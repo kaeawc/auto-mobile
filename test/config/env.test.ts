@@ -83,3 +83,38 @@ describe("typed env readers", () => {
     expect(readEnvList(LIST, {})).toEqual([]);
   });
 });
+
+describe("webrtc and video-server registry names", () => {
+  test("canonical and legacy spellings are pinned", () => {
+    expect(
+      [
+        ENV.VIDEO_SERVER_JAR,
+        ENV.REQUIRE_VIDEO_SERVER,
+        ENV.SKIP_VIDEO_SERVER_DOWNLOAD,
+        ENV.IOS_SIMULATOR_WINDOW_TIMEOUT_MS,
+        ENV.WEBRTC_WHIP_ENDPOINT,
+        ENV.WEBRTC_WHIP_ALLOWED_ORIGINS,
+      ].map((spec) => spec.name),
+    ).toEqual([
+      "AUTOMOBILE_VIDEO_SERVER_JAR",
+      "AUTOMOBILE_REQUIRE_VIDEO_SERVER",
+      "AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD",
+      "AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS",
+      "AUTOMOBILE_WEBRTC_WHIP_ENDPOINT",
+      "AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS",
+    ]);
+    expect(ENV.IOS_WEBRTC_FFMPEG.legacyName).toBe("AUTO_MOBILE_IOS_WEBRTC_FFMPEG");
+    expect(ENV.IOS_WEBRTC_FORCE_RAW.legacyName).toBe("AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW");
+  });
+
+  test("window timeout falls back to 2000 for unusable values", () => {
+    expect(readEnvInt(ENV.IOS_SIMULATOR_WINDOW_TIMEOUT_MS, {}, { log: { warn: () => {} } })).toBe(
+      2000,
+    );
+    expect(
+      readEnvInt(ENV.IOS_SIMULATOR_WINDOW_TIMEOUT_MS, {
+        AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "5000",
+      }),
+    ).toBe(5000);
+  });
+});

@@ -38,7 +38,6 @@ import {
 } from "./utils/ctrlProxyDownloadControl";
 import { prefetchVideoServerJar } from "./features/webrtc/videoServerJar";
 import { ScreenCaptureHelperProvider } from "./features/screen-stream/ScreenCaptureHelperProvider";
-import { WEBRTC_ENV } from "./features/webrtc/webrtcStreamingConfig";
 import { EVENT_ALL_MARKERS_FLAG } from "./utils/eventAllMarkers";
 import { parseArgs } from "./cli/parseArgs";
 import { terminateCliProcess } from "./cli/termination";
@@ -414,7 +413,7 @@ async function main() {
     void prefetchVideoServerJar();
     if (
       process.platform === "darwin" &&
-      process.env[WEBRTC_ENV.WHIP_ENDPOINT]?.trim() &&
+      readEnvRaw(ENV.WEBRTC_WHIP_ENDPOINT)?.trim() &&
       !readEnvRaw(ENV.IOS_SCREEN_CAPTURE_HELPER)
     ) {
       void ScreenCaptureHelperProvider.getInstance()

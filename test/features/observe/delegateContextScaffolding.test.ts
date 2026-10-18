@@ -48,8 +48,7 @@ function createAndroidClient(): AndroidCtrlProxyClient {
   const fakeTimer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
   return AndroidCtrlProxyClient.createForTesting(androidDevice, fakeAdb, {
-    webSocketFactory: (url: string) =>
-      new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket,
+    webSocketFactory: (url: string) => new FakeWebSocket(url, "none", 0, fakeTimer),
     timer: fakeTimer,
   });
 }
@@ -57,8 +56,7 @@ function createAndroidClient(): AndroidCtrlProxyClient {
 function createIosClient(): IOSCtrlProxyClient {
   const fakeTimer = new FakeTimer();
   IOSCtrlProxyClient.resetInstances();
-  const factory: WebSocketFactory = (url: string) =>
-    new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket;
+  const factory: WebSocketFactory = (url: string) => new FakeWebSocket(url, "none", 0, fakeTimer);
   return IOSCtrlProxyClient.createForTesting(iosDevice, 8765, factory, fakeTimer);
 }
 

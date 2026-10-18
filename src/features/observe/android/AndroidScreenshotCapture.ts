@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../shared/types";
 /**
  * Accessibility-service screenshot capture for the observation stream, with the ADB screencap
  * fallback and the supported/unsupported latch, extracted from `AndroidCtrlProxyClient` (#11846).
@@ -51,7 +52,7 @@ export interface AndroidScreenshotCaptureContext {
   readonly screenGeometry: TrackedScreenGeometry;
   readonly requestManager: RequestManager;
   readonly screenshotObservationStreamSuppressions: Set<string>;
-  readonly socket: WebSocket | null;
+  readonly socket: CtrlSocket | null;
   /** Advances the shared accessibility screenshot rate-limit floor clock (issue #4927). */
   noteScreenshotCaptureStarted(): void;
 }

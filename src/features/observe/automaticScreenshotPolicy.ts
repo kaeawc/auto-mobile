@@ -23,7 +23,7 @@ export function shouldSkipObserveWaitForScreenshot(env: NodeJS.ProcessEnv = proc
   return isSkipEnabled(readEnvRaw(ENV.OBSERVE_WAIT_FOR_SKIP_SCREENSHOT, env));
 }
 import { ENV, readEnvRaw } from "../../config/env";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 
 export type ScreenshotMode = "settled" | "async" | "none";
 export const OBSERVE_SETTLED_SCREENSHOT_ENV = ENV.OBSERVE_SETTLED_SCREENSHOT.name;
@@ -42,7 +42,7 @@ export const OBSERVE_SETTLED_SCREENSHOT_ENV = ENV.OBSERVE_SETTLED_SCREENSHOT.nam
 export function resolveScreenshotMode(
   screenshot?: ScreenshotMode,
   env: NodeJS.ProcessEnv = process.env,
-  flags: Pick<FeatureFlagService, "isEnabled"> = FeatureFlagService.getInstance(),
+  flags: FeatureFlagReader = FeatureFlagService.getInstance(),
 ): ScreenshotMode {
   if (screenshot !== undefined) {
     return screenshot;

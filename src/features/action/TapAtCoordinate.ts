@@ -5,7 +5,7 @@ import {
   TALKBACK_STATE_UNKNOWN_WARNING,
 } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import {
@@ -324,7 +324,7 @@ function hasSameTapTargetingLayout(previous: ObserveResult, refreshed: ObserveRe
 
 export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   timer?: Timer;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetector;
   talkBackStrategy?: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
@@ -382,7 +382,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly invalidateIosCache: () => void;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly snapshotReferences: SnapshotReferenceStore;
-  private readonly featureFlags: FeatureFlagService;
+  private readonly featureFlags: FeatureFlagReader;
   private readonly accessibilityDetector: AccessibilityDetector;
   private readonly talkBackStrategy: Pick<
     TalkBackTapStrategy,

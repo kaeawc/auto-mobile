@@ -13,6 +13,9 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
 import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #6148 (#6069 residual) — `setToolEnabled` must reject a never-issued

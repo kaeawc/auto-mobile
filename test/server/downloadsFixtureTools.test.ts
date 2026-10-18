@@ -7,6 +7,9 @@ import type {
   DownloadsFixtureService,
   StageSessionDownloadsRequest,
 } from "../../src/server/downloadsFixtureService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("stageSessionDownloads tool (#7007)", () => {
   let originalTimer: ReturnType<typeof ToolRegistry.getCollaboratorsForTesting>["timer"];

@@ -15,6 +15,9 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const ANDROID_DEVICE: BootedDevice = { name: "a", deviceId: "emulator-5554", platform: "android" };
 const IOS_DEVICE: BootedDevice = { name: "i", deviceId: "00008130-001", platform: "ios" };

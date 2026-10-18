@@ -178,11 +178,8 @@ import {
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
 import type { StorageSubscription } from "../../storage/storageTypes";
-import {
-  ObserverPendingRequestTimeoutError,
-  WebSocketFactory,
-  defaultWebSocketFactory,
-} from "../DeviceServiceClient";
+import { WebSocketFactory, defaultWebSocketFactory } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
 import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
@@ -220,6 +217,7 @@ import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages"
 
 // Import types
 import type { DelegateContext } from "../shared/types";
+import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
 import { defaultPrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
 import type {
@@ -1273,24 +1271,16 @@ export class AndroidCtrlProxyClient
     if (!this.hierarchyUpdateHandler) {
       const client = this;
       this.hierarchyUpdateHandler = new AndroidHierarchyUpdateHandler({
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
-        get transientObserver() {
-          return client.transientObserver;
-        },
+        transientObserver: client.transientObserver,
         get hierarchy() {
           return client.hierarchy;
         },
-        get observerHierarchyRequestIds() {
-          return client.observerHierarchyRequestIds;
-        },
-        get hierarchyObservationStreamSuppressions() {
-          return client.hierarchyObservationStreamSuppressions;
-        },
+        observerHierarchyRequestIds: client.observerHierarchyRequestIds,
+        hierarchyObservationStreamSuppressions: client.hierarchyObservationStreamSuppressions,
         get sdkNavigationAppIds() {
           return client.sdkNavigationAppIds;
         },
@@ -1328,9 +1318,7 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
@@ -1340,18 +1328,10 @@ export class AndroidCtrlProxyClient
         get logger() {
           return client.loggerInstance;
         },
-        get idGenerator() {
-          return client.idGenerator;
-        },
-        get physicalDisplayIdResolver() {
-          return client.physicalDisplayIdResolver;
-        },
-        get screenGeometry() {
-          return client.screenGeometry;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
+        idGenerator: client.idGenerator,
+        physicalDisplayIdResolver: client.physicalDisplayIdResolver,
+        screenGeometry: client.screenGeometry,
+        requestManager: client.requestManager,
         get screenshotObservationStreamSuppressions() {
           return client.screenshotObservationStreamSuppressions;
         },
@@ -1383,9 +1363,7 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         getNavigationGraphManager: () => client.getNavigationGraphManager(),
         requestPackageInfo: (appId, options, timeoutMs) =>
           client.requestPackageInfo(appId, options, timeoutMs),
@@ -1398,15 +1376,9 @@ export class AndroidCtrlProxyClient
     if (!this.actionDispatcher) {
       const client = this;
       this.actionDispatcher = new AndroidActionDispatcher({
-        get timer() {
-          return client.timer;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
-        get pendingFocusedInputClickIds() {
-          return client.pendingFocusedInputClickIds;
-        },
+        timer: client.timer,
+        requestManager: client.requestManager,
+        pendingFocusedInputClickIds: client.pendingFocusedInputClickIds,
         get supportedCommands() {
           return client.supportedCommands;
         },
@@ -1428,12 +1400,8 @@ export class AndroidCtrlProxyClient
     if (!this.clientRequests) {
       const client = this;
       this.clientRequests = new AndroidClientRequests({
-        get timer() {
-          return client.timer;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
+        timer: client.timer,
+        requestManager: client.requestManager,
         get logger() {
           return client.loggerInstance;
         },
@@ -1456,9 +1424,7 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
@@ -1489,12 +1455,8 @@ export class AndroidCtrlProxyClient
         set recoveryPromise(value: Promise<boolean> | null) {
           client.recoveryPromise = value;
         },
-        get forcedRestartBudget() {
-          return client.forcedRestartBudget;
-        },
-        get serviceManagerFactory() {
-          return client.serviceManagerFactory;
-        },
+        forcedRestartBudget: client.forcedRestartBudget,
+        serviceManagerFactory: client.serviceManagerFactory,
         get restartRearmPending() {
           return client.restartRearmTimeout !== null;
         },
@@ -1516,15 +1478,11 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
-        get ctrlProxyForwardLease() {
-          return client.ctrlProxyForwardLease;
-        },
+        ctrlProxyForwardLease: client.ctrlProxyForwardLease,
         get forwardClientProbe() {
           return client.forwardClientProbe;
         },
@@ -1540,9 +1498,7 @@ export class AndroidCtrlProxyClient
         set localPort(value) {
           client.localPort = value;
         },
-        get portAllocationId() {
-          return client.portAllocationId;
-        },
+        portAllocationId: client.portAllocationId,
         get portForwardingSetup() {
           return client.portForwardingSetup;
         },
@@ -1631,6 +1587,63 @@ export class AndroidCtrlProxyClient
       client.screenshotBackoffScheduler = deps.screenshotBackoffScheduler;
     }
     return client;
+  }
+
+  /** @internal Typed view of internals for unit tests; production code must not use it. */
+  get testHooks(): AndroidCtrlProxyClientTestHooks {
+    const client = this;
+    return {
+      requestManager: client.requestManager,
+      forcedRestartBudget: client.forcedRestartBudget,
+      text: () => client.text,
+      webSocketMessageHandlers: () => client.webSocketMessageHandlers,
+      cachedHierarchy: () => client.cachedHierarchy,
+      handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
+      getWebSocketUrl: () => client.getWebSocketUrl(),
+      removeCtrlProxyPortForward: (port) => client.removeCtrlProxyPortForward(port),
+      get recoveryPromise() {
+        return client.recoveryPromise;
+      },
+      set recoveryPromise(value) {
+        client.recoveryPromise = value;
+      },
+      get isRecoveringService() {
+        return client.isRecoveringService;
+      },
+      set isRecoveringService(value) {
+        client.isRecoveringService = value;
+      },
+      get connectionAttempts() {
+        return client.connectionAttempts;
+      },
+      set connectionAttempts(value) {
+        client.connectionAttempts = value;
+      },
+      get lastConnectionAttempt() {
+        return client.lastConnectionAttempt;
+      },
+      set lastConnectionAttempt(value) {
+        client.lastConnectionAttempt = value;
+      },
+      get connectionResetMs() {
+        return client.config.connectionResetMs;
+      },
+      set connectionResetMs(value) {
+        client.config.connectionResetMs = value;
+      },
+      get portForwardingSetup() {
+        return client.portForwardingSetup;
+      },
+      set portForwardingSetup(value) {
+        client.portForwardingSetup = value;
+      },
+      get localPort() {
+        return client.localPort;
+      },
+      set localPort(value) {
+        client.localPort = value;
+      },
+    };
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
@@ -1865,7 +1878,7 @@ export class AndroidCtrlProxyClient
     return connected;
   }
 
-  protected override async connectWebSocket(
+  public override async connectWebSocket(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     if (this.closed) {
@@ -2391,15 +2404,9 @@ export class AndroidCtrlProxyClient
     if (!this.screenshotRequesterInstance) {
       const client = this;
       this.screenshotRequesterInstance = new AndroidScreenshotRequester({
-        get timer() {
-          return client.timer;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
-        get screenGeometry() {
-          return client.screenGeometry;
-        },
+        timer: client.timer,
+        requestManager: client.requestManager,
+        screenGeometry: client.screenGeometry,
         get screenshotObservationStreamSuppressions() {
           return client.screenshotObservationStreamSuppressions;
         },
@@ -2458,9 +2465,7 @@ export class AndroidCtrlProxyClient
     if (!this.serviceReadinessVerifierInstance) {
       const client = this;
       this.serviceReadinessVerifierInstance = new AndroidServiceReadinessVerifier({
-        get retryExecutor() {
-          return client.retryExecutor;
-        },
+        retryExecutor: client.retryExecutor,
         get logger() {
           return client.loggerInstance;
         },
@@ -2764,12 +2769,8 @@ export class AndroidCtrlProxyClient
     if (!this.inboundMessageRouter) {
       const client = this;
       this.inboundMessageRouter = new AndroidInboundMessageRouter({
-        get transientObserver() {
-          return client.transientObserver;
-        },
-        get rejectedCommands() {
-          return client.rejectedCommands;
-        },
+        transientObserver: client.transientObserver,
+        rejectedCommands: client.rejectedCommands,
         get supportedCommands() {
           return client.supportedCommands;
         },
@@ -2782,9 +2783,7 @@ export class AndroidCtrlProxyClient
         get lateCancelledScreenshotRequestIds() {
           return client.lateCancelledScreenshotRequestIds;
         },
-        get requestManager() {
-          return client.requestManager;
-        },
+        requestManager: client.requestManager,
         get _hierarchy() {
           return client._hierarchy;
         },
@@ -2818,9 +2817,7 @@ export class AndroidCtrlProxyClient
         get prototypes() {
           return client.prototypes;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get lastInteractionByApp() {
           return client.lastInteractionByApp;
         },

@@ -166,7 +166,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
   test("sweeps on the first write of each lifetime and then after 256 more writes", async () => {
     for (let lifetime = 0; lifetime < 2; lifetime++) {
       const fresh = new ToolCallRepository(db);
-      const prune = spyOn(fresh as any, "pruneToRowCap");
+      const prune = spyOn(fresh, "pruneToRowCap");
       try {
         await fresh.recordToolCall({ toolName: "first", timestamp: "2026-01-01T00:00:00Z" });
         expect(prune).toHaveBeenCalledTimes(1);
@@ -202,7 +202,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
       });
     }
 
-    await (repo as any).pruneToRowCap(5);
+    await repo.pruneToRowCap(5);
 
     const rows = await db
       .selectFrom("tool_calls")
@@ -226,7 +226,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
       });
     }
 
-    await (repo as any).pruneToRowCap(10);
+    await repo.pruneToRowCap(10);
 
     const rows = await db.selectFrom("tool_calls").selectAll().execute();
     expect(rows).toHaveLength(3);
@@ -247,7 +247,7 @@ describe("ToolCallRepository row-cap retention (#6464)", () => {
     const beforePrune = await db.selectFrom("tool_calls").selectAll().execute();
     expect(beforePrune.every((row) => row.status === "success")).toBe(true);
 
-    await (repo as any).pruneToRowCap(2);
+    await repo.pruneToRowCap(2);
 
     const rows = await db
       .selectFrom("tool_calls")

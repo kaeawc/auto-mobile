@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
-import {
-  RealCtrlProxyWebSocketInTestError,
-  defaultWebSocketFactory,
-} from "../../../src/features/observe/DeviceServiceClient";
+import { defaultWebSocketFactory } from "../../../src/features/observe/DeviceServiceClient";
+import { RealCtrlProxyWebSocketInTestError } from "../../../src/features/observe/RealCtrlProxyWebSocketInTestError";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { ForcedRestartBudget } from "../../../src/ctrlProxy/ForcedRestartBudget";
 import type { CtrlProxyIosManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";

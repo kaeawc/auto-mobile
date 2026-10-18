@@ -6,6 +6,9 @@ import {
   registerInteractionTools,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("clipboard tool schema", () => {
   beforeEach(() => {

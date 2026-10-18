@@ -20,6 +20,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const other = { ...device, deviceId: "emulator-5556", name: "Pixel B" };

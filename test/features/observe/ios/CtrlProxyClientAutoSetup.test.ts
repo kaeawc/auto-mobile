@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../../../../src/features/observe/shared/types";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
@@ -7,7 +8,6 @@ import {
   FakeWebSocket,
   WebSocketState,
 } from "../../../fakes/FakeWebSocket";
-import type WebSocket from "ws";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import type {
@@ -187,12 +187,12 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // until we fire `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
     const sockets: { url: string; socket: ManualCloseWebSocket }[] = [];
-    const wsFactory = (url: string): WebSocket => {
+    const wsFactory = (url: string): CtrlSocket => {
       // "timeout" mode keeps the socket CONNECTING (the timer is never advanced);
       // ManualCloseWebSocket also defers the "close" event to our control.
       const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
       sockets.push({ url, socket });
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
@@ -266,10 +266,10 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
-      (url: string): WebSocket => {
+      (url: string): CtrlSocket => {
         const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
         sockets.push(socket);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       manualTimer,
       createManagerFactory(),
@@ -306,12 +306,12 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // connectionTimeoutMs.
     const manualTimer = new FakeTimer();
     const sockets: { url: string; socket: ManualCloseWebSocket }[] = [];
-    const wsFactory = (url: string): WebSocket => {
+    const wsFactory = (url: string): CtrlSocket => {
       // "timeout" mode + a never-advanced timer keeps the socket in CONNECTING
       // forever, emitting NEITHER "open" NOR "error" — a wedged handshake.
       const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
       sockets.push({ url, socket });
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
@@ -370,10 +370,10 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // This test drives connectWebSocket directly to isolate its per-endpoint
     // budget. Keep the separate threshold-restart path from resetting that budget.
     fakeManager.setForceRestartShouldFail(true);
-    const wsFactory = (url: string): WebSocket => {
+    const wsFactory = (url: string): CtrlSocket => {
       // The old port fails instantly (exhausting the budget); the new port connects.
       const mode: "none" | "instant" = url.includes(":8767") ? "none" : "instant";
-      return new FakeWebSocket(url, mode, 0, manualTimer) as unknown as WebSocket;
+      return new FakeWebSocket(url, mode, 0, manualTimer);
     };
     const client = IOSCtrlProxyClient.createForTesting(
       testDevice,

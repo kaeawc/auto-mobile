@@ -4,6 +4,9 @@ import {
   registerVideoRecordingTools,
   type VideoRecordingArgs,
 } from "../../src/server/videoRecordingTools";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 test("video recording requires CtrlProxy only when startup highlights need it", () => {
   const registry = ToolRegistry;

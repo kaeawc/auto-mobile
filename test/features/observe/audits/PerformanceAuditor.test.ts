@@ -8,9 +8,9 @@ import {
   findAppWindowBounds,
   findInertTouchPoint,
   isHierarchyReliableForTapProbe,
-  ObserveInertTouchPointResolver,
   PerformanceAuditor,
 } from "../../../../src/features/observe/audits/PerformanceAuditor";
+import { ObserveInertTouchPointResolver } from "../../../../src/features/observe/audits/ObserveInertTouchPointResolver";
 import type {
   ObserveScreen,
   ObserveScreenExecuteOptions,

@@ -35,6 +35,9 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeToolSelectionProfileProvenanceStore } from "../fakes/FakeToolSelectionProfileProvenanceStore";
 import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #6148 round 4 — the DEFAULT deployment forwards `setToolEnabled` through

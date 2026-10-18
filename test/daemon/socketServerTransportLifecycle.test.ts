@@ -166,7 +166,7 @@ describe("daemon socket transport lifecycle", () => {
     }
   });
 
-  test("a late binding written by an abort-ignoring handler after disconnect is forgotten when it ends (#13053)", async () => {
+  test("a late binding written by an abort-ignoring handler after disconnect never leaves a live binding (#13053, #13346)", async () => {
     const { internals, socket } = connectedSocketFixture("late-socket");
     const store = daemonSessionToolBindingStore();
     const execution = executionTracker.startExecution("observe", "late-socket");
@@ -175,8 +175,9 @@ describe("daemon socket transport lifecycle", () => {
       await Promise.all([...internals.activeRequestHandlers]);
       expect(execution.abortController.signal.aborted).toBe(true);
       // The handler ignored the abort and records its acquisition after the socket is gone.
+      // The forget() tombstone from teardown (#13346) refuses it outright.
       store.bind("late-socket", "device-session-late");
-      expect(store.boundSessionUuid("late-socket")).toBe("device-session-late");
+      expect(store.boundSessionUuid("late-socket")).toBeUndefined();
 
       executionTracker.endExecution(execution.id);
       await new Promise<void>((resolve) => setImmediate(resolve));

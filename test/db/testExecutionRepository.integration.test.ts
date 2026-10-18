@@ -151,7 +151,7 @@ describe("TestExecutionRepository", () => {
 
       const runs = await repo.getTestRuns();
 
-      expect((runs[0].steps[0] as any).details).toEqual({
+      expect(runs[0].steps[0].details).toEqual({
         device: "device-a",
         trackIndex: 0,
         optional: true,
@@ -821,7 +821,7 @@ describe("TestExecutionRepository retention (#3440)", () => {
       await repo.recordExecution(makeExecution({ timestamp: base + i }));
     }
 
-    await (repo as any).pruneToRowCap(5);
+    await repo.pruneToRowCap(5);
 
     const rows = await db
       .selectFrom("test_executions")
@@ -843,7 +843,7 @@ describe("TestExecutionRepository retention (#3440)", () => {
       await repo.recordExecution(makeExecution({ timestamp: base + i }));
     }
 
-    await (repo as any).pruneToRowCap(10);
+    await repo.pruneToRowCap(10);
 
     const rows = await db.selectFrom("test_executions").selectAll().execute();
     expect(rows).toHaveLength(3);

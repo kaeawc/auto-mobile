@@ -3,6 +3,7 @@ import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { bindFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 import { runExclusiveResetTest } from "./resetTestSerialLock";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 /**
  * Regression tests for issue #2796.
@@ -41,10 +42,7 @@ describe("closeDatabase resets migration + path globals (issue #2796)", () => {
   const makeTempDbDir = (prefix: string): Promise<string> => getHarness().makeTempDbDir(prefix);
 
   function queryToolCalls(db: any) {
-    return db
-      .selectFrom("tool_calls" as any)
-      .selectAll()
-      .execute();
+    return looseKyselyTables(db).selectFrom("tool_calls").selectAll().execute();
   }
 
   test(

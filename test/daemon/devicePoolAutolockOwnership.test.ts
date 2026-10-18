@@ -32,6 +32,9 @@ import {
 } from "../../src/server/deviceTools";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 async function harness(deviceUtils?: FakeDeviceUtils) {
   const db = new Kysely<Database>({

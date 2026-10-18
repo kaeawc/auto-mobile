@@ -6,6 +6,9 @@ import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { issue8379Hierarchy } from "../fixtures/issue8379Hierarchy";
 import capturedAndroid from "../fixtures/android-focus/playground-text-field-pre-tap.json";
 import type { ViewHierarchyResult } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("highlight selector failures", () => {
   afterEach(() => ToolRegistry.clearTools());

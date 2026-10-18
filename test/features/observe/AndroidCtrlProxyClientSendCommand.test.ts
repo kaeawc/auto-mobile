@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
   ctrlProxyRequests,
@@ -35,14 +34,14 @@ async function harness() {
     { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
     },
   );
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = socket;
   client["supportedCommands"] = new Set([
     "request_activate_accessibility_link",
     "discover_keystore",

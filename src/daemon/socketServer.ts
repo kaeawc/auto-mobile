@@ -896,7 +896,7 @@ export class UnixSocketServer {
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private readonly adbClientFactory: AdbClientFactory;
-  private sessions: Map<string, SessionContext> = new Map();
+  protected sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
   private acceptedClientConnections = 0;
@@ -905,7 +905,7 @@ export class UnixSocketServer {
   /** Request handlers that can continue after their client socket is destroyed. */
   protected activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
-  private pendingSocketRequests = new PendingRequestTracker();
+  protected pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private readonly resourceSubscriptions = new Map<string, Set<string>>();
@@ -1767,7 +1767,7 @@ export class UnixSocketServer {
     this.writeFrameData(socket, sessionId, frame, onFlushed);
   }
 
-  private writeFrameData(
+  protected writeFrameData(
     socket: Socket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
@@ -1822,7 +1822,7 @@ export class UnixSocketServer {
   /**
    * Handle a request from a client
    */
-  private async handleRequest(
+  protected async handleRequest(
     sessionId: string,
     ownerSocket: Socket,
     request: DaemonRequest,
@@ -3877,7 +3877,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async handleLocalSocketRequest(
+  protected async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
     signal?: AbortSignal,

@@ -30,6 +30,7 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { stableStringify } from "../../src/utils/stableStringify";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubChildProcess } from "../fakes/StubChildProcess";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import {
@@ -1430,13 +1431,16 @@ describe("DeviceBootService", () => {
     let outcome: "pending" | "rejected" = "pending";
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    devices.setMockChildProcess(
+      image.name,
+      new StubChildProcess({
+        pid: 12,
+        onKill: () => {
+          killCount++;
+          return true;
+        },
+      }),
+    );
 
     const boot = service(devices, matcher, undefined, timer).boot(
       { platform: "android", timeoutMs: 10_000 },
@@ -1467,13 +1471,16 @@ describe("DeviceBootService", () => {
     const matcher = new FakeDeviceMatcher();
     let killCount = 0;
     devices.setDeviceImages("android", [image]);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 24,
-    } as any);
+    devices.setMockChildProcess(
+      image.name,
+      new StubChildProcess({
+        pid: 24,
+        onKill: () => {
+          killCount++;
+          return true;
+        },
+      }),
+    );
     // Mirror the diagnostic the emulator client raises when a fresh cold boot
     // stays ADB-offline through the bounded recovery.
     devices.setWaitForDeviceReadyError(
@@ -1506,13 +1513,16 @@ describe("DeviceBootService", () => {
     let outcome: "pending" | "rejected" = "pending";
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    devices.setMockChildProcess(
+      image.name,
+      new StubChildProcess({
+        pid: 12,
+        onKill: () => {
+          killCount++;
+          return true;
+        },
+      }),
+    );
 
     const boot = service(devices, matcher).boot(
       { platform: "android", signal: controller.signal },
@@ -1546,10 +1556,7 @@ describe("DeviceBootService", () => {
     let rejection: unknown = "unset";
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => true,
-      pid: 12,
-    } as any);
+    devices.setMockChildProcess(image.name, new StubChildProcess({ pid: 12, onKill: () => true }));
 
     const boot = service(devices, matcher).boot(
       { platform: "android", signal: controller.signal },
@@ -1580,13 +1587,16 @@ describe("DeviceBootService", () => {
     let killCount = 0;
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    devices.setMockChildProcess(
+      image.name,
+      new StubChildProcess({
+        pid: 12,
+        onKill: () => {
+          killCount++;
+          return true;
+        },
+      }),
+    );
 
     await expect(
       service(devices, matcher).boot(
@@ -1982,13 +1992,16 @@ describe("DeviceBootService", () => {
     let killed = false;
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killed = true;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    devices.setMockChildProcess(
+      image.name,
+      new StubChildProcess({
+        pid: 12,
+        onKill: () => {
+          killed = true;
+          return true;
+        },
+      }),
+    );
     devices.setWaitForDeviceReadyError(new Error("not ready"));
 
     await expect(service(devices, matcher).boot({ platform: "android" })).rejects.toThrow(
@@ -3319,7 +3332,10 @@ describe("DeviceBootService", () => {
       const pendingReadiness = new Promise<BootedDevice>(() => {});
       devices.setDeviceImages("android", [image]);
       matcher.setImageResult(image);
-      devices.setMockChildProcess(image.name, { kill: () => true, pid: 12 } as any);
+      devices.setMockChildProcess(
+        image.name,
+        new StubChildProcess({ pid: 12, onKill: () => true }),
+      );
       devices.waitForDeviceReady = async () => {
         markReadinessStarted();
         return pendingReadiness;

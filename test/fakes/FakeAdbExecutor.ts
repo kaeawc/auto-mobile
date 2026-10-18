@@ -152,6 +152,11 @@ export class FakeAdbExecutor implements AdbExecutor {
     this.wakefulness = wakefulness ?? (isOn ? "Awake" : "Asleep");
   }
 
+  /** Make the wakefulness probe report an unknown state (dumpsys gave no parseable value). */
+  setWakefulnessUnknown(): void {
+    this.wakefulness = null;
+  }
+
   /**
    * Configure available devices
    * @param devices - Array of booted devices

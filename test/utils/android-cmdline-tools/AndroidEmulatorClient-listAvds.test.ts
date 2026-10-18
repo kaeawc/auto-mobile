@@ -45,8 +45,8 @@ describe("AndroidEmulatorClient listAvds", () => {
         execAsync,
         timer: new FakeTimer(),
         avdConfigReader: noAvdConfigReader,
+        locateEmulatorPath: async () => "emulator",
       });
-      (client as any).ensureEmulatorPath = async () => "emulator";
 
       await expect(client.listAvds()).rejects.toThrow("Android emulator not found");
     } finally {
@@ -77,9 +77,11 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("spawn /bin/sh ENOENT");
       };
-      const client = new AndroidEmulatorClient({ execAsync, timer: new FakeTimer() });
-      (client as any).emulatorPath = emulatorPath;
-      (client as any).ensureEmulatorPath = async () => emulatorPath;
+      const client = new AndroidEmulatorClient({
+        execAsync,
+        timer: new FakeTimer(),
+        locateEmulatorPath: async () => emulatorPath,
+      });
 
       await expect(client.listAvds()).rejects.toThrow("daemon working directory");
       await expect(client.listAvds()).rejects.not.toThrow("Android emulator not found");
@@ -115,9 +117,11 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("ENOENT: no such file or directory, posix_spawn '/bin/sh'");
       };
-      const client = new AndroidEmulatorClient({ execAsync, timer: new FakeTimer() });
-      (client as any).emulatorPath = emulatorPath;
-      (client as any).ensureEmulatorPath = async () => emulatorPath;
+      const client = new AndroidEmulatorClient({
+        execAsync,
+        timer: new FakeTimer(),
+        locateEmulatorPath: async () => emulatorPath,
+      });
 
       await expect(client.listAvds()).rejects.toThrow("daemon working directory");
       await expect(client.listAvds()).rejects.not.toThrow("Android emulator not found");
@@ -139,8 +143,11 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("emulator: command not found");
       };
-      const client = new AndroidEmulatorClient({ execAsync, timer: new FakeTimer() });
-      (client as any).ensureEmulatorPath = async () => "emulator";
+      const client = new AndroidEmulatorClient({
+        execAsync,
+        timer: new FakeTimer(),
+        locateEmulatorPath: async () => "emulator",
+      });
 
       await expect(client.listAvds()).rejects.toThrow("Android emulator not found");
     } finally {
@@ -182,9 +189,8 @@ describe("AndroidEmulatorClient listAvds", () => {
         execAsync,
         timer: new FakeTimer(),
         avdConfigReader: noAvdConfigReader,
+        locateEmulatorPath: async () => "/usr/local/lib/android/sdk/emulator/emulator",
       });
-      (client as any).ensureEmulatorPath = async () =>
-        "/usr/local/lib/android/sdk/emulator/emulator";
 
       let message = "";
       try {
@@ -220,8 +226,8 @@ describe("AndroidEmulatorClient listAvds", () => {
       execAsync,
       timer: new FakeTimer(),
       avdConfigReader: noAvdConfigReader,
+      locateEmulatorPath: async () => "emulator",
     });
-    (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
       { name: "Pixel_9", platform: "android", isRunning: false, source: "local" },
@@ -245,8 +251,8 @@ describe("AndroidEmulatorClient listAvds", () => {
       execAsync: async () => createExecResult("Pixel_6\n"),
       timer: new FakeTimer(),
       avdConfigReader: configReader,
+      locateEmulatorPath: async () => "emulator",
     });
-    (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
       expect.objectContaining({
@@ -268,8 +274,8 @@ describe("AndroidEmulatorClient listAvds", () => {
       execAsync: async () => createExecResult("Pixel_Tablet\n"),
       timer: new FakeTimer(),
       avdConfigReader: configReader,
+      locateEmulatorPath: async () => "emulator",
     });
-    (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
       expect.objectContaining({
@@ -289,8 +295,8 @@ describe("AndroidEmulatorClient listAvds", () => {
       execAsync: async () => createExecResult("Pixel_6\n"),
       timer: new FakeTimer(),
       avdConfigReader: configReader,
+      locateEmulatorPath: async () => "emulator",
     });
-    (client as any).ensureEmulatorPath = async () => "emulator";
 
     const [image] = await client.listAvds();
     expect(image.runtimeId).toBeUndefined();
@@ -316,8 +322,8 @@ describe("AndroidEmulatorClient listAvds", () => {
       execAsync,
       timer: new FakeTimer(),
       avdConfigReader: configReader,
+      locateEmulatorPath: async () => "emulator",
     });
-    (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
       {
@@ -347,8 +353,8 @@ describe("AndroidEmulatorClient listAvds", () => {
       execAsync,
       timer: new FakeTimer(),
       avdConfigReader: configReader,
+      locateEmulatorPath: async () => "emulator",
     });
-    (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toMatchObject([{ apiLevel: 34 }]);
   });

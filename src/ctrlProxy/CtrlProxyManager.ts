@@ -152,7 +152,7 @@ export interface CtrlProxyManager extends ProxyManager {
    * Re-toggle CtrlProxy's accessibility-service entry when dumpsys shows it is
    * crashed or unbound. Returns whether a rebind was attempted.
    */
-  rebindIfUnhealthy?(): Promise<boolean>;
+  rebindIfUnhealthy(): Promise<boolean>;
   /**
    * Force-stop and re-add CtrlProxy's accessibility-service entry
    * unconditionally, even when {@link isAccessibilityServiceHealthy} already
@@ -164,7 +164,7 @@ export interface CtrlProxyManager extends ProxyManager {
    * pre-recovery device-presence check, issue #7532), so a caller cannot spin
    * this into a restart loop against a device that has disappeared.
    */
-  forceRestartProcess?(): Promise<boolean>;
+  forceRestartProcess(): Promise<boolean>;
   isEnabledForUser(userId: number): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
   isVersionCompatible(): Promise<boolean>;
@@ -371,7 +371,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public static getInstance(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  ): AndroidCtrlProxyManager {
+  ): import("./AndroidCtrlProxyManagerHandle").AndroidCtrlProxyManagerHandle {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
     return AndroidCtrlProxyManager.registry.get(
       device.deviceId,

@@ -16,7 +16,7 @@ import { SwipeDirection } from "../../../../src/models";
 import type { AdbExecutor } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice } from "../../../../src/models";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 const ANDROID_DEVICE: BootedDevice = {
   name: "test-device",
@@ -37,7 +37,7 @@ function makeExecutor(
   fakeDetector: FakeAccessibilityDetector,
   fakeTimer: FakeTimer,
   fakeAdb: AdbExecutor = new FakeAdbClient(),
-  featureFlags?: FeatureFlagService,
+  featureFlags?: FeatureFlagReader,
 ): TalkBackSwipeExecutor {
   return new TalkBackSwipeExecutor(
     device,
@@ -245,7 +245,7 @@ describe("TalkBackSwipeExecutor", () => {
   describe("force-accessibility-mode feature flag threading (#3925)", () => {
     test("forwards the injected featureFlags to detectMethod on android", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
       const exec = makeExecutor(
         ANDROID_DEVICE,
         fakeGestureExecutor,

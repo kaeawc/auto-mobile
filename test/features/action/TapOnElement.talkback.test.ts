@@ -9,7 +9,7 @@ import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector
 import { HierarchyTalkBackDriver as FakeTalkBackNavigationDriver } from "../talkback/HierarchyTalkBackDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
-import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../../src/features/featureFlags/FeatureFlagService";
 import {
   TalkBackTapStrategy,
   TALKBACK_ACTIVATION_WARNING,
@@ -853,9 +853,9 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   // fidelity mode — it drives cursor traversal even without the per-call option.
   describe("screen-reader-navigation feature flag (global opt-in)", () => {
     const makeFlaggedTapOnElement = (flagEnabled: boolean) => {
-      const featureFlags = {
+      const featureFlags: FeatureFlagReader = {
         isEnabled: (key: string) => flagEnabled && key === "screen-reader-navigation",
-      } as unknown as FeatureFlagService;
+      };
       const tap = new TapOnElement(
         { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
         fakeAdb as any,
@@ -1158,7 +1158,7 @@ describe("TapOnElement screen-reader navigation result", () => {
         },
         featureFlags: {
           isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
-        } as FeatureFlagService,
+        },
       },
     );
     command.refreshViewHierarchy = async () => observation.viewHierarchy;

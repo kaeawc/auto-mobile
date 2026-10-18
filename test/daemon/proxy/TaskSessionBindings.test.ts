@@ -131,6 +131,116 @@ describe("TaskSessionBindings (#4668)", () => {
     expect(released).toEqual(["a", "b"]);
   });
 
+  test("only a task-not-found or expired JSON-RPC error forgets; others keep waiting (#13144)", async () => {
+    const { bindings, bound, released } = harness();
+    const rpc = (code: number, message: string) =>
+      Object.assign(new Error(message), { jsonRpcError: { code, message } });
+    bindings.defer("t", "ctx");
+
+    const missingCapability = rpc(-32021, "Missing required client capability");
+    await expect(
+      bindings.relayed("tasks/get", { taskId: "t" }, Promise.reject(missingCapability)),
+    ).rejects.toBe(missingCapability);
+    const transient = new Error("daemon connection lost");
+    await expect(
+      bindings.relayed("tasks/get", { taskId: "t" }, Promise.reject(transient)),
+    ).rejects.toBe(transient);
+    expect(bindings.isPending("t")).toBe(true);
+
+    await bindings.relayed(
+      "tasks/get",
+      { taskId: "t" },
+      Promise.resolve({ status: "completed", result: { n: 1 } }),
+    );
+    expect(bound).toEqual([["ctx", { n: 1 }]]);
+    expect(released).toEqual(["ctx"]);
+
+    bindings.defer("e", "ctx2");
+    const expired = rpc(-32602, "Failed to retrieve task: Task has expired");
+    await expect(
+      bindings.relayed("tasks/get", { taskId: "e" }, Promise.reject(expired)),
+    ).rejects.toBe(expired);
+    expect(bindings.isPending("e")).toBe(false);
+    expect(released).toEqual(["ctx", "ctx2"]);
+  });
+
+  test("an abandoned task is released when the retention elapses, with no further call (#13144)", () => {
+    const { timer, bindings, released } = harness();
+    bindings.defer("idle", "a");
+
+    timer.advanceTime(TASK_BINDING_IDLE_MS);
+    expect(released).toEqual([]);
+    timer.advanceTime(1);
+
+    expect(released).toEqual(["a"]);
+    expect(bindings.isPending("idle")).toBe(false);
+  });
+
+  test("a poll restarts the expiry, and a settled task leaves no timer behind (#13144)", async () => {
+    const { timer, bindings, released } = harness();
+    bindings.defer("polled", "a");
+    bindings.defer("done", "b");
+    await bindings.settle("done", { status: "completed", result: {} });
+    expect(released).toEqual(["b"]);
+
+    timer.advanceTime(TASK_BINDING_IDLE_MS - 1);
+    await bindings.settle("polled", { status: "working" });
+    timer.advanceTime(TASK_BINDING_IDLE_MS - 1);
+    expect(bindings.isPending("polled")).toBe(true);
+    timer.advanceTime(2);
+
+    expect(released).toEqual(["b", "a"]);
+  });
+
+  test("drain waits for an in-flight binding and binds nothing afterwards (#13144)", async () => {
+    let finish: () => void = () => {};
+    const { bindings, bound, released } = harness(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    bindings.defer("running", "a");
+    bindings.defer("waiting", "b");
+    void bindings.settle("running", { status: "completed", result: {} });
+
+    let drained = false;
+    const draining = bindings.drain(1000).then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    expect(released).toEqual(["b"]);
+    finish();
+    await draining;
+    expect(released).toEqual(["b", "a"]);
+
+    bindings.defer("late", "c");
+    await bindings.settle("late", { status: "completed", result: {} });
+    expect(bound).toEqual([["a", {}]]);
+  });
+
+  test("drain does not reject when a binding fails (#13144)", async () => {
+    const { bindings } = harness(async () => {
+      throw new Error("boom");
+    });
+    bindings.defer("t", "a");
+    bindings.settle("t", { status: "completed", result: {} }).catch(() => undefined);
+
+    await bindings.drain(1000);
+  });
+
+  test("drain gives up on a binding that outlasts its deadline (#13144)", async () => {
+    const { timer, bindings } = harness(() => new Promise<void>(() => {}));
+    bindings.defer("t", "a");
+    void bindings.settle("t", { status: "completed", result: {} });
+
+    const draining = bindings.drain(1000);
+    timer.advanceTime(1000);
+
+    await draining;
+  });
+
   test("clear releases every waiting task", () => {
     const { bindings, released } = harness();
     bindings.defer("a", "a");

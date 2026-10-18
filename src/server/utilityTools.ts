@@ -21,10 +21,8 @@ import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
-import {
-  recordDeviceSettingDefaultsBeforeChange,
-  type DeviceSettingKey,
-} from "../features/utility/DeviceSettingDefaults";
+import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
+import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import {
   DeviceState,
   biometricEnrollmentSchema,

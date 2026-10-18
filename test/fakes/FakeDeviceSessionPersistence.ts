@@ -1,5 +1,5 @@
 import type { FaultPlan } from "./FaultPlan";
-import { ignoresManagedExecutionIdleDeadline } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "../../src/models/managedExecutionLiveness";
 import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,

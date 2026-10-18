@@ -982,7 +982,10 @@ same list takes a later one. The event carries the value only while the payload 
 no host connected, a device-persistent prototype's write events wait in `PrototypeOfflineEventBuffer`
 like every other event.
 
-**Revisions and host patches.** The device has one revision counter per prototype. A data write bumps
+**Revisions and host patches.** The device has one revision counter per prototype, shared with iOS
+(#13040): every `show` takes the next revision (the first show of an id is revision 1, a re-show
+moves it on, none rewinds it) and both platforms replay
+`test/fixtures/prototype-spec/revision/show-revisions.json` to pin it. A data write bumps
 it and reports the new value as `payload.revision`; a patch result's `revision` is the same counter.
 The agent's `/data` patch and a device write must not silently lose each other, so:
 

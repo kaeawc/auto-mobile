@@ -177,7 +177,11 @@ final class PinchGeometryTests: XCTestCase {
         XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(0), 1)
         XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(5), 1)
         XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(-90), 9)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(360), 36)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(350), 35)
         XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(100_000), 36)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(.greatestFiniteMagnitude), 36)
+        XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(.infinity), 1)
         XCTAssertEqual(ObjCExceptionCatcher_pinchSegmentCount(.nan), 1)
     }
 

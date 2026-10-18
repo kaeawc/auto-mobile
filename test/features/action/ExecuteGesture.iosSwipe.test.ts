@@ -226,12 +226,12 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       })),
     );
 
-    expect(await new ExecuteGesture(device).swipe(1, 2, 3, 4, { duration: 90 })).toEqual({
+    expect(await new ExecuteGesture(device).swipe(1, 2, 10, 2, { duration: 90 })).toEqual({
       success: true,
       x1: 1,
       y1: 2,
-      x2: 3,
-      y2: 4,
+      x2: 10,
+      y2: 2,
       duration: 90,
       a11yTotalTimeMs: 42,
       a11yGestureTimeMs: 30,
@@ -315,5 +315,21 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
     expect(result).toMatchObject({ success: false, error: "Not connected" });
     expect(result.outcomeIndeterminate).toBeUndefined();
     expect(h.sentMessages).toHaveLength(0);
+  });
+});
+
+describe("ExecuteGesture iOS XCUICoordinate velocity clamp (#12987)", () => {
+  test("a 3000 ms / 100 pt swipe reports the clamped duration and a warning", async () => {
+    use(new FakeIOSCtrlProxy());
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result).toMatchObject({ success: true, duration: 3000, effectiveDurationMs: 1000 });
+    expect(result.warnings?.[0]).toContain("clamped");
+  });
+
+  test("an in-range swipe carries no clamp report", async () => {
+    use(new FakeIOSCtrlProxy());
+    const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 300 });
+    expect(result.effectiveDurationMs).toBeUndefined();
+    expect(result.warnings).toBeUndefined();
   });
 });

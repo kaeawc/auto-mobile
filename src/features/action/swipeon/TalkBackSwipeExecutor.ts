@@ -26,6 +26,7 @@ import {
 } from "./swipeTiming";
 import { Timer } from "../../../utils/interfaces/Timer";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { semanticScrollSuccess } from "./swipeDurationReport";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 export type AccessibilityScrollAction = "scroll_forward" | "scroll_backward";
@@ -436,14 +437,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
 
       if (result.success) {
         logger.info("[SwipeOn] ACTION_SCROLL succeeded");
-        return {
-          success: true,
-          x1,
-          y1,
-          x2,
-          y2,
-          duration: gestureOptions?.duration || 300,
-        };
+        return semanticScrollSuccess({ x1, y1, x2, y2 }, gestureOptions);
       }
       if (result.dispatched && result.acknowledged !== true) {
         logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${result.error}`);

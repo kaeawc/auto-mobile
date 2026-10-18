@@ -237,7 +237,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         let big = try changePayload(String(repeating: "x", count: 4096))
         XCTAssertNil(big["value"])
         XCTAssertEqual(big["op"], .string("set"))
-        XCTAssertEqual(big["revision"], .number(1))
+        XCTAssertEqual(big["revision"], .number(2))
     }
 
     func testRepeatBindsTheRowIndexAndItemIntoEachRowsDataActions() throws {
@@ -256,7 +256,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         let event = try XCTUnwrap(events.first)
         XCTAssertEqual(event.kind, "change")
         XCTAssertEqual(event.name, "/data/items/1")
-        XCTAssertEqual(event.payload, .object(["op": .string("remove"), "revision": .number(1)]))
+        XCTAssertEqual(event.payload, .object(["op": .string("remove"), "revision": .number(2)]))
         XCTAssertEqual(event.sequence, 1)
         XCTAssertEqual(
             session.data?["items"],
@@ -264,7 +264,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         )
         XCTAssertEqual(texts(session), ["List", "one", "three"])
         XCTAssertNil(session.spec.flatMap { nodes($0.root).first { $0.label == "Delete two" } })
-        XCTAssertEqual(session.dataRevision, 1)
+        XCTAssertEqual(session.dataRevision, 2)
     }
 
     func testAppendInsideARepeatPushesTheRowsItemFieldAndKeepsTheRowsInPlace() throws {
@@ -274,7 +274,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         XCTAssertEqual(event.name, "/data/items/1/tags")
         XCTAssertEqual(
             event.payload,
-            .object(["op": .string("append"), "value": .string("two"), "revision": .number(1)])
+            .object(["op": .string("append"), "value": .string("two"), "revision": .number(2)])
         )
         guard case let .array(items)? = session.data?["items"], case let .object(second) = items[1] else {
             return XCTFail("items")
@@ -290,7 +290,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         // The new row's own buttons exist and index the appended element.
         XCTAssertEqual(try button(session, "Delete new").first?.path, "/data/items/3")
         let events = try session.run(button(session, "Delete new"))
-        XCTAssertEqual(events.first?.payload.objectValue?["revision"], .number(2))
+        XCTAssertEqual(events.first?.payload.objectValue?["revision"], .number(3))
         XCTAssertEqual(texts(session), ["List", "one", "two", "three"])
     }
 
@@ -300,7 +300,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         XCTAssertEqual(events.first?.name, "/data/title")
         XCTAssertEqual(
             events.first?.payload,
-            .object(["op": .string("set"), "value": .string("New"), "revision": .number(1)])
+            .object(["op": .string("set"), "value": .string("New"), "revision": .number(2)])
         )
         XCTAssertEqual(events.first?.state["draft"], .string("New"))
         XCTAssertEqual(texts(session).first, "New")
@@ -316,7 +316,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         ]
         let events = session.run(actions)
         XCTAssertEqual(events.map(\.name), ["after"])
-        XCTAssertEqual(session.dataRevision, 0)
+        XCTAssertEqual(session.dataRevision, 1)
         XCTAssertEqual(texts(session), ["List", "one", "two", "three"])
     }
 
@@ -333,20 +333,20 @@ final class PrototypeDataActionsTests: XCTestCase {
         let events = try session.run(XCTUnwrap(session.spec?.root.onTap))
         XCTAssertEqual(events.map(\.name), ["after"])
         XCTAssertEqual(session.data, before)
-        XCTAssertEqual(session.dataRevision, 0)
+        XCTAssertEqual(session.dataRevision, 1)
     }
 
     func testRevisionsAreMonotonicPerIdAcrossReshows() throws {
         var session = try shown()
         _ = try session.run(button(session, "Add"))
         _ = try session.run(button(session, "Add"))
-        XCTAssertEqual(session.dataRevision, 2)
+        XCTAssertEqual(session.dataRevision, 3)
         try session.show(spec(Self.listSpec))
-        XCTAssertEqual(session.dataRevision, 2)
+        XCTAssertEqual(session.dataRevision, 4)
         let events = try session.run(button(session, "Add"))
-        XCTAssertEqual(events.first?.payload.objectValue?["revision"], .number(3))
+        XCTAssertEqual(events.first?.payload.objectValue?["revision"], .number(5))
         try session.show(spec(Self.listSpec.replacingOccurrences(of: #""id":"list""#, with: #""id":"other""#)))
-        XCTAssertEqual(session.dataRevision, 0)
+        XCTAssertEqual(session.dataRevision, 1)
     }
 
     func testTheChangeEventWireObjectCarriesNameAndPayload() throws {
@@ -357,7 +357,7 @@ final class PrototypeDataActionsTests: XCTestCase {
         XCTAssertEqual(wire["name"] as? String, "/data/title")
         let payload = try XCTUnwrap(wire["payload"] as? [String: Any])
         XCTAssertEqual(payload["op"] as? String, "set")
-        XCTAssertEqual(payload["revision"] as? Double, 1)
+        XCTAssertEqual(payload["revision"] as? Double, 2)
         XCTAssertNil(wire["validity"])
     }
 

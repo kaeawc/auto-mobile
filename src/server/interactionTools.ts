@@ -57,6 +57,8 @@ import {
   PINCH_SCALE_EXCLUSIVE_MIN,
   PINCH_DURATION_MIN_MS,
   PINCH_DURATION_MAX_MS,
+  PINCH_ROTATION_MAX_DEGREES,
+  PINCH_ROTATION_MIN_DEGREES,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
 import {
@@ -900,7 +902,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .max(SWIPE_DURATION_MAX_MS)
           .optional()
           .describe(
-            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes.`,
+            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
           ),
         fromEdge: z
           .enum(["left", "right", "top", "bottom"])
@@ -994,9 +996,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
           ),
         rotationDegrees: z
           .number()
+          .min(PINCH_ROTATION_MIN_DEGREES)
+          .max(PINCH_ROTATION_MAX_DEGREES)
           .optional()
           .describe(
-            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
+            `Degrees (${PINCH_ROTATION_MIN_DEGREES} to ${PINCH_ROTATION_MAX_DEGREES}) the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.`,
           ),
         includeSystemInsets: z
           .boolean()

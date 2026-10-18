@@ -445,8 +445,10 @@ async function launchClaude(
     cwd: run.claudeCwd,
     env: {
       ...claudeLaunchEnv(deps.env, run.paths),
-      // User-level CLAUDE.md and auto-memory differ per operator; keep runs comparable.
+      // User-level CLAUDE.md, auto-memory, and managed policy skills differ per operator or
+      // host; keep runs comparable.
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
+      CLAUDE_CODE_DISABLE_POLICY_SKILLS: "1",
       AUTOMOBILE_AGENT_BENCH_SERIAL: run.serial,
       AUTOMOBILE_AGENT_BENCH_RUN_DIR: run.runDirectory,
     },

@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { loadSuite } from "../../../scripts/agent-benchmark/config";
 import {
   adbClientIdentity,
+  assertDirectlyLaunchable,
   bundleDigest,
   dryRunReport,
   fileSha256,
@@ -63,6 +64,18 @@ describe("agent benchmark process tree kill", () => {
     const windows: number[] = [];
     killProcessGroupRemnants(42, "win32", (pid) => windows.push(pid));
     expect(windows).toEqual([]);
+  });
+});
+
+describe("agent benchmark --claude launchability", () => {
+  test("refuses a Windows command script up front, and nothing elsewhere", () => {
+    expect(() => assertDirectlyLaunchable("claude", "win32", () => "C:\\npm\\claude.CMD")).toThrow(
+      /Windows command script/,
+    );
+    expect(() =>
+      assertDirectlyLaunchable("claude", "win32", () => "C:\\bin\\claude.exe"),
+    ).not.toThrow();
+    expect(() => assertDirectlyLaunchable("claude.cmd", "linux", () => null)).not.toThrow();
   });
 });
 

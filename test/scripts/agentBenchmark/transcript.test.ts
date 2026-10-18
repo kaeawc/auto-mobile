@@ -295,6 +295,27 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.toolCalls[0].hasResult).toBe(false);
   });
 
+  test("tool blocks under the wrong message role fail the transcript", () => {
+    const lines = [
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_use", id: "toolu_misplaced", name: "mcp__auto-mobile__tapOn", input: {} },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_x", content: "ok" }] },
+      }),
+    ];
+    expect(auditTranscript(`${INIT}${lines.join("\n")}\n`, NO_PATTERNS).parseErrors).toEqual([
+      "line 4: tool_use in a user event",
+      "line 5: tool_result in an assistant event",
+    ]);
+  });
+
   test("a tool_use without an object input fails the transcript", () => {
     const uses = [undefined, "tap", [1]].map((input, index) =>
       JSON.stringify({

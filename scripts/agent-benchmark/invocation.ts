@@ -7,8 +7,9 @@
  * - Claude runs from an empty temp directory outside the repository: Claude Code
  *   loads CLAUDE.md from the cwd and every ancestor, so a cwd under the checkout
  *   (even the artifact directory) would still pick up this repository's context.
- *   CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 is forced as well, so the operator's user-level
- *   ~/.claude/CLAUDE.md and auto-memory never shape a run, and
+ *   CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 and CLAUDE_CODE_DISABLE_POLICY_SKILLS=1 are forced as
+ *   well, so the operator's user-level ~/.claude/CLAUDE.md, auto-memory, and any managed
+ *   policy skills on the host never shape a run, and
  *   `--setting-sources project,local` skips user settings (hooks, enabled plugins);
  *   the empty cwd has no project or local settings.
  * - The auto-mobile server talks to a private daemon (`AUTOMOBILE_AUX_SOCKET_DIR`)

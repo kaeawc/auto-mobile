@@ -617,6 +617,30 @@ function claudeCommandIdentity(command: string): Uint8Array {
   }
 }
 
+/**
+ * Claude is spawned without a shell, so on Windows a `.cmd` or `.bat` wrapper (the npm
+ * install's `claude.cmd`, say) cannot run. Routing arguments through `cmd.exe` would need
+ * cmd-specific quoting of the system prompt, so the harness refuses up front, before any
+ * device work, and names the executables that do work.
+ */
+export function assertDirectlyLaunchable(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  resolve: (command: string) => string | null = (name) => Bun.which(name),
+): void {
+  if (platform !== "win32") {
+    return;
+  }
+  const resolved = resolve(command) ?? command;
+  if (/\.(?:cmd|bat)$/i.test(resolved)) {
+    throw new Error(
+      `--claude resolves to ${resolved}, a Windows command script the harness cannot launch ` +
+        "without a shell. Install the native Claude Code binary (claude.exe) or pass its path " +
+        "with --claude.",
+    );
+  }
+}
+
 /** SHA-256 of a file's content, read in 1 MiB chunks. */
 export function fileSha256(path: string): string {
   const hash = createHash("sha256");
@@ -731,6 +755,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
   }
+  assertDirectlyLaunchable(options.claude);
   const serverBuild = await serverDigest(options.claude);
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];

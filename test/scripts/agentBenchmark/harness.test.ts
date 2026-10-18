@@ -181,6 +181,7 @@ describe("agent benchmark harness", () => {
       AUTOMOBILE_DB_DIR: artifact("db"),
       AUTOMOBILE_LOG_DIR: artifact("logs"),
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
+      CLAUDE_CODE_DISABLE_POLICY_SKILLS: "1",
       AUTOMOBILE_AGENT_BENCH_SERIAL: "emulator-5554",
       AUTOMOBILE_AGENT_BENCH_RUN_DIR: RUN_DIR,
     });

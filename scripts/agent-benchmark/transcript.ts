@@ -239,6 +239,11 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
     state.audit.parseErrors.push(`line ${line}: invalid parent_tool_use_id`);
   }
   for (const block of contentBlocks(event, line, state)) {
+    if (block.type === "tool_result") {
+      // Results come from the user side; one here would be skipped and its outcome lost.
+      state.audit.parseErrors.push(`line ${line}: tool_result in an assistant event`);
+      continue;
+    }
     if (block.type !== "tool_use") {
       continue;
     }
@@ -280,6 +285,11 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
 
 function handleUser(event: JsonRecord, line: number, state: AuditState): void {
   for (const block of contentBlocks(event, line, state)) {
+    if (block.type === "tool_use") {
+      // Calls come from the assistant; one here would be skipped and missing from the counts.
+      state.audit.parseErrors.push(`line ${line}: tool_use in a user event`);
+      continue;
+    }
     if (block.type !== "tool_result") {
       continue;
     }

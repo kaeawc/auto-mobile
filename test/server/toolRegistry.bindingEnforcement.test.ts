@@ -8,7 +8,7 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -50,9 +50,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
   const mcpA = "mcp-socket-a";
 
   let handled: string[];
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let registry: FakeBindingRegistry;
@@ -87,12 +85,14 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     });
     const devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([slotA, slotB, free]);
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     timer = new FakeTimer();
     registry = new FakeBindingRegistry(timer);
@@ -138,9 +138,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
 
   afterEach(() => {
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();

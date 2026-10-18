@@ -397,6 +397,10 @@ struct PrototypeSession {
                 code: .limitExceeded, message: "\(path): the changed data breaks a limit the show enforces"
             ))
         }
+        // The size baseline moves with the data the write changed, as it does for a patch, so a later
+        // state write or patch is measured against the written spec rather than the shown one.
+        let structureDelta = PrototypePatch.structureBytes(rebuilt) - PrototypePatch.structureBytes(spec)
+        nonStateBytes = max(0, nonStateBytes + structureDelta)
         self.spec = rebuilt
         structureRevision += 1
         rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)

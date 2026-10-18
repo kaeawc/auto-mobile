@@ -13,6 +13,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 /**
  * #10151: a client that cancels a long `swipeOn` `lookFor` search must stop the search before its
@@ -181,7 +182,14 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
     internals.handleConnection(daemonSide as unknown as Socket);
-    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, {}, null, new FakeIdGenerator());
+    daemonClient = new DaemonClient(
+      "/fake/socket",
+      60_000,
+      timer,
+      ISOLATED_DAEMON_RECOVERY,
+      null,
+      new FakeIdGenerator(),
+    );
     daemonClient.attachSocketForTesting(clientSide as never);
     daemonSide.deliver = (frame) => daemonClient.simulateIncomingDataForTesting(Buffer.from(frame));
   });

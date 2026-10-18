@@ -11,6 +11,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -33,7 +34,7 @@ async function setup() {
     "/fake/socket",
     1000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(),
   );

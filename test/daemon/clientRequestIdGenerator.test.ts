@@ -6,6 +6,7 @@ import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 interface DaemonClientFrameInternals {
   handleData(data: Buffer): void;
@@ -30,7 +31,14 @@ function createConnectedClient(
   idGenerator: CountingIdGenerator,
   writes: string[],
 ): DaemonClient {
-  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, {}, null, idGenerator);
+  const client = new DaemonClient(
+    "/fake/socket",
+    1000,
+    fakeTimer,
+    ISOLATED_DAEMON_RECOVERY,
+    null,
+    idGenerator,
+  );
   (client as any).connected = true;
   (client as any).socket = createCapturingSocket(writes);
   return client;

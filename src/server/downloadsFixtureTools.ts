@@ -1,5 +1,6 @@
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { stageSessionDownloadsResultSchema } from "./downloadsFixtureToolOutputSchemas";
 import { ActionableError } from "../models";
 import {
   stageSessionDownloadsSchema,
@@ -40,13 +41,14 @@ export function registerDownloadsFixtureTools(
     },
     {
       defaultEnabled: false,
+      outputSchema: stageSessionDownloadsResultSchema,
       shouldEnsureDevice: () => false,
       nonDeviceHandler: async (
         args: StageSessionDownloadsArgs,
         _progress?: ProgressCallback,
         signal?: AbortSignal,
       ) =>
-        createJSONToolResponse(
+        createStructuredToolResponse(
           await service().stage({
             sessionUuid: args.sessionUuid,
             directory: args.directory,

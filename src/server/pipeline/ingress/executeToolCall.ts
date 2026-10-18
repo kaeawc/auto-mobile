@@ -398,9 +398,11 @@ function routeCall(
   const sessionId = options.sessionContext?.sessionId;
   const implicitAutolockMcpSessionId =
     context.requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-  // The one session key (#4678): a daemon call's forwarded `__mcpSessionId`, else the
-  // request's session-key header, else the stateful transport's own id. Every binding
-  // read and write below goes through it, never the transport id directly.
+  // The one session key (#4678, #13315): `context.requestMcpSessionId` already applies the
+  // precedence (the session-key header wins over an in-band `__mcpSessionId`, except on the
+  // daemon's own trusted forward, whose in-band id names the originating client); else the
+  // stateful transport's own id. Every binding read and write below goes through it, never
+  // the transport id directly.
   const bindingKey = context.requestMcpSessionId ?? deps.serverBindingKey;
   let routingSessionUuid: string | undefined;
   let readOutsideBoundSession = false;
@@ -637,6 +639,8 @@ async function executeToolCallBody(
   const context = parseCallContext(call.args, {
     daemonMode: deps.daemonMode,
     acceptanceDiscoveryCapability: deps.options.acceptanceDiscoveryCapability,
+    sessionKey: deps.options.requestMcpSessionId,
+    trustForwardedSessionId: deps.options.trustForwardedMcpSessionId === true,
   });
   const routed = routeCall(deps, call, context);
   if ("failure" in routed) {

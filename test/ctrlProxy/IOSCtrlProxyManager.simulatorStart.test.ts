@@ -1,5 +1,5 @@
+import { FakeXcodeSigningManager } from "../fakes/FakeXcodeSigningManager";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import {
   IOSCtrlProxyManager,
   STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
@@ -18,7 +18,6 @@ import { logger } from "../../src/utils/logger";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
-import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
@@ -880,19 +879,13 @@ describe("IOSCtrlProxyManager simulator start", function () {
             throw new Error("runner verification rejected");
           }
         };
-        const signing = {
-          resolveSigningForDevice: async () => ({
-            buildSettings: [],
-            allowProvisioningUpdates: false,
-            warnings: [],
-          }),
-        } as unknown as XcodeSigningManager;
+        const signing = new FakeXcodeSigningManager();
         const xcodebuild: Xcodebuild = {
           executeCommand: async () => createExecResult("", ""),
           isAvailable: async () => true,
           startStreaming: async () => {
             events.push("spawn");
-            return new FakeChildProcess(fakeTimer) as unknown as ChildProcess;
+            return new FakeChildProcess(fakeTimer);
           },
         };
         const { steps } = createManagerWithOwnSteps({
@@ -940,13 +933,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
             return "/tmp/automobile-runner-DEV.xctestrun";
           },
         });
-        const fakeSigning = {
-          resolveSigningForDevice: async () => ({
-            buildSettings: [],
-            allowProvisioningUpdates: false,
-            warnings: [],
-          }),
-        } as unknown as XcodeSigningManager;
+        const fakeSigning = new FakeXcodeSigningManager();
         const { steps } = createManagerWithOwnSteps({
           device: physicalDevice,
           timer: fakeTimer,
@@ -992,13 +979,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
         timer: fakeTimer,
         builder: createFakeBuilder(),
         processExecutor: fakeExecutor,
-        signingManager: {
-          resolveSigningForDevice: async () => ({
-            buildSettings: [],
-            allowProvisioningUpdates: false,
-            warnings: [],
-          }),
-        } as unknown as XcodeSigningManager,
+        signingManager: new FakeXcodeSigningManager(),
         tunnelClient: new FakeIosTunnelClient(),
       });
 
@@ -1008,7 +989,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       replacement.pid = 41002;
       manager.trackRunnerForTesting({
         pid: replacement.pid,
-        process: replacement as unknown as ChildProcess,
+        process: replacement,
       });
 
       staleChild.emit("error", new Error("late stale failure"));
@@ -1041,7 +1022,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       child.pid = process.pid;
       manager.trackRunnerForTesting({
         pid: process.pid,
-        process: child as unknown as ChildProcess,
+        process: child,
       });
 
       await expect(manager.stop()).rejects.toThrow(

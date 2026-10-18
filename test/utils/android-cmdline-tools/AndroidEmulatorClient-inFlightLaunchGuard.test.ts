@@ -124,15 +124,15 @@ function createHarness(): Harness {
     avdConfigReader: new FakeAvdConfigReader(),
     hostPortAvailabilityChecker: { isPortAvailable: () => true },
     runningAvdAdvertisementReader: advertisements,
+    locateEmulatorPath: async () => "emulator",
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+  spyOn(client, "listAvds").mockImplementation(async () => [
     { name: AVD, platform: "android", isRunning: false } as DeviceInfo,
-  ];
-  (
-    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
-  ).checkArchitectureCompatibility = async () => ({ compatible: true });
+  ]);
+  spyOn(client, "checkArchitectureCompatibility").mockImplementation(async () => ({
+    compatible: true,
+    hostArch: "arm64",
+  }));
 
   return {
     client,

@@ -1,23 +1,19 @@
-import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Fake ChildProcess for testing without spawning real processes
  * Simulates process lifecycle: spawn -> running -> exit
  */
-export class FakeChildProcess
-  extends EventEmitter
-  implements Partial<ChildProcessWithoutNullStreams>
-{
+export class FakeChildProcess extends ChildProcess {
   stdout: Readable;
   stderr: Readable;
   stdin: Writable;
-  exitCode: number | null = null;
-  signalCode: NodeJS.Signals | null = null;
-  killed = false;
-  pid: number | undefined;
+  override exitCode: number | null = null;
+  override signalCode: NodeJS.Signals | null = null;
+  override killed = false;
+  override pid: number | undefined;
 
   private spawnDelay: number = 0;
   private exitDelay: number = 0;
@@ -127,7 +123,7 @@ export class FakeChildProcess
   /**
    * Simulate process exit
    */
-  simulateExit(code: number = 0, signal: NodeJS.Signals | null = null): void {
+  simulateExit(code: number | null = 0, signal: NodeJS.Signals | null = null): void {
     this.timer.setTimeout(() => {
       this.exitCode = code;
       this.signalCode = signal;
@@ -141,7 +137,7 @@ export class FakeChildProcess
   /**
    * Kill the process (simulated)
    */
-  kill(signal?: NodeJS.Signals | number): boolean {
+  override kill(signal?: NodeJS.Signals | number): boolean {
     if (this.killed || this.exitCode !== null) {
       return false;
     }
@@ -157,14 +153,14 @@ export class FakeChildProcess
   /**
    * Ref (no-op for testing)
    */
-  ref(): this {
+  override ref(): this {
     return this;
   }
 
   /**
    * Unref (no-op for testing)
    */
-  unref(): this {
+  override unref(): this {
     return this;
   }
 
@@ -172,12 +168,11 @@ export class FakeChildProcess
    * Get all other required properties from ChildProcessWithoutNullStreams
    * These are stubs for testing purposes
    */
-  channel?: any;
-  connected = false;
-  disconnect(): void {
+  override connected = false;
+  override disconnect(): void {
     this.connected = false;
   }
-  send(): boolean {
+  override send(): boolean {
     return false;
   }
 }

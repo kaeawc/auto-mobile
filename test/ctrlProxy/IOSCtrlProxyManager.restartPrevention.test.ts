@@ -3,7 +3,6 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
 import { createExecResult } from "../../src/utils/execResult";
@@ -225,7 +224,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
             await releaseStartup.promise;
             manager.trackRunnerForTesting({
               pid: runner.pid!,
-              process: runner as unknown as ChildProcess,
+              process: runner,
               abortController: runnerController,
             });
           },
@@ -572,7 +571,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       failedPreHealthProcess.pid = 22222;
       manager.trackRunnerForTesting({
         pid: failedPreHealthProcess.pid,
-        process: failedPreHealthProcess as unknown as ChildProcess,
+        process: failedPreHealthProcess,
       });
       fakeExecutor.setCommandHandler("curl -s", () =>
         createExecResult(
@@ -897,7 +896,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
           startOnDevice: async () => {
             manager.trackRunnerForTesting({
               pid: runnerPid,
-              process: new FakeChildProcess(fakeTimer) as unknown as ChildProcess,
+              process: new FakeChildProcess(fakeTimer),
             });
             fakeExecutor.setNextSpawnProcess(iproxy);
             tunnel(manager).setStateForTesting({ processId: iproxy.pid! });
@@ -1508,7 +1507,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       test("keeps retrying when a scheduled iproxy restart attempt fails before the tunnel is supervised", async function () {
         const fakeProcess1 = new FakeChildProcess();
         const fakeProcess2 = new FakeChildProcess();
-        fakeProcess2.pid = undefined as unknown as number;
+        fakeProcess2.pid = undefined;
         fakeExecutor.setNextSpawnProcess(fakeProcess1);
         const manager = IOSCtrlProxyManager.createForTestingWithDeps(
           physicalDevice,

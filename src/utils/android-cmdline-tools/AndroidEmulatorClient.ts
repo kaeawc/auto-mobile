@@ -398,6 +398,70 @@ export function isMissingExecutableError(
   );
 }
 
+/**
+ * Constructor dependencies for {@link AndroidEmulatorClient}. All fields are
+ * optional; omitted fields use the production implementation. Test seams are
+ * injected by name instead of by position.
+ */
+export interface AndroidEmulatorClientOptions {
+  /** Promisified exec function (for testing) */
+  execAsync?: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null;
+  /** Spawn function (for testing) */
+  spawnFn?: SpawnFn | null;
+  /** Timer for delays */
+  timer?: Timer;
+  /** Factory for creating AdbClient instances (for testing) */
+  adbFactory?: AdbClientFactory;
+  /** Reader for AVD config.ini files (for testing) */
+  avdConfigReader?: AvdConfigReader;
+  /** Host platform (for testing) */
+  platform?: NodeJS.Platform;
+  /** Host CPU architecture (for testing) */
+  hostArchitecture?: string;
+  /** Checks whether emulator ports are free (for testing) */
+  hostPortAvailabilityChecker?: PortAvailabilityChecker;
+  runningAvdAdvertisementReader?: RunningAvdAdvertisementReader;
+  /** Tracks daemon-owned console-exclusive operations (for testing) */
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  /** Orders completed device discovery observations (for testing) */
+  observationSequence?: DiscoveryObservationSequence;
+  posterFileSystem?: Pick<FileSystem, "existsSync">;
+  reservations?: EmulatorPortReservations;
+  inventory?: AndroidDeviceInventoryScanner;
+  launcher?: EmulatorLauncher;
+  readinessPoller?: EmulatorReadinessPoller;
+}
+
+type ResolvedClientOptions = AndroidEmulatorClientOptions &
+  Required<
+    Pick<
+      AndroidEmulatorClientOptions,
+      | "timer"
+      | "adbFactory"
+      | "platform"
+      | "hostArchitecture"
+      | "runningAvdAdvertisementReader"
+      | "observationSequence"
+    >
+  >;
+
+function withClientOptionDefaults(options: AndroidEmulatorClientOptions): ResolvedClientOptions {
+  return {
+    ...options,
+    timer: options.timer ?? defaultTimer,
+    // Below the admission gate, not behind it: discovery reading the AVD name on
+    // a quarantined serial is the only event that can LIFT the quarantine, and
+    // `emu kill` on one is how the pool settles a serial it can no longer
+    // identify ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    adbFactory: options.adbFactory ?? unadmittedAdbClientFactory,
+    platform: options.platform ?? process.platform,
+    hostArchitecture: options.hostArchitecture ?? arch(),
+    runningAvdAdvertisementReader:
+      options.runningAvdAdvertisementReader ?? new TmpdirRunningAvdAdvertisementReader(),
+    observationSequence: options.observationSequence ?? defaultDiscoveryObservationSequence,
+  };
+}
+
 export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
@@ -423,43 +487,34 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     Promise<ActionableError | undefined>
   >();
 
+  private readonly observationSequence: DiscoveryObservationSequence;
+  private readonly posterFileSystem?: Pick<FileSystem, "existsSync">;
+
   /**
-   * Create an AndroidEmulatorClient instance
-   * @param execAsyncFn - promisified exec function (for testing)
-   * @param spawnFn - spawn function (for testing)
-   * @param timer - Timer for delays
-   * @param adbFactory - Factory for creating AdbClient instances (for testing)
-   * @param avdConfigReader - Reader for AVD config.ini files (for testing)
-   * @param platform - Host platform (for testing)
-   * @param hostArchitecture - Host CPU architecture (for testing)
-   * @param hostPortAvailabilityChecker - Checks whether emulator ports are free (for testing)
-   * @param consoleBusyRegistry - Tracks daemon-owned console-exclusive operations (for testing)
-   * @param observationSequence - Orders completed device discovery observations (for testing)
+   * Create an AndroidEmulatorClient instance. Every dependency is optional and
+   * defaults to the production implementation (see {@link AndroidEmulatorClientOptions}).
    */
-  constructor(
-    execAsyncFn:
-      | ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>)
-      | null = null,
-    spawnFn: SpawnFn | null = null,
-    timer: Timer = defaultTimer,
-    // Below the admission gate, not behind it: discovery reading the AVD name on
-    // a quarantined serial is the only event that can LIFT the quarantine, and
-    // `emu kill` on one is how the pool settles a serial it can no longer
-    // identify ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-    adbFactory: AdbClientFactory = unadmittedAdbClientFactory,
-    avdConfigReader?: AvdConfigReader,
-    platform: NodeJS.Platform = process.platform,
-    hostArchitecture: string = arch(),
-    hostPortAvailabilityChecker: PortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
-    runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
-    consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
-    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    private readonly posterFileSystem?: Pick<FileSystem, "existsSync">,
-    reservations?: EmulatorPortReservations,
-    inventory?: AndroidDeviceInventoryScanner,
-    launcher?: EmulatorLauncher,
-    readinessPoller?: EmulatorReadinessPoller,
-  ) {
+  constructor(options: AndroidEmulatorClientOptions = {}) {
+    const {
+      execAsync: execAsyncFn = null,
+      spawnFn = null,
+      timer,
+      adbFactory,
+      avdConfigReader,
+      platform,
+      hostArchitecture,
+      hostPortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
+      runningAvdAdvertisementReader,
+      consoleBusyRegistry,
+      observationSequence,
+      posterFileSystem,
+      reservations,
+      inventory,
+      launcher,
+      readinessPoller,
+    } = withClientOptionDefaults(options);
+    this.observationSequence = observationSequence;
+    this.posterFileSystem = posterFileSystem;
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
     this.spawnFn =
       spawnFn || ((file, args, options) => emulatorHostProcessExecutor.spawn(file, args, options));

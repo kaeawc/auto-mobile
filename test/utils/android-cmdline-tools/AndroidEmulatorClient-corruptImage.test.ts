@@ -146,7 +146,11 @@ describe("AndroidEmulatorClient detectCorruptImage", () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
     const fakeFactory = new TestAdbClientFactory(fakeAdb);
-    client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
   });
 
   // PARAM-8: pin the observable outcome across every branch, including the
@@ -288,13 +292,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
@@ -328,13 +332,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
         : createExecResult("");
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
@@ -352,13 +356,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
         : createExecResult("");
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const process = await client.startEmulator("Pixel_9_Pro");
@@ -381,13 +385,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
         : createExecResult("");
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const process = await client.startEmulator("Pixel_9_Pro");
@@ -436,13 +440,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.startEmulator("Pixel_9_Pro");
@@ -469,13 +473,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
@@ -514,13 +518,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
     fakeAdb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1\n"));
     fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const child = await client.startEmulator("Pixel_9_Pro");
@@ -566,13 +570,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     fakeAdb.setCommandResponse("shell pm list packages", createExecResult("package:android\n"));
     fakeAdb.setCommandResponse("shell getprop sys.boot_completed", createExecResult("1\n"));
     fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const child = await client.startEmulator("Pixel_9_Pro");
@@ -609,13 +613,13 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       args.includes("-list-avds") ? createExecResult("Pixel_9_Pro\n") : createExecResult("");
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     const firstLaunch = await client.startEmulator("Pixel_9_Pro");
@@ -666,7 +670,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
     skipEmulatorPathDetection(client);
 
     // Schedule exit event after waitForEmulatorReady registers its handlers. A tick,
@@ -697,7 +705,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
     skipEmulatorPathDetection(client);
 
     process.nextTick(() => {
@@ -716,7 +728,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     process.env.EMULATOR_POLLING_INTERVAL_MS = "1e9";
     const fakeChild = createFakeChildProcess();
     const execAsync = async (): Promise<ExecResult> => createExecResult("");
-    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
     skipEmulatorPathDetection(client);
     const controller = new AbortController();
     const readiness = client.waitForEmulatorReady(
@@ -762,7 +778,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
     skipEmulatorPathDetection(client);
 
     // Without child process, should just timeout normally
@@ -773,7 +793,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
   test("removes child process listeners after readiness times out", async () => {
     const fakeChild = createFakeChildProcess();
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 100, fakeChild));
@@ -805,7 +829,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     fakeAdb.setCommandResponse("shell getprop init.svc.bootanim", createExecResult("stopped\n"));
     const controller = new AbortController();
 
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, fakeFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady(
@@ -861,7 +889,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
         source: "local",
       },
     ]);
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, null, "emulator-5556");
@@ -889,7 +921,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       ],
       new Map([["emulator-5556", "am-api32-ga-arm64"]]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(
@@ -914,7 +950,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       new Map(),
       new Map([["emulator-5556", "am-api35-ga-arm64"]]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(
@@ -938,7 +978,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       [candidate],
       new Map([["emulator-5556", "am-api35-ga-arm64"]]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const error = await expectRejection(
@@ -962,7 +1006,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       [candidate],
       new Map([["emulator-5556", "am-api33-ga-arm64"]]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady(
@@ -990,7 +1038,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       new Map(),
       new Map([["emulator-5556", "am-api33-ga-arm64"]]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady(
@@ -1018,7 +1070,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       ],
       new Map([["emulator-5556", "am-api32-ga-arm64"]]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady(
@@ -1039,7 +1095,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const scopedFactory = new DeviceScopedAdbClientFactory([
       { name: "Pixel 8", platform: "android", deviceId: "R58M123456A" },
     ]);
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady("R58M123456A", 5_000, null, "R58M123456A");
@@ -1071,7 +1131,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
         ["emulator-5558", "am-api33-ga-arm64"],
       ]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000);
@@ -1104,7 +1168,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       [existingDevice],
       [existingDevice, launchedDevice],
     ]);
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     await expect(client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild)).rejects.toThrow(
@@ -1153,7 +1221,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       }
       return createExecResult("");
     };
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      spawnFn,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const child = await client.startEmulator("am-api33-ga-arm64");
@@ -1197,7 +1270,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       }
       return createExecResult("");
     };
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      spawnFn,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
@@ -1254,7 +1332,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       }
       return createExecResult("");
     };
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      spawnFn,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
@@ -1306,7 +1389,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       }
       return createExecResult("");
     };
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      spawnFn,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
@@ -1357,7 +1445,12 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       }
       return createExecResult("");
     };
-    const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync,
+      spawnFn,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     const child = await client.startEmulator("am-api33-ga-arm64");
@@ -1398,7 +1491,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
         },
       ],
     ]);
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     await expect(client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild)).rejects.toThrow(
@@ -1438,7 +1535,11 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
         ["emulator-5558", "am-api32-ga-arm64"],
       ]),
     );
-    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: mockExecAsync,
+      timer: fakeTimer,
+      adbFactory: scopedFactory,
+    });
     skipEmulatorPathDetection(client);
 
     await expect(client.waitForEmulatorReady("am-api33-ga-arm64", 100, fakeChild)).rejects.toThrow(

@@ -133,12 +133,11 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
 }
 
 function clientWith(adb: FreshOfflineAdbExecutor, timer: FakeTimer): AndroidEmulatorClient {
-  return new AndroidEmulatorClient(
-    async () => result(),
-    null,
+  return new AndroidEmulatorClient({
+    execAsync: async () => result(),
     timer,
-    new FakeAdbClientFactory(adb),
-  );
+    adbFactory: new FakeAdbClientFactory(adb),
+  });
 }
 
 function configureReadyProbes(adb: FreshOfflineAdbExecutor): void {

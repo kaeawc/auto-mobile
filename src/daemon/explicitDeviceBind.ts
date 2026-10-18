@@ -1,7 +1,7 @@
 import { bindDevice, unbindDevice, holderOf } from "./deviceBinding";
 import { releasePoolDevice } from "./releaseSessionAndDevice";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
-import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
+import { throwIfRequestAborted } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import { logger } from "../utils/logger";
@@ -147,6 +147,8 @@ export interface ExplicitBindOptions {
   refusePreparedForOtherRequest: boolean;
   deferRebindCleanup: boolean;
   recoveryTarget?: SessionRecoveryTarget;
+  /** The caller's cancel signal, read once by the pool entry point (#11817). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -210,6 +212,7 @@ export class ExplicitDeviceBind {
     receipt?: AcquisitionReceipt,
     refusePreparedForOtherRequest = false,
     recoveryTarget?: SessionRecoveryTarget,
+    signal?: AbortSignal,
   ): Promise<string> {
     // Registered before the first await so a close racing the whole bind is seen (#11146).
     const endBind = this.port.beginMcpBind(mcpSessionId);
@@ -228,6 +231,7 @@ export class ExplicitDeviceBind {
         receipt: receipt ?? {},
         deferRebindCleanup: receipt !== undefined,
         refusePreparedForOtherRequest,
+        signal,
       });
     } finally {
       endBind();
@@ -349,6 +353,7 @@ export class ExplicitDeviceBind {
               sessionId,
               sourceImage,
               confirmedSameOwner,
+              options.signal,
             );
           }
 
@@ -527,6 +532,7 @@ export class ExplicitDeviceBind {
             expectedExistingSessionDeviceId,
           ),
           recoveryTarget: options.recoveryTarget,
+          signal: options.signal,
         },
       ),
     );
@@ -783,9 +789,10 @@ export class ExplicitDeviceBind {
       persistenceSource: string | undefined;
       deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
       recoveryTarget?: SessionRecoveryTarget;
+      signal?: AbortSignal;
     },
   ): () => Promise<Session> {
-    const { stableDeviceId, persistenceSource } = creation;
+    const { stableDeviceId, persistenceSource, signal } = creation;
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
       return async () => {
@@ -800,7 +807,7 @@ export class ExplicitDeviceBind {
             recoveredLiveness: creation.recoveryTarget?.liveness,
             initialOwnership: creation.recoveryTarget?.initialOwnership,
             persistenceSource,
-            signal: getAbortSignal(),
+            signal,
           },
         );
         if (previousSession && platform === "android") {
@@ -831,7 +838,7 @@ export class ExplicitDeviceBind {
       const session = await this.port.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
         deferCleanup: creation.deferCleanup,
-        signal: getAbortSignal(),
+        signal,
       });
       if (previousDevice) {
         this.port.autolockManager.clearRebindAutolockLock(
@@ -892,6 +899,7 @@ export class ExplicitDeviceBind {
     requestedSessionId: string,
     sourceImage?: DeviceInfo,
     confirmedSameOwner = false,
+    signal?: AbortSignal,
   ): Promise<string> {
     const existingSessionId = existingSession.sessionId;
     if (sourceImage && !confirmedSameOwner) {
@@ -923,7 +931,7 @@ export class ExplicitDeviceBind {
       false,
       {
         callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId(),
-        signal: getAbortSignal(),
+        signal,
       },
     );
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);

@@ -11,6 +11,7 @@ const SOCKET_SERVER = "src/daemon/socketServer.ts";
 const DEVICE_ALLOCATION = "src/daemon/deviceAllocation.ts";
 const SESSION_MANAGER = "src/daemon/sessionManager.ts";
 const SESSION_DEVICE_STATE_RESTORE = "src/daemon/sessionDeviceStateRestore.ts";
+const EXPLICIT_DEVICE_BIND = "src/daemon/explicitDeviceBind.ts";
 const AMBIENT_READ = /\bgetAbortSignal\s*\(/;
 
 describe("control-socket server reads no ambient abort signal (#11817)", () => {
@@ -33,10 +34,11 @@ describe("control-socket server reads no ambient abort signal (#11817)", () => {
     expect(AMBIENT_READ.test(readFileSync(path.join(ROOT, DEVICE_ALLOCATION), "utf8"))).toBe(false);
   });
 
+  // Slice e: ExplicitDeviceBind takes the signal from DevicePool.bindOrReuseDeviceSession.
   // Slice c + d: session creation, rebind and acquisition take the caller's signal in their
   // options, and dispatchDeviceRestore / the device-state restorers take the restore's scope
   // (RestoreSignalOptions: the teardown shield, the forced signal, the caller's signal) explicitly.
-  test.each([SESSION_MANAGER, SESSION_DEVICE_STATE_RESTORE])(
+  test.each([SESSION_MANAGER, SESSION_DEVICE_STATE_RESTORE, EXPLICIT_DEVICE_BIND])(
     "%s never calls getAbortSignal()",
     (file) => {
       expect(AMBIENT_READ.test(readFileSync(path.join(ROOT, file), "utf8"))).toBe(false);

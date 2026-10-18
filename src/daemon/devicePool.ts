@@ -6978,6 +6978,7 @@ export class DevicePool {
     refusePreparedForOtherRequest = false,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
+    // The ambient signal is read once here, at the pool entry point; the bind takes it explicitly.
     return this.explicitDeviceBind.bindOrReuseDeviceSession(
       sessionId,
       deviceId,
@@ -6994,6 +6995,7 @@ export class DevicePool {
       receipt,
       refusePreparedForOtherRequest,
       recoveryTarget,
+      getAbortSignal(),
     );
   }
 

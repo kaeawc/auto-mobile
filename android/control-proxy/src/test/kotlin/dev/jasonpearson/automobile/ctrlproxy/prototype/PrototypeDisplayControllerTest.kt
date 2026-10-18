@@ -87,6 +87,32 @@ class PrototypeDisplayControllerTest {
   }
 
   @Test
+  fun `a device below the display floor refuses a non-default display with a capability error`() =
+    runTest {
+      val unsupported =
+        PrototypeController(
+          host,
+          PrototypeResultSink { _, success, error -> results.all += success to error },
+          eventSink = PrototypeEventSink { events += it },
+          clock = { 42L },
+          lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+          displays =
+            object : PrototypeDisplayProvider {
+              override fun isAvailable(displayId: Int) = true
+
+              override fun unsupportedReason(displayId: Int) =
+                PrototypeDisplayRouting.error(displayId, 31)
+            },
+        )
+      unsupported.show("r", spec(), displayId = 2)
+      assertFalse(results.last.first)
+      assertTrue(results.last.second.orEmpty().contains("requires Android 12L (API 32)"))
+      assertTrue(host.calls.isEmpty())
+      unsupported.show("r", spec(), displayId = 0)
+      assertEquals(true to null, results.last)
+    }
+
+  @Test
   fun `unknown display leaves the prototype already shown in place`() = runTest {
     controller.show("a", spec("first"))
     controller.show("b", spec("second"), displayId = 9)

@@ -60,7 +60,7 @@ import {
 } from "../registry/registryRetryPacing";
 import { DefaultRetryExecutor, type RetryExecutor } from "../../../utils/retry/RetryExecutor";
 import type { Timer } from "../../../utils/SystemTimer";
-import { MANAGED_EXECUTION_LIVENESS_POLICY } from "./executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
 import {
   forceStuckSessionRelease,
   releaseSessionAndDevice,

@@ -99,17 +99,24 @@ export interface ExploreArgs extends ExploreOptions {
   sessionUuid?: string;
 }
 
-function getNavigationManager(sessionUuid?: string): NavigationGraphService {
+/** Resolves the navigation graph for an optional session; injectable so tests pass a fake directly. */
+export type NavigationManagerFactory = (sessionUuid?: string) => NavigationGraphService;
+
+const getNavigationManager: NavigationManagerFactory = (sessionUuid) => {
   return sessionUuid
     ? NavigationGraphManager.getInstanceForSession(sessionUuid)
     : NavigationGraphManager.getInstance();
-}
+};
 
 // Narrow executor interface for per-handler dependency injection.
 export type NavigateToLike = Pick<NavigateTo, "execute">;
 
-function createDefaultNavigateTo(device: BootedDevice, args: NavigateToArgs): NavigateToLike {
-  const navigationManager = getNavigationManager(args.sessionUuid);
+function createDefaultNavigateTo(
+  device: BootedDevice,
+  args: NavigateToArgs,
+  navigationManagerFactory: NavigationManagerFactory = getNavigationManager,
+): NavigateToLike {
+  const navigationManager = navigationManagerFactory(args.sessionUuid);
   return new NavigateTo(
     device,
     undefined,
@@ -124,10 +131,13 @@ function createDefaultNavigateTo(device: BootedDevice, args: NavigateToArgs): Na
 
 export interface NavigateToHandlerDependencies {
   navigateToFactory?: (device: BootedDevice, args: NavigateToArgs) => NavigateToLike;
+  navigationManagerFactory?: NavigationManagerFactory;
 }
 
 export function createNavigateToHandler({
-  navigateToFactory = createDefaultNavigateTo,
+  navigationManagerFactory = getNavigationManager,
+  navigateToFactory = (device, args) =>
+    createDefaultNavigateTo(device, args, navigationManagerFactory),
 }: NavigateToHandlerDependencies = {}) {
   return async (
     device: BootedDevice,
@@ -186,13 +196,14 @@ export interface NavigationToolDependencies extends NavigateToHandlerDependencie
 
 export function registerNavigationTools({
   navigateToFactory,
+  navigationManagerFactory = getNavigationManager,
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
 }: NavigationToolDependencies = {}) {
   // Get navigation graph handler (for debugging)
   const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
     try {
-      const manager = getNavigationManager(args.sessionUuid);
+      const manager = navigationManagerFactory(args.sessionUuid);
       const observation = RealObserveScreen.getRecentCachedResultForDevice(device.deviceId);
       const observedAppId =
         observation?.viewHierarchy?.packageName ?? observation?.activeWindow?.appId ?? null;
@@ -238,7 +249,7 @@ export function registerNavigationTools({
     "navigateTo",
     "Navigate to screen using navigation graph",
     navigateToSchema,
-    createNavigateToHandler({ navigateToFactory }),
+    createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
     { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
   );
 
@@ -290,7 +301,7 @@ export function registerNavigationTools({
         device,
         null,
         undefined,
-        getNavigationManager(args.sessionUuid),
+        navigationManagerFactory(args.sessionUuid),
         args.sessionUuid,
       );
       const options: ExploreOptions = {

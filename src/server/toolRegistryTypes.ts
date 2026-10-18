@@ -1,3 +1,5 @@
+import type { ZodType } from "zod/v4";
+import type { McpToolCallResult } from "./toolCallDispatch";
 import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
 
 import { type ToolTransportRecovery } from "./toolTransportRecovery";
@@ -30,14 +32,29 @@ export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
 }
 
+/**
+ * What the pipeline treats a handler's result as once it leaves the registry: an MCP tool result.
+ * Handlers themselves resolve to `unknown` (text, image, structured and defined-tool payloads all
+ * differ); {@link ToolHandlerResult} is asserted once, at the pipeline's invocation boundary.
+ */
+export type ToolHandlerResult = McpToolCallResult;
+
+/** A tool's stored (erased) input schema: parsing it yields the wire-shaped argument record. */
+export type ToolSchema = ZodType<Record<string, unknown>>;
+
 // Interface for tool handlers
-export interface ToolHandler<T = any> {
-  (args: T, progress?: ProgressCallback, signal?: AbortSignal): Promise<any>; // Using any since the actual type varies between text and image responses
+export interface ToolHandler<T = Record<string, unknown>> {
+  (args: T, progress?: ProgressCallback, signal?: AbortSignal): Promise<unknown>;
 }
 
 // Interface for device-aware tool handlers
-export interface DeviceAwareToolHandler<T = any> {
-  (device: BootedDevice, args: T, progress?: ProgressCallback, signal?: AbortSignal): Promise<any>;
+export interface DeviceAwareToolHandler<T = Record<string, unknown>> {
+  (
+    device: BootedDevice,
+    args: T,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
 }
 
 export interface InternalToolCallOptions {
@@ -83,7 +100,7 @@ export interface ToolRegistrationOptions {
    * the session-acquisition flow and CLI despite not being advertised.
    */
   hidden?: boolean;
-  outputSchema?: any;
+  outputSchema?: ZodType;
   /** Accept the plan executor's internal coordination namespace. */
   acceptsPlanLockNamespace?: boolean;
   /**
@@ -95,14 +112,14 @@ export interface ToolRegistrationOptions {
 }
 
 /** Options for a plain (non-device) tool. */
-export interface PlainToolOptions extends ToolRegistrationOptions {
+export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegistrationOptions {
   /**
    * The plain tool's read/control classification (#11107): true for a read, a per-args classifier
    * for a mixed tool, absent for control. A read naming a session is admitted read-only: it never
    * counts as session activity (owner decision 2026-10-09). Enumerated by
    * `test/lint/toolReadControlClassification.test.ts`.
    */
-  readOnly?: boolean | ((args: any) => boolean);
+  readOnly?: boolean | ((args: T) => boolean);
 }
 
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
@@ -135,7 +152,8 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
   return { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites };
 }
 
-export interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions, ToolTraits {
+export interface DeviceAwareToolOptions<T = Record<string, unknown>>
+  extends ToolRegistrationOptions, ToolTraits {
   shouldEnsureDevice?: (args: T) => boolean;
   /** Opt-in start admission: holder check before broker bindings, held-session requirement after. */
   assertHeldDeviceStart?: (
@@ -184,7 +202,7 @@ export interface CachedToolDefinitionSchemas {
 export interface RegisteredTool extends ToolTraits {
   name: string;
   description: string;
-  schema: any;
+  schema: ToolSchema;
   handler: ToolHandler;
   defaultEnabled: boolean;
   defaultDeclared: boolean;
@@ -200,7 +218,7 @@ export interface RegisteredTool extends ToolTraits {
   planExecutable?: boolean;
   planOnly?: boolean;
   acceptsPlanLockNamespace?: boolean;
-  outputSchema?: any;
+  outputSchema?: ZodType;
   appUiResourceUri?: string;
   /**
    * The tool's read/control classification (#10965; plain tools' `readOnly`, #11107): true for a
@@ -210,7 +228,7 @@ export interface RegisteredTool extends ToolTraits {
    * a session (#10971). Mixed tools may advertise conservative declarative read forms via
    * `_meta["automobile/deviceReadOnlyArgs"]`; SQL text remains classifier-only.
    */
-  deviceReadOnly?: boolean | ((args: any) => boolean);
+  deviceReadOnly?: boolean | ((args: Record<string, unknown>) => boolean);
   deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
 }
 

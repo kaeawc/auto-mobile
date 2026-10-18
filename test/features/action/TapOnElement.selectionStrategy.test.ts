@@ -78,8 +78,11 @@ async function executeFocus(
   }
   if (preTapHierarchy) {
     const resolver = new ResolverElementSelector();
-    spyOn(fakeSelector, "selectByResourceId").mockImplementation((hierarchy, id, options) =>
-      resolver.selectByResourceId(hierarchy, id, { ...options, intentAction: "focus-input" }),
+    const fallback = fakeSelector.select.bind(fakeSelector);
+    spyOn(fakeSelector, "select").mockImplementation((hierarchy, query, options) =>
+      query.elementId === undefined
+        ? fallback(hierarchy, query, options)
+        : resolver.select(hierarchy, query, { ...options, intentAction: "focus-input" }),
     );
   }
   let tapped = false;

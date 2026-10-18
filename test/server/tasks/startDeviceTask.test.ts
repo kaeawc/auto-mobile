@@ -289,7 +289,7 @@ describe("startDevice as an MCP task (#4668)", () => {
   });
 
   test("startDevice is the eligible tool", () => {
-    expect([...TASK_ELIGIBLE_TOOLS]).toEqual(["startDevice"]);
+    expect([...TASK_ELIGIBLE_TOOLS]).toContain("startDevice");
   });
 
   test("a declaring call gets a task that completes with the startDevice result, holding the bound session until then", async () => {

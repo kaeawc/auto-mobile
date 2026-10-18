@@ -20,8 +20,10 @@ export interface BoundaryRow {
   readonly owner: string;
   /** Repo-relative path prefixes that are never scanned. */
   readonly skipPrefixes: readonly string[];
-  /** Repo-relative paths, beyond the owner, that are never scanned. */
+  /** Repo-relative paths, beyond the owner, that are never scanned (documented exceptions or allowlists). */
   readonly skipFiles?: readonly string[];
+  /** File extensions scanned by `tree` rows; defaults to `.ts`. */
+  readonly extensions?: readonly string[];
   /**
    * `added-lines` only reports hits that overlap a line added in the diff (a
    * ratchet that tolerates existing debt). `whole-file` reports every hit in a
@@ -33,9 +35,17 @@ export interface BoundaryRow {
    * How failures are listed: `files` one indented line per file; `locations`
    * indented `file:line:col: text`; `positions` indented `file:line:col`;
    * `src-locations` unindented `file:line:col: text` with the leading `src/`
-   * stripped.
+   * stripped; `bare-locations` and `bare-positions` are the same unindented
+   * forms with the full repo path kept.
    */
-  readonly report: "files" | "locations" | "positions" | "src-locations";
+  readonly report:
+    | "files"
+    | "locations"
+    | "positions"
+    | "src-locations"
+    | "bare-locations"
+    | "bare-positions";
+  /** Printed above the violations; an empty string prints the violations alone. */
   readonly failureHeader: string;
   readonly successMessage?: string;
   /** Hits as 1-based [startLine, endLine] spans plus position. */
@@ -154,6 +164,14 @@ function reportLines(
       return violations.map(
         (violation) => `  ${violation.file}:${violation.line}:${violation.column}`,
       );
+    case "bare-locations":
+      return violations.map(
+        (violation) => `${violation.file}:${violation.line}:${violation.column}: ${violation.text}`,
+      );
+    case "bare-positions":
+      return violations.map(
+        (violation) => `${violation.file}:${violation.line}:${violation.column}`,
+      );
     case "src-locations":
       return violations.map(
         (violation) =>
@@ -174,7 +192,8 @@ export function renderBoundaryResult(
     };
   }
   const lines = reportLines(row.report, violations);
-  return { exitCode: 1, stdout: "", stderr: `${[row.failureHeader, ...lines].join("\n")}\n` };
+  const output = row.failureHeader ? [row.failureHeader, ...lines] : lines;
+  return { exitCode: 1, stdout: "", stderr: `${output.join("\n")}\n` };
 }
 
 /** Builds a span for an AST node. */

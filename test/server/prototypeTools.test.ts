@@ -38,7 +38,7 @@ import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycl
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { PROTOTYPE_EVENT_BUFFER_CAPACITY } from "../../src/features/prototype/PrototypeEventBuffer";
-import { getRemovedToolActionHint } from "../../src/models/removedTools";
+import { getRemovedToolActionHint } from "../../src/server/removedTools";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };

@@ -9,6 +9,7 @@ import {
 } from "../../src/daemon/performancePushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer } from "../fakes/FakeListeningServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 
 /**
@@ -26,17 +27,17 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    */
   async startFake(): Promise<void> {
     // Mark as listening without creating real socket
-    (this as any).server = { listening: true };
+    this.server = new FakeListeningServer();
     // Start keepalive using injected timer
-    (this as any).onServerStarted();
+    this.onServerStarted();
   }
 
   /**
    * Simulate closing the server
    */
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   /**
@@ -49,12 +50,11 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
     const socket = new FakeSocket();
 
     // Create subscription directly using protected members
-    const subscriptionId = `performancepush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = this.nextSubscriptionId();
     this.subscribers.set(subscriptionId, {
       socket: socket as unknown as Socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         deviceSessionUuid: options.deviceSessionUuid ?? null,
         packageName: options.packageName ?? null,
@@ -72,8 +72,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
   simulatePong(subscriptionId: string): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
-      const timer = (this as any).timer as FakeTimer;
-      subscriber.lastActivity = timer.now();
+      subscriber.lastActivity = this.timer.now();
     }
   }
 
@@ -100,7 +99,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Trigger keepalive check manually
    */
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
 }
 

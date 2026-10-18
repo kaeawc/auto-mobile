@@ -6,6 +6,7 @@ import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/Re
 import { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import { FakeListeningServer } from "../../fakes/FakeListeningServer";
 
 interface TestRequest extends SocketRequest {
   action: string;
@@ -30,19 +31,15 @@ class TestableRequestResponseServer extends RequestResponseSocketServer<TestRequ
    * Start without creating real socket
    */
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
+    this.server = new FakeListeningServer();
   }
 
   /**
    * Simulate a client sending a line
    */
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
-    // Wait for pending promise to complete
-    const pending = (this as any).pendingBySocket.get(socket);
-    if (pending) {
-      await pending;
-    }
+    await this.processLine(socket, line);
+    await this.whenRequestsSettled(socket);
   }
 
   protected async handleRequest(request: TestRequest): Promise<TestResponse> {
@@ -102,6 +99,11 @@ class GatedSequencingServer extends RequestResponseSocketServer<TestRequest, Tes
     this.gate = new Promise<void>((resolve) => {
       this.releaseGate = resolve;
     });
+  }
+
+  /** Queue a raw wire line through the real processLine entry point. */
+  queueLine(socket: FakeSocket, line: string): Promise<void> {
+    return this.processLine(socket, line);
   }
 
   /** Release the first request's handler so the chain can drain. */
@@ -196,11 +198,11 @@ describe("RequestResponseSocketServer", () => {
     // Fire both requests WITHOUT awaiting the first. pendingBySocket — not the
     // test — must be what serializes them. processLine returns immediately after
     // chaining onto the per-socket promise, so both are queued back-to-back.
-    void (sequencer as any).processLine(
+    void sequencer.queueLine(
       seqSocket as unknown as Socket,
       JSON.stringify({ id: "1", action: "noop" }),
     );
-    void (sequencer as any).processLine(
+    void sequencer.queueLine(
       seqSocket as unknown as Socket,
       JSON.stringify({ id: "2", action: "noop" }),
     );
@@ -212,7 +214,7 @@ describe("RequestResponseSocketServer", () => {
 
     // Releasing the gate lets the first finish, and only then may the second run.
     sequencer.release();
-    await (sequencer as any).pendingBySocket.get(seqSocket);
+    await sequencer.whenRequestsSettled(seqSocket);
 
     expect(sequencer.order).toEqual(["req1-start", "req1-end", "req2-start", "req2-end"]);
   });

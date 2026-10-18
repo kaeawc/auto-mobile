@@ -222,6 +222,15 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
   }
 
   /**
+   * Allocate the next subscription id (`<servername>-<n>`). Protected so
+   * subclasses (and test doubles that register subscribers directly) draw from
+   * the same counter as real subscribe commands.
+   */
+  protected nextSubscriptionId(): string {
+    return `${this.serverName.toLowerCase()}-${++this.subscriptionCounter}`;
+  }
+
+  /**
    * Handle a subscribe command.
    */
   private async handleSubscribe(
@@ -229,7 +238,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     request: SubscriptionCommand & Record<string, unknown>,
   ): Promise<void> {
     this.authorizeSubscription(request);
-    const subscriptionId = `${this.serverName.toLowerCase()}-${++this.subscriptionCounter}`;
+    const subscriptionId = this.nextSubscriptionId();
     const filter = this.parseSubscriptionFilter(request);
 
     this.subscribers.set(subscriptionId, {

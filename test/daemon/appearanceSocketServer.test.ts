@@ -8,6 +8,7 @@ import {
 import { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer } from "../fakes/FakeListeningServer";
 import {
   SessionScopedStreamAuthenticator,
   STREAM_SOCKET_AUTH_ENV,
@@ -103,15 +104,12 @@ class TestableAppearanceSocketServer extends AppearanceSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
+    this.server = new FakeListeningServer();
   }
 
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
-    const pending = (this as any).pendingBySocket.get(socket);
-    if (pending) {
-      await pending;
-    }
+    await this.processLine(socket as unknown as Socket, line);
+    await this.whenRequestsSettled(socket);
   }
 }
 

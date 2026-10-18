@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
+import type { Subscriber } from "../../src/daemon/socketServer/SocketServerTypes";
 import {
   TelemetryPushSocketServer,
   boundBackfillEventText,
+  type TelemetryFilter,
 } from "../../src/daemon/telemetryPushSocketServer";
 import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer } from "../fakes/FakeListeningServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { withInMemorySingletonDatabase } from "../db/inMemorySingletonDatabase";
 import { getDatabase } from "../../src/db/database";
@@ -25,13 +28,13 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
-    (this as any).onServerStarted();
+    this.server = new FakeListeningServer();
+    this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   simulateSubscription(options: {
@@ -44,12 +47,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
     subscriptionId: string;
   } {
     const socket = new FakeSocket();
-    const subscriptionId = `telemetrypush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = this.nextSubscriptionId();
     this.subscribers.set(subscriptionId, {
       socket: socket as unknown as Socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         category: options.category ?? null,
         deviceSessionUuid: options.deviceSessionUuid ?? null,
@@ -67,13 +69,24 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
   simulatePong(subscriptionId: string): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
-      const timer = (this as any).timer as FakeTimer;
-      subscriber.lastActivity = timer.now();
+      subscriber.lastActivity = this.timer.now();
     }
   }
 
+  setSubscriber(id: string, subscriber: Subscriber<TelemetryFilter>): void {
+    this.subscribers.set(id, subscriber);
+  }
+
+  deleteSubscriber(id: string): void {
+    this.subscribers.delete(id);
+  }
+
+  runBackfill(subscriptionId: string, filter: TelemetryFilter, socket: Socket): Promise<void> {
+    return this.backfillRecentEvents(subscriptionId, filter, socket);
+  }
+
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
 }
 
@@ -638,7 +651,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
 
       const server = new TestableTelemetryPushSocketServer(new FakeTimer());
       const socket = new FakeSocket();
-      (server as any).subscribers.set("backfill-test", {
+      server.setSubscriber("backfill-test", {
         socket: socket as unknown as Socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
@@ -657,7 +670,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         didWrite?.();
         return false;
       };
-      const drainingBackfill = (server as any).backfillRecentEvents(
+      const drainingBackfill = server.runBackfill(
         "backfill-test",
         { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
         socket as unknown as Socket,
@@ -678,7 +691,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
       expect(crash!.subscriptionId).toBe("backfill-test");
 
       socket.reset();
-      (server as any).subscribers.set("backfill-test", {
+      server.setSubscriber("backfill-test", {
         socket: socket as unknown as Socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
@@ -686,12 +699,12 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         backfilling: true,
         drainPending: false,
       });
-      const backfill = (server as any).backfillRecentEvents(
+      const backfill = server.runBackfill(
         "backfill-test",
         { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
         socket as unknown as Socket,
       );
-      (server as any).subscribers.delete("backfill-test");
+      server.deleteSubscriber("backfill-test");
 
       await backfill;
 
@@ -756,7 +769,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         deviceId: null,
         sessionId: null,
       };
-      (server as any).subscribers.set("stale", {
+      server.setSubscriber("stale", {
         socket: staleSocket as unknown as Socket,
         subscriptionId: "stale",
         lastActivity: 0,
@@ -764,11 +777,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         backfilling: true,
         drainPending: false,
       });
-      await (server as any).backfillRecentEvents(
-        "stale",
-        staleFilter,
-        staleSocket as unknown as Socket,
-      );
+      await server.runBackfill("stale", staleFilter, staleSocket as unknown as Socket);
       expect(staleSocket.getWrittenMessages()).toHaveLength(0);
 
       // Contrast: an all-devices subscription (deviceSessionUuid === null) still backfills.
@@ -779,7 +788,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         deviceId: null,
         sessionId: null,
       };
-      (server as any).subscribers.set("all", {
+      server.setSubscriber("all", {
         socket: allSocket as unknown as Socket,
         subscriptionId: "all",
         lastActivity: 0,
@@ -787,7 +796,7 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         backfilling: true,
         drainPending: false,
       });
-      await (server as any).backfillRecentEvents("all", allFilter, allSocket as unknown as Socket);
+      await server.runBackfill("all", allFilter, allSocket as unknown as Socket);
       expect(allSocket.getWrittenMessages().length).toBeGreaterThan(0);
     });
   });
@@ -866,7 +875,7 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         deviceId: "emulator-5554",
         sessionId: null,
       };
-      (server as any).subscribers.set("nav-scope", {
+      server.setSubscriber("nav-scope", {
         socket: socket as unknown as Socket,
         subscriptionId: "nav-scope",
         lastActivity: 0,
@@ -875,7 +884,7 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         drainPending: false,
       });
 
-      await (server as any).backfillRecentEvents("nav-scope", filter, socket as unknown as Socket);
+      await server.runBackfill("nav-scope", filter, socket as unknown as Socket);
 
       const messages = socket.getWrittenMessages<{
         data: TelemetryEvent & { data: { screenshotUri: string | null } };

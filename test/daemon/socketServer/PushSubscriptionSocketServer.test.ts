@@ -6,8 +6,10 @@ import {
   PushSubscriptionSocketServer,
   SubscriptionResponse,
 } from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
+import type { Subscriber } from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import { FakeListeningServer } from "../../fakes/FakeListeningServer";
 
 interface TestFilter {
   deviceId: string | null;
@@ -46,7 +48,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
    * Start without creating real socket
    */
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
+    this.server = new FakeListeningServer();
     this.onServerStarted();
   }
 
@@ -55,7 +57,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
    */
   async closeFake(): Promise<void> {
     this.onServerClosing();
-    (this as any).server = null;
+    this.server = null;
   }
 
   /**
@@ -66,13 +68,12 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
     subscriptionId: string;
   } {
     const socket = new FakeSocket();
-    const subscriptionId = `testpush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = this.nextSubscriptionId();
 
     this.subscribers.set(subscriptionId, {
       socket: socket as unknown as Socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         deviceId: options.deviceId ?? null,
         packageName: options.packageName ?? null,
@@ -91,23 +92,27 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
    * run instead of being bypassed by direct map mutation.
    */
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
+    await this.processLine(socket as unknown as Socket, line);
   }
 
   closeConnectionForTest(socket: FakeSocket): void {
-    (this as any).onConnectionClose(socket as unknown as Socket);
+    this.onConnectionClose(socket as unknown as Socket);
   }
 
   /**
    * Trigger keepalive check
    */
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
 
   /**
    * Push data to subscribers (public wrapper)
    */
+  getSubscriberForTest(subscriptionId: string): Subscriber<TestFilter> | undefined {
+    return this.subscribers.get(subscriptionId);
+  }
+
   pushData(data: TestPushData): number {
     return this.pushToSubscribers(data);
   }
@@ -149,7 +154,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
     return {
       type: "test_push",
       data,
-      timestamp: (this as any).timer.now(),
+      timestamp: this.timer.now(),
       subscriptionId,
     };
   }
@@ -432,7 +437,7 @@ describe("PushSubscriptionSocketServer", () => {
       // Peer finally drains — our listener should bump lastActivity.
       socket.emit("drain");
 
-      const subscriber = (server as any).subscribers.get(subscriptionId);
+      const subscriber = server.getSubscriberForTest(subscriptionId)!;
       expect(subscriber.lastActivity).toBe(5_000);
       expect(subscriber.drainPending).toBe(false);
     });
@@ -460,7 +465,7 @@ describe("PushSubscriptionSocketServer", () => {
       // peer is alive — so it must not bump lastActivity.
       server.pushData({ deviceId: "device-1", packageName: "com.app", value: 42 });
 
-      const subscriber = (server as any).subscribers.get(subscriptionId);
+      const subscriber = server.getSubscriberForTest(subscriptionId)!;
       expect(socket.destroyed).toBe(false);
       expect(subscriber.lastActivity).toBe(0);
     });
@@ -492,7 +497,7 @@ describe("PushSubscriptionSocketServer", () => {
 
       // Should only have one drain listener attached.
       expect(socket.listenerCount("drain")).toBe(1);
-      const subscriber = (server as any).subscribers.get(subscriptionId);
+      const subscriber = server.getSubscriberForTest(subscriptionId)!;
       expect(subscriber.drainPending).toBe(true);
     });
   });

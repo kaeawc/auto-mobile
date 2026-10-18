@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Socket } from "node:net";
 import {
   ConfigSocketRequest,
   ConfigSocketResponse,
@@ -83,11 +82,8 @@ class TestableConfigSocketServer extends ConfigSocketServer<
   }
 
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
-    const pending = (this as any).pendingBySocket.get(socket);
-    if (pending) {
-      await pending;
-    }
+    await this.processLine(socket, line);
+    await this.whenRequestsSettled(socket);
   }
 }
 
@@ -221,11 +217,17 @@ describe("ConfigSocketServer", () => {
   });
 });
 
-async function simulateLine(server: unknown, socket: FakeSocket, line: string): Promise<void> {
-  await (server as any).processLine(socket as unknown as Socket, line);
-  const pending = (server as any).pendingBySocket.get(socket);
-  if (pending) {
-    await pending;
+class TestableDeviceSnapshotSocketServer extends DeviceSnapshotSocketServer {
+  async simulateLine(socket: FakeSocket, line: string): Promise<void> {
+    await this.processLine(socket, line);
+    await this.whenRequestsSettled(socket);
+  }
+}
+
+class TestableVideoRecordingSocketServer extends VideoRecordingSocketServer {
+  async simulateLine(socket: FakeSocket, line: string): Promise<void> {
+    await this.processLine(socket, line);
+    await this.whenRequestsSettled(socket);
   }
 }
 
@@ -236,7 +238,7 @@ describe("config socket wrappers", () => {
     const socket = new FakeSocket();
     const config = { includeAppData: true } as DeviceSnapshotConfig;
     const updates: Array<DeviceSnapshotConfigInput | null> = [];
-    const server = new DeviceSnapshotSocketServer("/fake/path/device.sock", timer, {
+    const server = new TestableDeviceSnapshotSocketServer("/fake/path/device.sock", timer, {
       getConfig: async () => config,
       updateConfig: async (update) => {
         updates.push(update);
@@ -255,7 +257,7 @@ describe("config socket wrappers", () => {
       },
     };
 
-    await simulateLine(server, socket, JSON.stringify(request));
+    await server.simulateLine(socket, JSON.stringify(request));
 
     expect(updates).toEqual([{ includeAppData: true }]);
     expect(socket.getWrittenMessages<DeviceSnapshotSocketResponse>()).toEqual([
@@ -277,7 +279,7 @@ describe("config socket wrappers", () => {
     const socket = new FakeSocket();
     const config = { format: "mp4" } as VideoRecordingConfig;
     const updates: Array<VideoRecordingConfigInput | null> = [];
-    const server = new VideoRecordingSocketServer(
+    const server = new TestableVideoRecordingSocketServer(
       "/fake/path/video.sock",
       timer,
       {
@@ -303,7 +305,7 @@ describe("config socket wrappers", () => {
       },
     };
 
-    await simulateLine(server, socket, JSON.stringify(request));
+    await server.simulateLine(socket, JSON.stringify(request));
 
     expect(updates).toEqual([{ format: "mp4" }]);
     expect(socket.getWrittenMessages<VideoRecordingSocketResponse>()).toEqual([

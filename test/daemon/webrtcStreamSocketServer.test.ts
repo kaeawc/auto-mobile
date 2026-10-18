@@ -101,12 +101,13 @@ class TestableServer extends WebRtcStreamSocketServer {
   ) {
     super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator, admissionGate);
   }
+  async simulateRawLine(socket: FakeSocket, line: string): Promise<void> {
+    await this.processLine(socket as unknown as Socket, line);
+  }
+
   async simulate(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, JSON.stringify(request));
-    const pending = (this as any).pendingBySocket.get(socket);
-    if (pending) {
-      await pending;
-    }
+    await this.processLine(socket as unknown as Socket, JSON.stringify(request));
+    await this.whenRequestsSettled(socket);
   }
 
   enqueue(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
@@ -742,7 +743,7 @@ describe("WebRtcStreamSocketServer", () => {
   test("invalid JSON yields an error response", async () => {
     const server = new TestableServer(makeDeps());
     const socket = new FakeSocket();
-    await (server as any).processLine(socket as unknown as Socket, "{not json");
+    await server.simulateRawLine(socket, "{not json");
     const response = lastResponse(socket);
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid JSON");

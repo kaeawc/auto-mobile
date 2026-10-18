@@ -109,9 +109,8 @@
 2	test/daemon/shuttingDownFrameTypedFields.test.ts
 1	test/daemon/socketRequestAdmission.test.ts
 1	test/daemon/socketServer/BaseSocketServerFraming.test.ts
-2	test/daemon/socketServer/ConfigSocketServer.test.ts
 3	test/daemon/socketServer/PushSubscriptionSocketServer.test.ts
-3	test/daemon/socketServer/RequestResponseSocketServer.test.ts
+2	test/daemon/socketServer/RequestResponseSocketServer.test.ts
 5	test/daemon/socketServer/inboundFrameLimit.test.ts
 4	test/daemon/socketServerAcquisitionToolSelectionProfile.integration.test.ts
 1	test/daemon/socketServerClose.integration.test.ts

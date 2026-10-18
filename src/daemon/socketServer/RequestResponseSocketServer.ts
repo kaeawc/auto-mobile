@@ -58,6 +58,16 @@ export abstract class RequestResponseSocketServer<
   }
 
   /**
+   * Resolves once every request already queued for this socket has finished.
+   * Public so tests (and callers that need to flush a connection) can await the
+   * per-socket chain without reaching into its private map. Never rejects:
+   * the chain swallows handler errors after logging them.
+   */
+  async whenRequestsSettled(socket: Socket): Promise<void> {
+    await this.pendingBySocket.get(socket);
+  }
+
+  /**
    * Answer an oversized frame with a structured error, then drop the connection
    * once the reply is flushed. The request id is unknowable: the frame was never
    * completed or parsed, and scanning its prefix for an id would be a heuristic.

@@ -8,6 +8,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { toActionableError } from "../../models/ActionableError";
 import { taskLookupError } from "./mcpTasksExtension";
 
 /** Finished tasks stay readable for minutes (owner decision, 2026-10-18): 10 by default. */
@@ -80,8 +81,13 @@ interface InputWaiter {
 
 interface TaskState {
   readonly controller: AbortController;
+  /** Every input-request key issued so far: the spec keeps keys unique over the task's life. */
+  readonly issuedInputKeys: Set<string>;
   cancelRequested: boolean;
+  /** True only once the terminal state is durably stored; a failed write stays retryable. */
   settled: boolean;
+  /** The terminal write in flight, shared by concurrent settle calls. */
+  settling?: Promise<void>;
   waiter?: InputWaiter;
 }
 
@@ -154,6 +160,7 @@ export class DefaultTaskManager implements TaskManager {
     });
     const state: TaskState = {
       controller: new AbortController(),
+      issuedInputKeys: new Set(),
       cancelRequested: false,
       settled: false,
     };
@@ -196,8 +203,12 @@ export class DefaultTaskManager implements TaskManager {
       });
       return;
     }
-    state.waiter = undefined;
+    // Persist the move back to `working` before releasing the waiter: if the write rejects, the
+    // waiter stays, so the client's retry of this `tasks/update` still resolves it.
     await this.store.updateRunning(taskId, { status: "working", inputRequests: null });
+    if (state.waiter === waiter) {
+      state.waiter = undefined;
+    }
     waiter.resolve(waiter.responses);
   }
 
@@ -224,15 +235,27 @@ export class DefaultTaskManager implements TaskManager {
 
   private handle(created: McpTaskRecord, state: TaskState): RunningTask {
     const { taskId } = created;
-    const settle = async (settlement: Parameters<McpTaskStore["settle"]>[1]): Promise<void> => {
-      if (state.settled) {
-        return;
+    const persistSettlement = async (
+      settlement: Parameters<McpTaskStore["settle"]>[1],
+    ): Promise<void> => {
+      try {
+        await this.store.settle(taskId, settlement);
+      } finally {
+        state.settling = undefined;
       }
+      // Only a durably stored terminal state settles the task: when the write rejects, a later
+      // settle (the caller's fallback `fail`) can still persist one.
       state.settled = true;
       this.running.delete(taskId);
       state.waiter?.reject(new Error("Task settled while waiting for input"));
       state.waiter = undefined;
-      await this.store.settle(taskId, settlement);
+    };
+    const settle = (settlement: Parameters<McpTaskStore["settle"]>[1]): Promise<void> => {
+      if (state.settled) {
+        return Promise.resolve();
+      }
+      state.settling ??= persistSettlement(settlement);
+      return state.settling;
     };
     return {
       taskId,
@@ -258,21 +281,36 @@ export class DefaultTaskManager implements TaskManager {
         if (state.waiter) {
           throw new Error(`Task ${taskId} is already waiting for input`);
         }
-        if (Object.keys(requests).length === 0) {
+        const keys = Object.keys(requests);
+        if (keys.length === 0) {
           return {};
         }
+        const reused = keys.filter((key) => state.issuedInputKeys.has(key));
+        if (reused.length > 0) {
+          throw new Error(
+            `Task ${taskId} already issued input-request key(s) ${reused.map((key) => JSON.stringify(key)).join(", ")}; keys must be unique over the task's life`,
+          );
+        }
+        let waiter: InputWaiter | undefined;
         const responses = new Promise<JsonObject>((resolve, reject) => {
-          state.waiter = {
-            outstanding: new Set(Object.keys(requests)),
-            responses: {},
-            resolve,
-            reject,
-          };
+          waiter = { outstanding: new Set(keys), responses: {}, resolve, reject };
         });
-        await this.store.updateRunning(taskId, {
-          status: "input_required",
-          inputRequests: requests,
-        });
+        state.waiter = waiter;
+        try {
+          await this.store.updateRunning(taskId, {
+            status: "input_required",
+            inputRequests: requests,
+          });
+        } catch (error) {
+          // The client never saw these requests: drop the waiter so the work may ask again.
+          if (state.waiter === waiter) {
+            state.waiter = undefined;
+          }
+          throw toActionableError(error, `Failed to store input requests for task ${taskId}`);
+        }
+        for (const key of keys) {
+          state.issuedInputKeys.add(key);
+        }
         return responses;
       },
       complete: (result, statusMessage) =>

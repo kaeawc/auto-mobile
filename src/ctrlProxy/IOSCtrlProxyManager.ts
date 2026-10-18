@@ -11,8 +11,8 @@ import type {
 } from "./ios/IosCtrlProxyLifecycleSteps";
 import { runnerQueryTimeoutEnv } from "./ios/runnerQueryTimeoutEnv";
 import { runnerHierarchyPairCaptureEnv } from "./ios/runnerHierarchyPairCaptureEnv";
-import type { DoctorProbeOptions } from "../doctor/types";
-import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "../doctor/deadline";
+import type { DoctorProbeOptions } from "../utils/doctorTypes";
+import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "../utils/doctorProbe";
 import { errorMessage } from "../utils/describeUnknownError";
 import { trackAmbient } from "../utils/PerfContext";
 import { logger } from "../utils/logger";

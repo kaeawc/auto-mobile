@@ -118,6 +118,30 @@ describe("buildAndroidInputTextPlan", () => {
     ]);
   });
 
+  test("keeps a space with the character after it at a pre-31 chunk boundary", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan("a".repeat(size - 1) + " b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand("a".repeat(size - 1)),
+      buildAndroidInputTextCommand(" b"),
+    ]);
+  });
+
+  test("keeps a run of spaces with the next character at a chunk boundary", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan("a".repeat(size - 2) + "   b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand("a".repeat(size - 2)),
+      buildAndroidInputTextCommand("   b"),
+    ]);
+  });
+
+  test("still advances when a whole chunk is spaces", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan(" ".repeat(size + 1), 30);
+    expect(plan.commands.length).toBe(2);
+  });
+
   test("chunks at 32 characters on API 31+ and when the level is unknown", () => {
     for (const apiLevel of [31, 36, null]) {
       expect(buildAndroidInputTextPlan(text, apiLevel)).toEqual({

@@ -1,10 +1,9 @@
 # MCP SDK v2 and stateless daemon layer: decision record
 
-Status: **in progress (#4678)**, epic [#4665](https://github.com/kaeawc/auto-mobile/issues/4665).
-Step 1 (SDK v2 split packages) has landed on the branch stack; the stateless daemon
-layer (steps 2 and 3, slices A to K) is being built. Sections marked "in progress"
-describe the agreed design, not merged behaviour, and must be re-checked against the
-code before relying on them.
+Status: **landed except slice L (#4678)**, epic [#4665](https://github.com/kaeawc/auto-mobile/issues/4665).
+Step 1 (SDK v2 split packages) and the stateless daemon layer (slices A to K) are on
+main. Slice L (device-control transport recovery on the socket server, #11820) is in
+progress; sections that mention it say so.
 
 This record began as the feasibility spike for #4666 (kept in full at the end as the
 [original spike assessment](#appendix-original-spike-assessment-2026-07-29)). The
@@ -12,15 +11,15 @@ spike's go/no-go has since been replaced by owner decisions, summarised here.
 
 ## Decisions
 
-| #   | Decision                                                                                                                                                                                                                              | Status                                 |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| 1   | Adopt the SDK v2 split packages (`@modelcontextprotocol/server` and `client` 2.3.1, `@modelcontextprotocol/node` 2.1.1). See [MCP TypeScript SDK v2 split packages](../../decisions/mcp-sdk-v2-split-packages.md); not repeated here. | Landed (step 1)                        |
-| 2   | The daemon's internal MCP layer is stateless: a server and transport per request, no `mcp-session-id`, no transport session map.                                                                                                      | In progress (#4678)                    |
-| 3   | The restart-404 recovery in the socket server is removed, because nothing can expire.                                                                                                                                                 | In progress (#4678)                    |
-| 4   | One explicit session key, the `x-auto-mobile-mcp-session-id` header, is the only key for per-session tool binding. The in-band `__mcpSessionId` argument stays accepted.                                                              | Contract landed; consumers in progress |
-| 5   | Desktop keeps device binding by sending one generated id per app session on every call.                                                                                                                                               | In progress (#4678)                    |
-| 6   | `tools/list`, `tools/call` and resources stay on our own request handlers, not SDK `registerTool` dispatch.                                                                                                                           | Decided                                |
-| 7   | `tools/list_changed` stays an internal push, with a polling fallback in the proxy.                                                                                                                                                    | In progress (#4678)                    |
+| #   | Decision                                                                                                                                                                                                                              | Status                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| 1   | Adopt the SDK v2 split packages (`@modelcontextprotocol/server` and `client` 2.3.1, `@modelcontextprotocol/node` 2.1.1). See [MCP TypeScript SDK v2 split packages](../../decisions/mcp-sdk-v2-split-packages.md); not repeated here. | Landed (step 1)                 |
+| 2   | The daemon's internal MCP layer is stateless: a server and transport per request, no `mcp-session-id`, no transport session map.                                                                                                      | Landed (#13049, #13052)         |
+| 3   | The restart-404 recovery in the socket server is removed, because nothing can expire.                                                                                                                                                 | Landed (#13052, #13053)         |
+| 4   | One explicit session key, the `x-auto-mobile-mcp-session-id` header, is the only key for per-session tool binding. The in-band `__mcpSessionId` argument stays accepted.                                                              | Landed (#13047, #13052, #13046) |
+| 5   | Desktop keeps device binding by sending one generated id per app session on every call.                                                                                                                                               | Landed (#13046)                 |
+| 6   | `tools/list`, `tools/call` and resources stay on our own request handlers, not SDK `registerTool` dispatch.                                                                                                                           | Decided                         |
+| 7   | `tools/list_changed` stays an internal push, with a polling fallback in the proxy.                                                                                                                                                    | Landed (#13048)                 |
 
 ## Split packages (step 1)
 
@@ -32,7 +31,7 @@ v2 behaviour differences are bridged so the wire is unchanged
 test helpers are `test/helpers/fakeServerContext.ts` and
 `test/helpers/v1ViewMcpClient.ts`.
 
-## Stateless daemon MCP layer (in progress, #4678)
+## Stateless daemon MCP layer (landed, #4678)
 
 The daemon's internal HTTP endpoint (`/auto-mobile/streamable`) is the loopback hop the
 socket server uses to reach the tools, and it is also called directly by the desktop app's
@@ -54,7 +53,26 @@ Kotlin client (`McpHttpClient`). After this change:
   directly through `executionTracker`.
 
 The cost of building a server per request depends on `registerMcpTools` and
-`registerAllResources` being idempotent and cheap; B benchmarks it.
+`registerAllResources` being cheap. They were not: tools are now registered once and
+shared, which cut the `tool-definitions` p50 from 10.07 ms to 0.16 ms (#13051).
+
+### What shipped
+
+| PR             | Slice  | What it did                                                                                                                                                                |
+| -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #13042         | step 1 | SDK v2 split packages and the v1-compat bridges.                                                                                                                           |
+| #13050         | review | Review fixes for step 1. v1 also advertised `tools.listChanged`, and v2 now does too. Remaining intentional wire diffs: notification key order, and abort-after-`onclose`. |
+| #13047         | A      | Session key contract and the daemon-scoped `SessionToolBindingStore`.                                                                                                      |
+| #13049         | B      | Stateless HTTP endpoint: a server and transport per POST, no `mcp-session-id`, `GET` and `DELETE` answer `405`.                                                            |
+| #13052         | C      | Loopback cleanup: no restart-404 replay, the session-key header is sent on every forward, and a socket disconnect cancels that session's executions.                       |
+| #13053         | C2     | Bindings are forgotten on disconnect; keyless bindings are supported.                                                                                                      |
+| #13048         | F      | Ephemeral per-request servers and `ToolListPoller`.                                                                                                                        |
+| #13051         | perf   | Tools registered once instead of per request.                                                                                                                              |
+| #13041, #13054 | G      | Wire baseline and its fixes.                                                                                                                                               |
+| #13044         | H1     | Boundary guard (`scripts/check-mcp-sdk-boundary.ts`), now also covering `test/`.                                                                                           |
+| #13046         | K      | Desktop sends the session-key header.                                                                                                                                      |
+| #11820 (open)  | L      | Device-control transport recovery in the socket server: in progress.                                                                                                       |
+| (this change)  | H2     | Last boundary allowlist entries removed (`sessionIdGenerator` is omitted rather than set to `undefined`); the allowlist is empty.                                          |
 
 ### Restart-404 recovery removed
 
@@ -106,7 +124,7 @@ for external clients and the desktop app, which the wire-parity and
 
 If this is revisited, a Zod 4 upgrade of the tool schemas is the prerequisite.
 
-## list_changed: internal push plus polling fallback (in progress, #4678)
+## list_changed: internal push plus polling fallback (landed, #4678)
 
 A per-request server cannot hold a notification channel, so list-changed delivery does not
 depend on one:
@@ -124,14 +142,14 @@ depend on one:
 
 ## Open questions and resolutions
 
-| #   | Question                                                                                                                   | Resolution                                                                                                                                                                                           |
-| --- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Can a stateless v2 server send progress on the POST's SSE stream, and does a client disconnect abort the handler's signal? | Pending: settled by B's tests and the `cancel*Through*` tests. Fallback is in-process cancellation through `executionTracker`, since the loopback is the same process.                               |
-| 2   | Does a v2 stateless server still accept the legacy `initialize`?                                                           | Pending: settled by G's stateless-handshake fixture and the desktop wire contract tests.                                                                                                             |
-| 3   | Where do `InMemoryTransport`, `StreamableHTTPError`, the ping request schema and `toJsonSchemaCompat` live in v2?          | Resolved in step 1: handlers use method strings, the ping shim is gone, `toJsonSchemaCompat` is replaced by `zod-to-json-schema` called directly, loopback errors are mapped in `LoopbackMcpClient`. |
-| 4   | CJS to ESM interop risk from the spike.                                                                                    | Resolved: current version is 2.3.1, both packages ship CommonJS builds, and the repo bundles them at build time.                                                                                     |
-| 5   | Do direct desktop HTTP clients lose implicit device binding?                                                               | Resolved by owner decision (2026-10-17): desktop sends one generated id per app session in the session-key header (slice K).                                                                         |
-| 6   | `subscriptions/listen` support across hosts.                                                                               | Pending, out of scope: the internal push plus polling stands.                                                                                                                                        |
+| #   | Question                                                                                                                   | Resolution                                                                                                                                                                                                              |
+| --- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Can a stateless v2 server send progress on the POST's SSE stream, and does a client disconnect abort the handler's signal? | Resolved (#13049): progress rides the POST's own stream. Bun gives no client-disconnect signal, so `notifications/cancelled` is matched in-process by (session key, request id) and cancels through `executionTracker`. |
+| 2   | Does a v2 stateless server still accept the legacy `initialize`?                                                           | Resolved (#13049): a legacy `initialize` is accepted, and a call without `initialize` works.                                                                                                                            |
+| 3   | Where do `InMemoryTransport`, `StreamableHTTPError`, the ping request schema and `toJsonSchemaCompat` live in v2?          | Resolved in step 1: handlers use method strings, the ping shim is gone, `toJsonSchemaCompat` is replaced by `zod-to-json-schema` called directly, loopback errors are mapped in `LoopbackMcpClient`.                    |
+| 4   | CJS to ESM interop risk from the spike.                                                                                    | Resolved: current version is 2.3.1, both packages ship CommonJS builds, and the repo bundles them at build time.                                                                                                        |
+| 5   | Do direct desktop HTTP clients lose implicit device binding?                                                               | Resolved by owner decision (2026-10-17): desktop sends one generated id per app session in the session-key header (slice K, #13046).                                                                                    |
+| 6   | `subscriptions/listen` support across hosts.                                                                               | Pending, out of scope: the internal push plus polling stands.                                                                                                                                                           |
 
 ## Appendix: original spike assessment (2026-07-29)
 

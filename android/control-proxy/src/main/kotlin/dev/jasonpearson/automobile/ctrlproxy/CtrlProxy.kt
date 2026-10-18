@@ -22,8 +22,6 @@ import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
-import android.text.Spanned
-import android.text.style.ClickableSpan
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
@@ -1291,6 +1289,62 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
         },
+    )
+  }
+  private val nodeActionController by lazy {
+    NodeActionController(
+      host =
+        object : NodeActionController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun findNodeInDisplayWindows(
+            find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
+          ) = this@CtrlProxy.findNodeInDisplayWindows(find)
+
+          override fun screenDimensions(displayId: Int) = getScreenDimensions(displayId)
+
+          override fun createView() = View(this@CtrlProxy)
+
+          override suspend fun publishSettledHierarchy() {
+            val freshHierarchy =
+              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+                quiescenceMs = HierarchyQuiescence.POLL_MS,
+                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+                pollIntervalMs = 10L,
+              )
+            if (freshHierarchy != null) {
+              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+            }
+          }
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+          override suspend fun sendActionResult(
+            requestId: String?,
+            action: String,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            alreadySatisfied: Boolean,
+          ) =
+            this@CtrlProxy.broadcastActionResult(
+              requestId,
+              action,
+              success,
+              error,
+              totalTimeMs,
+              alreadySatisfied,
+            )
+        },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
     )
   }
   private val focusController by lazy {
@@ -2887,7 +2941,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun requestClickFocusedInput(requestId: String?) {
     textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
-    // Like performNodeAction, stay on the inbound command queue until settling and replying.
+    // Like NodeActionController.performNodeAction, stay on the inbound command queue until settling
+    // and replying.
     try {
       val outcome =
         clickFocusedInput(
@@ -2899,7 +2954,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
           },
           recycle = { node -> node.recycle() },
-          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+          settleAfterClick = nodeActionController::refreshHierarchyAfterNodeAction,
         )
       broadcastActionResult(
         requestId,
@@ -2927,14 +2982,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
-  ) = performNodeAction(requestId, action, resourceId, selector)
+  ) = nodeActionController.performNodeAction(requestId, action, resourceId, selector)
 
   override suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: NodeSelector?,
-  ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
+  ) = nodeActionController.performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
   override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
     clipboardController.performClipboard(requestId, action, text)
@@ -4715,226 +4770,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         Log.e(TAG, "Error taking screenshot", e)
         ScreenshotCaptureOutcome.Failure(null)
       }
-    }
-  }
-
-  /**
-   * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
-   * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
-   * IDs, and collection coordinates.
-   */
-  private fun performAccessibilityLinkActivation(
-    requestId: String?,
-    text: String,
-    occurrence: Int,
-    selector: NodeSelector?,
-  ) {
-    val startTime = System.currentTimeMillis()
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Semantic accessibility links require Android API 26 or later",
-          System.currentTimeMillis() - startTime,
-        )
-      }
-      return
-    }
-    if (text.isBlank() || occurrence < 0) {
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Link text must be non-blank and occurrence must be non-negative",
-          System.currentTimeMillis() - startTime,
-        )
-      }
-      return
-    }
-
-    try {
-      val root = rootInActiveWindow
-      val owner = selector?.let { sel -> findNodeInDisplayWindows { findNodeBySelector(it, sel) } }
-      if (selector != null && owner == null) {
-        throw IllegalStateException("Selected link owner is no longer present")
-      }
-      var matched = 0
-      var activated = false
-      var activationError: String? = null
-      fun visit(node: AccessibilityNodeInfo?) {
-        if (node == null || activated) return
-        val nodeText = node.text as? Spanned
-        if (nodeText != null) {
-          nodeText
-            .getSpans(0, nodeText.length, ClickableSpan::class.java)
-            .sortedBy { nodeText.getSpanStart(it) }
-            .forEach { span ->
-              if (activated) return@forEach
-              val start = nodeText.getSpanStart(span)
-              val end = nodeText.getSpanEnd(span)
-              val spanText = nodeText.subSequence(start, end).toString()
-              if (spanText.equals(text, ignoreCase = true)) {
-                if (matched++ == occurrence) {
-                  try {
-                    // Accessibility exposes ClickableSpan only from API 26. Invoke its public
-                    // contract; no coordinate, reflection, or whole-node fallback is permitted.
-                    span.onClick(View(this))
-                    activated = true
-                  } catch (error: Exception) {
-                    activationError = error.message ?: error.javaClass.simpleName
-                  }
-                }
-              }
-            }
-        }
-        for (index in 0 until node.childCount) {
-          node.getChild(index)?.let { child ->
-            try {
-              visit(child)
-            } finally {
-              child.recycle()
-            }
-          }
-        }
-      }
-      visit(owner ?: root)
-      owner?.recycle()
-
-      val error =
-        when {
-          activated -> null
-          activationError != null -> "Semantic link activation failed: $activationError"
-          else -> "No actionable semantic link matching '$text' at occurrence $occurrence"
-        }
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          activated,
-          error,
-          System.currentTimeMillis() - startTime,
-        )
-      }
-    } catch (error: Exception) {
-      Log.w(TAG, "Semantic accessibility link activation failed", error)
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          error.message ?: error.javaClass.simpleName,
-          System.currentTimeMillis() - startTime,
-        )
-      }
-    }
-  }
-
-  /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
-  private suspend fun refreshHierarchyAfterNodeAction() {
-    val freshHierarchy =
-      hierarchyDebouncer.extractAfterQuiescenceSuspending(
-        quiescenceMs = HierarchyQuiescence.POLL_MS,
-        maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-        pollIntervalMs = 10L,
-      )
-    if (freshHierarchy != null) {
-      broadcastHierarchyUpdate(freshHierarchy, sync = true)
-    }
-  }
-
-  private suspend fun performNodeAction(
-    requestId: String?,
-    action: String,
-    resourceId: String?,
-    selector: NodeSelector?,
-  ) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    val effectiveSelector = selector?.takeIf { it.hasCriteria() }
-    val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
-    Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
-    perfProvider.serial("performAction")
-
-    try {
-      if (effectiveSelector == null && resourceId.isNullOrEmpty()) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "A resource-id or stable node selector is required for accessibility actions"
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("findNode")
-      val targetNode = findNodeInDisplayWindows { root ->
-        if (effectiveSelector != null) {
-          findNodeBySelector(root, effectiveSelector)
-        } else if (resourceId != null) {
-          findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
-        } else {
-          null
-        }
-      }
-      perfProvider.endOperation("findNode")
-
-      if (targetNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "Element not found with $targetDescription"
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("executeAction")
-      val decision =
-        decideNodeAction(
-          action,
-          targetNode.isAccessibilityFocused,
-          targetNode.actionList?.map { it.id },
-        )
-      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
-      val actionError = (decision as? NodeActionDecision.Refused)?.message
-      val success =
-        alreadySatisfied ||
-          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
-      perfProvider.endOperation("executeAction")
-
-      targetNode.recycle()
-      perfProvider.end()
-
-      Log.d(TAG, "Action completed: success=$success")
-
-      // Wait for UI to settle after click/long_click/scroll, then extract fresh hierarchy
-      if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
-        refreshHierarchyAfterNodeAction()
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Action total time: ${totalTime}ms")
-
-      broadcastActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else actionError ?: "performAction returned false",
-        totalTime,
-        alreadySatisfied,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing action", e)
-      broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
     }
   }
 

@@ -48,3 +48,10 @@ PAIRS=(
     ! grep -q 'secrets\.' ".github/actions/${action}/action.yml"
   done
 }
+
+@test "workflow-check-contexts.sh lists the shared jobs with their display names" {
+  run bash scripts/ci/workflow-check-contexts.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'pull_request\tbuild-ide-plugin\tBuild IDE Plugin'* ]]
+  [[ "$output" == *$'merge\tide-plugin-unit-tests\tRun IDE Plugin Unit Tests'* ]]
+}

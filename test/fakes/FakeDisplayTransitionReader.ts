@@ -6,6 +6,8 @@ import type { DisplayRef } from "../../src/models/DisplayPanel";
 export class FakeDisplayTransitionReader implements DisplayTransitionReader {
   fullRevision = 41;
   generation = 7;
+  /** Starts at the current full revision, as a real tracker's fence equals its revision once any identity change is the latest event. */
+  private lastIdentityChange = 41;
   panel: Pick<DisplayRef, "key" | "role"> | undefined = { key: "inner", role: "inner" };
 
   revision(_deviceId: string): number {
@@ -15,7 +17,7 @@ export class FakeDisplayTransitionReader implements DisplayTransitionReader {
     return this.generation;
   }
   sameIdentitySince(_deviceId: string, renderedRevision: number): boolean {
-    return renderedRevision === this.fullRevision;
+    return renderedRevision >= this.lastIdentityChange && renderedRevision <= this.fullRevision;
   }
   currentObservedPanel(_deviceId: string) {
     return this.panel;
@@ -30,6 +32,11 @@ export class FakeDisplayTransitionReader implements DisplayTransitionReader {
   transition(count = 1, knownPanel = true): void {
     this.fullRevision += count;
     this.generation += count;
+    this.lastIdentityChange = this.fullRevision;
     this.panel = knownPanel ? { key: "cover", role: "cover" } : undefined;
+  }
+  /** A geometry-only correction: advances the full revision but not the identity fence. */
+  geometryTransition(count = 1): void {
+    this.fullRevision += count;
   }
 }

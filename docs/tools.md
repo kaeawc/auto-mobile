@@ -855,8 +855,11 @@ reports `pinned`: `pinned` (already on the home screen), `pending` (the launcher
 screen" dialog is open; the icon exists only once a person accepts it, and declining sends no
 signal) or `unsupported` (the default launcher cannot pin; the prototype is still saved). A
 `device_locked` or `pin_failed` pin error returns `success:false` with `saved` kept, so retrying
-the same save is safe. `autoConfirm:true` (needs `pin`) only adds a reminder: accepting the launcher
-dialog automatically is tracked in #12266. `deleteSaved` disables the shortcut; the disabled icon
+the same save is safe. `autoConfirm:true` (needs `pin`) waits up to 5 s for the launcher dialog, taps its
+"Add to home screen" button (a bare "Add" only beside "Cancel"; Cancel is never tapped) with
+`adb shell input tap`, and reports `pinned` only once `listSaved` shows the shortcut pinned. Otherwise
+it stays `pending` with a reason (`confirmation_unrecognized` lists the dialog's buttons). Matching is
+by English label; resource-id and Samsung matching are not done yet (#12266). `deleteSaved` disables the shortcut; the disabled icon
 stays on the home screen. With `removeIcon:true` the host runs `cmd shortcut clear-shortcuts` for
 CtrlProxy only when no saved prototype remains, because that command clears every CtrlProxy
 shortcut; otherwise the response says the icon remains and can be removed by hand. On iOS,

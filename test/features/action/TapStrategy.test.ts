@@ -6,6 +6,7 @@ import { createTapStrategy } from "../../../src/features/action/strategies/creat
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
@@ -47,11 +48,11 @@ describe("TapStrategy", () => {
   };
 
   const buildViewHierarchy = (device: BootedDevice): ViewHierarchy =>
-    new ViewHierarchy(device, { create: () => new FakeAdbClient() as any });
+    new ViewHierarchy(device, new FakeAdbClientFactory());
 
   const minimalHierarchy: ViewHierarchyResult = {
-    hierarchy: { $: {}, node: [] },
-  } as any;
+    hierarchy: {},
+  };
 
   describe("FakeTapStrategy", () => {
     let fake: FakeTapStrategy;
@@ -115,11 +116,7 @@ describe("TapStrategy", () => {
       device: androidDevice,
       build: () => {
         const detector = new FakeAccessibilityDetector();
-        const strategy = new AndroidTapStrategy(
-          androidDevice,
-          new FakeAdbClient() as any,
-          detector,
-        );
+        const strategy = new AndroidTapStrategy(androidDevice, new FakeAdbClient(), detector);
         return {
           strategy,
           setA11y: (enabled) =>
@@ -221,7 +218,7 @@ describe("TapStrategy", () => {
       const detector = new FakeAccessibilityDetector();
       const strategy = new AndroidTapStrategy(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         detector,
         sentinelFlags,
       );
@@ -240,7 +237,7 @@ describe("TapStrategy", () => {
       const detector = new FakeAccessibilityDetector();
       const strategy = createTapStrategy(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         detector,
         new FakeIosVoiceOverDetector(),
         sentinelFlags,
@@ -253,7 +250,7 @@ describe("TapStrategy", () => {
       const detector = new FakeIosVoiceOverDetector();
       const strategy = createTapStrategy(
         iosDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeAccessibilityDetector(),
         detector,
         sentinelFlags,
@@ -267,7 +264,7 @@ describe("TapStrategy", () => {
     it("returns an AndroidTapStrategy for Android devices", () => {
       const strategy = createTapStrategy(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeAccessibilityDetector(),
         new FakeIosVoiceOverDetector(),
       );
@@ -278,7 +275,7 @@ describe("TapStrategy", () => {
     it("returns an IosTapStrategy for iOS devices", () => {
       const strategy = createTapStrategy(
         iosDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeAccessibilityDetector(),
         new FakeIosVoiceOverDetector(),
       );

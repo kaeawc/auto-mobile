@@ -1,7 +1,7 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import androidHome from "../../fixtures/observe/android-home.json";
-import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
+import type { BootedDevice, Element } from "../../../src/models";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TalkBackSwipeExecutor } from "../../../src/features/action/swipeon/TalkBackSwipeExecutor";
@@ -25,8 +25,9 @@ import { FakeTalkBackSwipeExecutor } from "../../fakes/FakeTalkBackSwipeExecutor
 import { FakeOverlayDetector } from "../../fakes/FakeOverlayDetector";
 import { FakeElementGeometry } from "../../fakes/FakeElementGeometry";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
+import { observeResultFromFixture } from "../../helpers/observeFixture";
 
-const observation = androidHome as unknown as ObserveResult;
+const observation = observeResultFromFixture(androidHome, "androidHome");
 const hierarchy = observation.viewHierarchy!;
 const device: BootedDevice = { deviceId: "sequence-device", name: "Test", platform: "android" };
 const element: Element = {

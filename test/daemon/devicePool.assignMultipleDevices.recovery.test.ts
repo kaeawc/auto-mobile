@@ -71,6 +71,110 @@ describe("DevicePool", () => {
     return { recovery };
   };
 
+  /** Queue a teardown lease behind the stable-id's lifecycle lease and track when it is granted. */
+  const reserveTeardown = (
+    lifecycleCoordinator: InMemoryVirtualDeviceLifecycleCoordinator,
+    stableId: string,
+    deadlineMs: number,
+  ) => {
+    let acquired = false;
+    const lease = lifecycleCoordinator
+      .reserve(
+        { kind: "stable", platform: "android", stableId },
+        { operation: "teardown", deadlineMs },
+      )
+      .then((granted) => {
+        acquired = true;
+        return granted;
+      });
+    return { lease, isAcquired: () => acquired };
+  };
+
+  const flushMicrotasks = async (): Promise<void> => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await Promise.resolve();
+    }
+  };
+
+  /** A pool-start allocation that fails: resolves with the rejection instead of throwing. */
+  const startFailingAllocation = () =>
+    devicePool.assignMultipleDevices(["session-1"], 1_000, "android").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+  /** After a failed pool start, the teardown lease stays held until the emulator really exits. */
+  const expectTeardownHeldUntilExit = async (
+    lifecycleCoordinator: InMemoryVirtualDeviceLifecycleCoordinator,
+    image: DeviceInfo,
+    childProcess: { emit(event: string, code: number, signal: null): unknown },
+  ): Promise<void> => {
+    const teardown = reserveTeardown(lifecycleCoordinator, image.name, 3_000);
+    await flushMicrotasks();
+    expect(teardown.isAcquired()).toBe(false);
+
+    childProcess.emit("exit", 0, null);
+    (await teardown.lease).release();
+  };
+
+  /** Cancellation hits a stubborn owned child: the bounded stop fails, then the late exit frees the lease. */
+  const expectStubbornChildStopFailure = async (
+    manager: DeferredRecoveryDeviceManagerWithStubbornChild,
+    recovery: Promise<void>,
+  ): Promise<void> => {
+    devicePool.markIntentionalShutdown("emulator-5554");
+    manager.releaseRecovery();
+
+    await expect(
+      settleWithFakeTime(fakeTimer, recovery, {
+        stepMs: 1000,
+        maxSteps: 2,
+        description: "owned child bounded stop",
+      }),
+    ).rejects.toThrow("did not exit after SIGKILL");
+    expect(manager.childProcesses).toHaveLength(2);
+    expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(devicePool.getDevice("emulator-5554")).toBeNull();
+    manager.recoveryChild.exitCode = 0;
+    manager.recoveryChild.emit("exit", 0, null);
+    await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
+      description: "late exit releases retained recovery lease",
+    });
+  };
+
+  /** Rediscovery fixture: an AVD whose boot is suppressed after its device is dropped while unrecoverable. */
+  const suppressedAvdManager = async (): Promise<FakeDeviceManager> => {
+    const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
+    const manager = new FakeDeviceManager([image]);
+    devicePool = makePool({
+      deviceManager: manager,
+      androidDeviceReboot: { run: async () => false },
+    });
+    await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+    await devicePool.releaseDevice("emulator-5554", "session-1");
+    manager.bootedDevices = [];
+    await devicePool.removeDisconnectedDevice("emulator-5554", false);
+    return manager;
+  };
+
+  const rediscoverAndRemove = async (manager: FakeDeviceManager, avdName: string) => {
+    manager.bootedDevices = [{ name: avdName, platform: "android", deviceId: "emulator-5554" }];
+    await devicePool.refreshDevices();
+    await devicePool.removeDevice("emulator-5554");
+    manager.bootedDevices = [];
+  };
+
+  const assignIosSimByVersionCriteria = () =>
+    devicePool.assignMultipleDevicesByCriteria(
+      [
+        {
+          sessionId: "session-a",
+          criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+        },
+      ],
+      1000,
+    );
+
   beforeEach(() => {
     ({ devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager } =
       createDevicePoolSuite());
@@ -112,27 +216,17 @@ describe("DevicePool", () => {
       useRecoveryManager(manager, { lifecycleCoordinator });
       try {
         const { recovery } = await startRecoveryOf(manager);
-        let teardownAcquired = false;
-        const teardown = lifecycleCoordinator
-          .reserve(
-            { kind: "stable", platform: "android", stableId: "Pixel 8" },
-            { operation: "teardown", deadlineMs: 300_000 },
-          )
-          .then((lease) => {
-            teardownAcquired = true;
-            return lease;
-          });
+        const teardown = reserveTeardown(lifecycleCoordinator, "Pixel 8", 300_000);
         await manager.recoveryChild.sigtermSent.promise;
 
         expect(manager.recoveryChild.signals).toEqual(["SIGTERM"]);
-        expect(teardownAcquired).toBe(false);
+        expect(teardown.isAcquired()).toBe(false);
 
         manager.recoveryChild.exitCode = 0;
         manager.recoveryChild.emit("exit", 0, null);
         await expect(recovery).resolves.toBeUndefined();
-        const teardownLease = await teardown;
-        teardownLease.release();
-        expect(teardownAcquired).toBe(true);
+        (await teardown.lease).release();
+        expect(teardown.isAcquired()).toBe(true);
       } finally {
         manager.releaseRecovery();
         restoreRebootOnDeath();
@@ -146,16 +240,7 @@ describe("DevicePool", () => {
       useRecoveryManager(manager, { lifecycleCoordinator });
       try {
         const { recovery } = await startRecoveryOf(manager, { observeRejection: true });
-        let teardownAcquired = false;
-        const teardown = lifecycleCoordinator
-          .reserve(
-            { kind: "stable", platform: "android", stableId: "Pixel 8" },
-            { operation: "teardown", deadlineMs: 300_000 },
-          )
-          .then((lease) => {
-            teardownAcquired = true;
-            return lease;
-          });
+        const teardown = reserveTeardown(lifecycleCoordinator, "Pixel 8", 300_000);
         await manager.recoveryChild.sigtermSent.promise;
         expect(fakeTimer.getPendingTimeouts()).toContain(1_000);
         fakeTimer.advanceTime(1_000);
@@ -169,13 +254,12 @@ describe("DevicePool", () => {
 
         await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
         expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
-        expect(teardownAcquired).toBe(false);
+        expect(teardown.isAcquired()).toBe(false);
 
         manager.recoveryChild.exitCode = 0;
         manager.recoveryChild.emit("exit", 0, null);
-        const teardownLease = await teardown;
-        teardownLease.release();
-        expect(teardownAcquired).toBe(true);
+        (await teardown.lease).release();
+        expect(teardown.isAcquired()).toBe(true);
       } finally {
         manager.releaseRecovery();
         restoreRebootOnDeath();
@@ -210,24 +294,7 @@ describe("DevicePool", () => {
       useRecoveryManager(manager);
       try {
         const { recovery } = await startRecoveryOf(manager);
-        devicePool.markIntentionalShutdown("emulator-5554");
-        manager.releaseRecovery();
-
-        await expect(
-          settleWithFakeTime(fakeTimer, recovery, {
-            stepMs: 1000,
-            maxSteps: 2,
-            description: "owned child bounded stop",
-          }),
-        ).rejects.toThrow("did not exit after SIGKILL");
-        expect(manager.childProcesses).toHaveLength(2);
-        expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
-        expect(devicePool.getDevice("emulator-5554")).toBeNull();
-        manager.recoveryChild.exitCode = 0;
-        manager.recoveryChild.emit("exit", 0, null);
-        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
-          description: "late exit releases retained recovery lease",
-        });
+        await expectStubbornChildStopFailure(manager, recovery);
       } finally {
         manager.releaseRecovery();
         restoreRebootOnDeath();
@@ -240,24 +307,7 @@ describe("DevicePool", () => {
       useRecoveryManager(manager);
       try {
         const { recovery } = await startRecoveryOf(manager);
-        devicePool.markIntentionalShutdown("emulator-5554");
-        manager.releaseRecovery();
-
-        await expect(
-          settleWithFakeTime(fakeTimer, recovery, {
-            stepMs: 1000,
-            maxSteps: 2,
-            description: "owned child bounded stop",
-          }),
-        ).rejects.toThrow("did not exit after SIGKILL");
-        expect(manager.childProcesses).toHaveLength(2);
-        expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
-        expect(devicePool.getDevice("emulator-5554")).toBeNull();
-        manager.recoveryChild.exitCode = 0;
-        manager.recoveryChild.emit("exit", 0, null);
-        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
-          description: "late exit releases retained recovery lease",
-        });
+        await expectStubbornChildStopFailure(manager, recovery);
       } finally {
         manager.releaseRecovery();
         restoreRebootOnDeath();
@@ -287,23 +337,13 @@ describe("DevicePool", () => {
         expect(manager.childProcess.signals).toEqual(["SIGTERM", "SIGKILL"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
 
-        const teardown = lifecycleCoordinator.reserve(
-          { kind: "stable", platform: "android", stableId: "Pixel 8" },
-          { operation: "teardown", deadlineMs: fakeTimer.now() + 1_000 },
-        );
-        let teardownAcquired = false;
-        void teardown.then(() => {
-          teardownAcquired = true;
-        });
-        for (let attempt = 0; attempt < 50; attempt++) {
-          await Promise.resolve();
-        }
-        expect(teardownAcquired).toBe(false);
+        const teardown = reserveTeardown(lifecycleCoordinator, "Pixel 8", fakeTimer.now() + 1_000);
+        await flushMicrotasks();
+        expect(teardown.isAcquired()).toBe(false);
 
         manager.childProcess.emit("exit", 0, null);
         childExited = true;
-        const teardownLease = await teardown;
-        teardownLease.release();
+        (await teardown.lease).release();
       } finally {
         if (!childExited) {
           manager.childProcess.emit("exit", 0, null);
@@ -315,33 +355,15 @@ describe("DevicePool", () => {
 
     test("same-serial rediscovery clears suppression for the authoritative AVD name", async () => {
       const restoreRebootOnDeath = enableRebootOnDeath();
-      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
-      const manager = new FakeDeviceManager([image]);
-      devicePool = makePool({
-        deviceManager: manager,
-        androidDeviceReboot: { run: async () => false },
-      });
       try {
-        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554", "session-1");
-        manager.bootedDevices = [];
-        await devicePool.removeDisconnectedDevice("emulator-5554", false);
+        const manager = await suppressedAvdManager();
 
         await expect(
           devicePool.assignMultipleDevices(["session-suppressed"], 1_000, "android"),
         ).rejects.toThrow("Not enough devices in pool");
         expect(manager.startedDevices).toHaveLength(1);
 
-        manager.bootedDevices = [
-          {
-            name: "Pixel 8",
-            platform: "android",
-            deviceId: "emulator-5554",
-          },
-        ];
-        await devicePool.refreshDevices();
-        await devicePool.removeDevice("emulator-5554");
-        manager.bootedDevices = [];
+        await rediscoverAndRemove(manager, "Pixel 8");
 
         await expect(
           devicePool.assignMultipleDevices(["session-2"], 1_000, "android"),
@@ -354,28 +376,10 @@ describe("DevicePool", () => {
 
     test("same-serial rediscovery keeps suppression for a different AVD", async () => {
       const restoreRebootOnDeath = enableRebootOnDeath();
-      const image: DeviceInfo = androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" });
-      const manager = new FakeDeviceManager([image]);
-      devicePool = makePool({
-        deviceManager: manager,
-        androidDeviceReboot: { run: async () => false },
-      });
       try {
-        await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-        await devicePool.releaseDevice("emulator-5554", "session-1");
-        manager.bootedDevices = [];
-        await devicePool.removeDisconnectedDevice("emulator-5554", false);
+        const manager = await suppressedAvdManager();
 
-        manager.bootedDevices = [
-          {
-            name: "Pixel 9",
-            platform: "android",
-            deviceId: "emulator-5554",
-          },
-        ];
-        await devicePool.refreshDevices();
-        await devicePool.removeDevice("emulator-5554");
-        manager.bootedDevices = [];
+        await rediscoverAndRemove(manager, "Pixel 9");
 
         await expect(
           devicePool.assignMultipleDevices(["session-2"], 1_000, "android"),
@@ -408,11 +412,7 @@ describe("DevicePool", () => {
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
       devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
 
-      const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-      const allocationOutcome = allocation.then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const allocationOutcome = startFailingAllocation();
       await drainUntil(
         () =>
           manager.childProcess.signals.includes("SIGTERM") &&
@@ -431,22 +431,7 @@ describe("DevicePool", () => {
       fakeTimer.advanceTime(1_000);
       expect(await allocationOutcome).toBeInstanceOf(Error);
 
-      const teardown = lifecycleCoordinator.reserve(
-        { kind: "stable", platform: "android", stableId: image.name },
-        { operation: "teardown", deadlineMs: 3_000 },
-      );
-      let teardownAcquired = false;
-      void teardown.then(() => {
-        teardownAcquired = true;
-      });
-      for (let attempt = 0; attempt < 50; attempt++) {
-        await Promise.resolve();
-      }
-      expect(teardownAcquired).toBe(false);
-
-      manager.childProcess.emit("exit", 0, null);
-      const teardownLease = await teardown;
-      teardownLease.release();
+      await expectTeardownHeldUntilExit(lifecycleCoordinator, image, manager.childProcess);
     });
 
     test("retains a cancelled pool-start launch's lease until its emulator exits (#10075)", async () => {
@@ -455,11 +440,7 @@ describe("DevicePool", () => {
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
       devicePool = makePool({ deviceManager: manager, lifecycleCoordinator: lifecycleCoordinator });
 
-      const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
-      const allocationOutcome = allocation.then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const allocationOutcome = startFailingAllocation();
       await drainUntil(
         () =>
           manager.childProcess.signals.includes("SIGTERM") &&
@@ -474,22 +455,7 @@ describe("DevicePool", () => {
       fakeTimer.advanceTime(1_000);
       expect(await allocationOutcome).toBeInstanceOf(Error);
 
-      const teardown = lifecycleCoordinator.reserve(
-        { kind: "stable", platform: "android", stableId: image.name },
-        { operation: "teardown", deadlineMs: 3_000 },
-      );
-      let teardownAcquired = false;
-      void teardown.then(() => {
-        teardownAcquired = true;
-      });
-      for (let attempt = 0; attempt < 50; attempt++) {
-        await Promise.resolve();
-      }
-      expect(teardownAcquired).toBe(false);
-
-      manager.childProcess.emit("exit", 0, null);
-      const teardownLease = await teardown;
-      teardownLease.release();
+      await expectTeardownHeldUntilExit(lifecycleCoordinator, image, manager.childProcess);
     });
 
     test("bounds a pending pool cold-boot readiness wait by the allocation deadline", async () => {
@@ -639,15 +605,7 @@ describe("DevicePool", () => {
       const fakeDeviceManager = new FakeDeviceManager(images);
       devicePool = makePool({ deviceManager: fakeDeviceManager });
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(fakeDeviceManager.startedDevices.map((device) => device.deviceId)).toEqual(["sim-1"]);
@@ -662,15 +620,7 @@ describe("DevicePool", () => {
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
       devicePool = makePool({ deviceManager: fakeDeviceManager });
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
@@ -685,15 +635,7 @@ describe("DevicePool", () => {
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
       devicePool = makePool({ deviceManager: fakeDeviceManager });
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
@@ -709,15 +651,7 @@ describe("DevicePool", () => {
       const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
       devicePool = makePool({ deviceManager: fakeDeviceManager });
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(devicePool.getDevice("sim-1")?.name).toBe("QA Phone");
@@ -737,15 +671,7 @@ describe("DevicePool", () => {
         devicePool.recordDeviceError("sim-failed");
       }
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-replacement");
       expect(fakeDeviceManager.startedDevices.map((device) => device.deviceId)).toEqual([
@@ -765,15 +691,7 @@ describe("DevicePool", () => {
       ]);
       fakeDeviceManager.bootedDevices = [];
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-replacement");
       expect(fakeDeviceManager.startedDevices.map((device) => device.deviceId)).toEqual([
@@ -796,15 +714,7 @@ describe("DevicePool", () => {
       }
       expect(statusOf(devicePool.getDevice("sim-1")!)).toBe("error");
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-1");
       expect(fakeDeviceManager.startedDevices.map((device) => device.deviceId)).toEqual(["sim-1"]);
@@ -862,15 +772,7 @@ describe("DevicePool", () => {
         createBootedDevice("sim-2", "ios", "iPhone 15", "17.4"),
       ];
 
-      const assignments = await devicePool.assignMultipleDevicesByCriteria(
-        [
-          {
-            sessionId: "session-a",
-            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
-          },
-        ],
-        1000,
-      );
+      const assignments = await assignIosSimByVersionCriteria();
 
       expect(assignments.get("session-a")).toBe("sim-1");
     });

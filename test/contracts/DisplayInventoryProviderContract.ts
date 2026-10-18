@@ -80,6 +80,19 @@ export const runDisplayInventoryProviderContract = (
       expect(hydrated[displayInventoryOutcome]).toEqual({ kind: "single" });
     });
 
+    test("a cached read still reflects the caller's current device fields", async function () {
+      const { provider, script } = make();
+      script("multi");
+      await provider.hydrate(device, "boot-1");
+
+      const renamed: BootedDevice = { ...device, name: "Renamed Pixel" };
+      const hydrated = await provider.hydrate(renamed, "boot-1");
+
+      expect(hydrated.name).toBe("Renamed Pixel");
+      expect(hydrated.displays?.panels).toHaveLength(2);
+      expect(hydrated[displayInventoryOutcome]).toEqual({ kind: "multi" });
+    });
+
     test("re-reads when the identity token changes", async function () {
       const { provider, script } = make();
       script("single");

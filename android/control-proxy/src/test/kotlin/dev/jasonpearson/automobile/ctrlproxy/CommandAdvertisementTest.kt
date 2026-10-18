@@ -36,6 +36,7 @@ class CommandAdvertisementTest {
       "sdk_capabilities_user_id_v1",
       "gesture_display_id_v1",
       "prototype_display_id_v1",
+      "prototype_display_id_v2",
       "prototype_multi_surface_v1",
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
@@ -138,6 +139,10 @@ class CommandAdvertisementTest {
       assertEquals(
         sdk >= PrototypeDisplayRouting.DISPLAY_API,
         commands.contains("prototype_display_id_v1"),
+      )
+      assertEquals(
+        sdk >= PrototypeDisplayRouting.DISPLAY_API,
+        commands.contains("prototype_display_id_v2"),
       )
     }
   }

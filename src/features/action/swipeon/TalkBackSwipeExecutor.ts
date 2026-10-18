@@ -105,7 +105,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
           signal,
         );
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
     }
 
     // Check if TalkBack is enabled (not just any accessibility service).
@@ -174,7 +174,10 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
 
       // Standard mode: Use coordinate-based swipes
       logger.debug("[SwipeOn] TalkBack disabled, using standard swipe");
-      const result = await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+      const result = await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, {
+        perf,
+        signal,
+      });
       return withEpilogueWarning(result, warning);
     }
   }
@@ -207,15 +210,10 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
     const returnOptions = this.buildGestureOptions(gestureOptions, returnDuration);
 
-    const forwardResult = await this.executeGesture.swipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      forwardOptions,
+    const forwardResult = await this.executeGesture.swipe(x1, y1, x2, y2, forwardOptions, {
       perf,
       signal,
-    );
+    });
     if (!forwardResult.success) {
       throwIfAborted(signal);
       return forwardResult;
@@ -226,7 +224,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       timer: this.timer,
       apexPauseMs: boomerang.apexPauseMs,
       signal,
-      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, perf, signal),
+      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, { perf, signal }),
     });
     if (!returnResult.success) {
       return {

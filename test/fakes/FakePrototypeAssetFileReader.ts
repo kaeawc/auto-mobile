@@ -1,5 +1,10 @@
 import type { PrototypeAssetFileReader } from "../../src/features/prototype/prototypeAssetUploader";
 
+/** A Node-style fs error carrying `code`, as the real reader's rejections do. */
+function fsError(code: string, message: string, path: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`${code}: ${message}, '${path}'`), { code });
+}
+
 /** In-memory prototype asset reader; records reads so tests can prove nothing touched disk. */
 export class FakePrototypeAssetFileReader implements PrototypeAssetFileReader {
   private readonly files = new Map<string, Buffer>();
@@ -7,7 +12,7 @@ export class FakePrototypeAssetFileReader implements PrototypeAssetFileReader {
   readonly reads: string[] = [];
 
   addFile(path: string, bytes: Buffer): this {
-    this.files.set(path, bytes);
+    this.files.set(path, Buffer.from(bytes));
     return this;
   }
 
@@ -24,15 +29,18 @@ export class FakePrototypeAssetFileReader implements PrototypeAssetFileReader {
     if (this.directories.has(path)) {
       return { isFile: () => false, size: 0 };
     }
-    throw new Error(`ENOENT: no such file or directory, '${path}'`);
+    throw fsError("ENOENT", "no such file or directory", path);
   }
 
   async readFile(path: string): Promise<Buffer> {
     this.reads.push(path);
     const file = this.files.get(path);
     if (file === undefined) {
-      throw new Error(`ENOENT: no such file or directory, '${path}'`);
+      throw this.directories.has(path)
+        ? fsError("EISDIR", "illegal operation on a directory, read", path)
+        : fsError("ENOENT", "no such file or directory", path);
     }
-    return file;
+    // Fresh copy per read, like fs.readFile: a caller mutating it cannot corrupt storage.
+    return Buffer.from(file);
   }
 }

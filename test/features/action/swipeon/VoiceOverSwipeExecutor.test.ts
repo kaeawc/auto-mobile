@@ -33,7 +33,7 @@ function makeFakeGestureExecutor(): {
     options?: { duration?: number };
   }> = [];
   const executor: GestureExecutor = {
-    swipe: async (x1, y1, x2, y2, options, perf) => {
+    swipe: async (x1, y1, x2, y2, options) => {
       calls.push({ x1, y1, x2, y2, options });
       return makeSwipeResult({ x1, y1, x2, y2, duration: options?.duration ?? 300 });
     },

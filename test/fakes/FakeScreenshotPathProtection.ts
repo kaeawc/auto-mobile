@@ -4,6 +4,7 @@ import type {
   ScreenshotRetentionWrite,
 } from "../../src/features/observe/ScreenshotRetention";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
+import { screenshotPathKey } from "../../src/features/observe/screenshotCacheEviction";
 import { toActionableError } from "../../src/models/ActionableError";
 import type { Timer } from "../../src/utils/SystemTimer";
 
@@ -20,8 +21,9 @@ export class FakeScreenshotPathProtection implements ScreenshotPathProtection {
   private readonly removals = new Map<string, Promise<boolean>>();
   private readonly directoryTails = new Map<string, Promise<void>>();
   constructor(private readonly timer: Timer) {}
-  async protect(path: string): Promise<number> {
-    this.calls.push(path);
+  async protect(rawPath: string): Promise<number> {
+    this.calls.push(rawPath);
+    const path = screenshotPathKey(rawPath);
     const removal = this.removals.get(path);
     if (removal) {
       await removal;
@@ -42,7 +44,8 @@ export class FakeScreenshotPathProtection implements ScreenshotPathProtection {
       await this.sweep();
     }
   }
-  async write(path: string, operation: ScreenshotRetentionWrite): Promise<void> {
+  async write(rawPath: string, operation: ScreenshotRetentionWrite): Promise<void> {
+    const path = screenshotPathKey(rawPath);
     const directory = nodePath.dirname(path);
     const run = async (): Promise<boolean> => {
       try {
@@ -74,7 +77,8 @@ export class FakeScreenshotPathProtection implements ScreenshotPathProtection {
       });
     }
   }
-  async removeIfUnprotected(path: string, remove: () => Promise<boolean>): Promise<boolean> {
+  async removeIfUnprotected(rawPath: string, remove: () => Promise<boolean>): Promise<boolean> {
+    const path = screenshotPathKey(rawPath);
     if (this.isProtected(path) || this.removals.has(path)) {
       return false;
     }
@@ -86,7 +90,7 @@ export class FakeScreenshotPathProtection implements ScreenshotPathProtection {
       this.removals.delete(path);
     }
   }
-  isProtected(path: string): boolean {
-    return (this.deadlines.get(path) ?? 0) > this.timer.now();
+  isProtected(rawPath: string): boolean {
+    return (this.deadlines.get(screenshotPathKey(rawPath)) ?? 0) > this.timer.now();
   }
 }

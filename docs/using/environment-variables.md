@@ -164,7 +164,7 @@ export AUTOMOBILE_DB_PATH="$PWD/.auto-mobile/auto-mobile.db"
 ```
 
 Do not use `AUTOMOBILE_DB_PATH=:memory:` in production. It is allowed only
-for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB=1`.
+for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB` to `1`, `true` or `yes`.
 
 ## Tool defaults
 

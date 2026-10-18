@@ -3233,10 +3233,16 @@ every `tasks/*` request, in the per-request capabilities:
 - The stdio proxy relays the extension: it advertises it to a client whose `initialize` declared
   it, forwards each request's declaration and the `tasks/*` requests to the daemon, and answers
   with the daemon's results and errors unchanged. Its tasks belong to the proxy process rather
-  than to one daemon connection, so polling keeps working after the proxy reconnects. A
-  device-binding call (`startDevice`, `getAndroid`, `getApple`, `provisionDevice`,
-  `setActiveDevice`) stays synchronous through the proxy for now: the proxy binds the device
-  session from that call's result.
+  than to one daemon connection, so polling keeps working after the proxy reconnects.
+- A device-binding call (`startDevice` today) runs as a task through the proxy too. The proxy
+  binds the device session when a `tasks/get` first reports the task `completed`, before it
+  answers that poll, exactly as it binds from the synchronous result; later tool calls route to
+  that session. It binds once per task, however often the task is polled and across proxy
+  reconnects. A `failed` or `cancelled` task binds nothing, and neither does a session the daemon
+  released before the completed poll (that poll answers an error). Poll the task to completion:
+  until then the proxy holds no binding for it, and the proxy stops waiting on a task left
+  unpolled for 10 minutes. A synchronous `startDevice` re-checks a device still finishing its
+  previous session's cleanup; as a task, that refusal is the task's result.
 
 ## Checks
 

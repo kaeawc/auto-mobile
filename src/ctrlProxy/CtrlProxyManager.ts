@@ -2800,9 +2800,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return capabilities;
   }
 
-  private async getInstalledApkSha256WithDetails(
-    signal?: AbortSignal,
-  ): Promise<InstalledApkSha256Result> {
+  /** Read the installed APK's SHA-256 with its source; public so tests can pin it without a cast. */
+  async getInstalledApkSha256WithDetails(signal?: AbortSignal): Promise<InstalledApkSha256Result> {
     const throwIfAborted = () => signal?.throwIfAborted();
     throwIfAborted();
     const apkPath = await this.getInstalledApkPath();
@@ -2910,7 +2909,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  private async getExpectedChecksum(useSharedCache = true): Promise<string> {
+  /** Resolve the expected APK checksum; public so tests can pin caching without a cast. */
+  async getExpectedChecksum(useSharedCache = true): Promise<string> {
     if (this.shouldSkipChecksum()) {
       return "";
     }

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
 import {
-  CtrlProxyServicePortChangedError,
   IOS_RUNNER_FEATURE_FLAGS,
-  SdkCapabilityProbeSupersededError,
   getRequiredIosRunnerFeatureFlags,
 } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
+import { SdkCapabilityProbeSupersededError } from "../../../../src/features/observe/ios/SdkCapabilityProbeSupersededError";
 import { BootedDevice, HighlightShape } from "../../../../src/models";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { IosRunnerBusyError } from "../../../../src/features/observe/ios/runnerErrorCodes";

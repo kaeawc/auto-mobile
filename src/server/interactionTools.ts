@@ -2301,7 +2301,7 @@ export async function tapAtHandler(
       durationMs: args.durationMs,
       layer: args.layer,
       pointer: args.pointer,
-    },
+    } as Parameters<TapAtElementLike["execute"]>[0],
     { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
   );
   const message = result.success

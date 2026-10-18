@@ -67,6 +67,7 @@ import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/andr
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -284,13 +285,7 @@ describe("AndroidCtrlProxyClient", function () {
     let removed = false;
     let remainingListings = listingsAfterRemove;
     let lastListOutput = "";
-    fakeAdb.executeCommand = async (
-      command: string,
-      timeoutMs?: number,
-      maxBuffer?: number,
-      noRetry?: boolean,
-      signal?: AbortSignal,
-    ) => {
+    fakeAdb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
       if (command === "forward --list") {
         if (shouldFailList()) {
           throw new Error("adb forward listing failed");
@@ -317,7 +312,7 @@ describe("AndroidCtrlProxyClient", function () {
       if (command.startsWith("forward tcp:")) {
         removed = false;
       }
-      return executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      return executeCommand(command, options);
     };
     return { getLastListOutput: () => lastListOutput };
   };
@@ -419,17 +414,11 @@ describe("AndroidCtrlProxyClient", function () {
       releaseForward = resolve;
     });
     class GatedForwardAdb extends FakeAdbExecutor {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command.includes("forward")) {
           await forwardGate; // hold setupBeforeConnect until the test releases it
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
     const gatedAdb = new GatedForwardAdb();
@@ -1974,13 +1963,7 @@ describe("AndroidCtrlProxyClient", function () {
     const installSharedForwardTable = (initialRows: string[]): { rows: () => string[] } => {
       let rows = [...initialRows];
       const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
-      fakeAdb.executeCommand = async (
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) => {
+      fakeAdb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "forward --list") {
           const stdout = rows.map((row) => `${row}\n`).join("");
           return {
@@ -2002,7 +1985,7 @@ describe("AndroidCtrlProxyClient", function () {
             `${testDevice.deviceId} ${added[1]} ${added[2]}`,
           ];
         }
-        return executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return executeCommand(command, options);
       };
       return { rows: () => rows };
     };

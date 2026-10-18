@@ -4,7 +4,7 @@ import type {
   H264CaptureSourceOptions,
   H264CaptureSourceTelemetry,
 } from "../../src/features/webrtc/H264CaptureSource";
-import type { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
+import type { WebRtcStreamPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import {
   getWebRtcStreamDescriptor,
   resetWebRtcStreamManager,
@@ -48,13 +48,15 @@ function install(telemetry?: H264CaptureSourceTelemetry) {
         notifySourceFailed: (error: Error) => failures.push(error),
         writeH264Chunk: (chunk: Buffer) => chunks.push(chunk),
         primeH264ParameterSets: () => {},
+        endOfH264Packet: () => {},
+        writePcmAudioChunk: () => {},
         getDescriptor: () => ({
           streamId: config.streamId,
           state: "idle",
           iceServers: [],
           readiness: { ...counters },
         }),
-      }) as unknown as WebRtcPublisher,
+      }) satisfies WebRtcStreamPublisher,
   });
   return { registry, chunks, failures, options };
 }

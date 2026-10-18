@@ -1,7 +1,7 @@
 import { ActionableError } from "../models/ActionableError";
 import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
-import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
+import { nodeProcFs } from "./bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../utils/HostCommandExecutor";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";

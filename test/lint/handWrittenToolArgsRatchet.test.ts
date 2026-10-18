@@ -11,14 +11,11 @@ import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
  * the schema rather than adding another interface.
  */
 const BASELINE: Readonly<Record<string, number>> = {
-  "appFileContract.ts": 2,
-  "biometricTools.ts": 1,
+  "appFileContract.ts": 1,
   "deviceSnapshotManager.ts": 2,
-  "downloadsFixtureContract.ts": 1,
   "fileSourcePreparation.ts": 1,
-  "interactionToolTypes.ts": 8,
+  "interactionToolTypes.ts": 1,
   "navigationTools.ts": 3,
-  "notificationTools.ts": 1,
   "performanceData.ts": 1,
   "prototypePatchAction.ts": 1,
   "prototypeReverse.ts": 1,

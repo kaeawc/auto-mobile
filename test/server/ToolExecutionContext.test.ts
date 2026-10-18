@@ -9,8 +9,8 @@ import {
   storeSetupTiming,
   createToolExecutionContext,
 } from "../../src/server/ToolExecutionContext";
-import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import type { DeviceReadinessProxyDriver } from "../../src/server/deviceReadinessProxyProvider";
 import {
   installNoOpReadinessDriver,
   setDeviceReadinessProxyDriverProviderForTesting,
@@ -63,8 +63,43 @@ describe("ToolExecutionContext", () => {
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeTimer: FakeTimer;
   let fakeDeviceManager: FakeDeviceManager;
-  const originalGetInstance = AndroidCtrlProxyManager.getInstance;
-  const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
+  // Per-test readiness stubs, published through the readiness-driver provider seam
+  // (`setDeviceReadinessProxyDriverProviderForTesting`) instead of reassigning the
+  // `AndroidCtrlProxyManager` / `AndroidCtrlProxyClient` `getInstance` statics.
+  type ManagerStub = Pick<DeviceReadinessProxyDriver, "resetSetupState" | "setup"> &
+    Partial<Pick<DeviceReadinessProxyDriver, "isInstalled" | "isVersionCompatible">>;
+  type ClientStub = Pick<
+    DeviceReadinessProxyDriver,
+    "waitForConnection" | "resetConnectionBudget"
+  > & {
+    close?: () => Promise<void>;
+  };
+  let managerStub: ManagerStub | undefined;
+  let clientStub: ClientStub | undefined;
+  let onDriverRequested: ((device: BootedDevice) => void) | undefined;
+  const publishDriver = () => {
+    setDeviceReadinessProxyDriverProviderForTesting((device) => {
+      onDriverRequested?.(device);
+      return {
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+        waitForConnection: async () => true,
+        resetConnectionBudget: () => {},
+        ...managerStub,
+        ...clientStub,
+        resetSetupState: managerStub?.resetSetupState ?? (() => {}),
+        setup: managerStub?.setup ?? (async () => ({ success: true, message: "ok" })),
+      };
+    });
+  };
+  const stubManager = (stub: ManagerStub) => {
+    managerStub = stub;
+    publishDriver();
+  };
+  const stubClient = (stub: ClientStub) => {
+    clientStub = stub;
+    publishDriver();
+  };
   const sessionOptions = { keepScreenAwake: false };
   // The auto-advancing FakeTimer runs the readiness waits of a setup far past the default 2-minute
   // idle window; tests that race setups give their session a window those waits fit inside.
@@ -94,11 +129,11 @@ describe("ToolExecutionContext", () => {
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
 
     // These tests exercise the real `ensureAccessibilityServiceReady` path and
-    // stub setup via the `AndroidCtrlProxyManager`/`AndroidCtrlProxyClient`
-    // `getInstance` statics per test. Restore the real readiness driver (which
-    // routes through those statics) so the overrides take effect; the shared
-    // preload's no-op driver (#6227) is re-installed in `afterEach` so the rest
-    // of the process stays neutralized.
+    // stub setup per test through `stubManager`/`stubClient`, which publish a
+    // readiness driver via the provider seam. Restore the real provider here so
+    // an unstubbed test still runs the real path; the shared preload's no-op
+    // driver (#6227) is re-installed in `afterEach` so the rest of the process
+    // stays neutralized.
     setDeviceReadinessProxyDriverProviderForTesting(null);
 
     // Reset AndroidCtrlProxyClient instances for clean test state
@@ -107,8 +142,9 @@ describe("ToolExecutionContext", () => {
 
   function cleanup() {
     sessionManager?.stopCleanupTimer();
-    AndroidCtrlProxyManager.getInstance = originalGetInstance;
-    AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
+    managerStub = undefined;
+    clientStub = undefined;
+    onDriverRequested = undefined;
     AndroidCtrlProxyClient.resetInstances();
     installNoOpReadinessDriver();
   }
@@ -209,24 +245,23 @@ describe("ToolExecutionContext", () => {
 
   test("should run accessibility setup when creating a new session", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     const clientCallArgs: unknown[] = [];
-    AndroidCtrlProxyClient.getInstance = ((device: unknown) => {
+    onDriverRequested = (device) => {
       clientCallArgs.push(device);
-      return {
-        waitForConnection: async () => true,
-        resetConnectionBudget: () => {},
-        close: async () => {},
-      };
-    }) as any;
+    };
+    stubClient({
+      waitForConnection: async () => true,
+      resetConnectionBudget: () => {},
+      close: async () => {},
+    });
 
     const context = await createToolExecutionContext(
       "session-1",
@@ -250,14 +285,13 @@ describe("ToolExecutionContext", () => {
   // background reconnect, or an earlier failed readiness attempt) don't
   // silently gate the dial that would otherwise succeed.
   test("resets the connection budget after a successful setup, before waitForConnection", async () => {
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => ({ success: true, message: "ok" }),
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => ({ success: true, message: "ok" }),
+    });
 
     const calls: string[] = [];
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubClient({
       resetConnectionBudget: () => {
         calls.push("resetConnectionBudget");
       },
@@ -266,7 +300,7 @@ describe("ToolExecutionContext", () => {
         return true;
       },
       close: async () => {},
-    })) as any;
+    });
 
     const context = await createToolExecutionContext(
       "session-1",
@@ -792,14 +826,13 @@ describe("ToolExecutionContext", () => {
     staleDeviceManager.bootedDevices = [];
 
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     await expect(
       createToolExecutionContext("session-stale", sessionManager, stalePool, sessionOptions),
@@ -809,16 +842,15 @@ describe("ToolExecutionContext", () => {
   });
 
   test("writes the keep-awake state to the typed keepScreenAwake slot on setup (#2973)", async () => {
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => ({ success: true, message: "ok" }),
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => ({ success: true, message: "ok" }),
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // keepScreenAwake:false → apply() short-circuits to an applied:false state,
     // which ensureKeepScreenAwake must persist to the typed slot (not customData).
@@ -838,14 +870,13 @@ describe("ToolExecutionContext", () => {
   // DeviceSessionManager.ensureDeviceReady's `readiness` option.
   test("skips accessibility setup for a new session when deviceReadiness is booted (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
       ...sessionOptions,
@@ -914,19 +945,18 @@ describe("ToolExecutionContext", () => {
 
   test("still runs accessibility setup for a new session when deviceReadiness is automationReady (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
       ...sessionOptions,
@@ -939,19 +969,18 @@ describe("ToolExecutionContext", () => {
 
   test("a tool not requiring readiness (deviceReadiness omitted) is unaffected on the persisted path (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // No deviceReadiness set — behaves exactly as before this fix (default
     // automationReady semantics), for both a new session...
@@ -985,19 +1014,18 @@ describe("ToolExecutionContext", () => {
   // call must NOT see `undefined` and redundantly re-run setup.
   test("does not redundantly re-run setup for a session whose readiness was recorded at acquisition (#6227 round 5 P1)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // Simulate the acquisition/binding path: the session is created and its
     // achieved readiness is recorded (as `bindBootedDeviceSession` now does)
@@ -1026,19 +1054,18 @@ describe("ToolExecutionContext", () => {
 
   test("reruns setup after automation readiness is invalidated for a session", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await sessionManager.createSession("lost-service", "device-1", "android");
     sessionManager.setDeviceReadiness("lost-service", "automationReady");
@@ -1056,19 +1083,18 @@ describe("ToolExecutionContext", () => {
   // widen the concurrency-hole fix in `isReadinessSatisfied`.
   test("still runs setup for a genuinely-unrecorded recovered session (#6227 round 5 P1)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // No `setDeviceReadiness` call here — this session's readiness was never
     // recorded, mirroring a recovered session whose acquisition never
@@ -1093,19 +1119,18 @@ describe("ToolExecutionContext", () => {
   // actually achieved.
   test("upgrades a booted-only session to automationReady when a later call needs it (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     const bootedContext = await createToolExecutionContext(
       "session-1",
@@ -1138,19 +1163,18 @@ describe("ToolExecutionContext", () => {
 
   test("reruns automation readiness after a VM restore resets the session marker", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
     sessionManager.resetDeviceReadinessForDevice("device-1");
@@ -1161,19 +1185,18 @@ describe("ToolExecutionContext", () => {
 
   test("does not redundantly re-run setup for a booted tool after an automationReady session (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     const readyContext = await createToolExecutionContext("session-1", sessionManager, devicePool, {
       ...sessionOptions,
@@ -1206,19 +1229,18 @@ describe("ToolExecutionContext", () => {
   // still-undefined recorded readiness as satisfied and skip setup.
   test("runs setup for a concurrent automationReady call that observes a published-but-unrecorded session (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // Simulate the race directly: a session already published into the
     // SessionManager's in-memory map (as `createSession` does), but with its
@@ -1265,23 +1287,22 @@ describe("ToolExecutionContext", () => {
       setupEnteredResolve = resolve;
     });
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {
-          resetCalls += 1;
-        },
-        setup: async () => {
-          setupCalls += 1;
-          setupEnteredResolve();
-          await setupGate;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {
+        resetCalls += 1;
+      },
+      setup: async () => {
+        setupCalls += 1;
+        setupEnteredResolve();
+        await setupGate;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // Publish the session with readiness NOT YET recorded — the same window
     // a recovered/newly-published session sits in before this module's own
@@ -1327,21 +1348,20 @@ describe("ToolExecutionContext", () => {
     let setupCalls = 0;
     const setupEntered = Promise.withResolvers<void>();
     const setupGate = Promise.withResolvers<void>();
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          setupEntered.resolve();
-          await setupGate.promise;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        setupEntered.resolve();
+        await setupGate.promise;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await sessionManager.createSession("lost-service-concurrent", "device-1", "android");
     sessionManager.setDeviceReadiness("lost-service-concurrent", "automationReady");
@@ -1398,23 +1418,22 @@ describe("ToolExecutionContext", () => {
       setupEnteredResolve = resolve;
     });
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {
-          resetCalls += 1;
-        },
-        setup: async () => {
-          setupCalls += 1;
-          setupEnteredResolve();
-          await setupGate;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {
+        resetCalls += 1;
+      },
+      setup: async () => {
+        setupCalls += 1;
+        setupEnteredResolve();
+        await setupGate;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // Neither call awaits before the other starts: both synchronously
     // observe `getSessionForNewExecution` returning `null` for this
@@ -1469,21 +1488,20 @@ describe("ToolExecutionContext", () => {
       triggerReject = resolve;
     });
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          automationSetupCalls += 1;
-          setupEnteredResolve();
-          await rejectSignal;
-          throw new Error("simulated automation setup failure");
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        automationSetupCalls += 1;
+        setupEnteredResolve();
+        await rejectSignal;
+        throw new Error("simulated automation setup failure");
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await sessionManager.createSession("session-booted-bypass", "device-1", "android");
 
@@ -1534,23 +1552,22 @@ describe("ToolExecutionContext", () => {
     });
     let mode: "old" | "new" = "old";
 
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          if (mode === "old") {
-            oldEnteredResolve();
-            await oldGate;
-          }
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        if (mode === "old") {
+          oldEnteredResolve();
+          await oldGate;
+        }
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     const original = await sessionManager.createSession(
       "session-incarnation-scope",
@@ -1624,21 +1641,20 @@ describe("ToolExecutionContext", () => {
     let setupCalls = 0;
     let installed = false;
     let versionCompatible = true;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        isInstalled: async () => installed,
-        isVersionCompatible: async () => versionCompatible,
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      isInstalled: async () => installed,
+      isVersionCompatible: async () => versionCompatible,
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     serverConfig.setSkipCtrlProxyDownload(true);
     try {
@@ -1706,19 +1722,18 @@ describe("ToolExecutionContext", () => {
   // accessibility setup until the preparation releases it.
   test("serializes a session upgrade behind a concurrent device preparation holding the per-device readiness lock (#6227)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     await sessionManager.createSession("session-device-lock", "device-1", "android", {
       timeoutMs: AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
@@ -1757,19 +1772,18 @@ describe("ToolExecutionContext", () => {
   // readiness once the acquisition finishes.
   test("joins an in-flight device acquisition instead of redoing CtrlProxy setup for a reused session (#6280)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     // A post-restart recovered session: already tracked, readiness never
     // recorded — mirrors a session reused by a concurrent acquisition.
@@ -1816,19 +1830,18 @@ describe("ToolExecutionContext", () => {
 
   test("cancels while queued for a device readiness transaction without starting setup (#6280)", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
     await sessionManager.createSession("session-cancelled-readiness", "device-1", "android");
 
     const release = await acquireDeviceReadinessLock(deviceReadinessLockKey("android", "device-1"));
@@ -2152,14 +2165,13 @@ describe("ToolExecutionContext", () => {
 
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
 
     await sessionManager.createSession("session-1", "device-1", "android");
     // #6227 P1 follow-up: `undefined` recorded readiness is no longer treated
@@ -2292,19 +2304,18 @@ describe("ToolExecutionContext", () => {
 
   test("runs first-session setup when a released UUID is recreated during context creation", async () => {
     let setupCalls = 0;
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupCalls += 1;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     const original = await sessionManager.createSession("session-recreated", "device-1", "android");
     let finishSetup!: () => void;
@@ -2473,20 +2484,19 @@ describe("ToolExecutionContext", () => {
     const setupStartedPromise = new Promise<void>((resolve) => {
       setupStarted = resolve;
     });
-    AndroidCtrlProxyManager.getInstance = () =>
-      ({
-        resetSetupState: () => {},
-        setup: async () => {
-          setupStarted();
-          await setupFinished;
-          return { success: true, message: "ok" };
-        },
-      }) as any;
-    AndroidCtrlProxyClient.getInstance = (() => ({
+    stubManager({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupStarted();
+        await setupFinished;
+        return { success: true, message: "ok" };
+      },
+    });
+    stubClient({
       waitForConnection: async () => true,
       resetConnectionBudget: () => {},
       close: async () => {},
-    })) as any;
+    });
 
     try {
       const context = createToolExecutionContext(
@@ -2563,19 +2573,18 @@ describe("ToolExecutionContext", () => {
 
     test("rejects a fabricated UUID and never assigns a pooled device while a session is active", async () => {
       let setupCalls = 0;
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
-          resetSetupState: () => {},
-          setup: async () => {
-            setupCalls += 1;
-            return { success: true, message: "ok" };
-          },
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
+      stubManager({
+        resetSetupState: () => {},
+        setup: async () => {
+          setupCalls += 1;
+          return { success: true, message: "ok" };
+        },
+      });
+      stubClient({
         waitForConnection: async () => true,
         resetConnectionBudget: () => {},
         close: async () => {},
-      })) as any;
+      });
 
       // The connection already holds a live, issued session on device-1.
       await devicePool.assignDeviceToSession("issued-session", "android");
@@ -2605,16 +2614,15 @@ describe("ToolExecutionContext", () => {
     });
 
     test("still recovers a persisted, non-terminal session (live-during-restart)", async () => {
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
-          resetSetupState: () => {},
-          setup: async () => ({ success: true, message: "ok" }),
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
+      stubManager({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      });
+      stubClient({
         waitForConnection: async () => true,
         resetConnectionBudget: () => {},
         close: async () => {},
-      })) as any;
+      });
 
       const persisted = nonTerminalPersisted("restarted-session", "device-1");
       const recoveryManager = new SessionManager(
@@ -2658,16 +2666,15 @@ describe("ToolExecutionContext", () => {
     });
 
     test("the caller's own issued session still resolves without a new assignment", async () => {
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
-          resetSetupState: () => {},
-          setup: async () => ({ success: true, message: "ok" }),
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
+      stubManager({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      });
+      stubClient({
         waitForConnection: async () => true,
         resetConnectionBudget: () => {},
         close: async () => {},
-      })) as any;
+      });
 
       await sessionManager.createSession("mine", "device-1", "android");
       const assignSpy = spyOn(devicePool, "assignDeviceToSession");
@@ -2688,16 +2695,15 @@ describe("ToolExecutionContext", () => {
     });
 
     test("device-label / internal fresh mint is unaffected (requireIssuedSession defaults false)", async () => {
-      AndroidCtrlProxyManager.getInstance = () =>
-        ({
-          resetSetupState: () => {},
-          setup: async () => ({ success: true, message: "ok" }),
-        }) as any;
-      AndroidCtrlProxyClient.getInstance = (() => ({
+      stubManager({
+        resetSetupState: () => {},
+        setup: async () => ({ success: true, message: "ok" }),
+      });
+      stubClient({
         waitForConnection: async () => true,
         resetConnectionBudget: () => {},
         close: async () => {},
-      })) as any;
+      });
 
       // Mirrors deviceLabelMapping.registerDeviceLabelMap, which mints a fresh
       // derived session without passing requireIssuedSession.

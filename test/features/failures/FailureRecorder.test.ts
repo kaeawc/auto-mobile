@@ -9,6 +9,7 @@ import type {
 import type { RecordFailureInput } from "../../../src/db/failureAnalyticsRepository";
 import type { StackTraceElement } from "../../../src/server/failuresResources";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 
 /**
  * Fake FailureAnalyticsRepository that captures recordFailure calls in memory.
@@ -72,10 +73,12 @@ const baseContext = {
   sessionId: "session-1",
 };
 
+type FailureTelemetryEvent = Parameters<TelemetryRecorder["recordFailureTelemetry"]>[0];
+
 class FakeTelemetryRecorder {
-  pushed: Array<{ type: string; stackTrace?: unknown }> = [];
-  recordFailureTelemetry(event: Record<string, unknown>): void {
-    this.pushed.push(event as any);
+  pushed: FailureTelemetryEvent[] = [];
+  recordFailureTelemetry(event: FailureTelemetryEvent): void {
+    this.pushed.push(event);
   }
 }
 
@@ -90,7 +93,7 @@ describe("FailureRecorder", () => {
     timer = new FakeTimer();
     telemetry = new FakeTelemetryRecorder();
     // Use the constructor DI to inject our fakes
-    recorder = new FailureRecorder(repo as any, timer, telemetry);
+    recorder = new FailureRecorder(repo, timer, telemetry);
   });
 
   describe("recordToolFailure", () => {
@@ -655,7 +658,7 @@ describe("FailureRecorder", () => {
     });
 
     test("createForTesting returns a new instance", () => {
-      const instance = FailureRecorder.createForTesting(repo as any);
+      const instance = FailureRecorder.createForTesting(repo);
       expect(instance).toBeInstanceOf(FailureRecorder);
     });
   });
@@ -737,7 +740,7 @@ describe("FailureRecorder", () => {
         ...baseContext,
       });
 
-      expect((telemetry.pushed[0] as any).timestamp).toBe(9999);
+      expect(telemetry.pushed[0].timestamp).toBe(9999);
     });
   });
 });

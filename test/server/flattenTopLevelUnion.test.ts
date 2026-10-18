@@ -21,8 +21,8 @@ describe("flattenTopLevelUnion", () => {
     const result = flattenTopLevelUnion(schema);
     expect(result.type).toBe("object");
     expect(result.anyOf).toBeUndefined();
-    expect((result.properties as any).text).toEqual({ type: "string" });
-    expect((result.properties as any).id).toEqual({ type: "string" });
+    expect(result.properties).toHaveProperty("text", { type: "string" });
+    expect(result.properties).toHaveProperty("id", { type: "string" });
     expect(result.required).toBeUndefined();
   });
 
@@ -35,8 +35,8 @@ describe("flattenTopLevelUnion", () => {
     };
     const result = flattenTopLevelUnion(schema);
     expect(result.type).toBe("object");
-    expect((result.properties as any).a).toEqual({ type: "number" });
-    expect((result.properties as any).b).toEqual({ type: "boolean" });
+    expect(result.properties).toHaveProperty("a", { type: "number" });
+    expect(result.properties).toHaveProperty("b", { type: "boolean" });
   });
 
   test("merges shared properties from first branch", () => {
@@ -55,9 +55,9 @@ describe("flattenTopLevelUnion", () => {
     };
     const result = flattenTopLevelUnion(schema);
     // First-seen wins for duplicate keys
-    expect((result.properties as any).text).toEqual(textDef);
-    expect((result.properties as any).timeout).toEqual({ type: "number" });
-    expect((result.properties as any).id).toEqual({ type: "string" });
+    expect(result.properties).toHaveProperty("text", textDef);
+    expect(result.properties).toHaveProperty("timeout", { type: "number" });
+    expect(result.properties).toHaveProperty("id", { type: "string" });
   });
 
   test("preserves additionalProperties when consistent across branches", () => {
@@ -110,7 +110,7 @@ describe("flattenTopLevelUnion", () => {
     const result = flattenTopLevelUnion(schema);
 
     expect(result.$defs).toEqual(schema.$defs);
-    expect((result.properties as any).node).toEqual({ $ref: "#/$defs/node" });
+    expect(result.properties).toHaveProperty("node", { $ref: "#/$defs/node" });
   });
 
   test("handles empty properties in branches", () => {
@@ -119,7 +119,7 @@ describe("flattenTopLevelUnion", () => {
     };
     const result = flattenTopLevelUnion(schema);
     expect(result.type).toBe("object");
-    expect((result.properties as any).x).toEqual({ type: "string" });
+    expect(result.properties).toHaveProperty("x", { type: "string" });
   });
 
   test("keeps discriminator branches flattened without top-level combinators", () => {
@@ -153,7 +153,7 @@ describe("flattenTopLevelUnion", () => {
     expect(result.type).toBe("object");
     expect(result.oneOf).toBeUndefined();
     expect(result.allOf).toBeUndefined();
-    expect((result.properties as any).platform).toEqual({
+    expect(result.properties).toHaveProperty("platform", {
       type: "string",
       description: "Target platform",
       enum: ["ios", "android"],

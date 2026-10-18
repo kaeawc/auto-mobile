@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { DeviceServiceClient } from "../../../src/features/observe/DeviceServiceClient";
+import {
+  DeviceServiceClient,
+  type WebSocketFactory,
+} from "../../../src/features/observe/DeviceServiceClient";
 import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -17,7 +20,7 @@ class TestDeviceServiceClient extends DeviceServiceClient {
   protected readonly logTag = "TestClient";
   setupError: Error | null = null;
 
-  constructor(timer: FakeTimer, wsFactory: (url: string) => WebSocket) {
+  constructor(timer: FakeTimer, wsFactory: WebSocketFactory) {
     super(timer, wsFactory);
   }
 

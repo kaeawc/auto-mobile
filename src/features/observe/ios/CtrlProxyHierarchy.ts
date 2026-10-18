@@ -1,10 +1,9 @@
+import type { CtrlSocket } from "../shared/types";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
-import { iosHierarchyAcquisition } from "./types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
  *
- * This delegate handles hierarchy retrieval, caching, and conversion
- * via the iOS CtrlProxy iOS WebSocket API.
+ * Handles hierarchy retrieval, caching, and conversion via the iOS CtrlProxy WebSocket API.
  */
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
@@ -22,14 +21,15 @@ import { hasIosHeaderTrait } from "./semanticRoles";
 import { IOS_WINDOW_LAYER_EXTRA } from "./iosWindowLayer";
 import { maxObservationAgeMs } from "../observationFreshness";
 import { assignIosStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
-import type {
-  HierarchyDelegateContext,
-  CtrlProxyNode,
-  XCTestHierarchy,
-  CtrlProxyHierarchyResponse,
-  CtrlProxySyncedHierarchy,
-  CtrlProxyPerfTiming,
-  CachedHierarchy,
+import {
+  iosHierarchyAcquisition,
+  type HierarchyDelegateContext,
+  type CtrlProxyNode,
+  type XCTestHierarchy,
+  type CtrlProxyHierarchyResponse,
+  type CtrlProxySyncedHierarchy,
+  type CtrlProxyPerfTiming,
+  type CachedHierarchy,
 } from "./types";
 import {
   resolveAccessibilityHierarchyArgs,
@@ -37,7 +37,7 @@ import {
 } from "../hierarchyReadArgs";
 
 /** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
-interface ConvertedNode {
+export interface ConvertedNode {
   $: Record<string, unknown>;
   extras?: Record<string, string>;
   node?: ConvertedNode[];
@@ -55,11 +55,14 @@ export const IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000;
 
 type HierarchyRequestFailure = { reason: IosHierarchyUnavailableReason; detail?: string };
 
-/**
- * Delegate class for handling hierarchy operations.
- */
+/** Delegate class for handling hierarchy operations. */
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
+
+  /** Typed unit-test view of the node filter. */
+  readonly testHooks = {
+    filterHierarchyNode: (node: ConvertedNode) => this.filterHierarchyNode(node, true),
+  };
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
@@ -747,7 +750,7 @@ export class CtrlProxyHierarchy {
     });
   }
 
-  private sendHierarchyRequest(ws: WebSocket | null, requestId: string, payload: string): void {
+  private sendHierarchyRequest(ws: CtrlSocket | null, requestId: string, payload: string): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       this.context.requestManager.reject(
         requestId,
@@ -1095,9 +1098,7 @@ export class CtrlProxyHierarchy {
     return isContainerClass && hasChildren;
   }
 
-  /**
-   * Clean node attributes by removing false booleans and empty values
-   */
+  /** Clean node attributes by removing false booleans and empty values */
   private cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
     const cleaned: Record<string, unknown> = {};
     const booleanFields = [

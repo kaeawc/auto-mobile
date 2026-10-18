@@ -15,7 +15,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../../utils/Backoff";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { createVideoSimCtl, type VideoSimCtl } from "./VideoSimCtl";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { logger } from "../../utils/logger";
@@ -628,8 +628,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly simctlFactory: (device: BootedDevice) => SimCtl = (device) =>
-      new SimCtlClient(device),
+    private readonly simctlFactory: (device: BootedDevice) => VideoSimCtl = createVideoSimCtl,
     private readonly ffmpegClient: FfmpegClient = new DefaultFfmpegClient(),
     // Injectable so hardware-accel detection can be tested for every OS branch on
     // any CI host, rather than only the branch matching the runner's platform.
@@ -1046,7 +1045,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   }
 
   private async recordingDisplayArg(
-    simctl: SimCtl,
+    simctl: VideoSimCtl,
     device: BootedDevice,
     deadlineMs: number,
   ): Promise<string | undefined> {
@@ -1054,7 +1053,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     if (remainingMs <= 0) {
       return undefined;
     }
-    let displays: Awaited<ReturnType<SimCtl["enumerateDisplays"]>>;
+    let displays: Awaited<ReturnType<VideoSimCtl["enumerateDisplays"]>>;
     try {
       const probeBudgetMs = Math.min(remainingMs, IOS_LIVE_DISPLAY_PROBE_TIMEOUT_MS);
       displays = await runWithinDeadline(
@@ -1319,7 +1318,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     device: BootedDevice;
     error: unknown;
     maxAttempts: number;
-    simctl: SimCtl;
+    simctl: VideoSimCtl;
     spawned: boolean;
     startDeadlineMs: number;
   }): Promise<{ description: string; cleanupError?: unknown }> {
@@ -1376,7 +1375,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   }
 
   private async diagnoseFailedIosStart(
-    simctl: SimCtl,
+    simctl: VideoSimCtl,
     device: BootedDevice,
     startDeadlineMs: number,
     isFinalAttempt: boolean,
@@ -1408,7 +1407,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
    * original recording error.
    */
   private async captureSimulatorDiagnostics(
-    simctl: SimCtl,
+    simctl: VideoSimCtl,
     device: BootedDevice,
     timeoutMs: number,
     abortSignal: AbortSignal | undefined,

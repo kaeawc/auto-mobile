@@ -15,6 +15,24 @@ import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnec
 import type { PrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import type { SavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
 
+/**
+ * The slice of the `ws` WebSocket surface the CtrlProxy clients, delegates and
+ * exchange recorder actually use. `WebSocketFactory` returns this narrow type
+ * rather than the full `ws` class so test fakes (`FakeWebSocket`) can satisfy it
+ * structurally; the real `ws` WebSocket is assignable to it.
+ */
+export interface CtrlSocket {
+  readonly readyState: number;
+  send(data: WebSocket.Data, cb?: (error?: Error) => void): void;
+  close(): void;
+  ping(): void;
+  terminate(): void;
+  removeAllListeners(): this;
+  on(event: "message", listener: (data: WebSocket.Data) => void): this;
+  on(event: "open" | "close" | "ping" | "pong", listener: () => void): this;
+  on(event: "error", listener: (error: Error) => void): this;
+}
+
 // =============================================================================
 // Performance Timing
 // =============================================================================
@@ -100,7 +118,7 @@ export interface DelegateContext {
    */
   wireDeadlineParams?(messageType: string, timeoutMs: number): Record<string, unknown>;
   /** Get the current WebSocket connection (may be null if not connected) */
-  getWebSocket(): WebSocket | null;
+  getWebSocket(): CtrlSocket | null;
   /** RequestManager for correlating requests and responses */
   requestManager: RequestManager;
   /** Timer for setTimeout/setInterval operations */

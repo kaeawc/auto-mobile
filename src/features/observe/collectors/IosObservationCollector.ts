@@ -6,7 +6,7 @@ import { projectActionableHierarchy } from "../HierarchyNormalization";
 import { resolveIosObserveRotation } from "../iosObserveRotation";
 import { deriveIosScreenIdentity } from "../ios/IosScreenIdentity";
 import type { PlatformCollectionContext } from "./AndroidObservationCollector";
-import type { HierarchyCollector } from "./HierarchyCollector";
+import type { HierarchyCollectorPort } from "./collectorPorts";
 
 /** Platform-specific hierarchy collection and metadata derivation for iOS observations. */
 export interface IosObservationCollector {
@@ -14,7 +14,7 @@ export interface IosObservationCollector {
 }
 
 export interface IosObservationCollectorDeps {
-  hierarchyCollector: () => HierarchyCollector;
+  hierarchyCollector: () => HierarchyCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
 }

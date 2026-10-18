@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../../helpers/jsonSchemaNode";
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
@@ -81,9 +82,9 @@ describe("MCP Tools Schema", () => {
       // provably-dead second operand — the "should not publish top-level schema
       // combinators" test below asserts every top-level anyOf/oneOf/allOf is
       // undefined, so hasCombinator was always false. Assert `type` directly.
-      const schema = tool.inputSchema as any;
+      const schema = tool.inputSchema;
       expect(Object.prototype.hasOwnProperty.call(schema, "type")).toBe(true);
-      if (schema.type === "object") {
+      if (parseJsonSchemaNode(schema).type === "object") {
         expect(schema).toHaveProperty("properties");
       }
     });
@@ -95,7 +96,7 @@ describe("MCP Tools Schema", () => {
   test.each(["tapOn", "tapAny"])("%s advertises duration minimum 0", (toolName) => {
     const tool = ToolRegistry.getToolDefinitions().find((t) => t.name === toolName);
     expect(tool, `${toolName} should be advertised`).toBeDefined();
-    const duration = (tool!.inputSchema as any).properties?.duration;
+    const duration = parseJsonSchemaNode(tool!.inputSchema).properties?.duration;
     expect(duration?.type).toBe("number");
     expect(duration?.minimum).toBe(0);
   });
@@ -104,7 +105,7 @@ describe("MCP Tools Schema", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
     for (const tool of toolDefinitions) {
-      const schema = tool.inputSchema as any;
+      const schema = parseJsonSchemaNode(tool.inputSchema);
       expect(schema.anyOf, `${tool.name} should not publish top-level anyOf`).toBeUndefined();
       expect(schema.oneOf, `${tool.name} should not publish top-level oneOf`).toBeUndefined();
       expect(schema.allOf, `${tool.name} should not publish top-level allOf`).toBeUndefined();
@@ -246,7 +247,7 @@ describe("MCP Tools Schema", () => {
   ])("%s advertises the raw/project response-shape control", async (toolName) => {
     const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
     expect(tool).toBeDefined();
-    const props = (tool!.inputSchema as any).properties ?? {};
+    const props = parseJsonSchemaNode(tool!.inputSchema).properties ?? {};
     expect(props.raw).toBeDefined();
     expect(props.project).toBeDefined();
   });
@@ -263,7 +264,7 @@ describe("MCP Tools Schema", () => {
     for (const toolName of SKELETON_DEFAULT_ACTION_TOOLS) {
       const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
       expect(tool, `${toolName} should be an advertised tool`).toBeDefined();
-      const props = (tool!.inputSchema as any).properties ?? {};
+      const props = parseJsonSchemaNode(tool!.inputSchema).properties ?? {};
       expect(props.raw, `${toolName} must advertise raw`).toBeDefined();
       expect(props.project, `${toolName} must advertise project`).toBeDefined();
     }

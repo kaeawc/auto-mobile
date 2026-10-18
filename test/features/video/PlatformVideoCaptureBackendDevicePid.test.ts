@@ -331,17 +331,9 @@ describe("orphaned Android recorder teardown", () => {
         }
         return { stdout: "", stderr: "", error: cause };
       });
-      const signal = backend as unknown as {
-        signalDeviceRecorder(
-          adb: typeof client,
-          descriptor: typeof descriptor,
-          pid: number,
-          signal: 2 | 9,
-        ): Promise<unknown>;
-      };
       try {
         for (const kind of [2, 9] as const) {
-          const error = await signal
+          const error = await backend
             .signalDeviceRecorder(client, descriptor, 4321, kind)
             .catch((caught: unknown) => caught);
           expect(error).not.toBeInstanceOf(DeviceUnreachableError);

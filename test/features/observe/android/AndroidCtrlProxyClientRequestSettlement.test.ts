@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { AndroidCtrlProxyDelegatingFacade } from "../../../../src/features/observe/android/AndroidCtrlProxyDelegatingFacade";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
@@ -41,7 +40,7 @@ async function harness() {
     },
   );
   await Promise.resolve();
-  client["ws"] = socket as WebSocket;
+  client["ws"] = socket;
   client["supportedCommands"] = new Set([
     "full_command_set_v1",
     "request_id_echo_v1",
@@ -500,7 +499,7 @@ async function settle(
   if (trigger === "abort") {
     controller.abort(new Error("caller cancelled"));
   } else {
-    h.client["finishEstablishedConnection"](h.socket as WebSocket);
+    h.client["finishEstablishedConnection"](h.socket);
   }
   await flush();
   if (!settled) {

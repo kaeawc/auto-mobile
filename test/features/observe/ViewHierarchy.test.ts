@@ -296,7 +296,7 @@ describe("ViewHierarchy", function () {
     test("names a secure keyguard as the cause of a null hierarchy (#4281)", async function () {
       fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
       const result = await viewHierarchy.getAndroidViewHierarchy();
-      const error = String((result.hierarchy as any).error).toLowerCase();
+      const error = String(result.hierarchy.error).toLowerCase();
       expect(error).toContain("locked");
       expect(error).toContain("unlock");
     });
@@ -326,7 +326,7 @@ describe("ViewHierarchy", function () {
       const vh = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), throwingClient);
 
       const result = await vh.getAndroidViewHierarchy();
-      const error = String((result.hierarchy as any).error).toLowerCase();
+      const error = String(result.hierarchy.error).toLowerCase();
       expect(error).toContain("locked");
       expect(error).toContain("dismiss");
     });
@@ -334,7 +334,7 @@ describe("ViewHierarchy", function () {
     test("keeps the generic message when the device is not locked (#4281/#4039)", async function () {
       fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
       const result = await viewHierarchy.getAndroidViewHierarchy();
-      const error = String((result.hierarchy as any).error);
+      const error = String(result.hierarchy.error);
       expect(error).toContain("Failed to retrieve view hierarchy");
       expect(error.toLowerCase()).not.toContain("keyguard");
     });
@@ -344,19 +344,17 @@ describe("ViewHierarchy", function () {
       // that state cannot explain an accessibility-service binding failure.
       fakeAdb.setDeviceLock({ locked: false, keyguardShowing: true, secure: true });
       const result = await viewHierarchy.getAndroidViewHierarchy();
-      const error = String((result.hierarchy as any).error);
+      const error = String(result.hierarchy.error);
       expect(error).toContain("Failed to retrieve view hierarchy");
       expect(error.toLowerCase()).not.toContain("device is locked");
     });
 
     test("falls back to the generic message when the lock read fails (#4281)", async function () {
-      (fakeAdb as any).getDeviceLock = async () => {
+      spyOn(fakeAdb, "getDeviceLock").mockImplementation(async () => {
         throw new Error("dumpsys boom");
-      };
+      });
       const result = await viewHierarchy.getAndroidViewHierarchy();
-      expect(String((result.hierarchy as any).error)).toContain(
-        "Failed to retrieve view hierarchy",
-      );
+      expect(String(result.hierarchy.error)).toContain("Failed to retrieve view hierarchy");
     });
 
     test("skips the lock probe when the caller's signal is already aborted (#4281 review)", async function () {
@@ -365,10 +363,10 @@ describe("ViewHierarchy", function () {
       fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
       let probed = false;
       const originalGetDeviceLock = fakeAdb.getDeviceLock.bind(fakeAdb);
-      (fakeAdb as any).getDeviceLock = async (signal?: AbortSignal) => {
+      spyOn(fakeAdb, "getDeviceLock").mockImplementation(async () => {
         probed = true;
-        return originalGetDeviceLock(signal);
-      };
+        return originalGetDeviceLock();
+      });
       const controller = new AbortController();
       controller.abort();
 
@@ -381,9 +379,7 @@ describe("ViewHierarchy", function () {
       );
 
       expect(probed).toBe(false);
-      expect(String((result.hierarchy as any).error)).toContain(
-        "Failed to retrieve view hierarchy",
-      );
+      expect(String(result.hierarchy.error)).toContain("Failed to retrieve view hierarchy");
     });
 
     test("skips the lock probe when a per-read timeoutMs budget is supplied (#4281 review)", async function () {
@@ -392,10 +388,10 @@ describe("ViewHierarchy", function () {
       fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
       let probed = false;
       const originalGetDeviceLock = fakeAdb.getDeviceLock.bind(fakeAdb);
-      (fakeAdb as any).getDeviceLock = async (signal?: AbortSignal) => {
+      spyOn(fakeAdb, "getDeviceLock").mockImplementation(async () => {
         probed = true;
-        return originalGetDeviceLock(signal);
-      };
+        return originalGetDeviceLock();
+      });
 
       // timeoutMs supplied (5th arg signal omitted, 6th arg timeoutMs=500).
       const result = await viewHierarchy.getAndroidViewHierarchy(
@@ -408,9 +404,7 @@ describe("ViewHierarchy", function () {
       );
 
       expect(probed).toBe(false);
-      expect(String((result.hierarchy as any).error)).toContain(
-        "Failed to retrieve view hierarchy",
-      );
+      expect(String(result.hierarchy.error)).toContain("Failed to retrieve view hierarchy");
     });
 
     test("surfaces iOS CtrlProxy reconnect cooldown as retry metadata", async function () {
@@ -781,10 +775,11 @@ describe("ViewHierarchy", function () {
         );
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
-        const button = (result.hierarchy as any).node;
+        const button = result.hierarchy.node;
 
-        expect(button.viewId).toBeUndefined();
-        expect(button["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
+        expect(button).toBeDefined();
+        expect(button).not.toHaveProperty("viewId");
+        expect(button!["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
       } finally {
         getInstanceSpy.mockRestore();
       }

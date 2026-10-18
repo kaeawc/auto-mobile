@@ -5,14 +5,11 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { BootedDevice, ObserveResult, BackStackInfo } from "../../../../src/models";
+import { createObserveResultForTest } from "../flatHierarchyBuilders";
 import type { BackStack } from "../../../../src/features/observe/interfaces/BackStack";
 
 function makeResult(): ObserveResult {
-  return {
-    updatedAt: 0,
-    screenSize: { width: 0, height: 0 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  return createObserveResultForTest({ updatedAt: 0, screenSize: { width: 0, height: 0 } });
 }
 
 function makeDevice(): BootedDevice {
@@ -20,15 +17,11 @@ function makeDevice(): BootedDevice {
     name: "test-device",
     platform: "android",
     deviceId: "test-device",
-  } as BootedDevice;
+  };
 }
 
 class FakeBackStack implements BackStack {
-  configured: BackStackInfo = {
-    activities: [],
-    tasks: [],
-    currentActivity: null,
-  } as unknown as BackStackInfo;
+  configured: BackStackInfo = { depth: 0, activities: [], tasks: [] };
   shouldFail: Error | null = null;
   async execute(): Promise<BackStackInfo> {
     if (this.shouldFail) {
@@ -128,12 +121,15 @@ describe("DeviceStateCollector", () => {
     });
 
     test("does not append error on failure (logs only)", async () => {
-      // Swap getWakefulness to throw
-      (fakeAdb as any).getWakefulness = async () => {
-        throw new Error("wake fail");
-      };
+      const wakefulness = spyOn(fakeAdb, "getWakefulness").mockRejectedValue(
+        new Error("wake fail"),
+      );
       const result = makeResult();
-      await collector.collectWakefulness(result);
+      try {
+        await collector.collectWakefulness(result);
+      } finally {
+        wakefulness.mockRestore();
+      }
       expect(result.wakefulness).toBeUndefined();
       expect(result.errors).toBeUndefined();
     });
@@ -162,11 +158,13 @@ describe("DeviceStateCollector", () => {
     });
 
     test("does not append error on failure (logs only)", async () => {
-      (fakeAdb as any).getDeviceLock = async () => {
-        throw new Error("lock fail");
-      };
+      const deviceLock = spyOn(fakeAdb, "getDeviceLock").mockRejectedValue(new Error("lock fail"));
       const result = makeResult();
-      await collector.collectDeviceLock(result);
+      try {
+        await collector.collectDeviceLock(result);
+      } finally {
+        deviceLock.mockRestore();
+      }
       expect(result.deviceLock).toBeUndefined();
       expect(result.errors).toBeUndefined();
     });

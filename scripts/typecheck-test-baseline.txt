@@ -306,7 +306,6 @@ test/daemon/helpers/desktopWireHarness.ts TS2352 1
 test/daemon/helpers/ideRouteParamCases.ts TS2741 1
 test/daemon/helpers/inputSocketHarness.ts TS18048 1
 test/daemon/helpers/inputSocketHarness.ts TS2345 2
-test/daemon/helpers/inputSocketHarness.ts TS2352 1
 test/daemon/helpers/inputSocketHarness.ts TS2739 1
 test/daemon/ideMutationReleasedMidCall.test.ts TS2322 1
 test/daemon/ideMutationReleasedMidCall.test.ts TS2741 1
@@ -611,11 +610,12 @@ test/daemon/socketServerInputSuspectSession.test.ts TS2345 1
 test/daemon/socketServerInputSuspectSession.test.ts TS2741 1
 test/daemon/socketServerInputSuspectSession.test.ts TS2769 1
 test/daemon/socketServerInputSwipe.integration.test.ts TS2741 11
+test/daemon/socketServerInputTap.integration.test.ts TS2322 8
 test/daemon/socketServerInputTap.integration.test.ts TS2741 23
 test/daemon/socketServerInputToolActivity.test.ts TS2322 1
 test/daemon/socketServerInputToolActivity.test.ts TS2719 1
 test/daemon/socketServerInputToolActivity.test.ts TS2741 2
-test/daemon/socketServerInputTypeText.integration.test.ts TS2352 2
+test/daemon/socketServerInputTypeText.integration.test.ts TS2322 7
 test/daemon/socketServerInputTypeText.integration.test.ts TS2493 1
 test/daemon/socketServerInputTypeText.integration.test.ts TS2741 39
 test/daemon/socketServerInputTypeText.integration.test.ts TS2769 3
@@ -659,6 +659,8 @@ test/daemon/socketServerToolCapabilities.integration.test.ts TS2352 2
 test/daemon/socketServerToolCapabilities.integration.test.ts TS2741 1
 test/daemon/socketServerTransportLifecycle.test.ts TS2339 3
 test/daemon/socketServerTypedRefusal.test.ts TS2769 1
+test/daemon/socketServerWriteBackpressure.test.ts TS2345 20
+test/daemon/socketServerWriteBackpressure.test.ts TS2611 1
 test/daemon/socketTasksRelay.integration.test.ts TS2488 1
 test/daemon/socketTasksRelay.integration.test.ts TS2741 1
 test/daemon/sseKeepaliveAndDisconnect.test.ts TS2345 2

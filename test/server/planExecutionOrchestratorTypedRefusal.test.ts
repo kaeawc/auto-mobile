@@ -1,4 +1,5 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
+import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as planUtils from "../../src/utils/planUtils";
 import {
@@ -124,7 +125,7 @@ for (const recovering of [true, false]) {
         ...(recovering ? { retryAfterMs: 12345 } : {}),
       },
     ];
-    const error = new acquisitionRefusals.DeviceUnhealthyError(devices, "unhealthy");
+    const error = new DeviceUnhealthyError(devices, "unhealthy");
     const expected = {
       code: "device_unhealthy",
       deviceId: "emulator-5554",
@@ -146,9 +147,7 @@ for (const recovering of [true, false]) {
 }
 
 test("#12112 a cleanup refusal keeps the plan deviceId at top level", async () => {
-  execute.mockRejectedValue(
-    new acquisitionRefusals.DeviceCleanupInProgressError("emulator-9999", 1000),
-  );
+  execute.mockRejectedValue(new DeviceCleanupInProgressError("emulator-9999", 1000));
   expect(await run()).toMatchObject({
     success: false,
     code: "device_cleanup_in_progress",

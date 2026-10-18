@@ -1,10 +1,8 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
-import {
-  BindingOwnershipLostError,
-  BindingOwnershipUnconfirmedError,
-} from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipLostError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { BrokerExecutionRelease } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
 import {

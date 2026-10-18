@@ -7,12 +7,12 @@ import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
 import { migrateBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import {
-  BINDING_REGISTRY_BUSY_TIMEOUT_MS,
   openSqliteBindingRegistry,
   SqliteBindingRegistry,
   type BindingRegistryDatabase,
   defaultBindingRegistryPath,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../../src/daemon/sessionBroker/registry/openRegistrySqlite";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../../../src/db/database";
 import { describeBindingRegistryContract } from "../../../helpers/bindingRegistryContract";
 

@@ -52,13 +52,10 @@ import { type AcquisitionReceipt } from "./acquisitionReceipt";
 import { TransitionalAdbBindWait } from "./transitionalAdbBindWait";
 import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
-import {
-  DeviceCleanupInProgressError,
-  DeviceUnhealthyError,
-  DEVICE_UNHEALTHY_CODE,
-  DeviceOwnedByOtherDaemonError,
-  DeviceShuttingDownError,
-} from "./deviceAcquisitionRefusals";
+import { DEVICE_UNHEALTHY_CODE, DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceUnhealthyError } from "./DeviceUnhealthyError";
+import { DeviceCleanupInProgressError } from "./DeviceCleanupInProgressError";
+import { DeviceShuttingDownError } from "./DeviceShuttingDownError";
 import {
   currentAllocationCancellationScope,
   withAllocationCancellationScope,
@@ -210,10 +207,8 @@ import {
   type ManagedDeviceRef,
   type BindingExclusion,
 } from "./sessionBroker/provisioning/exclusion";
-import {
-  DeviceAssignedToBindingError,
-  BindingDiscoveryIncompleteError,
-} from "./sessionBroker/provisioning/refusal";
+import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "./sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,

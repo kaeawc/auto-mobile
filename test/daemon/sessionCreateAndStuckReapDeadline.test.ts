@@ -1,10 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import {
-  SESSION_CREATION_TIMEOUT_CODE,
-  SessionCreationTimeoutError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { SESSION_CREATION_TIMEOUT_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
+import { SessionCreationTimeoutError } from "../../src/daemon/SessionCreationTimeoutError";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import {
   STUCK_REAP_WARN_MS,

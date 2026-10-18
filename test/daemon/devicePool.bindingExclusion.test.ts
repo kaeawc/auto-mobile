@@ -12,8 +12,8 @@ import {
   DEVICE_ASSIGNED_TO_BINDING_CODE,
   BINDING_DISCOVERY_INCOMPLETE_CODE,
   DeviceAssignedToBindingError,
-  BindingDiscoveryIncompleteError,
 } from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";

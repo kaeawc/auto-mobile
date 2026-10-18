@@ -12,7 +12,7 @@ import {
   BrokerExecutionRelease,
   managedExecutionSessionsFrom,
 } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { InFlightBindingReservations } from "../../../../src/daemon/sessionBroker/registry/ownerLiveness";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";

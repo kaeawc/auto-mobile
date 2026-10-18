@@ -1,4 +1,4 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
@@ -238,7 +238,7 @@ for (const recovering of [true, false]) {
         ...(recovering ? { retryAfterMs: 12345 } : {}),
       },
     ];
-    const error = new acquisitionRefusals.DeviceUnhealthyError(devices, "unhealthy");
+    const error = new DeviceUnhealthyError(devices, "unhealthy");
     expect(mcpRequestFailureDetails(error, undefined)).toEqual({
       code: "device_unhealthy",
       retryable: recovering,

@@ -26,14 +26,13 @@ import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
 import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
 import {
-  DeviceManagerBindingInventory,
-  GateBindingBootCapacity,
-  PoolBindingDeviceClaims,
   ToolBindingProvisioner,
   type BindingBootCapacityAssertion,
-  type BindingClaimPool,
   type BindingToolInvoker,
 } from "./reconcilerPorts";
+import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDeviceClaims";
+import { GateBindingBootCapacity } from "./GateBindingBootCapacity";
+import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,

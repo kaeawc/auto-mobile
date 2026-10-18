@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyManager,
-  CtrlProxyApkInstallError,
-  CtrlProxyInspectionError,
   MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
   REBIND_BIND_WAIT_BUDGET_MS,
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/ctrlProxy/CtrlProxyManager";
+import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyInspectionError";
+import { CtrlProxyApkInstallError } from "../../src/ctrlProxy/CtrlProxyApkInstallError";
 import type { CtrlProxyApkPrefetcher } from "../../src/ctrlProxy/CtrlProxyApkPrefetcher";
 import type { FileDownloader } from "../../src/utils/FileDownloader";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";

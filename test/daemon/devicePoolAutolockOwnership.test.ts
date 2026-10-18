@@ -14,7 +14,7 @@ import { up as addLivenessWriterFence } from "../../src/db/migrations/2026_09_17
 import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_000_device_session_activity_seq";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
-import { DeviceShuttingDownError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../../test/fakes/FakeTimer";
 import { FakeIdGenerator } from "../../test/fakes/FakeIdGenerator";

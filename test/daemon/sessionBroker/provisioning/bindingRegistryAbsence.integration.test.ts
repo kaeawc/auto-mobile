@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RegistryBindingExclusion } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
-import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import {
   openSqliteBindingRegistry,
   bindingRegistryFileExists,

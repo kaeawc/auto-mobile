@@ -1,3 +1,8 @@
+import { ForceRestartCancelledError } from "./ForceRestartCancelledError";
+import { RemoteServicePortUnavailableError } from "./RemoteServicePortUnavailableError";
+import { CtrlProxyStartupRecoveryInterruptedError } from "./CtrlProxyStartupRecoveryInterruptedError";
+import { CtrlProxyRunnerExitedDuringStartupError } from "./CtrlProxyRunnerExitedDuringStartupError";
+import { CtrlProxyStartupCancelledByStopError } from "./CtrlProxyStartupCancelledByStopError";
 import { MapDeviceClientRegistry } from "./deviceClientRegistry";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { IosPhysicalDeviceLister } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
@@ -89,20 +94,6 @@ export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
   /** Startup was cancelled while another recovery path may still be active. */
   recoveryInterrupted?: boolean;
-}
-
-class CtrlProxyStartupRecoveryInterruptedError extends Error {}
-
-class CtrlProxyStartupCancelledByStopError extends CtrlProxyStartupRecoveryInterruptedError {
-  constructor() {
-    super("iOS CtrlProxy startup was cancelled by stop()");
-  }
-}
-
-class CtrlProxyRunnerExitedDuringStartupError extends CtrlProxyStartupRecoveryInterruptedError {
-  constructor() {
-    super("iOS CtrlProxy runner exited during startup");
-  }
 }
 
 export interface CtrlProxyStartOptions {
@@ -224,21 +215,6 @@ interface DaemonManagedRunnerParentRoot {
 // Re-exported from the extracted collaborator (issue #3218) so existing
 // consumers/tests keep importing it from this facade module.
 export type { HostPortAvailabilityChecker };
-
-class RemoteServicePortUnavailableError extends Error {
-  constructor(host: string, port: number) {
-    super(`Remote runner port ${port} is already in use on ${host}`);
-    this.name = "RemoteServicePortUnavailableError";
-  }
-}
-
-/** Marks a forced-restart failure caused by its initiating caller cancelling. */
-class ForceRestartCancelledError extends Error {
-  constructor(reason: unknown) {
-    super(errorMessage(reason), { cause: reason });
-    this.name = "ForceRestartCancelledError";
-  }
-}
 
 /**
  * Capabilities of the iOS device for CtrlProxy

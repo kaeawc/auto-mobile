@@ -3,7 +3,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { Timer } from "../../../utils/SystemTimer";
-import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "./sqliteBindingRegistry";
+import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "./openRegistrySqlite";
 
 /** First retry delay for shared registry contention. */
 export const REGISTRY_RETRY_INITIAL_DELAY_MS = 25;

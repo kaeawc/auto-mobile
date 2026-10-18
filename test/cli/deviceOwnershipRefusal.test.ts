@@ -8,11 +8,9 @@ import {
 } from "../../src/cli";
 import { cliDeviceOwnershipHint } from "../../src/cli/deviceOwnershipHint";
 import { InputDeviceOwnedError, TOOL_CALL_REMEDY } from "../../src/daemon/inputDeviceOwnership";
-import {
-  DeviceCleanupInProgressError,
-  DeviceOwnedByOtherDaemonError,
-  DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";

@@ -39,10 +39,8 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../../src/ctrlProxy/RunnerReadinessService";
-import {
-  DeviceUnhealthyError,
-  DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
+import { DeviceTransportOfflineError } from "../../src/daemon/DeviceTransportOfflineError";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { spyOn } from "bun:test";

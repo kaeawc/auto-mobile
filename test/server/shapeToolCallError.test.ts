@@ -11,12 +11,10 @@ import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
-import {
-  DeviceAssignedToBindingError,
-  BindingDiscoveryIncompleteError,
-  BindingOwnershipUnconfirmedError,
-  BindingOwnershipLostError,
-} from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import { BindingOwnershipLostError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";

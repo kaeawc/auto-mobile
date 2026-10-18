@@ -46,7 +46,7 @@ import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { ManagedExecutionReowner } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
-import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   isSessionlessDeviceRead,

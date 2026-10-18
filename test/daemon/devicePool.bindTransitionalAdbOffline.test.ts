@@ -2,10 +2,8 @@ import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import {
-  DeviceShuttingDownError,
-  DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceTransportOfflineError } from "../../src/daemon/DeviceTransportOfflineError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { ActionableError, type BootedDevice } from "../../src/models";

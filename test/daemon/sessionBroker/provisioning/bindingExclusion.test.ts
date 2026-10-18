@@ -11,8 +11,8 @@ import {
   DEVICE_ASSIGNED_TO_BINDING_CODE,
   DeviceAssignedToBindingError,
   BINDING_DISCOVERY_INCOMPLETE_CODE,
-  BindingDiscoveryIncompleteError,
 } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";

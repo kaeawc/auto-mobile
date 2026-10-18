@@ -1,4 +1,7 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
+import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
+import { RetryableDeviceAcquisitionError } from "../../src/daemon/RetryableDeviceAcquisitionError";
+import { SessionReleasedDuringCreationError } from "../../src/daemon/SessionReleasedDuringCreationError";
 import { Server } from "@modelcontextprotocol/server";
 import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
@@ -38,6 +41,17 @@ import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
 import * as provisioning from "../../src/devices/exactDeviceProvisioning";
 import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
+import * as nsDeviceCleanupInProgressError from "../../src/daemon/DeviceCleanupInProgressError";
+import * as nsDeviceUnhealthyError from "../../src/daemon/DeviceUnhealthyError";
+import * as nsDeviceTransportOfflineError from "../../src/daemon/DeviceTransportOfflineError";
+import * as nsBindingDiscoveryIncompleteError from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import * as nsBindingRegistrySchemaUnsupportedError from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import * as nsBindingOwnershipLostError from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import * as nsBindingOwnershipUnconfirmedError from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
+import * as nsSessionReleasedDuringCreationError from "../../src/daemon/SessionReleasedDuringCreationError";
+import * as nsDeviceShuttingDownError from "../../src/daemon/DeviceShuttingDownError";
+import * as nsSessionCreationTimeoutError from "../../src/daemon/SessionCreationTimeoutError";
+import * as nsRetryableDeviceAcquisitionError from "../../src/daemon/RetryableDeviceAcquisitionError";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
 import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
@@ -119,6 +133,20 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "devices/exactDeviceProvisioning": provisioning,
   "devices/deviceBootService": deviceBoot,
   "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
+  "daemon/SessionReleasedDuringCreationError": nsSessionReleasedDuringCreationError,
+  "daemon/DeviceShuttingDownError": nsDeviceShuttingDownError,
+  "daemon/SessionCreationTimeoutError": nsSessionCreationTimeoutError,
+  "daemon/RetryableDeviceAcquisitionError": nsRetryableDeviceAcquisitionError,
+  "daemon/DeviceCleanupInProgressError": nsDeviceCleanupInProgressError,
+  "daemon/DeviceUnhealthyError": nsDeviceUnhealthyError,
+  "daemon/DeviceTransportOfflineError": nsDeviceTransportOfflineError,
+  "daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError":
+    nsBindingDiscoveryIncompleteError,
+  "daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError":
+    nsBindingRegistrySchemaUnsupportedError,
+  "daemon/sessionBroker/provisioning/BindingOwnershipLostError": nsBindingOwnershipLostError,
+  "daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError":
+    nsBindingOwnershipUnconfirmedError,
   "daemon/inputDeviceOwnership": inputOwnership,
   "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
@@ -770,10 +798,10 @@ describe("refusal wire contract", () => {
         expect(payload).not.toHaveProperty("retryAfterMs");
       }
     }
-    expect(drivenErrorClasses.has(acquisitionRefusals.DeviceUnhealthyError)).toBe(true);
+    expect(drivenErrorClasses.has(DeviceUnhealthyError)).toBe(true);
     expect(
       isTypedToolRefusal(
-        new acquisitionRefusals.DeviceUnhealthyError(
+        new DeviceUnhealthyError(
           [{ deviceId: "device", reason: "future-reason", recovering: false }],
           "unhealthy",
         ),
@@ -984,7 +1012,7 @@ describe("refusal wire contract", () => {
       expect(drivenErrorClasses.has(errorClass), errorClass.name).toBe(false);
     }
     expect(fixtureDrivenErrorClasses()).toEqual(drivenErrorClasses);
-    expect(drivenErrorClasses.has(acquisitionRefusals.RetryableDeviceAcquisitionError)).toBe(false);
+    expect(drivenErrorClasses.has(RetryableDeviceAcquisitionError)).toBe(false);
   });
 
   test("the class coverage checker detects a new coded refusal", () => {
@@ -1074,7 +1102,7 @@ describe("refusal wire contract", () => {
       ],
       [
         "creation release",
-        () => new acquisitionRefusals.SessionReleasedDuringCreationError(SESSION),
+        () => new SessionReleasedDuringCreationError(SESSION),
         "session_released_during_creation",
         false,
         "acquire_new_session",

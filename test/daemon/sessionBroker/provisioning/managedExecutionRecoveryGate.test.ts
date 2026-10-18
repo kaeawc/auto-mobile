@@ -3,7 +3,7 @@ import { Daemon } from "../../../../src/daemon/daemon";
 import { DaemonState } from "../../../../src/daemon/daemonState";
 import { SessionManager, type SessionDeviceAssigner } from "../../../../src/daemon/sessionManager";
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
-import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import type { BindingAssignmentRecord } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { ManagedExecutionReownRegistry } from "../../../helpers/deferredProvisioningFixtures";
 import { DeviceSessionManager } from "../../../../src/devices/DeviceSessionManager";

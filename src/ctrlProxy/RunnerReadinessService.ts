@@ -1,9 +1,10 @@
 import { errorMessage } from "../utils/describeUnknownError";
-import type { BootedDevice, DeviceLockState } from "../models";
+import type { BootedDevice, DeviceLockState, ViewHierarchyResult } from "../models";
 import { ActionableError, toActionableError } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { AndroidCtrlProxyManager, CtrlProxyInspectionError } from "./CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "./CtrlProxyManager";
+import { CtrlProxyInspectionError } from "./CtrlProxyInspectionError";
 import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { redactAndroidCommandOutput } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
@@ -29,7 +30,6 @@ import {
   findSystemUiAnrDialog,
   type SystemUiAnrDialog,
 } from "../utils/androidSystemUiAnr";
-import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 
 const READINESS_RETRY_DELAY_MS = 250;
 const READINESS_PROBE_TIMEOUT_MS = 2_000;

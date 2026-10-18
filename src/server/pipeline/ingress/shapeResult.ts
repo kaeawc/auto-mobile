@@ -1,6 +1,6 @@
 import { DaemonState } from "../../../daemon/daemonState";
 import { daemonShuttingDownMcpOutcome } from "../../../daemon/daemonShutdownOutcome";
-import { SessionReleasedDuringCreationError } from "../../../daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../../daemon/SessionReleasedDuringCreationError";
 import {
   DaemonSessionCreationRejectedError,
   TerminalSessionError,

@@ -4,7 +4,7 @@ import {
   MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
 } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
-import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { logger } from "../../../../src/utils/logger";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";

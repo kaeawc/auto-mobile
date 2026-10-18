@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../../helpers/fakeTimerStepping";
 import { retryBusyRegistryWrite } from "../registry/fixtures/retryBusyRegistryWrite";

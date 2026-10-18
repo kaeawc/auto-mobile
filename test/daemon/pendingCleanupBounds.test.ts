@@ -11,7 +11,7 @@ import {
   type SessionCacheData,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
 import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
 import { NetworkState } from "../../src/server/NetworkState";
 import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";

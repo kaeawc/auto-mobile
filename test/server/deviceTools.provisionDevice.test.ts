@@ -14,13 +14,13 @@ import { provisionCancellationOutcomes } from "../../src/server/provisionCancell
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
   DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,
-  DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
-  DeviceShuttingDownError,
-  DeviceTransportOfflineError,
   DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
-  SessionCreationTimeoutError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
+import { DeviceTransportOfflineError } from "../../src/daemon/DeviceTransportOfflineError";
+import { SessionCreationTimeoutError } from "../../src/daemon/SessionCreationTimeoutError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";

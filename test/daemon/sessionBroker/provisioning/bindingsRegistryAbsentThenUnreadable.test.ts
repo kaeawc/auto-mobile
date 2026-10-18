@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { createDevicePoolDependencies } from "../../../helpers/devicePoolDependencies";
 import { RegistryBindingExclusion } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
-import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { DevicePool } from "../../../../src/daemon/devicePool";
 import { SessionManager } from "../../../../src/daemon/sessionManager";

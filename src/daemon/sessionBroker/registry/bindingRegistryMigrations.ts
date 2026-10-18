@@ -3,7 +3,7 @@ import { Migrator, type Migration, type MigrationProvider } from "kysely/migrati
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { selectMigrationLock } from "../../../db/migrationLock";
-import { BindingRegistrySchemaUnsupportedError } from "../provisioning/refusal";
+import { BindingRegistrySchemaUnsupportedError } from "../provisioning/BindingRegistrySchemaUnsupportedError";
 import * as retireSlot008 from "./migrations/2026_10_16_008_retire_slot_features";
 import * as bindingRegistry000 from "./migrations/2026_10_09_000_binding_registry";
 import * as bindingRegistry001 from "./migrations/2026_10_09_001_binding_owner_fencing";

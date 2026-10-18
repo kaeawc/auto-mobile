@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
+import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyInspectionError";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";

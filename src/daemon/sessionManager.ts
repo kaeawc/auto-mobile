@@ -169,9 +169,9 @@ import {
   SESSION_REBINDING_CODE,
   SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
-  SessionCreationTimeoutError,
-  SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
+import { SessionCreationTimeoutError } from "./SessionCreationTimeoutError";
+import { SessionReleasedDuringCreationError } from "./SessionReleasedDuringCreationError";
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import { DAEMON_SESSION_NOT_ACTIVE_CODE, DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {

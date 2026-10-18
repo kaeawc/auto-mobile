@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { Kysely } from "kysely";
 import { Migrator } from "kysely/migration";
 import {
-  BINDING_REGISTRY_BUSY_TIMEOUT_MS,
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../../src/daemon/sessionBroker/registry/openRegistrySqlite";
 import { BEGIN_TRANSACTION_SQL, BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
 import { bindingRegistryMigrationProvider } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { classifySqliteError } from "../../../../src/db/databaseFailureClassification";

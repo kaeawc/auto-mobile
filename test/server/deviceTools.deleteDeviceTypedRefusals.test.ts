@@ -9,16 +9,16 @@ import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisi
 import {
   DeviceAssignedToBindingError,
   BINDING_DISCOVERY_INCOMPLETE_CODE,
-  BindingDiscoveryIncompleteError,
 } from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import {
-  DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
-  DeviceShuttingDownError,
   SESSION_REBINDING_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import { typedTeardownRefusal } from "../../src/server/deviceToolsLifecycle";
 import type { BootedDevice } from "../../src/models";
 import {

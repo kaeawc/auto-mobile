@@ -5,11 +5,11 @@ import { DEVICE_CLEANUP_WAIT_BUDGET_MS } from "../../src/daemon/daemonMcpProxy";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
-  DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
-  DeviceShuttingDownError,
-  type RetryableDeviceAcquisitionError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
+import { type RetryableDeviceAcquisitionError } from "../../src/daemon/RetryableDeviceAcquisitionError";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import {
   getSessionReleaseCleanupWorstCaseMs,
   getSessionReleaseStuckDeadlineMs,

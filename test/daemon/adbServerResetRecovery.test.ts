@@ -5,10 +5,8 @@ import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { ActionableError } from "../../src/models/ActionableError";
-import {
-  BindingOwnershipUnconfirmedError,
-  BindingOwnershipLostError,
-} from "../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipLostError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,

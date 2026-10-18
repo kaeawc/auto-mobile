@@ -174,10 +174,8 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../../ctrlProxy/RunnerReadinessService";
-import {
-  DeviceTransportOfflineError,
-  DeviceUnhealthyError,
-} from "../../daemon/deviceAcquisitionRefusals";
+import { DeviceUnhealthyError } from "../../daemon/DeviceUnhealthyError";
+import { DeviceTransportOfflineError } from "../../daemon/DeviceTransportOfflineError";
 import { DeviceLostError } from "../../models/DeviceLostError";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,

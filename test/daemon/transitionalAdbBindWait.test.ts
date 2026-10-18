@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { TransitionalAdbBindWait } from "../../src/daemon/transitionalAdbBindWait";
-import { DeviceTransportOfflineError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceTransportOfflineError } from "../../src/daemon/DeviceTransportOfflineError";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";

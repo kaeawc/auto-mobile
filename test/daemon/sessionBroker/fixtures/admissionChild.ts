@@ -1,6 +1,6 @@
 /** Real process contender. Parent gates admission after every child has opened the same file. */
 import { classifySqliteError } from "../../../../src/db/databaseFailureClassification";
-import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
 

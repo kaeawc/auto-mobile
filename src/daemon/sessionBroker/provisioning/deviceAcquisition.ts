@@ -24,7 +24,8 @@
  */
 
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
-import { BindingDiscoveryIncompleteError, BindingRegistrySchemaUnsupportedError } from "./refusal";
+import { BindingRegistrySchemaUnsupportedError } from "./BindingRegistrySchemaUnsupportedError";
+import { BindingDiscoveryIncompleteError } from "./BindingDiscoveryIncompleteError";
 import { failure as reconcileFailure } from "./reconciler";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
 import { resolveManagedExecutionIdleTimeoutMs } from "./executionLiveness";

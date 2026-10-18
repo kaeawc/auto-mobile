@@ -1,4 +1,4 @@
-import { BindingDiscoveryIncompleteError } from "../../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { RegistryRetryPacing } from "../../../../../src/daemon/sessionBroker/registry/registryRetryPacing";
 import { classifySqliteError } from "../../../../../src/db/databaseFailureClassification";
 import { defaultTimer, type Timer } from "../../../../../src/utils/SystemTimer";

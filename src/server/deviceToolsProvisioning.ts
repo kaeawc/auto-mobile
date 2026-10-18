@@ -6,13 +6,11 @@ import {
   DEVICE_OFFLINE_CODE,
   DeviceOwnedByOtherDaemonError,
   SESSION_CREATION_TIMEOUT_CODE,
-  RetryableDeviceAcquisitionError,
 } from "../daemon/deviceAcquisitionRefusals";
+import { RetryableDeviceAcquisitionError } from "../daemon/RetryableDeviceAcquisitionError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import {
-  DeviceAssignedToBindingError,
-  BindingDiscoveryIncompleteError,
-} from "../daemon/sessionBroker/provisioning/refusal";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";

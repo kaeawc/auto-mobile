@@ -7,10 +7,8 @@ import {
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import {
-  DeviceTransportOfflineError,
-  DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceTransportOfflineError } from "../../src/daemon/DeviceTransportOfflineError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import {
   deviceAssignedToOtherSessionError,
   devicePreparedForOtherRequestError,

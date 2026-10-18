@@ -8,7 +8,7 @@ import {
   createDefaultBindingExclusion,
   RegistryBindingExclusion,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
-import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { defaultBindingRegistryPath } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { DevicePool } from "../../../../src/daemon/devicePool";

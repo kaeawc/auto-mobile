@@ -20,7 +20,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { ExecutionTrackerPlanExecutionLock } from "../../src/server/PlanExecutionLock";
 import { executionTracker } from "../../src/server/executionTracker";
 import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
-import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../src/daemon/SessionReleasedDuringCreationError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";

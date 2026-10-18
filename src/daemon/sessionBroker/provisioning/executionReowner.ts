@@ -16,7 +16,8 @@
 
 import type { BackoffPolicy } from "../../../utils/Backoff";
 import type { ActionableError } from "../../../models/ActionableError";
-import { BindingOwnershipLostError, BindingOwnershipUnconfirmedError } from "./refusal";
+import { BindingOwnershipLostError } from "./BindingOwnershipLostError";
+import { BindingOwnershipUnconfirmedError } from "./BindingOwnershipUnconfirmedError";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import type { ReleaseDeviceHold } from "../../sessionManager";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";

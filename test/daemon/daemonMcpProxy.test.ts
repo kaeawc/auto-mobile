@@ -1,4 +1,4 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -4415,7 +4415,7 @@ describe("DaemonMcpProxy", () => {
                 "emulator-5554",
                 "is being released",
               )
-            : new acquisitionRefusals.DeviceUnhealthyError(
+            : new DeviceUnhealthyError(
                 [
                   {
                     deviceId: "emulator-5554",

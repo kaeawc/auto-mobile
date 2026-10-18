@@ -9,7 +9,7 @@ import {
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
 } from "../../../../src/daemon/sessionBroker/provisioning/executionReowner";
-import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../../src/daemon/sessionBroker/registry/openRegistrySqlite";
 import {
   MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
   MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
@@ -17,10 +17,8 @@ import {
   MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_DELAY_MS,
   MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
 } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import {
-  BindingDiscoveryIncompleteError,
-  BindingOwnershipUnconfirmedError,
-} from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import {
   BINDING_BACK_OUT_RETRY_INITIAL_DELAY_MS,
   BINDING_BACK_OUT_RETRY_MAX_DELAY_MS,

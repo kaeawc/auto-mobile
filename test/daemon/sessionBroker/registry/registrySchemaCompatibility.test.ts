@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import { BindingRegistrySchemaUnsupportedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { Migrator } from "kysely/migration";
 import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
 import { NoOpMigrationLock } from "../../../../src/db/migrationLock";
 import { BrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
-import * as refusals from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   migrateBindingRegistry,
   bindingRegistryMigrationProvider,
@@ -115,7 +115,7 @@ describe("binding registry schema compatibility", () => {
       dbPath: ":memory:",
       unknownMigrations: [FUTURE],
     });
-    expect(error).toBeInstanceOf(refusals.BindingRegistrySchemaUnsupportedError);
+    expect(error).toBeInstanceOf(BindingRegistrySchemaUnsupportedError);
     if (harness === partial) {
       expect(
         harness.sqlite.query("SELECT name FROM kysely_migration WHERE name = ?").get(MIGRATION_005),
@@ -145,7 +145,7 @@ describe("binding registry schema compatibility", () => {
         name: "BindingRegistrySchemaUnsupportedError",
         unknownMigrations: [FUTURE],
       });
-      expect(error).toBeInstanceOf(refusals.BindingRegistrySchemaUnsupportedError);
+      expect(error).toBeInstanceOf(BindingRegistrySchemaUnsupportedError);
     } finally {
       acquire.mockRestore();
       release.mockRestore();
@@ -175,7 +175,7 @@ describe("binding registry schema compatibility", () => {
     const timer = new FakeTimer();
     const registry = new FakeBindingRegistry(timer);
     const ensureScope = spyOn(registry, "ensureScope");
-    const error = new refusals.BindingRegistrySchemaUnsupportedError(":memory:", [FUTURE]);
+    const error = new BindingRegistrySchemaUnsupportedError(":memory:", [FUTURE]);
     expect(error.toPayload()).toEqual({
       code: "registry_schema_unsupported",
       retryable: false,

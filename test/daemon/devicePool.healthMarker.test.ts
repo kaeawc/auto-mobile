@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -8,7 +9,6 @@ import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRe
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -313,7 +313,7 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
                 deviceId: device.deviceId,
                 platform: "android",
               });
-      await expect(acquire()).rejects.toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+      await expect(acquire()).rejects.toBeInstanceOf(DeviceUnhealthyError);
       await expect(acquire()).rejects.toThrow("network-condition");
       await expect(acquire()).rejects.toThrow("killDevice");
       expect(h.pool.getDevice(device.deviceId)?.sessionId).toBeNull();
@@ -657,7 +657,7 @@ test("#12112 named unhealthy recovery has an exact shrinking bound", async () =>
       },
     ],
   });
-  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toBeInstanceOf(DeviceUnhealthyError);
   await h.timer.advanceTimeAsync(137, flush);
   expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 12863 });
   h.pause();
@@ -682,8 +682,8 @@ test("#12112 three dispatched failed attempts make the typed refusal permanent",
   expect(h.calls).toBe(6);
   const error = await typedAllocationError(h);
   expect(error).toMatchObject({ code: "device_unhealthy", retryable: false, recovering: false });
-  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
-  if (!(error instanceof acquisitionRefusals.DeviceUnhealthyError)) {
+  expect(error).toBeInstanceOf(DeviceUnhealthyError);
+  if (!(error instanceof DeviceUnhealthyError)) {
     throw new Error("expected typed refusal");
   }
   expect(typeof error.retryAfterMs).not.toBe("number");
@@ -714,7 +714,7 @@ test("#12112 app-cleanup uses its own retry deadline and keeps the permanent rem
   expect(calls).toBe(3);
   const error = await typedAllocationError(h);
   expect(error).toMatchObject({ retryable: false, recovering: false, retryAfterMs: undefined });
-  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toBeInstanceOf(DeviceUnhealthyError);
   if (!(error instanceof Error)) {
     throw new Error("expected error");
   }
@@ -795,7 +795,7 @@ test("#12112 every unhealthy candidate carries evidence and the smallest recover
       { deviceId: other.deviceId, reason: "app-cleanup", recovering: true, retryAfterMs: 14404 },
     ],
   });
-  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toBeInstanceOf(DeviceUnhealthyError);
   expect(error).not.toHaveProperty("deviceId", expect.any(String));
   expect(error).not.toHaveProperty("reason", expect.any(String));
   h.markers.clear(other.deviceId);
@@ -1098,7 +1098,7 @@ test("#12112 recording-teardown refusal carries its real recovery bound", async 
     5_000,
   );
   const error = await typedAllocationError(h);
-  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toBeInstanceOf(DeviceUnhealthyError);
   expect(error).toMatchObject({
     code: "device_unhealthy",
     deviceId: device.deviceId,
@@ -1145,7 +1145,7 @@ test("#12112 recording-teardown refusal reports the re-check after three dispatc
   expect(calls).toBe(3);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("recording-teardown");
   const error = await typedAllocationError(h);
-  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toBeInstanceOf(DeviceUnhealthyError);
   expect(error).toMatchObject({
     code: "device_unhealthy",
     deviceId: device.deviceId,

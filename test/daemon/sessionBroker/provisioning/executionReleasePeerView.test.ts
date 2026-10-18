@@ -4,7 +4,7 @@ import { SessionManager } from "../../../../src/daemon/sessionManager";
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
-import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
+import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { BrokerExecutionRelease } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
 import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
 import {

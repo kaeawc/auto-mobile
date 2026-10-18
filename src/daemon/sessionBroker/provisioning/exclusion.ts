@@ -3,7 +3,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
-import { DeviceAssignedToBindingError, BindingDiscoveryIncompleteError } from "./refusal";
+import { DeviceAssignedToBindingError } from "./refusal";
+import { BindingDiscoveryIncompleteError } from "./BindingDiscoveryIncompleteError";
 import type {
   ManagedDeviceEntry,
   BindingKey,

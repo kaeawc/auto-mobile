@@ -2,10 +2,8 @@ import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import {
-  DeviceCleanupInProgressError,
-  DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
+import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import type { BackoffInput } from "../../src/utils/Backoff";

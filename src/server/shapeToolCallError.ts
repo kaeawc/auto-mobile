@@ -44,20 +44,18 @@ import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
 import { DeviceOutsideBrokerGrantError } from "../daemon/sessionBroker/connectionRefusal";
+import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import { BindingOwnershipUnconfirmedError } from "../daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import {
-  DeviceAssignedToBindingError,
-  BindingDiscoveryIncompleteError,
-  BindingOwnershipUnconfirmedError,
-} from "../daemon/sessionBroker/provisioning/refusal";
-import {
-  RetryableDeviceAcquisitionError,
-  DeviceUnhealthyError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_RELEASED_DURING_CREATION_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
+import { DeviceUnhealthyError } from "../daemon/DeviceUnhealthyError";
+import { RetryableDeviceAcquisitionError } from "../daemon/RetryableDeviceAcquisitionError";
 
 export interface ToolCallErrorContext {
   toolName: string;

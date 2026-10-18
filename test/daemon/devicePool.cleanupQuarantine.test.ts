@@ -1,10 +1,8 @@
 import { makePool } from "../helpers/makePool";
 import { drainMicrotasks, drainUntil, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { expect, test } from "bun:test";
-import {
-  DEVICE_CLEANUP_IN_PROGRESS_CODE,
-  DeviceCleanupInProgressError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
 import {
-  DeviceSessionNotActiveError,
   deviceRestartReleaseReason,
   type DeviceSessionRecord,
   type DeviceSessionRepository,

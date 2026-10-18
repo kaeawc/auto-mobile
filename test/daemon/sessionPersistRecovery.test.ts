@@ -7,7 +7,7 @@ import {
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { DeviceSessionRowChangedError } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionRowChangedError } from "../../src/db/DeviceSessionRowChangedError";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";

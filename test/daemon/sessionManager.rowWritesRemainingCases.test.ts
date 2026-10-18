@@ -15,10 +15,8 @@ import {
   SessionManager,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
-import {
-  DeviceSessionNotActiveError,
-  DeviceSessionRepository,
-} from "../../src/db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
+import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { TerminalReleaseIntent } from "../../src/daemon/terminalReleaseJournal";
 import type { Database } from "../../src/db/types";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";

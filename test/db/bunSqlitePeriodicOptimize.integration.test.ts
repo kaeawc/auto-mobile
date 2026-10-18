@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { Database as BunDatabase } from "bun:sqlite";
-import { BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import { BunSqliteConnectionState } from "../../src/db/BunSqliteConnectionState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 

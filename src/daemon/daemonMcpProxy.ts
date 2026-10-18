@@ -12,34 +12,29 @@ import {
   type DaemonLifecycleReconcilerDeps,
   runPreflightTransport,
 } from "./proxy/DaemonLifecycleReconciler";
-import {
-  DaemonToolOutcomeUnknownError,
-  LifecycleConnectionInFlightError,
-  DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonBoundSessionExpiredError,
-  DaemonSessionStalledError,
-  DaemonConnectionSessionReleasedError,
-  DaemonAmbiguousSessionSelectorError,
-  DaemonToolUnavailableError,
-  daemonInternalErrors,
-  type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./proxy/daemonErrors";
-export {
-  DaemonToolOutcomeUnknownError,
-  LifecycleConnectionInFlightError,
-  DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
-  DaemonBoundSessionExpiredError,
-  DaemonSessionStalledError,
-  DaemonConnectionSessionReleasedError,
-  DaemonAmbiguousSessionSelectorError,
-  DaemonToolUnavailableError,
-  type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./proxy/daemonErrors";
+import { DaemonToolOutcomeUnknownError } from "./proxy/DaemonToolOutcomeUnknownError";
+import { LifecycleConnectionInFlightError } from "./proxy/LifecycleConnectionInFlightError";
+import { DaemonVersionMismatchError } from "./proxy/DaemonVersionMismatchError";
+import { DaemonBuildMismatchError } from "./proxy/DaemonBuildMismatchError";
+import { DaemonBoundSessionExpiredError } from "./proxy/DaemonBoundSessionExpiredError";
+import { DaemonSessionStalledError } from "./proxy/DaemonSessionStalledError";
+import { DaemonConnectionSessionReleasedError } from "./proxy/DaemonConnectionSessionReleasedError";
+import { DaemonAmbiguousSessionSelectorError } from "./proxy/DaemonAmbiguousSessionSelectorError";
+import { DaemonToolUnavailableError } from "./proxy/DaemonToolUnavailableError";
+import { type VersionMismatchReason } from "./proxy/DaemonVersionMismatchError";
+import { type BuildMismatchReason } from "./proxy/DaemonBuildMismatchError";
+export { DaemonToolOutcomeUnknownError } from "./proxy/DaemonToolOutcomeUnknownError";
+export { LifecycleConnectionInFlightError } from "./proxy/LifecycleConnectionInFlightError";
+export { DaemonVersionMismatchError } from "./proxy/DaemonVersionMismatchError";
+export { DaemonBuildMismatchError } from "./proxy/DaemonBuildMismatchError";
+export { DaemonAssetVersionMismatchError } from "./proxy/DaemonAssetVersionMismatchError";
+export { DaemonBoundSessionExpiredError } from "./proxy/DaemonBoundSessionExpiredError";
+export { DaemonSessionStalledError } from "./proxy/DaemonSessionStalledError";
+export { DaemonConnectionSessionReleasedError } from "./proxy/DaemonConnectionSessionReleasedError";
+export { DaemonAmbiguousSessionSelectorError } from "./proxy/DaemonAmbiguousSessionSelectorError";
+export { DaemonToolUnavailableError } from "./proxy/DaemonToolUnavailableError";
+export { type VersionMismatchReason } from "./proxy/DaemonVersionMismatchError";
+export { type BuildMismatchReason } from "./proxy/DaemonBuildMismatchError";
 import { HandoverResolution, type HandoverResolutionPort } from "./proxy/HandoverResolution";
 import {
   BoundSessionHeartbeat,
@@ -179,8 +174,6 @@ import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../con
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
 
-const { DaemonPreflightConnectionError, HeldSessionNotFoundError } = daemonInternalErrors;
-
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
 import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./deviceAcquisitionRefusals";
@@ -234,6 +227,8 @@ import {
   type RecoveryAttemptOutcome,
 } from "./proxyLivenessRecovery";
 import { TickLatenessClock } from "./TickLatenessClock";
+import { DaemonPreflightConnectionError } from "./proxy/DaemonPreflightConnectionError";
+import { HeldSessionNotFoundError } from "./proxy/HeldSessionNotFoundError";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;

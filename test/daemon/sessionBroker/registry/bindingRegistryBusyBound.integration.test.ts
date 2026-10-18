@@ -8,7 +8,8 @@ import {
   type SqliteBindingRegistry,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { BINDING_REGISTRY_BUSY_TIMEOUT_MS } from "../../../../src/daemon/sessionBroker/registry/openRegistrySqlite";
-import { BEGIN_TRANSACTION_SQL, BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
+import { BEGIN_TRANSACTION_SQL } from "../../../../src/db/BunSqliteConnectionState";
+import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
 import { bindingRegistryMigrationProvider } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { classifySqliteError } from "../../../../src/db/databaseFailureClassification";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";

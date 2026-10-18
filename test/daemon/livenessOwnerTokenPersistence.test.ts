@@ -1,5 +1,5 @@
 import { expect, spyOn } from "bun:test";
-import { DeviceSessionNotActiveError } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
 import {
   getDbWriteBarrier,
   resetDbWriteBarrier,

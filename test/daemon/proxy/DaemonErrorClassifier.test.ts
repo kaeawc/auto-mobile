@@ -3,7 +3,7 @@ import { DaemonErrorClassifier } from "../../../src/daemon/proxy/DaemonErrorClas
 import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
 import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
 import { DaemonUnavailableError } from "../../../src/daemon/DaemonUnavailableError";
-import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/DaemonVersionMismatchError";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../../src/daemon/types";
 
 function classifier(

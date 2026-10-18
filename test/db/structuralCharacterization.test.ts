@@ -2,7 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:te
 import { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery, Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
-import { BunSqliteDialect, BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import { BunSqliteConnectionState } from "../../src/db/BunSqliteConnectionState";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import {
   VideoRecordingRepository,

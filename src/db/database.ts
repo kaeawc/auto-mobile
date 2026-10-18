@@ -24,11 +24,8 @@ import { ENV, readEnvRaw } from "../config/env";
 import { logger } from "../utils/logger";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../utils/bunTestRunnerProcess";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import {
-  BunSqliteDialect,
-  DEFAULT_OPTIMIZE_INTERVAL_MS,
-  DEFAULT_RETRY_TOTAL_WAIT_MS,
-} from "./bunSqliteDialect";
+import { BunSqliteDialect, DEFAULT_OPTIMIZE_INTERVAL_MS } from "./bunSqliteDialect";
+import { DEFAULT_RETRY_TOTAL_WAIT_MS } from "./BunSqliteConnectionState";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
   createIncompleteExtractionError,

@@ -7,16 +7,16 @@ import {
 } from "../../src/daemon/releaseReasons";
 import {
   DeviceSessionRepository,
-  DeviceSessionNotActiveError,
-  DeviceSessionRowNotRewritableError,
-  DeviceSessionRowNotReleasableError,
-  DeviceSessionTerminallyReleasedError,
   isRecoverableDeviceSession,
   persistedSessionExpiryReason,
   DEVICE_SESSION_RETENTION_MAX_AGE_MS,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
+import { DeviceSessionRowNotRewritableError } from "../../src/db/DeviceSessionRowNotRewritableError";
+import { DeviceSessionRowNotReleasableError } from "../../src/db/DeviceSessionRowNotReleasableError";
+import { DeviceSessionTerminallyReleasedError } from "../../src/db/DeviceSessionTerminallyReleasedError";
 import type { Database, DeviceSession } from "../../src/db/types";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";

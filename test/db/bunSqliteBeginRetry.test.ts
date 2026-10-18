@@ -4,7 +4,7 @@ import { CompiledQuery } from "kysely";
 import {
   BunSqliteConnectionState,
   DEFAULT_RETRY_TOTAL_WAIT_MS,
-} from "../../src/db/bunSqliteDialect";
+} from "../../src/db/BunSqliteConnectionState";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { Random } from "../../src/utils/Random";

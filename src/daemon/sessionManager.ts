@@ -97,13 +97,9 @@ import {
   type KeepScreenAwakeRestoreOutcome,
   type KeepAwakeRestoreReport,
 } from "../utils/KeepScreenAwakeManager";
+import { DeviceSessionNotActiveError } from "../db/DeviceSessionNotActiveError";
 import {
-  DeviceSessionNotActiveError,
   DeviceSessionRepository,
-  DeviceSessionRowChangedError,
-  DeviceSessionRowNotRewritableError,
-  DeviceSessionRowNotReleasableError,
-  DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   persistedSessionExpiryReason,
@@ -113,6 +109,10 @@ import {
   type RecoverableRowIncarnation,
   type UpsertActiveSessionOptions,
 } from "../db/deviceSessionRepository";
+import { DeviceSessionRowChangedError } from "../db/DeviceSessionRowChangedError";
+import { DeviceSessionRowNotRewritableError } from "../db/DeviceSessionRowNotRewritableError";
+import { DeviceSessionRowNotReleasableError } from "../db/DeviceSessionRowNotReleasableError";
+import { DeviceSessionTerminallyReleasedError } from "../db/DeviceSessionTerminallyReleasedError";
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError, toActionableError } from "../models/ActionableError";

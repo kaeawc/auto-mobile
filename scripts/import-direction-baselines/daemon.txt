@@ -69,7 +69,8 @@ src/daemon/proxy/TaskSessionBindings.ts -> src/server/tasks/TaskManager
 src/daemon/proxy/ToolCallForwarder.ts -> src/server/deviceSessionResult
 src/daemon/proxy/ToolCallForwarder.ts -> src/server/tasks/taskRelay
 src/daemon/proxy/ToolListPoller.ts -> src/server/listChangedBroadcast
-src/daemon/proxy/daemonErrors.ts -> src/server/deviceSessionResult
+src/daemon/proxy/DaemonBoundSessionExpiredError.ts -> src/server/deviceSessionResult
+src/daemon/proxy/DaemonConnectionSessionReleasedError.ts -> src/server/deviceSessionResult
 src/daemon/releaseSessionAndDevice.ts -> src/server/executionTracker
 src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.ts -> src/server/toolRegistry
 src/daemon/sessionBroker/provisioning/deviceDeleter.ts -> src/server/deviceTools

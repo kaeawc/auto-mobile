@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DeviceSessionNotActiveError } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
 import type { LivenessHoldState, LivenessOwnerView } from "../../src/daemon/livenessClaimDecision";
 import {
   SessionLivenessController,

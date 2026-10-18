@@ -6,7 +6,7 @@ import {
   type HeartbeatKeeperPort,
 } from "../../../src/daemon/proxy/HeartbeatKeeper";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
-import { LifecycleConnectionInFlightError } from "../../../src/daemon/proxy/daemonErrors";
+import { LifecycleConnectionInFlightError } from "../../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import { heartbeatRequestTimeoutMs } from "../../../src/daemon/proxy/heartbeatCadence";
 import {
   DAEMON_STALLED_CODE,

@@ -5,12 +5,12 @@ import {
   isTerminalReleaseReason,
   releaseReasonMayReplace,
 } from "../../src/daemon/releaseReasons";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
+import { DeviceSessionRowChangedError } from "../../src/db/DeviceSessionRowChangedError";
+import { DeviceSessionRowNotRewritableError } from "../../src/db/DeviceSessionRowNotRewritableError";
+import { DeviceSessionRowNotReleasableError } from "../../src/db/DeviceSessionRowNotReleasableError";
+import { DeviceSessionTerminallyReleasedError } from "../../src/db/DeviceSessionTerminallyReleasedError";
 import {
-  DeviceSessionNotActiveError,
-  DeviceSessionRowChangedError,
-  DeviceSessionRowNotRewritableError,
-  DeviceSessionRowNotReleasableError,
-  DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,

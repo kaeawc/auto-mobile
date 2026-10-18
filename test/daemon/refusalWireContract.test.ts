@@ -34,7 +34,16 @@ import * as orphanRecorderRefusal from "../../src/server/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
-import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
+import * as nsDaemonAmbiguousSessionSelectorError from "../../src/daemon/proxy/DaemonAmbiguousSessionSelectorError";
+import * as nsDaemonAssetVersionMismatchError from "../../src/daemon/proxy/DaemonAssetVersionMismatchError";
+import * as nsDaemonBoundSessionExpiredError from "../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import * as nsDaemonBuildMismatchError from "../../src/daemon/proxy/DaemonBuildMismatchError";
+import * as nsDaemonConnectionSessionReleasedError from "../../src/daemon/proxy/DaemonConnectionSessionReleasedError";
+import * as nsDaemonSessionStalledError from "../../src/daemon/proxy/DaemonSessionStalledError";
+import * as nsDaemonToolOutcomeUnknownError from "../../src/daemon/proxy/DaemonToolOutcomeUnknownError";
+import * as nsDaemonToolUnavailableError from "../../src/daemon/proxy/DaemonToolUnavailableError";
+import * as nsDaemonVersionMismatchError from "../../src/daemon/proxy/DaemonVersionMismatchError";
+import * as nsLifecycleConnectionInFlightError from "../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import * as sessionManager from "../../src/daemon/sessionManager";
 import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
@@ -66,6 +75,20 @@ import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuri
 import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
+import * as nsSessionSuspectError from "../../src/daemon/SessionSuspectError";
+import * as nsSessionHeldByRecoveryError from "../../src/daemon/SessionHeldByRecoveryError";
+import * as nsSessionRebindingError from "../../src/daemon/SessionRebindingError";
+import * as nsSessionTerminalReleaseInProgressError from "../../src/daemon/SessionTerminalReleaseInProgressError";
+import * as nsSessionRecoveryIdentityLossError from "../../src/daemon/SessionRecoveryIdentityLossError";
+import * as nsDaemonSessionCreationRejectedError from "../../src/daemon/DaemonSessionCreationRejectedError";
+import * as nsSessionActivityPersistenceError from "../../src/daemon/SessionActivityPersistenceError";
+import * as nsUnissuedSessionError from "../../src/daemon/UnissuedSessionError";
+import * as nsTerminalSessionError from "../../src/daemon/TerminalSessionError";
+import * as nsDaemonHandshakeMismatchError from "../../src/daemon/DaemonHandshakeMismatchError";
+import * as nsDaemonUnavailableError from "../../src/daemon/DaemonUnavailableError";
+import * as nsDaemonRequestNotDeliveredError from "../../src/daemon/DaemonRequestNotDeliveredError";
+import * as nsDaemonShuttingDownError from "../../src/daemon/DaemonShuttingDownError";
+import * as nsDaemonBoundSessionLostError from "../../src/daemon/DaemonBoundSessionLostError";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
 import * as stageDownloadsRefusal from "../../src/server/StageSessionDownloadsRefusal";
 import * as sessionOutsideBound from "../../src/server/SessionOutsideBoundSessionError";
@@ -129,7 +152,16 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "server/orphanRecorderRefusal": orphanRecorderRefusal,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
-  "daemon/proxy/daemonErrors": daemonErrors,
+  "daemon/proxy/DaemonAmbiguousSessionSelectorError": nsDaemonAmbiguousSessionSelectorError,
+  "daemon/proxy/DaemonAssetVersionMismatchError": nsDaemonAssetVersionMismatchError,
+  "daemon/proxy/DaemonBoundSessionExpiredError": nsDaemonBoundSessionExpiredError,
+  "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
+  "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
+  "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
+  "daemon/proxy/DaemonToolOutcomeUnknownError": nsDaemonToolOutcomeUnknownError,
+  "daemon/proxy/DaemonToolUnavailableError": nsDaemonToolUnavailableError,
+  "daemon/proxy/DaemonVersionMismatchError": nsDaemonVersionMismatchError,
+  "daemon/proxy/LifecycleConnectionInFlightError": nsLifecycleConnectionInFlightError,
   "daemon/sessionManager": sessionManager,
   "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
@@ -163,6 +195,18 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
+  "daemon/DaemonRequestNotDeliveredError": nsDaemonRequestNotDeliveredError,
+  "daemon/DaemonUnavailableError": nsDaemonUnavailableError,
+  "daemon/DaemonHandshakeMismatchError": nsDaemonHandshakeMismatchError,
+  "daemon/SessionActivityPersistenceError": nsSessionActivityPersistenceError,
+  "daemon/UnissuedSessionError": nsUnissuedSessionError,
+  "daemon/TerminalSessionError": nsTerminalSessionError,
+  "daemon/SessionSuspectError": nsSessionSuspectError,
+  "daemon/SessionHeldByRecoveryError": nsSessionHeldByRecoveryError,
+  "daemon/SessionRebindingError": nsSessionRebindingError,
+  "daemon/SessionTerminalReleaseInProgressError": nsSessionTerminalReleaseInProgressError,
+  "daemon/SessionRecoveryIdentityLossError": nsSessionRecoveryIdentityLossError,
+  "daemon/DaemonSessionCreationRejectedError": nsDaemonSessionCreationRejectedError,
   "daemon/deviceControlTransportFailure": controlTransport,
   "server/StageSessionDownloadsRefusal": stageDownloadsRefusal,
   "server/SessionOutsideBoundSessionError": sessionOutsideBound,
@@ -681,7 +725,7 @@ beforeAll(async () => {
           "explicit-release",
         ),
       ],
-      ["daemon_shutting_down", new daemonClient.DaemonShuttingDownError()],
+      ["daemon_shutting_down", new nsDaemonShuttingDownError.DaemonShuttingDownError()],
     ] as const;
     for (const [name, error] of cases) {
       const call = spyOn(harness.proxy, "callTool").mockRejectedValue(error);
@@ -700,7 +744,7 @@ beforeAll(async () => {
       }
     }
     const sessionUuid = "11111111-2222-4333-8444-555555555555";
-    const loss = new daemonClient.DaemonBoundSessionLostError({
+    const loss = new nsDaemonBoundSessionLostError.DaemonBoundSessionLostError({
       code: "bound_session_lost",
       sessionUuid,
       reason: "daemon-shutdown",

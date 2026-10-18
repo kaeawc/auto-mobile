@@ -1,5 +1,5 @@
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
 import {
-  DeviceSessionNotActiveError,
   DeviceSessionRepository,
   type DeviceSessionActivityUpdate,
   type DeviceSessionRecord,

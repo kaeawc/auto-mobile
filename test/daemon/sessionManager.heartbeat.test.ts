@@ -11,7 +11,7 @@ import { SessionActivityPersistenceError } from "../../src/daemon/SessionActivit
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
-import { DeviceSessionNotActiveError } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
 import {
   createAwaitingOwnerSession,
   installSessionManagerFixture,

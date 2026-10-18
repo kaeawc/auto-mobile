@@ -175,8 +175,8 @@ src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_TOKEN
 src/index.ts	AUTOMOBILE_APPEARANCE_SYNC
 src/index.ts	AUTOMOBILE_DISABLED_TOOLS
 src/index.ts	AUTOMOBILE_ENABLED_TOOLS
-src/server/appFileService.ts	AUTOMOBILE_APP_FILE_BACKUP
-src/server/appFileService.ts	AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY
+src/server/appFileSupport.ts	AUTOMOBILE_APP_FILE_BACKUP
+src/server/appFileSupport.ts	AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY
 src/server/planHealthSummary.ts	AUTOMOBILE_PLAN_HEALTH_DIR
 src/server/proxyServer.ts	AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER
 src/server/proxyServer.ts	AUTOMOBILE_ACCEPTANCE_LIVE

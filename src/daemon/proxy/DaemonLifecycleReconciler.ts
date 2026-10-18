@@ -21,16 +21,12 @@ import { releaseVersion } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";
 import { startupOptionDeficits, mergeDaemonOptions } from "./startupOptions";
-import {
-  DaemonVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
-  daemonInternalErrors,
-  type VersionMismatchReason,
-  type BuildMismatchReason,
-} from "./daemonErrors";
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
-
+import { DaemonVersionMismatchError } from "./DaemonVersionMismatchError";
+import { DaemonBuildMismatchError } from "./DaemonBuildMismatchError";
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { type VersionMismatchReason } from "./DaemonVersionMismatchError";
+import { type BuildMismatchReason } from "./DaemonBuildMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 export async function runPreflightTransport<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();

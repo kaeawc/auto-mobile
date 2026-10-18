@@ -4,15 +4,15 @@ import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
   deviceRestartReleaseReason,
-  DeviceSessionNotActiveError,
   DeviceSessionRepository,
-  DeviceSessionRowChangedError,
-  DeviceSessionRowNotReleasableError,
-  DeviceSessionRowNotRewritableError,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../../src/db/DeviceSessionNotActiveError";
+import { DeviceSessionRowChangedError } from "../../src/db/DeviceSessionRowChangedError";
+import { DeviceSessionRowNotReleasableError } from "../../src/db/DeviceSessionRowNotReleasableError";
+import { DeviceSessionRowNotRewritableError } from "../../src/db/DeviceSessionRowNotRewritableError";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
 import {

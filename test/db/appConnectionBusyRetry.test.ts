@@ -4,7 +4,7 @@ import { CompiledQuery } from "kysely";
 import {
   BunSqliteConnectionState,
   DEFAULT_RETRY_TOTAL_WAIT_MS,
-} from "../../src/db/bunSqliteDialect";
+} from "../../src/db/BunSqliteConnectionState";
 import {
   APP_CONNECTION_MAX_RETRY_ATTEMPTS,
   SQLITE_APP_CONNECTION_BUSY_TIMEOUT_MS,

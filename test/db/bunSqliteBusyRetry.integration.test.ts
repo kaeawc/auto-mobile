@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
-import { BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import { BunSqliteConnectionState } from "../../src/db/BunSqliteConnectionState";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { Random } from "../../src/utils/Random";

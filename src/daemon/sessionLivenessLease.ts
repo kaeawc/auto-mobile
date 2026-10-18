@@ -1,5 +1,5 @@
 import { Mutex } from "async-mutex";
-import { DeviceSessionNotActiveError } from "../db/deviceSessionRepository";
+import { DeviceSessionNotActiveError } from "../db/DeviceSessionNotActiveError";
 import type { DbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";

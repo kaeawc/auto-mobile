@@ -9,10 +9,8 @@ import {
 import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { fixedBackoff } from "../../src/utils/Backoff";
-import {
-  DeviceSessionRowNotReleasableError,
-  type MarkReleasedOptions,
-} from "../../src/db/deviceSessionRepository";
+import { DeviceSessionRowNotReleasableError } from "../../src/db/DeviceSessionRowNotReleasableError";
+import { type MarkReleasedOptions } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";

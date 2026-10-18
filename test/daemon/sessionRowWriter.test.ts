@@ -7,7 +7,7 @@ import {
   type SessionRowWriter,
 } from "../../src/daemon/sessionRowWriter";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
-import { DeviceSessionRowNotReleasableError } from "../../src/db/deviceSessionRepository";
+import { DeviceSessionRowNotReleasableError } from "../../src/db/DeviceSessionRowNotReleasableError";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeLogger } from "../fakes/FakeLogger";

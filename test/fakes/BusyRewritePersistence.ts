@@ -3,10 +3,8 @@ import type {
   MarkReleasedOptions,
   UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
-import {
-  DeviceSessionRowNotRewritableError,
-  DeviceSessionRowNotReleasableError,
-} from "../../src/db/deviceSessionRepository";
+import { DeviceSessionRowNotRewritableError } from "../../src/db/DeviceSessionRowNotRewritableError";
+import { DeviceSessionRowNotReleasableError } from "../../src/db/DeviceSessionRowNotReleasableError";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { FakeDeviceSessionPersistence } from "./FakeDeviceSessionPersistence";
 

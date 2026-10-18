@@ -7,7 +7,7 @@ import {
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { optionalEnum, optionalInteger, optionalString } from "./queryParamValidation";
 import type { Platform } from "../models";
-import type { LocalFileListEntry } from "./appFileService";
+import type { LocalFileListEntry } from "./appFileSupport";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
 

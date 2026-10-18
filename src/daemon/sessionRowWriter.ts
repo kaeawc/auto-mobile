@@ -1,5 +1,5 @@
+import { DeviceSessionRowNotReleasableError } from "../db/DeviceSessionRowNotReleasableError";
 import {
-  DeviceSessionRowNotReleasableError,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,

@@ -1,4 +1,5 @@
-import { SimctlIosFilesFixtureContainer, nodeAppFileFileSystem } from "./appFileService";
+import { SimctlIosFilesFixtureContainer } from "./SimctlIosFilesFixtureContainer";
+import { nodeAppFileFileSystem } from "./appFileSupport";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { createHash } from "node:crypto";

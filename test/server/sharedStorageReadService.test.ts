@@ -1,8 +1,6 @@
-import {
-  SimctlIosFilesFixtureContainer,
-  nodeAppFileFileSystem,
-  IOS_FILES_FIXTURE_BUNDLE_ID,
-} from "../../src/server/appFileService";
+import { SimctlIosFilesFixtureContainer } from "../../src/server/SimctlIosFilesFixtureContainer";
+import { nodeAppFileFileSystem } from "../../src/server/appFileSupport";
+import { IOS_FILES_FIXTURE_BUNDLE_ID } from "../../src/server/IosSimulatorUserFilesProvider";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";

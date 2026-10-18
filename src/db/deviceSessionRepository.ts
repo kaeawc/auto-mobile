@@ -1,18 +1,4 @@
 import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
-  ignoresManagedExecutionIdleDeadline,
-} from "../models/managedExecutionLiveness";
-import { sql, type ExpressionBuilder, type Kysely } from "kysely";
-import { getDatabase } from "./database";
-import { nowIso } from "./nowIso";
-import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
-import { logger } from "../utils/logger";
-import { errorMessage } from "../utils/describeUnknownError";
-import type { Platform } from "../models";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { ActionableError, toActionableError } from "../models/ActionableError";
-import {
   isRecoverableDaemonReleaseReason,
   literalReleaseReasonsStrongerThan,
   literalReleaseReasonsWhere,
@@ -22,6 +8,30 @@ import {
   sessionReleaseReasonFamily,
   type SessionReleaseReasonFamily,
 } from "../models/releaseReasons";
+import {
+  type Database,
+  type DeviceSession,
+  type DeviceSessionStatus,
+  type NewDeviceSession,
+} from "./types";
+import {
+  MANAGED_EXECUTION_LIVENESS_POLICY,
+  ignoresManagedExecutionIdleDeadline,
+} from "../models/managedExecutionLiveness";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import { sql, type ExpressionBuilder, type Kysely } from "kysely";
+import { type Platform } from "../models";
+import { nowIso } from "./nowIso";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { getDatabase } from "./database";
+import { logger } from "../utils/logger";
+import { DeviceSessionRowChangedError } from "./DeviceSessionRowChangedError";
+import { DeviceSessionRowNotRewritableError } from "./DeviceSessionRowNotRewritableError";
+import { DeviceSessionTerminallyReleasedError } from "./DeviceSessionTerminallyReleasedError";
+import { toActionableError } from "../models/ActionableError";
+import { DeviceSessionNotActiveError } from "./DeviceSessionNotActiveError";
+import { DeviceSessionRowNotReleasableError } from "./DeviceSessionRowNotReleasableError";
+import { errorMessage } from "../utils/describeUnknownError";
 
 // Terminal-state (`released`/`expired`) rows accumulate for the life of the
 // on-disk DB with no delete path (#6464). Bound their retention window rather
@@ -30,10 +40,12 @@ import {
 // `markStaleActiveSessionsExpired`), so it is a reliable "became terminal" age
 // marker without a migration.
 export const DEVICE_SESSION_RETENTION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** The literal recoverable release reasons, from the release-reason table (#11258). */
 export const RECOVERABLE_DAEMON_RELEASE_REASONS: ReadonlySet<string> = new Set(
   literalReleaseReasonsWhere("recoverable"),
 );
+
 export const DEVICE_RESTART_RELEASE_REASON_PREFIX =
   "device-restart:" satisfies SessionReleaseReasonFamily;
 
@@ -190,67 +202,6 @@ function rowRewriteGuard(
 
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
-}
-
-/**
- * An activity write matched no active row (#11129): a peer expired it, or it was released. The
- * write did not persist, so callers must not treat it as stored.
- */
-export class DeviceSessionNotActiveError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(`Device session ${sessionUuid} has no active row to record activity or ownership on.`);
-    this.name = "DeviceSessionNotActiveError";
-  }
-}
-
-/**
- * A recovery's upsert of a claimed recoverable row (#11243) found the row no longer the incarnation
- * it claimed: a terminal release, a peer, or the claim's own hand-back changed it first. Nothing
- * was written.
- */
-export class DeviceSessionRowChangedError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} changed while it was being recovered; the recovery did not ` +
-        "persist it.",
-    );
-    this.name = "DeviceSessionRowChangedError";
-  }
-}
-
-/**
- * An upsert that must not revive an ended UUID ({@link UpsertActiveSessionOptions.unlessTerminal},
- * #11498) found the row released for a terminal reason. Nothing was written: the session the
- * caller holds has been terminally released, whoever wrote the release.
- */
-export class DeviceSessionTerminallyReleasedError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} was terminally released; its row was not made active again.`,
-    );
-    this.name = "DeviceSessionTerminallyReleasedError";
-  }
-}
-
-/** A superseded-release rewrite found another terminal release or a live peer's row (#11557). */
-export class DeviceSessionRowNotRewritableError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} was not rewritten: its row holds another terminal release ` +
-        "or a live peer daemon owns it.",
-    );
-    this.name = "DeviceSessionRowNotRewritableError";
-  }
-}
-
-/** A guarded release matched no writable row; this is a refusal, not a storage failure. */
-export class DeviceSessionRowNotReleasableError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} was not released: its row is terminal or owned by a live peer.`,
-    );
-    this.name = "DeviceSessionRowNotReleasableError";
-  }
 }
 
 /** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */

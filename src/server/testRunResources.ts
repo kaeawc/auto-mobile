@@ -32,7 +32,7 @@ const TEST_RUN_QUERY_PARAM_KEYS = new Set<string>([
   "latestOnly",
 ]);
 
-interface TestRunQueryArgs {
+interface TestRunQueryParams {
   lookbackDays?: number;
   limit?: number;
   testClass?: string;
@@ -86,7 +86,7 @@ interface TestRunResponse {
   filters: Record<string, unknown>;
 }
 
-export function parseTestRunParams(params: Record<string, string>): TestRunQueryArgs {
+export function parseTestRunParams(params: Record<string, string>): TestRunQueryParams {
   const unknownKeys = Object.keys(params).filter((key) => !TEST_RUN_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -103,7 +103,7 @@ export function parseTestRunParams(params: Record<string, string>): TestRunQuery
   };
 }
 
-export function buildTestRunUri(options: TestRunQueryArgs): string {
+export function buildTestRunUri(options: TestRunQueryParams): string {
   const query = new URLSearchParams();
   if (options.lookbackDays !== undefined) {
     query.set("lookbackDays", options.lookbackDays.toString());
@@ -169,7 +169,7 @@ export function convertToResponseEntry(run: TestRun, sampleSize: number): TestRu
 }
 
 /** Echo the active filters back to the client, omitting unset dimensions. */
-function buildTestRunFilters(args: TestRunQueryArgs): Record<string, unknown> {
+function buildTestRunFilters(args: TestRunQueryParams): Record<string, unknown> {
   const filters: Record<string, unknown> = {};
   if (args.testClass) {
     filters.testClass = args.testClass;
@@ -184,7 +184,7 @@ function buildTestRunFilters(args: TestRunQueryArgs): Record<string, unknown> {
 }
 
 export async function buildTestRunResponse(
-  args: TestRunQueryArgs,
+  args: TestRunQueryParams,
   repository: TestExecutionRepository = new TestExecutionRepository(),
 ): Promise<TestRunResponse> {
   const lookbackDays = args.lookbackDays ?? TEST_RUN_LOOKBACK_DAYS_DEFAULT;
@@ -248,7 +248,7 @@ export async function buildTestRunResponse(
   };
 }
 
-async function getTestRunResource(args: TestRunQueryArgs, uri: string): Promise<ResourceContent> {
+async function getTestRunResource(args: TestRunQueryParams, uri: string): Promise<ResourceContent> {
   try {
     const response = await buildTestRunResponse(args);
     return {

@@ -15,7 +15,7 @@ import {
   AppFileReadRequest,
   AppFileReadResult,
   AppContainersTarget,
-  LegacyPutAppFileArgs,
+  LegacyPutAppFileInput,
   PutAppFileArgs,
   PutAppFileBatchResult,
   PutAppFileInput,
@@ -110,7 +110,7 @@ export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   signal?: AbortSignal;
 };
 
-export type LegacyPutAppFileRequest = Omit<LegacyPutAppFileArgs, "device"> & {
+export type LegacyPutAppFileRequest = Omit<LegacyPutAppFileInput, "device"> & {
   device: BootedDevice;
   signal?: AbortSignal;
 };

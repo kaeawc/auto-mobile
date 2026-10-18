@@ -1,6 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
-import type { NewRecompositionMetrics } from "../../db/types";
+import { RecompositionMetricsRepository } from "../../db/recompositionMetricsRepository";
+import type { Database, NewRecompositionMetrics } from "../../db/types";
 import {
   BootedDevice,
   ObserveResult,
@@ -55,12 +57,11 @@ export class RecompositionTracker {
   private readonly stateByDevice = new Map<string, RecompositionDeviceState>();
   private readonly parser = new DefaultElementParser();
   private timer: Timer;
+  private readonly repository: RecompositionMetricsRepository;
 
-  constructor(
-    timer: Timer = defaultTimer,
-    private readonly database: () => ReturnType<typeof getDatabase> = getDatabase,
-  ) {
+  constructor(timer: Timer = defaultTimer, database: () => Kysely<Database> = getDatabase) {
     this.timer = timer;
+    this.repository = new RecompositionMetricsRepository(database);
   }
 
   static getInstance(): RecompositionTracker {
@@ -301,7 +302,6 @@ export class RecompositionTracker {
       return;
     }
 
-    const db = this.database();
     const sessionId = new Date(this.timer.now()).toISOString().split("T")[0];
     const timestamp = new Date(observationTimestamp).toISOString();
 
@@ -330,9 +330,7 @@ export class RecompositionTracker {
         timestamp,
       }));
 
-      if (rows.length > 0) {
-        await db.insertInto("recomposition_metrics").values(rows).execute();
-      }
+      await this.repository.insertMany(rows);
 
       // Emit layout telemetry for recompositions
       const recorder = TelemetryRecorder.getInstance();
@@ -365,37 +363,15 @@ export class RecompositionTracker {
           });
       }
 
-      await this.pruneOldRecords(db);
+      await this.pruneOldRecords();
     } catch (error) {
       logger.error(`[RecompositionTracker] Failed to store recomposition metrics: ${error}`);
     }
   }
 
-  private async pruneOldRecords(db: ReturnType<typeof getDatabase>): Promise<void> {
+  private async pruneOldRecords(): Promise<void> {
     try {
-      const result = await db
-        .selectFrom("recomposition_metrics")
-        .select(({ fn }) => fn.count<number>("id").as("count"))
-        .executeTakeFirst();
-
-      const count = Number(result?.count ?? 0);
-      if (count <= MAX_RECOMPOSITION_RECORDS) {
-        return;
-      }
-
-      const deleteCount = count - MAX_RECOMPOSITION_RECORDS;
-      await db
-        .deleteFrom("recomposition_metrics")
-        .where(
-          "id",
-          "in",
-          db
-            .selectFrom("recomposition_metrics")
-            .select("id")
-            .orderBy("timestamp")
-            .limit(deleteCount),
-        )
-        .execute();
+      await this.repository.pruneToMaxRows(MAX_RECOMPOSITION_RECORDS);
     } catch (error) {
       logger.warn(`[RecompositionTracker] Failed to prune recomposition metrics: ${error}`);
     }

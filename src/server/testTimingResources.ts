@@ -10,7 +10,7 @@ import {
 import {
   buildTestTimingResponse,
   TEST_TIMING_LIMIT_MAX,
-  type TestTimingQueryArgs,
+  type TestTimingQueryParams,
 } from "./testTimingData";
 
 const TEST_TIMING_RESOURCE_URIS = {
@@ -40,7 +40,7 @@ const TEST_TIMING_QUERY_PARAM_KEYS: ReadonlySet<string> = new Set([
   "sessionUuid",
 ] as const);
 
-function parseTestTimingParams(params: Record<string, string>): TestTimingQueryArgs {
+function parseTestTimingParams(params: Record<string, string>): TestTimingQueryParams {
   const unknownKeys = Object.keys(params).filter((key) => !TEST_TIMING_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -69,7 +69,10 @@ function parseTestTimingParams(params: Record<string, string>): TestTimingQueryA
   };
 }
 
-function appendTestTimingDeviceParams(query: URLSearchParams, options: TestTimingQueryArgs): void {
+function appendTestTimingDeviceParams(
+  query: URLSearchParams,
+  options: TestTimingQueryParams,
+): void {
   if (options.deviceId) {
     query.set("deviceId", options.deviceId);
   }
@@ -86,7 +89,7 @@ function appendTestTimingDeviceParams(query: URLSearchParams, options: TestTimin
 
 function appendTestTimingExecutionParams(
   query: URLSearchParams,
-  options: TestTimingQueryArgs,
+  options: TestTimingQueryParams,
 ): void {
   if (options.appVersion) {
     query.set("appVersion", options.appVersion);
@@ -114,7 +117,7 @@ function appendTestTimingExecutionParams(
   }
 }
 
-function buildTestTimingUri(options: TestTimingQueryArgs): string {
+function buildTestTimingUri(options: TestTimingQueryParams): string {
   const query = new URLSearchParams();
   if (options.lookbackDays !== undefined) {
     query.set("lookbackDays", options.lookbackDays.toString());
@@ -146,7 +149,7 @@ function buildTestTimingUri(options: TestTimingQueryArgs): string {
 }
 
 async function getTestTimingResource(
-  args: TestTimingQueryArgs,
+  args: TestTimingQueryParams,
   uri: string,
 ): Promise<ResourceContent> {
   try {

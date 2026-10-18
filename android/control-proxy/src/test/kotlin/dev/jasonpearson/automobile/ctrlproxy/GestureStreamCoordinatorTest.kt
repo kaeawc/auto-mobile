@@ -66,6 +66,30 @@ class GestureStreamCoordinatorTest {
   }
 
   @Test
+  fun `a full 99-move dragPath burst is preserved in order with the default cap`() {
+    val c = GestureStreamCoordinator()
+    c.start(0f, 0f)
+    (1..99).forEach { c.move(0f, it.toFloat()) }
+
+    val ys = (1..99).map { dispatch(c.next()).to.y }
+    assertEquals((1..99).map { it.toFloat() }, ys)
+    assertTrue(c.next() is GestureStreamAction.Wait)
+  }
+
+  @Test
+  fun `exact duplicate consecutive points are coalesced`() {
+    val c = coordinator()
+    c.start(0f, 0f)
+    c.move(0f, 10f)
+    c.move(0f, 10f)
+    c.move(0f, 20f)
+
+    assertEquals(GesturePoint(0f, 10f), dispatch(c.next()).to)
+    assertEquals(GesturePoint(0f, 20f), dispatch(c.next()).to)
+    assertTrue(c.next() is GestureStreamAction.Wait)
+  }
+
+  @Test
   fun `a backlog past the cap drops the oldest waypoints and keeps the newest`() {
     val c = GestureStreamCoordinator(maxPendingMoves = 2)
     c.start(0f, 0f)

@@ -152,15 +152,7 @@ export interface ResetAppLogsResult {
   entries: ResetAppLogsPathOutcome[];
 }
 
-export interface ResetAppLogsArgs {
-  appId: string;
-  container: AppFileContainer;
-  paths: string[];
-  platform?: Platform;
-  deviceId?: string;
-  device?: string;
-  sessionUuid?: string;
-}
+export type ResetAppLogsArgs = z.output<typeof resetAppLogsSchema>;
 
 /** An app id that is safe both as a path segment and inside a unified-log predicate. */
 export function normalizeSessionLogAppId(appId: string): string {

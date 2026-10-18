@@ -1,7 +1,7 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -35,8 +35,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
   const sessionUuid = "session-on-a";
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let sessionManager: SessionManager;
   let restoreInventory: () => void;
   let seenDevices: string[];
@@ -66,11 +65,12 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", {
-      async recordToolCall(): Promise<void> {},
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: {
+        async recordToolCall(): Promise<void> {},
+      },
     });
 
     const timer = new FakeTimer();
@@ -92,8 +92,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
 
   afterEach(() => {
     restoreInventory();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();

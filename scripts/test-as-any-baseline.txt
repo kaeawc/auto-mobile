@@ -13,7 +13,6 @@
 6	test/daemon/socketServer/RequestResponseSocketServer.test.ts
 3	test/daemon/socketServerIdeForwardRoute.integration.test.ts
 2	test/daemon/socketServerIdeStatus.integration.test.ts
-1	test/daemon/socketServerInputTypeText.integration.test.ts
 4	test/daemon/socketServerSessionIdGenerator.test.ts
 19	test/daemon/telemetryPushSocketServer.integration.test.ts
 3	test/daemon/webrtcStreamSocketServer.test.ts

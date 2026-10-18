@@ -6,6 +6,9 @@ import {
 import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 
+/** The `stagesFiles` trait the registry hands the recorder for the file-staging tools (#11825). */
+const STAGES_FILES = { stagesFiles: true } as const;
+
 // Every tool the live registry lists in daemon mode (the superset surface).
 // Tools hidden from listing (startDevice, plan-only barrier/criticalSection) are
 // not enumerable, so they are classified below by name regardless.
@@ -315,27 +318,43 @@ describe("tools recorded by #9966", () => {
   test("a file-staging call that copies a host file is not recorded", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("putAppFile", {
-      target: { domain: "media_library" },
-      files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
-    });
-    recorder.record("putAppFile", {
-      appId: "com.example",
-      container: "documents",
-      destinationPath: "legacy.txt",
-      sourcePath: "fixtures/legacy.txt",
-    });
-    recorder.record("putAppFile", {
-      target: { domain: "user_files", namespace: "fixtures" },
-      files: [
-        { destinationPath: "a.txt", contentText: "a" },
-        { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
-      ],
-    });
-    recorder.record("stageSessionDownloads", {
-      directory: "fixtures",
-      files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
-    });
+    recorder.record(
+      "putAppFile",
+      {
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
+      },
+      STAGES_FILES,
+    );
+    recorder.record(
+      "putAppFile",
+      {
+        appId: "com.example",
+        container: "documents",
+        destinationPath: "legacy.txt",
+        sourcePath: "fixtures/legacy.txt",
+      },
+      STAGES_FILES,
+    );
+    recorder.record(
+      "putAppFile",
+      {
+        target: { domain: "user_files", namespace: "fixtures" },
+        files: [
+          { destinationPath: "a.txt", contentText: "a" },
+          { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
+        ],
+      },
+      STAGES_FILES,
+    );
+    recorder.record(
+      "stageSessionDownloads",
+      {
+        directory: "fixtures",
+        files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
+      },
+      STAGES_FILES,
+    );
     expect(recorder.stop()).toEqual([]);
   });
 });

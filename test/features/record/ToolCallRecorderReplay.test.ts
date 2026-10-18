@@ -20,6 +20,9 @@ import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 
+/** The `stagesFiles` trait the registry hands the recorder for the file-staging tools (#11825). */
+const STAGES_FILES = { stagesFiles: true } as const;
+
 const SIMULATOR: BootedDevice = {
   name: "iPhone 16",
   platform: "ios",
@@ -134,10 +137,14 @@ describe("recording export warnings (#10052)", () => {
     startToolCallRecording({ timer });
     const recorder = getToolCallRecorder()!;
     recorder.record("launchApp", { appId: "com.example.app" });
-    recorder.record("putAppFile", {
-      target: { domain: "media_library" },
-      files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
-    });
+    recorder.record(
+      "putAppFile",
+      {
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
+      },
+      STAGES_FILES,
+    );
     const result = stopToolCallRecording({ timer });
 
     expect(result.stepCount).toBe(1);
@@ -158,10 +165,14 @@ describe("recording export warnings (#10052)", () => {
   test("an all-skipped recording reports the skipped calls instead of the generic error", () => {
     const timer = new FakeTimer();
     startToolCallRecording({ timer });
-    getToolCallRecorder()!.record("stageSessionDownloads", {
-      directory: "fixtures",
-      files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
-    });
+    getToolCallRecorder()!.record(
+      "stageSessionDownloads",
+      {
+        directory: "fixtures",
+        files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
+      },
+      STAGES_FILES,
+    );
 
     expect(() => stopToolCallRecording({ timer })).toThrow(
       /No MCP tool calls were recorded\. 1 call\(s\) were skipped: stageSessionDownloads was not recorded .*sourcePath/,
@@ -180,12 +191,16 @@ describe("recorded param size cap (#10052)", () => {
   test("a param over the cap is skipped with a warning that names the param", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("putAppFile", {
-      target: { domain: "app_containers", appId: "com.example", container: "documents" },
-      files: [
-        { destinationPath: "big.bin", contentBase64: "A".repeat(MAX_RECORDED_PARAM_BYTES + 1) },
-      ],
-    });
+    recorder.record(
+      "putAppFile",
+      {
+        target: { domain: "app_containers", appId: "com.example", container: "documents" },
+        files: [
+          { destinationPath: "big.bin", contentBase64: "A".repeat(MAX_RECORDED_PARAM_BYTES + 1) },
+        ],
+      },
+      STAGES_FILES,
+    );
     const { steps, warnings } = recorder.stopWithWarnings();
 
     expect(steps).toEqual([]);

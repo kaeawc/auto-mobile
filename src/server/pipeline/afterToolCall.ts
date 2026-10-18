@@ -333,7 +333,11 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     });
 
     if (toolSuccess) {
-      getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(name, args);
+      getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(
+        name,
+        args,
+        traits,
+      );
     }
 
     return {

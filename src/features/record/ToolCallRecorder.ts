@@ -5,6 +5,12 @@ import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 
+/** The registry-declared tool traits the recorder reads (structural subset of `ToolTraits`). */
+export interface RecorderToolTraits {
+  /** Writes caller-supplied files, from a host `sourcePath` or inline content. */
+  stagesFiles?: boolean;
+}
+
 /**
  * MCP tool names whose successful calls are recorded as plan steps.
  *
@@ -167,9 +173,6 @@ function findOversizedParam(params: Record<string, unknown>): string | undefined
   );
 }
 
-/** Tools that write caller-supplied files, from a host path or inline content. */
-const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set(["putAppFile", "stageSessionDownloads"]);
-
 function hasSourcePath(entry: unknown): boolean {
   return typeof entry === "object" && entry !== null && "sourcePath" in entry;
 }
@@ -181,8 +184,11 @@ function hasSourcePath(entry: unknown): boolean {
  * `contentBase64` are self-contained and are recorded. Covers both the
  * canonical `files[]` shape and the legacy single-file putAppFile shape.
  */
-export function referencesHostFile(toolName: string, params: Record<string, unknown>): boolean {
-  if (!FILE_STAGING_TOOLS.has(toolName)) {
+export function referencesHostFile(
+  traits: RecorderToolTraits | undefined,
+  params: Record<string, unknown>,
+): boolean {
+  if (traits?.stagesFiles !== true) {
     return false;
   }
   return hasSourcePath(params) || (Array.isArray(params.files) && params.files.some(hasSourcePath));
@@ -260,7 +266,7 @@ export class ToolCallRecorder {
     return this.steps.length;
   }
 
-  record(toolName: string, args: Record<string, unknown>): void {
+  record(toolName: string, args: Record<string, unknown>, traits?: RecorderToolTraits): void {
     if (!this.recording) {
       return;
     }
@@ -272,7 +278,7 @@ export class ToolCallRecorder {
     if (isReadOnlyCall(toolName, params)) {
       return;
     }
-    const skipReason = this.skipReason(toolName, params);
+    const skipReason = this.skipReason(params, traits);
     if (skipReason) {
       const warning = `${toolName} was not recorded (after ${this.steps.length} recorded steps): ${skipReason}`;
       logger.warn(`[ToolCallRecorder] ${warning}`);
@@ -361,8 +367,11 @@ export class ToolCallRecorder {
     };
   }
 
-  private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {
-    if (referencesHostFile(toolName, params)) {
+  private skipReason(
+    params: Record<string, unknown>,
+    traits?: RecorderToolTraits,
+  ): string | undefined {
+    if (referencesHostFile(traits, params)) {
       return "it copies a host file (sourcePath), which a replay on another host cannot resolve; use contentText or contentBase64 to record it";
     }
     const oversized = findOversizedParam(params);

@@ -40,6 +40,7 @@ export function registerDownloadsFixtureTools(
     },
     {
       defaultEnabled: false,
+      stagesFiles: true,
       shouldEnsureDevice: () => false,
       nonDeviceHandler: async (
         args: StageSessionDownloadsArgs,

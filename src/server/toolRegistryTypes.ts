@@ -150,6 +150,8 @@ export interface ToolTraits {
    * one-way door (`test/server/skeletonDefaultDrift.test.ts`).
    */
   defaultsToSkeletonObservation?: boolean;
+  /** Writes caller-supplied files, from a host `sourcePath` or inline content (recorder skips host paths). */
+  stagesFiles?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
@@ -163,6 +165,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     recordsNavigation,
     loudArtifactWrites,
     defaultsToSkeletonObservation,
+    stagesFiles,
   } = options;
   return {
     stopsApp,
@@ -170,6 +173,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     recordsNavigation,
     loudArtifactWrites,
     defaultsToSkeletonObservation,
+    stagesFiles,
   };
 }
 

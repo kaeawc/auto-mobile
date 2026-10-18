@@ -7,6 +7,7 @@ import { sessionForIngress } from "./sessionForIngress";
 import { ActionableError } from "../models";
 import { DaemonState } from "./daemonState";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { ENV, readEnvRaw } from "../config/env";
 
 /**
  * Authentication + session-scoping for the two live-screen daemon sockets
@@ -35,7 +36,7 @@ import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/s
  */
 
 /** Env flag that opts a daemon out of stream-socket authentication. */
-export const STREAM_SOCKET_AUTH_ENV = "AUTOMOBILE_DAEMON_STREAM_AUTH";
+export const STREAM_SOCKET_AUTH_ENV = ENV.DAEMON_STREAM_AUTH.name;
 
 /**
  * The narrow SessionManager surface the authenticator needs. Kept minimal
@@ -107,7 +108,7 @@ export function streamAuthRefusalFields(error: unknown):
 }
 
 function authEnforced(env: NodeJS.ProcessEnv): boolean {
-  const raw = (env[STREAM_SOCKET_AUTH_ENV] ?? "").trim().toLowerCase();
+  const raw = (readEnvRaw(ENV.DAEMON_STREAM_AUTH, env) ?? "").trim().toLowerCase();
   return !(raw === "0" || raw === "false" || raw === "no" || raw === "off");
 }
 

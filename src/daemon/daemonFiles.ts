@@ -17,6 +17,7 @@ import { releaseVersion } from "../utils/mcpVersion";
 import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { sortedReaddirSync } from "../utils/io";
+import { ENV, readEnvRaw } from "../config/env";
 
 export {
   compareProcessGenerationTokens,
@@ -106,8 +107,7 @@ export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
 };
 
 export function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
-  const override =
-    env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
+  const override = readEnvRaw(ENV.WEBRTC_STREAM_SOCKET_PATH, env);
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override)
     : path.join(resolveAuxSocketDir(env), "webrtc-stream.sock");

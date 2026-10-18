@@ -1,4 +1,5 @@
 import { isAppearanceSyncEnabled } from "../utils/appearance/appearanceSyncPolicy";
+import { ENV, readEnvRaw } from "../config/env";
 
 export { isAppearanceSyncEnabled } from "../utils/appearance/appearanceSyncPolicy";
 
@@ -27,11 +28,13 @@ export function parsePassiveWorkSettings(
   iosAcceptanceSecretEnv: string,
 ): PassiveWorkSettings {
   return {
-    androidAppearanceSyncDevices: parseDeviceIds(env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES),
-    androidObservationStreamDevices: parseDeviceIds(
-      env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES,
+    androidAppearanceSyncDevices: parseDeviceIds(
+      readEnvRaw(ENV.ANDROID_APPEARANCE_SYNC_DEVICES, env),
     ),
-    iosWarmupDevices: parseDeviceIds(env.AUTOMOBILE_IOS_WARMUP_DEVICES),
+    androidObservationStreamDevices: parseDeviceIds(
+      readEnvRaw(ENV.ANDROID_OBSERVATION_STREAM_DEVICES, env),
+    ),
+    iosWarmupDevices: parseDeviceIds(readEnvRaw(ENV.IOS_WARMUP_DEVICES, env)),
     appearanceSyncEnabled: isAppearanceSyncEnabled(env.AUTOMOBILE_APPEARANCE_SYNC),
     iosPassiveWorkEnabled: env[iosAcceptanceSecretEnv] === undefined,
   };

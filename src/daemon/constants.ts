@@ -3,7 +3,8 @@ import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import { readEnvPositiveInteger } from "../utils/envNumbers";
+import { readEnvInt, readEnvPositiveInteger } from "../utils/envNumbers";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
@@ -39,7 +40,7 @@ const uid = getUserId();
  * yields "" (the resident, unsuffixed names).
  */
 export function resolveDaemonIsolationSuffix(env: NodeJS.ProcessEnv = process.env): string {
-  const auxDir = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  const auxDir = readEnvTrimmed(ENV.AUX_SOCKET_DIR, env);
   if (!auxDir) {
     return "";
   }
@@ -62,11 +63,11 @@ function readDaemonStatePathOverride(
 ): string | undefined {
   switch (extension) {
     case "sock":
-      return env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
+      return readEnvRaw(ENV.DAEMON_SOCKET_PATH, env);
     case "pid":
-      return env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
+      return readEnvRaw(ENV.DAEMON_PID_FILE_PATH, env);
     case "lock":
-      return env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+      return readEnvRaw(ENV.DAEMON_LOCK_FILE_PATH, env);
   }
 }
 
@@ -232,12 +233,7 @@ export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
  * Configurable via AUTOMOBILE_DAEMON_TIMEOUT_MS environment variable.
  */
 export function resolveConnectionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger(
-    "AUTOMOBILE_DAEMON_TIMEOUT_MS",
-    "AUTO_MOBILE_DAEMON_TIMEOUT_MS",
-    { fallback: 120000 },
-    env,
-  );
+  return readEnvInt(ENV.DAEMON_TIMEOUT_MS, env, { fallback: 120000 });
 }
 export const CONNECTION_TIMEOUT_MS = resolveConnectionTimeoutMs();
 
@@ -251,12 +247,7 @@ export const CONNECTION_TIMEOUT_MS = resolveConnectionTimeoutMs();
 const MAX_DAEMON_STARTUP_TIMEOUT_MS = 2_147_483_647;
 export function resolveDaemonStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return Math.min(
-    readEnvPositiveInteger(
-      "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",
-      "AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS",
-      { fallback: 30000 },
-      env,
-    ),
+    readEnvInt(ENV.DAEMON_STARTUP_TIMEOUT_MS, env, { fallback: 30000 }),
     MAX_DAEMON_STARTUP_TIMEOUT_MS,
   );
 }
@@ -293,12 +284,7 @@ export function resolveExistingDaemonReachabilityTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   return Math.min(
-    readEnvPositiveInteger(
-      "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
-      "AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
-      { fallback: 10000 },
-      env,
-    ),
+    readEnvInt(ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS, env, { fallback: 10000 }),
     Math.max(1, Math.floor((startupTimeoutMs * 2) / 3)),
   );
 }
@@ -644,8 +630,8 @@ export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
  */
 export function getCliSessionIdleTimeoutMs(): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
-    "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name,
+    ENV.CLI_SESSION_IDLE_TIMEOUT_MS.legacyName,
     {
       fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
       min: MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
@@ -695,11 +681,7 @@ export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLea
  * mismatched client must be allowed through during an incident. Clients that
  * declare no handshake fields are always allowed regardless of this flag.
  */
-const handshakeDisableOverride = (
-  process.env.AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE ??
-  process.env.AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE ??
-  ""
-)
+const handshakeDisableOverride = (readEnvRaw(ENV.DAEMON_DISABLE_HANDSHAKE) ?? "")
   .trim()
   .toLowerCase();
 export const DAEMON_HANDSHAKE_ENABLED = !(

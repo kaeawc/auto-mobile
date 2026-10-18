@@ -1,4 +1,4 @@
-import { ENV, readEnvNumber } from "../config/env";
+import { ENV, readEnvNumber, readEnvTrimmed } from "../config/env";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { parseStrictPositiveInteger } from "../utils/envNumbers";
@@ -44,7 +44,7 @@ export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = proces
 }
 
 /** A launcher that knows its own pid can pass it explicitly, which wins over the parent pid. */
-export const DAEMON_LAUNCHER_PID_ENV = "AUTOMOBILE_DAEMON_LAUNCHER_PID";
+export const DAEMON_LAUNCHER_PID_ENV = ENV.DAEMON_LAUNCHER_PID.name;
 
 /**
  * The launcher pid the orphan watchdog compares the parent against: the launcher-provided
@@ -55,13 +55,13 @@ export function resolveLauncherPid(
   entryParentPid: number,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const raw = env[DAEMON_LAUNCHER_PID_ENV]?.trim() ?? "";
+  const raw = readEnvTrimmed(ENV.DAEMON_LAUNCHER_PID, env) ?? "";
   const parsed = parseStrictPositiveInteger(raw);
   return parsed !== undefined && parsed > 1 ? parsed : entryParentPid;
 }
 
 /** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
-export const HARNESS_PRIVATE_DAEMON_ENV = "AUTOMOBILE_HARNESS_PRIVATE_DAEMON";
+export const HARNESS_PRIVATE_DAEMON_ENV = ENV.HARNESS_PRIVATE_DAEMON.name;
 
 /**
  * A harness-style private daemon (a test, lane, or acceptance run) is one whose
@@ -80,18 +80,18 @@ export function isHarnessPrivateDaemon(
   defaultSocketPath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const marker = env[HARNESS_PRIVATE_DAEMON_ENV]?.trim();
+  const marker = readEnvTrimmed(ENV.HARNESS_PRIVATE_DAEMON, env);
   if (marker === "1" || marker === "0") {
     return marker === "1";
   }
   const explicitSocket = firstNonBlank(env, [
-    "AUTOMOBILE_DAEMON_SOCKET_PATH",
-    "AUTO_MOBILE_DAEMON_SOCKET_PATH",
+    ENV.DAEMON_SOCKET_PATH.name,
+    ENV.DAEMON_SOCKET_PATH.legacyName,
   ]);
   return (
     explicitSocket !== "" &&
     socketPath !== defaultSocketPath &&
-    firstNonBlank(env, ["AUTOMOBILE_AUX_SOCKET_DIR"]) !== ""
+    firstNonBlank(env, [ENV.AUX_SOCKET_DIR.name]) !== ""
   );
 }
 

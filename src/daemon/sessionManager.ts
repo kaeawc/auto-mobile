@@ -75,7 +75,8 @@ import { requestAcquisitionReceipt } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
-import { readEnvPositiveInteger } from "../utils/envNumbers";
+import { readEnvInt } from "../utils/envNumbers";
+import { ENV } from "../config/env";
 import { isDeviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { BootedDevice, Platform } from "../models";
 import {
@@ -1390,11 +1391,9 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
 export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
-  return readEnvPositiveInteger(
-    "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-    "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-    { fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS },
-  );
+  return readEnvInt(ENV.SESSION_HEARTBEAT_TIMEOUT_MS, process.env, {
+    fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+  });
 }
 
 /**
@@ -1464,11 +1463,9 @@ function hasLapsedRestartRecoveryWindow(persisted: DeviceSession, nowMs: number)
  * reader to conclude the daemon reaped early (issue #5689).
  */
 export function getDefaultPreFirstHeartbeatGraceMs(): number {
-  return readEnvPositiveInteger(
-    "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-    "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-    { fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS },
-  );
+  return readEnvInt(ENV.SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS, process.env, {
+    fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
+  });
 }
 
 export class SessionManager {

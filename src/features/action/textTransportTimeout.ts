@@ -1,5 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError } from "../../models/ActionableError";
+import { TextIndeterminateError } from "./TextIndeterminateError";
 import { getAbortSignal, getRequestContext, runWithAbortSignal } from "../../utils/AbortContext";
 
 /** Keep short iOS text requests at the existing transport timeout. */
@@ -34,16 +34,6 @@ export function resolveTextCtrlProxyTimeoutMs(
 export const TEXT_MCP_REQUEST_HEADROOM_MS = 20_000;
 /** Return a terminal result before the enclosing request/safety-net timer fires. */
 export const TEXT_REQUEST_RESPONSE_MARGIN_MS = 1000;
-
-export class TextIndeterminateError extends ActionableError {
-  readonly retryable = false;
-
-  constructor(reason: string) {
-    super(
-      `Text outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The text may have been entered or cleared. Do not retry automatically. Observe before retrying.`,
-    );
-  }
-}
 
 /** Request-local evidence for dispatched text commands. */
 export class TextRequestState {

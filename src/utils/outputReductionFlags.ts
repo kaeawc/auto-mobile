@@ -1,5 +1,6 @@
 import type { FeatureFlagKey } from "../models/FeatureFlagDefinitions";
 import { readBooleanFlag } from "./flagTokens";
+import { ENV } from "../config/env";
 
 /**
  * Config plumbing for the MCP output-context reduction effort (issue #2756).
@@ -54,28 +55,28 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
   {
     field: "observeResultIncludeElements",
     cli: "--observe-result-include-elements",
-    env: "AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS",
+    env: ENV.OBSERVE_RESULT_INCLUDE_ELEMENTS.name,
     featureFlagKey: "observe-result-include-elements",
     label: "--observe-result-include-elements",
   },
   {
     field: "toolResultsNoStructuredContent",
     cli: "--tool-results-no-structured-content",
-    env: "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
+    env: ENV.TOOL_RESULTS_NO_STRUCTURED_CONTENT.name,
     featureFlagKey: "tool-results-no-structured-content",
     label: "--tool-results-no-structured-content",
   },
   {
     field: "actionsDiffObserve",
     cli: "--actions-diff-observe",
-    env: "AUTOMOBILE_ACTIONS_DIFF_OBSERVE",
+    env: ENV.ACTIONS_DIFF_OBSERVE.name,
     featureFlagKey: "actions-diff-observe",
     label: "--actions-diff-observe",
   },
   {
     field: "actionsNoObserve",
     cli: "--actions-no-observe",
-    env: "AUTOMOBILE_ACTIONS_NO_OBSERVE",
+    env: ENV.ACTIONS_NO_OBSERVE.name,
     featureFlagKey: "actions-no-observe",
     label: "--actions-no-observe",
   },
@@ -83,7 +84,7 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
     field: "actionsCompactMetadata",
     cli: "--actions-compact-metadata",
     disableCli: "--no-actions-compact-metadata",
-    env: "AUTOMOBILE_ACTIONS_COMPACT_METADATA",
+    env: ENV.ACTIONS_COMPACT_METADATA.name,
     featureFlagKey: "actions-compact-metadata",
     label: "--actions-compact-metadata",
   },

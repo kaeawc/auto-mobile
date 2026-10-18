@@ -7,6 +7,7 @@ import {
   type GitMetadataClient,
   type GitVersionInfo,
 } from "./GitMetadataClient";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 export type { GitVersionInfo } from "./GitMetadataClient";
 
@@ -131,12 +132,13 @@ export const formatMcpServerVersion = (baseVersion: string, git: GitVersionInfo 
  * - With no resolvable base version, returns "unknown" (unstamped).
  */
 export const resolveMcpServerVersion = (deps: McpVersionDeps): string => {
-  const override = deps.env.MCP_SERVER_VERSION;
+  const override = readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION, deps.env);
   if (override) {
     return override;
   }
 
-  const base = deps.readPackageVersion() || deps.env.npm_package_version || "unknown";
+  const base =
+    deps.readPackageVersion() || readEnvRaw(AMBIENT_ENV.npm_package_version, deps.env) || "unknown";
   if (base === "unknown") {
     return base;
   }
@@ -151,8 +153,8 @@ export const getMcpServerVersion = (): string => {
 
   cachedVersion = resolveMcpServerVersion({
     env: {
-      MCP_SERVER_VERSION: process.env.MCP_SERVER_VERSION,
-      npm_package_version: process.env.npm_package_version,
+      MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
+      npm_package_version: readEnvRaw(AMBIENT_ENV.npm_package_version),
     },
     readPackageVersion: readPackageVersionFromDisk,
     readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),

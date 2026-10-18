@@ -33,6 +33,7 @@ import {
   RUNNER_READINESS_TIMEOUT_FLAG,
   parseRunnerReadinessTimeout,
 } from "../utils/runnerReadinessConfig";
+import { ENV, readEnvRaw } from "../config/env";
 
 export type { ParseLogger } from "./numericValidators";
 
@@ -163,9 +164,7 @@ export function parseArgs(
     process.env,
     resolveDaemonLaunchWorkingDirectory(),
   );
-  const runnerReadinessEnv =
-    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
-    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
+  const runnerReadinessEnv = readEnvRaw(ENV.RUNNER_READINESS_TIMEOUT_MS, environment);
   const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
   // Undefined means this client has no opinion about a running daemon's
   // readiness budget. The daemon's ServerConfig owns the product default.
@@ -275,8 +274,10 @@ function parseToolDefaults(
       ?.split(",")
       .map((value) => value.trim())
       .filter(Boolean) ?? [];
-  const environmentEnabledTools = parseEnvironmentTools(environment.AUTOMOBILE_ENABLED_TOOLS);
-  const environmentDisabledTools = parseEnvironmentTools(environment.AUTOMOBILE_DISABLED_TOOLS);
+  const environmentEnabledTools = parseEnvironmentTools(readEnvRaw(ENV.ENABLED_TOOLS, environment));
+  const environmentDisabledTools = parseEnvironmentTools(
+    readEnvRaw(ENV.DISABLED_TOOLS, environment),
+  );
   const environmentDisabledSet = new Set(environmentDisabledTools);
   const environmentConflict = environmentEnabledTools.find((toolName) =>
     environmentDisabledSet.has(toolName),

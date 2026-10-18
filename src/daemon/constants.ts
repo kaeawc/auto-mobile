@@ -176,7 +176,7 @@ export const INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM = "__acceptanceDiscoveryO
 export const INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM = "__acceptanceDiscoveryCapability";
 
 /** Environment variable carrying the live-acceptance discovery capability. */
-export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY";
+export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = ENV.ACCEPTANCE_DISCOVERY_CAPABILITY.name;
 
 /**
  * Port range to try if default port is unavailable
@@ -224,7 +224,7 @@ export const LOCK_FILE_PATH = resolveDaemonStatePath("lock");
  * daemon publishes this in its PID record so log retention can associate a
  * specific `daemon-launch-*.log` with its actual child owner.
  */
-export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
+export const DAEMON_LAUNCH_LOG_PATH_ENV = ENV.DAEMON_LAUNCH_LOG_PATH.name;
 
 /**
  * Connection timeout in milliseconds

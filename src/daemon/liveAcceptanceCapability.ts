@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
 import type { DaemonGenerationIdentity } from "../utils/daemonGenerationIdentity";
 import { stableStringify } from "../utils/stableStringify";
+import { ENV, readEnvRaw } from "../config/env";
 
 export type { DaemonGenerationIdentity };
 
@@ -11,7 +12,7 @@ export type { DaemonGenerationIdentity };
  * children; ordinary clients never receive it from the daemon.
  */
 export const DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV =
-  "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET";
+  ENV.DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET.name;
 
 export function daemonGenerationIdentityFromStatus(
   status: Partial<DaemonGenerationIdentity> & { processGenerationTokenUtc?: unknown },
@@ -121,6 +122,6 @@ export function daemonLiveAcceptanceScopedCapabilityMatches(
 export function daemonLiveAcceptanceStartupSecret(
   environment: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const secret = environment[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+  const secret = readEnvRaw(ENV.DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET, environment);
   return secret && secret.length >= 32 ? secret : undefined;
 }

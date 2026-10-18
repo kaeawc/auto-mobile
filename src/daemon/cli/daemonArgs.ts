@@ -18,7 +18,6 @@ import {
 } from "../../utils/eventAllMarkers";
 import {
   parseRunnerReadinessTimeout,
-  RUNNER_READINESS_TIMEOUT_ENV,
   RUNNER_READINESS_TIMEOUT_FLAG,
 } from "../../utils/runnerReadinessConfig";
 import {
@@ -32,6 +31,7 @@ import {
   parseOutputReductionFlags,
 } from "../../utils/outputReductionFlags";
 import type { DaemonOptions } from "../types";
+import { ENV, readEnvRaw } from "../../config/env";
 
 const numericFlags: Partial<
   Record<
@@ -310,7 +310,7 @@ export function parseDaemonArgs(
     options.eventAllMarkersCliOverride = eventAllMarkersCliOverride;
   }
   const envRunnerReadinessTimeout = parseRunnerReadinessTimeout(
-    env[RUNNER_READINESS_TIMEOUT_ENV] ?? env.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS,
+    readEnvRaw(ENV.RUNNER_READINESS_TIMEOUT_MS, env),
   );
   if (envRunnerReadinessTimeout !== undefined) {
     options.runnerReadinessTimeoutMs = envRunnerReadinessTimeout;

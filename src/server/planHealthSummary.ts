@@ -10,9 +10,10 @@ import { createTimestampedId, defaultIdGenerator, type IdGenerator } from "../ut
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import { ENV, readEnvRaw } from "../config/env";
 
 /** Opt-in env var: a directory that receives one health-summary JSON file per plan run (#2306). */
-export const PLAN_HEALTH_DIR_ENV = "AUTOMOBILE_PLAN_HEALTH_DIR";
+export const PLAN_HEALTH_DIR_ENV = ENV.PLAN_HEALTH_DIR.name;
 
 export interface PlanHealthRunInfo {
   success: boolean;
@@ -111,7 +112,7 @@ export function planHealthWriterFromEnv(
   timer: Pick<Timer, "now">,
   env: NodeJS.ProcessEnv = process.env,
 ): PlanHealthWriter | undefined {
-  const dir = env[PLAN_HEALTH_DIR_ENV];
+  const dir = readEnvRaw(ENV.PLAN_HEALTH_DIR, env);
   return dir ? new FilePlanHealthWriter(dir, timer) : undefined;
 }
 

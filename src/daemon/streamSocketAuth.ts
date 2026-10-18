@@ -5,7 +5,7 @@ import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { sessionForIngress } from "./sessionForIngress";
 import { ActionableError } from "../models";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
 /**
@@ -322,18 +322,12 @@ export function createDefaultStreamSocketAuthenticator(
   operation: string,
   options: { allowObserverSessions?: boolean } = {},
 ): StreamSocketAuthenticator {
-  const resolveSessionManager = () => {
-    const state = DaemonState.getInstance();
-    return state.isInitialized() ? state.getSessionManager() : null;
-  };
+  const resolveSessionManager = () => defaultDaemonContext.sessionManager() ?? null;
   if (options.allowObserverSessions) {
     return new ObserverAdmittingStreamAuthenticator({
       resolveSessionManager,
       operation,
-      resolveObserverRegistry: () => {
-        const state = DaemonState.getInstance();
-        return state.isInitialized() ? (state.getObserverSessionRegistry() ?? null) : null;
-      },
+      resolveObserverRegistry: () => defaultDaemonContext.observerSessionRegistry() ?? null,
     });
   }
   return new SessionScopedStreamAuthenticator(resolveSessionManager, operation);

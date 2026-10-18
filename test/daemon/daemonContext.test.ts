@@ -26,6 +26,7 @@ function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>
     devicePool: () => undefined,
     devicePoolWrites: () => undefined,
     brokerConnectionScopes: () => undefined,
+    observerSessionRegistry: () => undefined,
     deviceSessionRegistry: () => undefined,
   };
 }

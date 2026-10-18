@@ -161,7 +161,7 @@ export class TouchLatencyTracker {
    * @param windowBounds - The audited app's actual window rect, if known
    * @returns Touch coordinates (x, y)
    */
-  private selectSafeTouchLocation(
+  selectSafeTouchLocation(
     screenSize: ScreenSize,
     touchPoint?: { x: number; y: number },
     windowBounds?: ElementBounds,

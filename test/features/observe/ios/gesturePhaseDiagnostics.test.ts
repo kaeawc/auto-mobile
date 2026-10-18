@@ -1,5 +1,5 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import WebSocket from "ws";
 import response from "../../../fixtures/ios/swipe-deadline-phases.json";
 import {
   decodeCtrlProxyMessage,
@@ -60,14 +60,11 @@ describe("iOS gesture phase diagnostics", () => {
     const manager = new RequestManager(timer);
     const perf = createPerformanceTracker(true, timer);
     perf.serial("swipeOn");
-    const socket = {
-      readyState: WebSocket.OPEN,
-      send(data: string) {
-        const request: { requestId: string } = JSON.parse(data);
-        const decoded = decodeCtrlProxyMessage({ ...message, requestId: request.requestId });
-        manager.resolve(request.requestId, decoded?.result);
-      },
-    } as unknown as WebSocket;
+    const socket = new FakeOpenSocket((data) => {
+      const request: { requestId: string } = JSON.parse(data);
+      const decoded = decodeCtrlProxyMessage({ ...message, requestId: request.requestId });
+      manager.resolve(request.requestId, decoded?.result);
+    });
     const gestures = new CtrlProxyGestures({
       timer,
       requestManager: manager,

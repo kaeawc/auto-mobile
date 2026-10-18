@@ -2,7 +2,8 @@ import { ToolRegistry } from "./toolRegistry";
 import { putAppFileSchema, type PutAppFileArgs } from "./appFileContract";
 import { getAppFileService, type AppFileService } from "./appFileService";
 import { registerPendingDeviceCleanup } from "./downloadsFixtureService";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { putAppFileResultSchema } from "./appFileToolOutputSchemas";
 import type { BootedDevice } from "../models";
 
 export function registerAppFileTools(
@@ -28,8 +29,8 @@ export function registerAppFileTools(
         );
       }
       const result = await writePromise;
-      return createJSONToolResponse(result);
+      return createStructuredToolResponse(result);
     },
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: putAppFileResultSchema },
   );
 }

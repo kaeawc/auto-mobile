@@ -12,6 +12,9 @@ import type { Session, SessionLivenessPolicy } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
 import { leaseRunningAt } from "./stallForgiveness";
+import type { LivenessLeasePhase } from "../models/managedExecutionLiveness";
+
+export type { LivenessLeasePhase };
 
 /**
  * How long a session whose owner missed its lease is held, device still reserved
@@ -19,14 +22,6 @@ import { leaseRunningAt } from "./stallForgiveness";
  * release windows in `./sessionLivenessWindows`.
  */
 export { SUSPECT_GRACE_MS };
-
-/**
- * - `live`: the owner's lease has not expired.
- * - `suspect`: the lease expired but the grace window has not; the session and
- *   its device are held for the owner token, and only the owner can restore it.
- * - `lapsed`: the lease and any grace are over; the session may be released.
- */
-export type LivenessLeasePhase = "live" | "suspect" | "lapsed";
 
 /** Everything the lease decision reads, captured at one instant. */
 export interface LivenessOwnerLeaseSnapshot {

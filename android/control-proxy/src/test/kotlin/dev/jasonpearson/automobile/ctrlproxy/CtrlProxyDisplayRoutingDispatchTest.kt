@@ -83,9 +83,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
       object : TimeProvider {
         override fun currentTimeMillis(): Long = if (reads++ == 0) 1_000L else 1_250L
       }
-    ReflectionHelpers.setField(
-      fixture.service,
-      "hierarchyDebouncer",
+    fixture.service.hierarchyController.debouncer =
       HierarchyDebouncer(
         scope = ReflectionHelpers.getField<CoroutineScope>(fixture.service, "serviceScope"),
         timeProvider = time,
@@ -93,8 +91,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
           optionsSeen.add(snapshotOptions)
           null
         },
-      ),
-    )
+      )
     for (displayId in listOf(2, null)) {
       reads = 0
       fixture.actions.requestTapCoordinates(

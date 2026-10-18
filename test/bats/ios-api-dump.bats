@@ -28,6 +28,8 @@ setup() {
   cp "$SCRIPT" "$fixture/scripts/ios/api-dump.sh"
   cp "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" "$fixture/ios/auto-mobile-sdk/Sources/AutoMobileSDK/Surface.swift"
   printf '%s\n' 'public struct SdkViewNode {}' > "$wire_sources/AutoMobileSdkWire/SdkViewNode.swift"
+  printf '%s\n' 'import Foundation' '@_exported import AutoMobileSdkWire' \
+    > "$fixture/ios/auto-mobile-sdk/Sources/AutoMobileSDK/Exports.swift"
   unset AUTOMOBILE_IOS_API_SOURCES
   bash "$fixture/scripts/ios/api-dump.sh" > "$AUTOMOBILE_IOS_API_FILE"
   grep -Fx '// Surface.swift' "$AUTOMOBILE_IOS_API_FILE"
@@ -40,6 +42,25 @@ setup() {
   [ "$status" -eq 1 ]
   [[ "$output" == *'-public struct SdkViewNode'* ]]
   [[ "$output" == *'+public struct RenamedNode'* ]]
+}
+
+@test "default sources fail the check when the SDK stops re-exporting the wire product" {
+  local fixture="$BATS_TEST_TMPDIR/repo"
+  local sdk_sources="$fixture/ios/auto-mobile-sdk/Sources/AutoMobileSDK"
+  mkdir -p "$fixture/scripts/ios" "$sdk_sources" "$fixture/ios/sdk-wire/Sources/AutoMobileSdkWire"
+  cp "$SCRIPT" "$fixture/scripts/ios/api-dump.sh"
+  cp "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" "$sdk_sources/Surface.swift"
+  printf '%s\n' 'public struct SdkViewNode {}' > "$fixture/ios/sdk-wire/Sources/AutoMobileSdkWire/SdkViewNode.swift"
+  printf '%s\n' '@_exported import AutoMobileSdkWire' > "$sdk_sources/Exports.swift"
+  unset AUTOMOBILE_IOS_API_SOURCES
+  bash "$fixture/scripts/ios/api-dump.sh" > "$AUTOMOBILE_IOS_API_FILE"
+  run bash "$fixture/scripts/ios/api-dump.sh" --check
+  [ "$status" -eq 0 ]
+  # A plain import (or a commented-out re-export) leaves the dump byte-identical, so only the assertion catches it.
+  printf '%s\n' 'import AutoMobileSdkWire' '// @_exported import AutoMobileSdkWire' > "$sdk_sources/Exports.swift"
+  run bash "$fixture/scripts/ios/api-dump.sh" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'@_exported import AutoMobileSdkWire'* ]]
 }
 
 @test "renaming a public protocol requirement fails the API check" {

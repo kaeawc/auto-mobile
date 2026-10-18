@@ -1,14 +1,14 @@
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { ensureMigrations, getDatabase } from "../../db/database";
-import type { Database } from "../../db/types";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { logger, type Logger } from "../../utils/logger";
+import { ensureMigrations, getDatabase } from "./database";
+import type { Database } from "./types";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger, type Logger } from "../utils/logger";
 import type {
   FeatureFlagConfig,
   FeatureFlagDefinition,
   FeatureFlagKey,
-} from "./FeatureFlagDefinitions";
+} from "../models/FeatureFlagDefinitions";
 
 export interface FeatureFlagRecord {
   key: FeatureFlagKey;

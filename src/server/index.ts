@@ -131,6 +131,8 @@ export interface McpServerOptions {
 // here to preserve the historical import path used by existing tests.
 export { formatToolParamError };
 
+let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefined;
+
 /**
  * Populate the canonical production registry and validate exact-tool startup
  * defaults. The process entrypoint calls this before opening daemon listeners;
@@ -140,7 +142,19 @@ export { formatToolParamError };
  */
 export function registerMcpTools(daemonMode: boolean): void {
   installDefaultProvisionedDeviceTransportFence();
-  registerAllTools({ daemonMode });
+  // Re-registering rebuilds every definition and drops the tool-schema cache, which a
+  // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
+  // The registered set only changes when something is removed, so skip while the
+  // same mode's set is still present. Session-gated tools are unaffected: callability
+  // is evaluated per request against the registry, not captured at registration.
+  const removalEpoch = ToolRegistry.removalEpochForRegistration;
+  if (
+    lastToolRegistration?.daemonMode !== daemonMode ||
+    lastToolRegistration.removalEpoch !== removalEpoch
+  ) {
+    registerAllTools({ daemonMode });
+    lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
+  }
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
@@ -293,7 +307,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all tools with the server
   startupBenchmark.startPhase("serverHandlerRegistration");
-  ToolRegistry.registerWithServer(server);
+  // A stateless server answers one request: track it only until it closes and never
+  // notify it (#4678).
+  const registration = { ephemeral: options.stateless === true };
+  ToolRegistry.registerWithServer(server, registration);
 
   // Emit notifications/tools/list_changed when a runtime feature-flag toggle
   // changes tool definitions (outputSchema advertisement or tool availability),
@@ -313,12 +330,30 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   });
 
   // Register all resources with the server
-  ResourceRegistry.registerWithServer(server, (signal) => ({
-    sessionUuid: sessionToolBinding.effectiveSessionUuid(bindingKey),
-    ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
-    releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
-    signal,
-  }));
+  ResourceRegistry.registerWithServer(
+    server,
+    (signal) => ({
+      sessionUuid: sessionToolBinding.effectiveSessionUuid(bindingKey),
+      ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
+      releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
+      signal,
+    }),
+    registration,
+  );
+
+  if (registration.ephemeral) {
+    // A server closed before it connects has no transport, so the SDK never fires
+    // onclose and the prune hooks would leave it tracked forever.
+    const closeServer = server.close.bind(server);
+    server.close = async () => {
+      try {
+        await closeServer();
+      } finally {
+        ToolRegistry.untrackServer(server);
+        ResourceRegistry.untrackServer(server);
+      }
+    };
+  }
 
   // Release teardown is subscribed by the binding store, once per store (see
   // createReleaseSubscribedBindingStore); this server's binding is attached to it

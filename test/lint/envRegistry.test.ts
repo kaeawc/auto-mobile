@@ -20,7 +20,7 @@ import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
  */
 const ROOT = path.resolve(import.meta.dir, "../..");
 const SRC = path.join(ROOT, "src");
-const REGISTRY_FILE = "src/config/env.ts";
+const REGISTRY_FILES = new Set(["src/config/env.ts", "src/config/envCli.ts"]);
 const BASELINE = path.join(import.meta.dir, "env-registry-baseline.txt");
 const DOCS = path.join(ROOT, "docs/using/environment-variables.md");
 const PRODUCT_NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
@@ -217,7 +217,7 @@ function readBaseline(): string[] {
 function unregisteredReads(files: Map<string, string>): string[] {
   const registered = registeredNames();
   return [...files]
-    .filter(([relative]) => relative !== REGISTRY_FILE)
+    .filter(([relative]) => !REGISTRY_FILES.has(relative))
     .flatMap(([relative, source]) =>
       [...findEnvNames(relative, source)]
         .filter((name) => !registered.has(name))
@@ -237,7 +237,7 @@ describe("environment variable registry", () => {
     found = unregisteredReads(files);
     const registered = registeredNames();
     rawReads = [...files]
-      .filter(([relative]) => relative !== REGISTRY_FILE)
+      .filter(([relative]) => !REGISTRY_FILES.has(relative))
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, registered))
       .sort();
   }, 60_000);

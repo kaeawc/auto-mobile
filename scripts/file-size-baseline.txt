@@ -1,5 +1,5 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
-1055	src/config/env.ts
+1051	src/config/env.ts
 2876	src/ctrlProxy/CtrlProxyManager.ts
 4085	src/ctrlProxy/IOSCtrlProxyManager.ts
 1789	src/ctrlProxy/IosCtrlProxyBuilder.ts

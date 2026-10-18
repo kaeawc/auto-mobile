@@ -8,6 +8,8 @@
  * `test/lint/env-registry-baseline.txt`, which may only shrink.
  */
 
+import { CLI_ENV } from "./envCli";
+
 export type EnvVarKind = "path" | "string" | "bool" | "int" | "number" | "enum" | "list";
 
 export interface EnvVarSpec {
@@ -29,6 +31,7 @@ export interface EnvVarSpec {
 }
 
 export const ENV = {
+  ...CLI_ENV,
   DATA_DIR: {
     name: "AUTOMOBILE_DATA_DIR",
     legacyName: "AUTO_MOBILE_DATA_DIR",
@@ -55,12 +58,6 @@ export const ENV = {
     kind: "path",
     default: "unset (broker disabled)",
     doc: "Operator session-broker host configuration file; never a session requester input.",
-  },
-  SESSION_CONFIG: {
-    name: "AUTOMOBILE_SESSION_CONFIG",
-    kind: "path",
-    default: "unset",
-    doc: "Session configuration file read by the CLI, equivalent to --session-config.",
   },
   ADB_SERVER_COORDINATION_DIR: {
     name: "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",

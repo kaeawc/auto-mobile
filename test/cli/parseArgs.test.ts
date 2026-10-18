@@ -426,3 +426,72 @@ describe("--session-config", () => {
     },
   );
 });
+
+describe("parseArgs process-env reads through the registry (#11848)", () => {
+  const withProcessEnv = <T>(values: Record<string, string>, run: () => T): T => {
+    const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, values);
+    try {
+      return run();
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  };
+
+  test("legacy AUTO_MOBILE_ video spellings apply when the canonical name is unset", () => {
+    const defaults = withProcessEnv(
+      {
+        AUTO_MOBILE_VIDEO_QUALITY_PRESET: "low",
+        AUTO_MOBILE_VIDEO_TARGET_BITRATE_KBPS: "500",
+        AUTO_MOBILE_VIDEO_MAX_THROUGHPUT_MBPS: "2.5",
+        AUTO_MOBILE_VIDEO_FPS: "15",
+        AUTO_MOBILE_VIDEO_MAX_ARCHIVE_MB: "25",
+        AUTO_MOBILE_VIDEO_FORMAT: "mp4",
+      },
+      () => parseArgs([], logger, {}).videoRecordingDefaults,
+    );
+    expect(defaults).toEqual({
+      qualityPreset: "low",
+      targetBitrateKbps: 500,
+      maxThroughputMbps: 2.5,
+      fps: 15,
+      maxArchiveSizeMb: 25,
+      format: "mp4",
+    });
+  });
+
+  test("a set canonical video name wins over the legacy spelling, even when empty", () => {
+    const logged: string[] = [];
+    const defaults = withProcessEnv(
+      { AUTOMOBILE_VIDEO_FPS: "30", AUTO_MOBILE_VIDEO_FPS: "10", AUTOMOBILE_VIDEO_FORMAT: "" },
+      () => parseArgs([], { warn: (message) => logged.push(message) }, {}).videoRecordingDefaults,
+    );
+    expect(defaults.fps).toBe(30);
+    // An empty canonical value shadows the legacy one and is ignored, not warned about.
+    expect(defaults.format).toBeUndefined();
+    expect(logged).toEqual([]);
+  });
+
+  test("debug switches enable only on the exact value 1 of the canonical name", () => {
+    const parse = (values: Record<string, string>) =>
+      withProcessEnv(values, () => {
+        const parsed = parseArgs([], logger, {});
+        return { debug: parsed.debug, debugPerf: parsed.debugPerf };
+      });
+    expect(parse({ AUTOMOBILE_DEBUG: "1", AUTOMOBILE_DEBUG_PERF: "1" })).toEqual({
+      debug: true,
+      debugPerf: true,
+    });
+    expect(parse({ AUTOMOBILE_DEBUG: "true", AUTOMOBILE_DEBUG_PERF: "yes" })).toEqual({
+      debug: false,
+      debugPerf: false,
+    });
+    expect(parse({ AUTO_MOBILE_DEBUG: "1" })).toEqual({ debug: false, debugPerf: false });
+  });
+});

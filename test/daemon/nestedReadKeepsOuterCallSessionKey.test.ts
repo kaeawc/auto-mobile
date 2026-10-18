@@ -18,7 +18,7 @@ import {
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -51,7 +51,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
   let previousInjectedManager: unknown;
   let restoreHermeticServer: () => void;
   let restorePipeline: () => void;
-  let previousRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let previousAutolock: string | undefined;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
@@ -111,8 +111,10 @@ describe("nested sessionless calls keep the outer control execution's session ke
         handle: async (input) => ({ durationMs: 0, finalizedResponse: input.response }),
       },
     });
-    previousRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
     timer = new FakeTimer();
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [HELD, WATCHED];
@@ -255,7 +257,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", previousRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     restorePipeline();
     restoreHermeticServer();
     resetDbWriteBarrier();

@@ -335,6 +335,25 @@ describe("BaselineManager", function () {
       expect(baselines.map((b) => b.screenId)).toEqual(["good_screen"]);
     });
 
+    test("getBaseline and listBaselines ignore a row whose JSON is valid but not a violation list (#11859)", async function () {
+      const now = new Date().toISOString();
+      await manager.saveBaseline("good_screen", []);
+      for (const [screen, json] of [
+        ["object_screen", '{"fingerprint":"a"}'],
+        ["null_entry_screen", "[null]"],
+        ["no_fingerprint_screen", '[{"type":"missing-content-description"}]'],
+      ]) {
+        await testDb
+          .insertInto("accessibility_baselines")
+          .values({ screen_id: screen, violations_json: json, created_at: now, updated_at: now })
+          .execute();
+        expect(await manager.getBaseline(screen)).toBeNull();
+      }
+
+      const baselines = await manager.listBaselines();
+      expect(baselines.map((b) => b.screenId)).toEqual(["good_screen"]);
+    });
+
     it("should store and retrieve updated_at timestamp", async function () {
       const screenId = "test_screen";
       const beforeSave = new Date();

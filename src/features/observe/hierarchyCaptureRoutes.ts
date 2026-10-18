@@ -6,7 +6,7 @@ import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "./DeviceHierarchyCapture";
 import { DisplaySelectionError } from "./DisplaySelection";
 import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
-import { ObserverPendingRequestTimeoutError } from "./DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "./ObserverPendingRequestTimeoutError";
 import type { HierarchyCapture, HierarchyCaptureRequest } from "./HierarchyCapture";
 import {
   classifySelectedDisplayReadFailure,

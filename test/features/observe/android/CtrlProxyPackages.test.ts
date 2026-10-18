@@ -172,19 +172,19 @@ describe("CtrlProxyPackages (Android)", function () {
   describe("connection lifecycle", function () {
     test("cancels screenshot backoff when the underlying socket closes", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const scheduler = new FakeScreenshotBackoffScheduler();
       const client = createClient(testDevice, fakeAdb, {
         webSocketFactory: factory,
         timer: fakeTimer,
+        screenshotBackoffScheduler: scheduler,
       });
-      const scheduler = new FakeScreenshotBackoffScheduler();
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        (client as any).screenshotBackoffScheduler = scheduler;
 
         // A genuine WebSocket "close" must run the client's close handler, which cancels pending
-        // screenshot captures. The old test poked (client as any).onConnectionClosed() directly, so
+        // screenshot captures. The old test called onConnectionClosed() directly, so
         // it stayed green even if the ws.on("close") -> onConnectionClosed() wiring was severed.
         socket!.close();
         await waitForCondition(() => scheduler.cancelPendingCapturesCalls >= 1);
@@ -197,13 +197,12 @@ describe("CtrlProxyPackages (Android)", function () {
 
     test("refreshes screenshot cadence by rescheduling keepalive", function () {
       const { factory } = createCapturingFactory(fakeTimer);
+      const scheduler = new FakeScreenshotBackoffScheduler();
       const client = createClient(testDevice, fakeAdb, {
         webSocketFactory: factory,
         timer: fakeTimer,
+        screenshotBackoffScheduler: scheduler,
       });
-      const scheduler = new FakeScreenshotBackoffScheduler();
-
-      (client as any).screenshotBackoffScheduler = scheduler;
       client.refreshObservationStreamScreenshotCadence();
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);

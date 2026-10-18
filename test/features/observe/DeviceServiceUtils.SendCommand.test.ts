@@ -1,5 +1,4 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import type WebSocket from "ws";
 import {
   sendCommand,
   type SendCommandOptions,
@@ -24,7 +23,7 @@ function harness(overrides: Partial<DelegateContext> = {}) {
   const context: DelegateContext = {
     timer,
     requestManager,
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     ensureConnected: async () => {
       order.push("connect");
       return true;

@@ -3,7 +3,6 @@ import {
   findTapTargetNode,
   type TapFocusFailure,
 } from "./tapTargetSupport";
-import { describeFocusTarget } from "./tapFocusIdentity";
 import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
 import {
   TapExplicitDisplayPhase,
@@ -46,7 +45,7 @@ import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import { type DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
-import { isFocusEditableElement, promoteClickableAncestor } from "../utility/ElementResolver";
+import { promoteClickableAncestor } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import { DefaultHierarchyCapture, type HierarchyCapture } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -73,7 +72,6 @@ import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { isElementKeyboardFocused } from "../utility/FocusedInput";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
@@ -112,6 +110,8 @@ import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
 import { TapPostTapEffectPhase } from "./tapPostTapEffectPhase";
 import { TapRetryPhase } from "./tapRetryPhase";
 import { TapTalkBackPhase } from "./tapTalkBackPhase";
+import { TapFinalizePhase } from "./tapFinalizePhase";
+import { TapFocusEntryPhase } from "./tapFocusEntryPhase";
 import { TapAndroidDispatchPhase, type ResolvedAndroidTapOptions } from "./tapAndroidDispatchPhase";
 import { scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
@@ -297,6 +297,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     executeAndroidTapWithCoordinates: (...args) => this.executeAndroidTapWithCoordinates(...args),
     reportTalkBackActivationWarning: (result, context, action) =>
       this.reportTalkBackActivationWarning(result, context, action),
+  });
+  private readonly focusEntry = new TapFocusEntryPhase({ platform: this.device.platform });
+  private readonly finalizePhase = new TapFinalizePhase({
+    deriveTapEffectAfterPostTapObservation: (previous, current, signal) =>
+      this.deriveTapEffectAfterPostTapObservation(previous, current, signal),
+    enforceFreshnessConsistencyWithEffect: (previous, result) =>
+      this.enforceFreshnessConsistencyWithEffect(previous, result),
+    applyEnsureCheckedResult: (result, options, signal) =>
+      this.applyEnsureCheckedResult(result, options, signal),
+    captureTerminalObservationScreenshot: (observation, perf, signal) =>
+      this.captureTerminalObservationScreenshot(observation, perf, signal),
+    recordDeferredPredictionOutcome: (result, observation) =>
+      this.recordDeferredPredictionOutcome(result, observation),
+    selectionStateTracker: () => this.selectionStateTracker,
+    verifyFocusAfterTap: (result, verify, signal) =>
+      this.verifyFocusAfterTap(result, verify, signal),
+    verifyFocusedInputTarget: (...args) => this.verifyFocusedInputTarget(...args),
+    detectLongPressMetadata: (previous, current) => this.detectLongPressMetadata(previous, current),
   });
   private readonly explicitDisplay = new TapExplicitDisplayPhase({
     device: this.device,
@@ -1232,47 +1250,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const longPressDuration = this.getLongPressDuration(options);
 
           if (action === "focus") {
-            if (!isFocusEditableElement(element)) {
+            const focus = this.focusEntry.resolve({
+              options,
+              element,
+              matchedElement: searchOutcome.selection.matchedElement,
+              selectedElement: selectedElementMetadata,
+              searchUntil: searchOutcome.stats,
+              viewHierarchy,
+              tapPoint: initialTapPoint,
+            });
+            if (focus.kind === "done") {
+              // A rejected (non-editable) target never becomes the focus target.
+              if (focus.outcome.success) {
+                focusTarget = element;
+              }
               perf.end();
-              return {
-                success: false,
-                action,
-                element,
-                selectedElement: selectedElementMetadata,
-                searchUntil: searchOutcome.stats,
-                error: `Cannot focus ${describeFocusTarget(element, options)} because it is not an editable input`,
-              };
+              return focus.outcome;
             }
-
             focusTarget = element;
-            const matchedLabel = searchOutcome.selection.matchedElement;
-            if (matchedLabel && matchedLabel !== element) {
-              focusLabelText = matchedLabel.text;
-            }
-
-            // Check if element is already focused
-            const isFocused = isElementKeyboardFocused(element);
-
-            if (isFocused) {
-              logger.info(`Element is already focused, no action needed`);
-              perf.end();
-              return withResolvedLayer(
-                {
-                  success: true,
-                  action,
-                  element: element,
-                  selectedElement: selectedElementMetadata,
-                  searchUntil: searchOutcome.stats,
-                  wasAlreadyFocused: true,
-                  focusChanged: false,
-                  focusVerified: true,
-                  x: initialTapPoint.x,
-                  y: initialTapPoint.y,
-                },
-                resolvedElementLayer(viewHierarchy, element, this.device.platform),
-              );
-            }
-
+            focusLabelText = focus.labelText;
             action = "tap";
             effectiveAction = "tap";
           }
@@ -1498,52 +1494,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         return unverifiableDisplayPostState(result, options);
       }
 
-      if (result.success && result.observation && result.element) {
-        const postTap = await this.deriveTapEffectAfterPostTapObservation(
-          previousObserveResult,
-          result.observation,
-          signal,
-        );
-        result.effect = postTap.effect;
-        // The observation that established the effect must be returned and become
-        // the caller's diff baseline, rather than the earlier source capture.
-        result.observation = postTap.observation;
-        await this.applyEnsureCheckedResult(result, options, signal);
-        await this.captureTerminalObservationScreenshot(result.observation, perf, signal);
-        await this.recordDeferredPredictionOutcome(result, result.observation);
-        const selectedElements = await this.selectionStateTracker.finalize({
-          action: effectiveAction,
-          selectionState: selectionCapture,
-          currentObservation: result.observation,
-          previousObservation: previousObserveResult,
-          element: result.element,
-          effect: postTap.effect,
-          signal,
-        });
-        if (selectedElements.length > 0) {
-          result.observation.selectedElements = selectedElements;
-        }
-        this.enforceFreshnessConsistencyWithEffect(previousObserveResult, result);
-      }
-
-      await this.confirmFocusAfterTap({
-        result,
+      return await this.finalizePhase.finalize(result, {
         options,
         requestedAction,
+        effectiveAction,
+        previousObserveResult,
+        selectionCapture,
         focusTarget,
         focusLabelText,
         preTapHierarchy,
+        perf,
         signal,
       });
-
-      if (effectiveAction === "longPress") {
-        const metadata = this.detectLongPressMetadata(previousObserveResult, result.observation);
-        return {
-          ...result,
-          ...metadata,
-        };
-      }
-      return result;
     } catch (error) {
       perf.end();
 
@@ -1650,47 +1612,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       activatedSubtext: { text: subtext.text, occurrence },
       ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
     };
-  }
-
-  /** Mark a focus-requested tap as failed unless the focused field matches the target (mutates `result`). */
-  private async confirmFocusAfterTap({
-    result,
-    options,
-    requestedAction,
-    focusTarget,
-    focusLabelText,
-    preTapHierarchy,
-    signal,
-  }: {
-    result: TapOnFocusOutcome;
-    options: TapOnElementOptions;
-    requestedAction: NonNullable<TapOnElementOptions["action"]>;
-    focusTarget: Element | undefined;
-    focusLabelText: string | undefined;
-    preTapHierarchy: ViewHierarchyResult | undefined;
-    signal?: AbortSignal;
-  }): Promise<void> {
-    if (requestedAction !== "focus" || !result.success || result.wasAlreadyFocused) {
-      return;
-    }
-    const target = focusTarget ?? result.element;
-    result.focusVerified = await this.verifyFocusAfterTap(
-      result,
-      (observation) =>
-        this.verifyFocusedInputTarget(
-          options,
-          target,
-          observation,
-          focusLabelText,
-          result.selectedElement?.indexInMatches,
-          preTapHierarchy,
-        ),
-      signal,
-    );
-    if (!result.focusVerified) {
-      result.success = false;
-      result.error = `Failed to confirm focus on editable input ${describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
-    }
   }
 
   private assertLongPressWithinRequestBudget(

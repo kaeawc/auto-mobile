@@ -1,4 +1,5 @@
-import type { Client } from "@modelcontextprotocol/client";
+import { asMcpClient } from "./helpers/fakeMcpClient";
+import { asCtrlProxyManager } from "./helpers/narrowStubs";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -144,27 +145,26 @@ describe("a direct frame naming a held handset by its other transport id", () =>
         driven.push(`ios-setPreference:${device.deviceId}`);
       },
     }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      (device) =>
-        ({
-          ensureCompatibleVersion: async () => {
-            driven.push(`updateService:${device.deviceId}`);
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
+    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation((device) =>
+      asCtrlProxyManager({
+        ensureCompatibleVersion: async () => {
+          driven.push(`updateService:${device.deviceId}`);
+          return { status: "compatible" };
+        },
+      }),
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     wire = InMemoryControlSocket.attach({
       timer,
       connectionIds: new FakeIdGenerator(),
       loopback: async () =>
-        ({
+        asMcpClient({
           readResource: async ({ uri }: { uri: string }) => {
             reads.push(uri);
             return { contents: [{ uri, mimeType: "image/png", blob: "fake-screenshot" }] };
           },
           close: async () => {},
-        }) as unknown as Client,
+        }),
       startupOptions: {
         sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
       },

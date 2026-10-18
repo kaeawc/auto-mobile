@@ -33,8 +33,7 @@ describe("held-session heartbeat skipped by the hold-is-current guard (#11028)",
   let spies: Array<ReturnType<typeof spyOn>>;
   let onHeldHeartbeat: () => void;
 
-  const held = () =>
-    (proxy as unknown as { otherHeldSessions: Map<string, HeldRecord> }).otherHeldSessions;
+  const held = () => proxy["otherHeldSessions"];
 
   beforeEach(() => {
     timer = new LivenessTimer();

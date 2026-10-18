@@ -180,8 +180,7 @@ describe("proxy restarted with a stable owner token", () => {
 
     // Handover and stall payloads name a session's device from this map; calls naming the
     // startup-bound session carry no deviceId, so the token resume is its only source.
-    const devices = (proxy as unknown as { sessionDeviceIds: Map<string, string> })
-      .sessionDeviceIds;
+    const devices = proxy["sessionDeviceIds"];
     expect(devices.get(FIRST)).toBe("emulator-5554");
     expect(devices.get(SECOND)).toBe("emulator-5556");
   });

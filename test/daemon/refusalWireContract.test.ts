@@ -562,7 +562,7 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     return { typed: payload as TypedFields };
   }
   if (fixture.surface === "delete-device") {
-    const text = (payload as unknown as RefusalWireResult).content[0].text;
+    const text = (payload as RefusalWireResult).content[0].text;
     const failure = (JSON.parse(text) as { failure: Record<string, unknown> }).failure;
     const { code, phase, message, retryable, retryAfterMs, nextAction, ...evidence } = failure;
     expect([phase, typeof message], fixture.name).toEqual(["precondition", "string"]);
@@ -571,7 +571,7 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
       details: Object.keys(evidence).length > 0 ? evidence : undefined,
     };
   }
-  const result = payload as unknown as BindingsResult;
+  const result = payload as BindingsResult;
   const failure = result.bindings.find((binding) => binding.failure)?.failure ?? result.failure;
   return { typed: failure as TypedFields, capacity: failure?.capacity, budget: failure?.budget };
 }

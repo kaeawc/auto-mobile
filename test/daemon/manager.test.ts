@@ -1,3 +1,5 @@
+import { asSessionManager } from "./helpers/narrowStubs";
+import { asDevicePool } from "./helpers/narrowStubs";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -6026,7 +6028,7 @@ describe("Daemon manager available-devices", () => {
     const fakeState: DaemonStateLike = {
       isInitialized: () => true,
       getDevicePool: () =>
-        ({
+        asDevicePool({
           // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
           getRefreshedInventory: async () => ({
             stats: { idle: 1, assigned: 2, error: 1, total: 4 },
@@ -6040,12 +6042,12 @@ describe("Daemon manager available-devices", () => {
             },
           ],
           getRecoveryEligibility: () => ({ eligible: false, reason: "unsupported-platform" }),
-        }) as any,
+        }),
       getSessionManager: () =>
-        ({
+        asSessionManager({
           getSession: () => null,
           releaseSession: async () => null,
-        }) as any,
+        }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };
 

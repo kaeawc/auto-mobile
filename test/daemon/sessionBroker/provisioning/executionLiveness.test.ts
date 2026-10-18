@@ -428,14 +428,7 @@ describe("managed-execution session liveness", () => {
     await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 30 * MINUTE });
     const row = (await persistence.getSession!(SESSION))!;
 
-    const liveness = (
-      manager as unknown as {
-        recoveryLivenessFromPersisted(persisted: typeof row): {
-          livenessPolicy: string;
-          sessionTimeoutMs: number;
-        };
-      }
-    ).recoveryLivenessFromPersisted(row);
+    const liveness = manager["recoveryLivenessFromPersisted"](row);
 
     expect(liveness.livenessPolicy).toBe(MANAGED_EXECUTION_LIVENESS_POLICY);
     expect(liveness.sessionTimeoutMs).toBe(30 * MINUTE);

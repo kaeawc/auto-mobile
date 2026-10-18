@@ -1,3 +1,4 @@
+import { asSocket } from "./helpers/fakeSocket";
 import { describe, it, expect } from "bun:test";
 import { Socket } from "node:net";
 import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
@@ -39,7 +40,7 @@ function drivable<T extends object>(server: T): T & LineDrivable {
   };
   return Object.assign(server, {
     processLineForTest: (socket: FakeSocket, line: string): Promise<void> =>
-      target.processLine(socket as unknown as Socket, line),
+      target.processLine(asSocket(socket), line),
     pushForTest: (data: unknown): number => target.pushToSubscribers(data),
   }) as T & LineDrivable;
 }

@@ -1,3 +1,4 @@
+import { asPerformanceStreamRequest } from "./helpers/narrowStubs";
 import { describe, expect, test } from "bun:test";
 import {
   PerformanceStreamSocketServer,
@@ -107,7 +108,7 @@ describe("performance poll query and cursor characterization", () => {
   test("rejects unsupported commands and invalid cursors before querying", async () => {
     const { repository, server } = setup();
     await expect(
-      server.dispatch({ command: "unknown" } as unknown as PerformanceStreamSocketRequest),
+      server.dispatch(asPerformanceStreamRequest({ command: "unknown" })),
     ).rejects.toThrow("Unsupported performance stream command: unknown");
     await expect(server.dispatch({ command: "poll", sinceId: -1 })).rejects.toThrow();
     expect(repository.queries).toEqual([]);

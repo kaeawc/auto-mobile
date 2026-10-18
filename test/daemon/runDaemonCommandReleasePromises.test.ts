@@ -1,3 +1,5 @@
+import { asDaemonManagerClass } from "./helpers/narrowStubs";
+import { asDaemonStateLike } from "./helpers/narrowStubs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import type { DaemonManager } from "../../src/daemon/manager";
@@ -210,18 +212,18 @@ function managerForRelease(
 ) {
   class FakeManager {
     getDaemonState(): DaemonStateLike {
-      return {
+      return asDaemonStateLike({
         isInitialized: () => true,
         getSessionManager: () => ({
           getSession: () => ({ assignedDevice: "fake-device" }),
           releaseSession,
         }),
         getDevicePool: () => ({ releaseDevice }),
-      } as unknown as DaemonStateLike;
+      });
     }
   }
   // This command only uses getDaemonState; no manager startup or daemon operations.
-  return FakeManager as unknown as new () => DaemonManager;
+  return asDaemonManagerClass(FakeManager);
 }
 
 describe("CLI release-session promise ownership", () => {

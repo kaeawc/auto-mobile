@@ -1,3 +1,4 @@
+import { asPerformanceStreamRequest } from "./helpers/narrowStubs";
 import { createTestDatabase } from "../db/testDbHelper";
 import { PerformanceAuditRepository } from "../../src/db/performanceAuditRepository";
 import { beforeAll, afterAll, describe, it, test, expect } from "bun:test";
@@ -78,10 +79,12 @@ describe("PerformanceStreamSocketServer query normalization (#6677)", () => {
     } as PerformanceStreamSocketRequest);
     const fromString = repository.lastQuery?.sinceTimestamp;
 
-    await server.handleRequestForTest({
-      command: "poll",
-      sinceTimestamp: epochMs,
-    } as unknown as PerformanceStreamSocketRequest);
+    await server.handleRequestForTest(
+      asPerformanceStreamRequest({
+        command: "poll",
+        sinceTimestamp: epochMs,
+      }),
+    );
 
     expect(fromString).toBe(new Date(epochMs).toISOString());
     expect(repository.lastQuery?.sinceTimestamp).toBe(fromString);

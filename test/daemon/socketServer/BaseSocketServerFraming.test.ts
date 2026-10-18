@@ -1,3 +1,4 @@
+import { asSocket } from "../helpers/fakeSocket";
 import { describe, it, expect } from "bun:test";
 import { Socket } from "node:net";
 import {
@@ -23,7 +24,7 @@ class FramingTestServer extends BaseSocketServer {
 
   /** Expose the protected connection setup for direct driving in tests. */
   attach(socket: FakeSocket): void {
-    this.handleConnection(socket as unknown as Socket);
+    this.handleConnection(asSocket(socket));
   }
 
   protected async processLine(_socket: Socket, line: string): Promise<void> {

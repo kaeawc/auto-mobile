@@ -1,6 +1,6 @@
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { expect, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import {
@@ -98,12 +98,6 @@ class TerminalSocket extends EventEmitter {
   }
 }
 
-interface SocketServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 function createHarness(peerCloses = true) {
   const timer = new FakeTimer();
   const started = Promise.withResolvers<void>();
@@ -129,10 +123,10 @@ function createHarness(peerCloses = true) {
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
   const server = createTestUnixSocketServer("unused", state, timer);
-  const internals = server as unknown as SocketServerInternals;
+  const internals = server;
   const socket = new TerminalSocket(peerCloses);
-  internals.acceptingRequests = true;
-  internals.handleConnection(socket as unknown as Socket);
+  internals["acceptingRequests"] = true;
+  internals["handleConnection"](asSocket(socket));
   return { server, internals, socket, timer, started, refresh, refreshStarts: () => refreshStarts };
 }
 
@@ -174,7 +168,7 @@ test("a stalled admitted handler gets one possibly-dispatched shutdown frame bef
   const { server, internals, socket, timer, started, refresh } = createHarness();
   socket.send("stalled");
   await started.promise;
-  const handlers = [...internals.activeRequestHandlers];
+  const handlers = [...internals["activeRequestHandlers"]];
   const close = server.close();
   timer.advanceTime(REQUEST_DRAIN_MS - 1);
   expect(socket.events).toEqual([]);
@@ -194,7 +188,7 @@ test("a queued successor gets one undispatched shutdown frame without reaching i
   socket.send("stalled");
   await started.promise;
   socket.send("queued");
-  const handlers = [...internals.activeRequestHandlers];
+  const handlers = [...internals["activeRequestHandlers"]];
   const close = server.close();
   expectShutdown(socket, "queued", false);
   expect(socket.events).toEqual(["write:queued"]);
@@ -215,7 +209,7 @@ test("a request queued before quiesce is refused as undispatched when the earlie
   socket.send("running");
   await started.promise;
   socket.send("queued");
-  const handlers = [...internals.activeRequestHandlers];
+  const handlers = [...internals["activeRequestHandlers"]];
   const quiesce = server.quiesce();
   // The drain bound passes with the first request still running, as when session
   // release is about to cancel it.

@@ -30,26 +30,6 @@ class FakeStreamServer extends DeviceDataStreamSocketServer {
   }
 }
 
-interface Internals {
-  sessionManager: {
-    getSession(sessionUuid: string): unknown | null;
-    getSessionForDevice(deviceId: string): string | null;
-    getDeviceLabels(sessionUuid: string): Record<string, string> | undefined;
-  };
-  devicePool: {
-    getDevice(deviceId: string): unknown;
-    getAllDevices(): unknown[];
-    assertDeviceActionable(deviceId: string, purpose: string): void;
-    assertNotAssignedToBinding(input: {
-      requesterSessionUuid?: string;
-      deviceId: string;
-    }): Promise<void>;
-    assertNotClaimedByForeignDaemon(deviceId: string): Promise<void>;
-  };
-  deviceDataStreamServer: unknown;
-  setupDeviceDataStreamCallback(): void;
-}
-
 const observation: ObserveResult = {
   observationId: "observed",
   updatedAt: 0,
@@ -73,19 +53,19 @@ async function observeAs(options: {
       idGenerator: new CountingIdGenerator("device-session"),
     },
   );
-  const internals = daemon as unknown as Internals;
+  const internals = daemon;
   const pooled = {
     id: "device-1",
     platform: "ios",
     sessionId: options.localHolder,
   };
-  internals.devicePool.getDevice = () => pooled;
-  internals.devicePool.getAllDevices = () => [pooled];
-  internals.devicePool.assertDeviceActionable = () => {};
-  internals.sessionManager.getSession = () => ({});
-  internals.sessionManager.getSessionForDevice = () => options.localHolder ?? null;
-  internals.sessionManager.getDeviceLabels = () => undefined;
-  internals.devicePool.assertNotAssignedToBinding = async (input) => {
+  internals["devicePool"].getDevice = () => pooled;
+  internals["devicePool"].getAllDevices = () => [pooled];
+  internals["devicePool"].assertDeviceActionable = () => {};
+  internals["sessionManager"].getSession = () => ({});
+  internals["sessionManager"].getSessionForDevice = () => options.localHolder ?? null;
+  internals["sessionManager"].getDeviceLabels = () => undefined;
+  internals["devicePool"].assertNotAssignedToBinding = async (input) => {
     if (options.slotCheckFails) {
       throw new Error("binding registry unreadable");
     }
@@ -102,7 +82,7 @@ async function observeAs(options: {
     }
   };
   let foreignChecks = 0;
-  internals.devicePool.assertNotClaimedByForeignDaemon = async (deviceId) => {
+  internals["devicePool"].assertNotClaimedByForeignDaemon = async (deviceId) => {
     foreignChecks += 1;
     // The real pool skips a device a local session holds.
     if (pooled.sessionId || !options.foreign) {
@@ -117,7 +97,7 @@ async function observeAs(options: {
     );
   };
   const stream = new FakeStreamServer();
-  internals.deviceDataStreamServer = stream;
+  internals["deviceDataStreamServer"] = stream;
   const paths: string[] = [];
   const deviceRead = spyOn(RealObserveScreen.prototype, "executeDeviceRead").mockImplementation(
     async () => {
@@ -132,7 +112,7 @@ async function observeAs(options: {
     },
   );
   try {
-    internals.setupDeviceDataStreamCallback();
+    internals["setupDeviceDataStreamCallback"]();
     const observations = await stream.handler!({
       deviceId: "device-1",
       sessionUuid: options.requester,

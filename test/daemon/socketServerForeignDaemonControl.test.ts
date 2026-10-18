@@ -1,5 +1,7 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDeviceManager } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -22,16 +24,10 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * claims it, before anything reaches the device.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const FOREIGN_PID = 4242;
 const LOCAL_SESSION = "local-session";
 
-let internals: Internals;
+let internals: UnixSocketServer;
 let sockets: FakeSocket[];
 /** Device ids another daemon claims, as the pool's foreign-ownership view reports them. */
 let foreignClaimed: Set<string>;
@@ -66,14 +62,14 @@ function useServer(localSessionHoldsDevice = false): void {
     // The storage tool is enabled, so the frame reaches the ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals = server;
+  internals["acceptingRequests"] = true;
 }
 
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals["handleConnection"](asSocket(socket));
   return socket;
 }
 
@@ -81,7 +77,7 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals["activeRequestHandlers"]]);
 }
 
 async function answer(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
@@ -116,13 +112,15 @@ beforeEach(() => {
   foreignClaimed = new Set();
   claimChecks = [];
   deviceCalls = [];
-  PlatformDeviceManagerFactory.setInstance({
-    getBootedDevices: async () => [androidDevice],
-    getBootedDevicesDetailed: async () => ({
-      devices: [androidDevice],
-      succeededPlatforms: new Set(["android", "ios"]),
+  PlatformDeviceManagerFactory.setInstance(
+    asDeviceManager({
+      getBootedDevices: async () => [androidDevice],
+      getBootedDevicesDetailed: async () => ({
+        devices: [androidDevice],
+        succeededPlatforms: new Set(["android", "ios"]),
+      }),
     }),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+  );
   spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: async (

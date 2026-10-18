@@ -1,8 +1,9 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asSocket } from "./helpers/fakeSocket";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
@@ -76,13 +77,6 @@ interface LoopbackCall {
   settled: Promise<unknown>;
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  mcpClientFactory(): Promise<Pick<Client, "callTool" | "close">>;
-}
-
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 async function settle(): Promise<void> {
@@ -112,7 +106,7 @@ async function connectProxy(fake: FakeDaemonClient, timer: FakeTimer) {
 
 describe("swipeOn lookFor cancellation through the daemon request path (#10151)", () => {
   let timer: FakeTimer;
-  let internals: Internals;
+  let internals: UnixSocketServer;
   let daemonSide: DaemonSideSocket;
   let clientSide: ClientSideSocket;
   let daemonClient: DaemonClient;
@@ -159,9 +153,9 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
       { isInitialized: () => false } as DaemonStateAccess,
       timer,
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
-    internals.mcpClientFactory = async () => ({
+    internals = server;
+    internals["acceptingRequests"] = true;
+    internals["mcpClientFactory"] = async () => ({
       close: async () => {},
       callTool: (_params, options) => {
         const call: LoopbackCall = {
@@ -180,7 +174,7 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     });
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
-    internals.handleConnection(daemonSide as unknown as Socket);
+    internals["handleConnection"](asSocket(daemonSide));
     daemonClient = new DaemonClient("/fake/socket", 60_000, timer, {}, null, new FakeIdGenerator());
     daemonClient.attachSocketForTesting(clientSide as never);
     daemonSide.deliver = (frame) => daemonClient.simulateIncomingDataForTesting(Buffer.from(frame));
@@ -189,7 +183,7 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
   afterEach(async () => {
     await daemonClient.close();
     daemonSide.destroy();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
   });
 
   const lookForArgs = { direction: "up", lookFor: { text: "NeverAppears39" } };

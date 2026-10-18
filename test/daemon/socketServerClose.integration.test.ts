@@ -73,7 +73,7 @@ describe("UnixSocketServer close", () => {
   (isWindows ? test.skip : test)(
     "does not remove a successor socket bound during close",
     async () => {
-      const listener = (server as unknown as { server: NetServer | null }).server;
+      const listener = server["server"];
       expect(listener).not.toBeNull();
 
       const replacementServer = createServer();

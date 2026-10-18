@@ -1,6 +1,6 @@
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -32,21 +32,14 @@ class InventorySocket extends EventEmitter {
   }
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  clientSockets: Map<string, Socket>;
-  activeRequestHandlers: Set<Promise<void>>;
-  forwardMcpRequest(options: { request: DaemonRequest; signal: AbortSignal }): Promise<unknown>;
-}
 function harness() {
   const state = { isInitialized: () => false } as DaemonStateAccess;
   const server = createTestUnixSocketServer("unused", state, new FakeTimer());
-  const internal = server as unknown as Internals;
-  internal.acceptingRequests = true;
+  const internal = server;
+  internal["acceptingRequests"] = true;
   const connect = () => {
     const socket = new InventorySocket();
-    internal.handleConnection(socket as unknown as Socket);
+    internal["handleConnection"](asSocket(socket));
     return socket;
   };
   return { internal, connect };
@@ -77,9 +70,9 @@ test.each(["EPIPE", "ECONNRESET", "ERR_STREAM_DESTROYED", "ECONNABORTED"])(
     const { internal, connect } = harness();
     const socket = connect();
     socket.emit("error", Object.assign(new Error("peer closed"), { code }));
-    await Promise.all([...internal.activeRequestHandlers]);
+    await Promise.all([...internal["activeRequestHandlers"]]);
     expect(socket.destroyed).toBe(true);
-    expect(internal.clientSockets.size).toBe(0);
+    expect(internal["clientSockets"].size).toBe(0);
     expect(socketErrorLogs(error)).toEqual([]);
     expect(debug.mock.calls.some(([message]) => String(message).includes("Socket"))).toBe(true);
   },
@@ -90,7 +83,7 @@ test("unexpected socket errors retain error logging", async () => {
   const { internal, connect } = harness();
   const socket = connect();
   socket.emit("error", Object.assign(new Error("bad handle"), { code: "EBADF" }));
-  await Promise.all([...internal.activeRequestHandlers]);
+  await Promise.all([...internal["activeRequestHandlers"]]);
   expect(socket.destroyed).toBe(true);
   expect(socketErrorLogs(error)).toHaveLength(1);
 });
@@ -109,7 +102,7 @@ test.each([true, false])(
       ["A", Promise.withResolvers<unknown>()],
       ["B", Promise.withResolvers<unknown>()],
     ]);
-    internal.forwardMcpRequest = async ({ request: frame, signal }) => {
+    internal["forwardMcpRequest"] = async ({ request: frame, signal }) => {
       signals.set(frame.id, signal);
       if (signals.size === 2) {
         started.resolve();
@@ -123,7 +116,7 @@ test.each([true, false])(
     a.send(request("A"));
     b.send(request("B"));
     await started.promise;
-    const handlers = [...internal.activeRequestHandlers];
+    const handlers = [...internal["activeRequestHandlers"]];
     a.destroy();
     expect(signals.get("A")?.aborted).toBe(true);
     expect(signals.get("B")?.aborted).toBe(false);
@@ -139,7 +132,7 @@ test.each([true, false])(
       ).toHaveLength(1);
     }
     b.destroy();
-    await Promise.all([...internal.activeRequestHandlers]);
+    await Promise.all([...internal["activeRequestHandlers"]]);
   },
 );
 
@@ -149,7 +142,7 @@ test("a live client cancel keeps the error response shape and emits no error-lev
   const { internal, connect } = harness();
   const socket = connect();
   const started = Promise.withResolvers<void>();
-  internal.forwardMcpRequest = async ({ signal }) => {
+  internal["forwardMcpRequest"] = async ({ signal }) => {
     started.resolve();
     return new Promise<never>((_resolve, reject) =>
       signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
@@ -164,7 +157,7 @@ test("a live client cancel keeps the error response shape and emits no error-lev
     params: { requestId: "A" },
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
-  await Promise.all([...internal.activeRequestHandlers]);
+  await Promise.all([...internal["activeRequestHandlers"]]);
   expect(socket.responses.find((frame) => frame.id === "A")).toMatchObject({
     type: "mcp_response",
     success: false,
@@ -175,5 +168,5 @@ test("a live client cancel keeps the error response shape and emits no error-lev
     debug.mock.calls.filter(([message]) => String(message).includes("MCP forward abandoned")),
   ).toHaveLength(1);
   socket.destroy();
-  await Promise.all([...internal.activeRequestHandlers]);
+  await Promise.all([...internal["activeRequestHandlers"]]);
 });

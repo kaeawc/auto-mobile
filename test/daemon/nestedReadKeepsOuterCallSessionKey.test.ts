@@ -38,12 +38,6 @@ const OUTER = "__nested_key_outer__";
 const READ = "__nested_key_read__";
 const CONTROL = "__nested_key_control__";
 
-/** Exercise the daemon's production subscriptions without starting any sockets or discovery. */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 type Nesting = "read" | "sessionless-control" | "same-session-control" | "throwing-read";
 
 describe("nested sessionless calls keep the outer control execution's session key (#11680)", () => {
@@ -141,7 +135,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
     manager.onSessionRelease((sessionId, _deviceId, reason) => {
       releases.push({ sessionId, reason, at: timer.now() });
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon["subscribeToolCallEndActivity"]();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -252,7 +246,7 @@ describe("nested sessionless calls keep the outer control execution's session ke
     await fixture.teardown();
     unsubscribeEnds();
     restoreEndSpy();
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon["stopSessionTimers"]();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

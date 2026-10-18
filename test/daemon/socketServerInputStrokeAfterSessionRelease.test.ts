@@ -1,5 +1,7 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDaemonState } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -43,13 +45,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * server and execution tracker on a FakeTimer; only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
-}
-
 const SESSION = "stroke-holder-session";
 const NEXT_SESSION = "next-owner-session";
 const OWNER_TOKEN = "harness-a";
@@ -61,7 +56,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let internals: UnixSocketServer;
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   let unsubscribeActivity: () => void;
@@ -119,7 +114,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
       },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -164,17 +159,17 @@ describe("an open input stroke vs. a release of its holder session", () => {
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      {
+      asDaemonState({
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
+      }),
       new FakeTimer(),
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals["acceptingRequests"] = true;
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals["handleConnection"](asSocket(socket));
 
     // The daemon's heartbeat monitor, wired as in `socketServerInputSuspectSession.test.ts`.
     monitor = new SessionHeartbeatMonitor(
@@ -196,7 +191,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     // before the device client is restored.
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     unsubscribeActivity();
     executionTracker.setSessionClockOffsetProvider(() => 0);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
@@ -210,7 +205,9 @@ describe("an open input stroke vs. a release of its holder session", () => {
   beforeAll(async () => {
     await setUp();
     try {
-      sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+      sessionManager.onSessionRelease(
+        (sessionId) => void internals["liftStrokesHeldBy"](sessionId),
+      );
       await reapHolderWithStrokeOpen();
       await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       await sendGesture("Move");
@@ -224,7 +221,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
 
   test("releasing the holder lifts its open stroke before the device has a new owner", async () => {
     // The server's session-release subscription, which `start()` wires to the broadcaster.
-    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    sessionManager.onSessionRelease((sessionId) => void internals["liftStrokesHeldBy"](sessionId));
 
     await reapHolderWithStrokeOpen();
     await settle();
@@ -245,7 +242,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
   // #11490: a plan's auto-release goes through the same release notification, so the stroke of
   // #11470 is lifted exactly once, and a frame still in flight is cut before the device is freed.
   test("a plan auto-release cuts an in-flight gesture frame and lifts the open stroke once", async () => {
-    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    sessionManager.onSessionRelease((sessionId) => void internals["liftStrokesHeldBy"](sessionId));
     expect(await sendGesture("Start")).toMatchObject({ success: true });
     const frame = executionTracker.startExecution("input/gestureMove", undefined, SESSION);
     executionTracker.bindDeviceExecution(frame.id, DEVICE);

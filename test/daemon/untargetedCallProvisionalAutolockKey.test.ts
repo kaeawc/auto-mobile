@@ -30,12 +30,6 @@ const OWNER = "provisional-key-owner";
 const SEED = "provisional-key-released-seed";
 const TOOL = "__untargeted_provisional_key_control__";
 
-/** The same subscription and teardown that the daemon runs in start() and stop(). */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 describe("untargeted calls cannot abandon a different provisional autolock key (#11381)", () => {
   let restoreHermeticServer: () => void;
   let previousAutolock: string | undefined;
@@ -90,7 +84,7 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
     daemon.getSessionManager().onSessionRelease((_sessionId, _deviceId, reason) => {
       releaseReasons.push(reason);
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon["subscribeToolCallEndActivity"]();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -142,7 +136,7 @@ describe("untargeted calls cannot abandon a different provisional autolock key (
       autolockSessionForMcpSession: (mcp) =>
         daemon.getDevicePool().captureAutolockSessionForMcpSession(mcp),
     });
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon["stopSessionTimers"]();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

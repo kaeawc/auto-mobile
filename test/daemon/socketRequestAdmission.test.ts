@@ -188,16 +188,12 @@ test.each([undefined, "device:a"])(
     const timer = new FakeTimer();
     const socket = new FakeSocket();
     const server = createTestUnixSocketServer("unused", {} as DaemonStateAccess, timer);
-    const internals = server as unknown as {
-      acceptingRequests: boolean;
-      handleConnection(socket: FakeSocket): void;
-      handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
-    };
-    internals.acceptingRequests = true;
+    const internals = server;
+    internals["acceptingRequests"] = true;
     const first = Promise.withResolvers<unknown>();
     const started = Promise.withResolvers<void>();
     let secondStarted = false;
-    internals.handleLocalSocketRequest = async (request) => {
+    internals["handleLocalSocketRequest"] = async (request) => {
       if (request.id === "first") {
         started.resolve();
         return first.promise;
@@ -205,7 +201,7 @@ test.each([undefined, "device:a"])(
       secondStarted = true;
       return {};
     };
-    internals.handleConnection(socket);
+    internals["handleConnection"](socket);
     const request = (id: string): DaemonRequest => ({
       id,
       type: "mcp_request",

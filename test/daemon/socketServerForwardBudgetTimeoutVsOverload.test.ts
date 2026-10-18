@@ -45,16 +45,7 @@ function requireBudget(
   deadline: ProgressExtendableDeadline,
   phase: string,
 ): number {
-  return (
-    server as unknown as {
-      requireRemainingMcpForwardBudget: (
-        request: DaemonRequest,
-        totalTimeoutMs: number,
-        deadline: ProgressExtendableDeadline,
-        phase: string,
-      ) => number;
-    }
-  ).requireRemainingMcpForwardBudget(request, totalTimeoutMs, deadline, phase);
+  return server["requireRemainingMcpForwardBudget"](request, totalTimeoutMs, deadline, phase);
 }
 
 const request: DaemonRequest = {

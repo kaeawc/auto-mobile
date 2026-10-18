@@ -1,3 +1,4 @@
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { Socket } from "node:net";
@@ -41,17 +42,6 @@ interface Recorded {
   release: (result: Ack) => void;
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  maxInboundFrameBytes: number;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  ownedGestures: { ownerCount: number };
-  sessions: Map<string, unknown>;
-  clientSockets: Map<string, Socket>;
-  pendingSocketRequests: Set<unknown>;
-}
-
 const device = { platform: "android", deviceId: androidDevice.deviceId };
 
 const tapFrame = (id: string, padding = ""): DaemonRequest => ({
@@ -77,7 +67,7 @@ const gestureFrame = (
 const padding = (): string => "p".repeat(LIMIT * 2);
 
 let server: UnixSocketServer;
-let internals: Internals;
+let internals: UnixSocketServer;
 let calls: Recorded[];
 let sockets: FakeSocket[];
 let baselineActive: number;
@@ -108,9 +98,9 @@ beforeEach(() => {
     createFakeDaemonState(new Map()) as DaemonStateAccess,
     new FakeTimer(),
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
-  internals.maxInboundFrameBytes = LIMIT;
+  internals = server;
+  internals["acceptingRequests"] = true;
+  Object.assign(internals, { maxInboundFrameBytes: LIMIT });
 });
 
 afterEach(() => {
@@ -124,7 +114,7 @@ afterEach(() => {
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals["handleConnection"](asSocket(socket));
   return socket;
 }
 
@@ -136,13 +126,13 @@ async function settle(): Promise<void> {
 
 async function drain(): Promise<void> {
   await settle();
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals["activeRequestHandlers"]]);
 }
 
 function expectNothingAdmitted(): void {
   expect(calls).toEqual([]);
-  expect(internals.activeRequestHandlers.size).toBe(0);
-  expect(internals.ownedGestures.ownerCount).toBe(0);
+  expect(internals["activeRequestHandlers"].size).toBe(0);
+  expect(internals["ownedGestures"].ownerCount).toBe(0);
   expect(executionTracker.getActiveExecutionCount()).toBe(baselineActive);
   expect(executionTracker.hasActiveDeviceExecutions(androidDevice.deviceId)).toBe(false);
 }
@@ -156,8 +146,8 @@ function expectFrameTooLarge(socket: FakeSocket): void {
     error: "Invalid request: frame too large",
     code: -32600,
   });
-  expect(internals.sessions.size).toBe(0);
-  expect(internals.clientSockets.size).toBe(0);
+  expect(internals["sessions"].size).toBe(0);
+  expect(internals["clientSockets"].size).toBe(0);
 }
 
 describe("an over-limit input/* frame (#10109 x #10032 admission)", () => {
@@ -221,7 +211,7 @@ describe("an over-limit input/* frame (#10109 x #10032 admission)", () => {
     await settle();
     pending("gestureStart")[0].release({ success: true });
     await settle();
-    expect(internals.ownedGestures.ownerCount).toBe(1);
+    expect(internals["ownedGestures"].ownerCount).toBe(1);
 
     owner.send(gestureFrame("move", "input/gestureMove", "g1", padding()));
     await settle();
@@ -238,7 +228,7 @@ describe("an over-limit input/* frame (#10109 x #10032 admission)", () => {
     await drain();
     expect(pending("gestureEnd")).toHaveLength(1);
     expect(pending("gestureMove")).toHaveLength(0);
-    expect(internals.ownedGestures.ownerCount).toBe(0);
+    expect(internals["ownedGestures"].ownerCount).toBe(0);
 
     expect(sibling.destroyed).toBe(false);
     sibling.send(tapFrame("sibling-tap"));
@@ -290,16 +280,16 @@ describe("a connect-and-leave probe against the control socket's framer (#10107 
 
   test("a probe that sends nothing and closes is not an overflow and keeps no session state", async () => {
     const probe = connect();
-    expect(internals.clientSockets.size).toBe(1);
+    expect(internals["clientSockets"].size).toBe(1);
 
     probe.destroy();
     await drain();
 
     expect(overflowWarnings()).toEqual([]);
     expect(probe.responses).toEqual([]);
-    expect(internals.sessions.size).toBe(0);
-    expect(internals.clientSockets.size).toBe(0);
-    expect(internals.pendingSocketRequests.size).toBe(0);
+    expect(internals["sessions"].size).toBe(0);
+    expect(internals["clientSockets"].size).toBe(0);
+    expect(internals["pendingSocketRequests"].size).toBe(0);
     expectNothingAdmitted();
   });
 
@@ -308,8 +298,8 @@ describe("a connect-and-leave probe against the control socket's framer (#10107 
       connect().destroy();
     }
     await drain();
-    expect(internals.sessions.size).toBe(0);
-    expect(internals.clientSockets.size).toBe(0);
+    expect(internals["sessions"].size).toBe(0);
+    expect(internals["clientSockets"].size).toBe(0);
 
     const client = connect();
     client.send(tapFrame("after-probes"));
@@ -333,7 +323,7 @@ describe("a connect-and-leave probe against the control socket's framer (#10107 
 
     expect(overflowWarnings()).toEqual([]);
     expect(probe.responses).toEqual([]);
-    expect(internals.clientSockets.size).toBe(0);
+    expect(internals["clientSockets"].size).toBe(0);
     expectNothingAdmitted();
   });
 });

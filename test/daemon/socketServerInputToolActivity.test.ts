@@ -1,5 +1,6 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
@@ -24,15 +25,9 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * alone (passive viewing) starts no execution and must not count.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const OWNER = "desktop-session";
 
-let internals: Internals;
+let internals: UnixSocketServer;
 let sockets: FakeSocket[];
 let ended: string[][];
 let unsubscribe: () => void;
@@ -44,14 +39,14 @@ function useServer(ownerDevice: string): void {
     createFakeDaemonState(new Map([[OWNER, session]])),
     new FakeTimer(),
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals = server;
+  internals["acceptingRequests"] = true;
 }
 
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals["handleConnection"](asSocket(socket));
   return socket;
 }
 
@@ -59,7 +54,7 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals["activeRequestHandlers"]]);
 }
 
 const ack = async (onDispatch?: () => void) => {

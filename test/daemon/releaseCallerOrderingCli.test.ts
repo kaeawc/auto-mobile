@@ -1,7 +1,7 @@
+import { asDaemonManagerClass } from "./helpers/narrowStubs";
+import { asDaemonStateLike } from "./helpers/narrowStubs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
-import type { DaemonManager } from "../../src/daemon/manager";
-import type { DaemonStateLike } from "../../src/daemon/daemonState";
 
 describe("in-daemon CLI release caller ordering", () => {
   test.each(["success", "session", "pool"] as const)(
@@ -12,7 +12,7 @@ describe("in-daemon CLI release caller ordering", () => {
       const exited = new Error("command exited");
       class Manager {
         getDaemonState() {
-          return {
+          return asDaemonStateLike({
             isInitialized: () => true,
             getSessionManager: () => ({
               getSession: () => ({ assignedDevice: "d1" }),
@@ -32,7 +32,7 @@ describe("in-daemon CLI release caller ordering", () => {
                 }
               },
             }),
-          } as unknown as DaemonStateLike;
+          });
         }
       }
       const log = spyOn(console, "log").mockImplementation((...args) => {
@@ -50,7 +50,7 @@ describe("in-daemon CLI release caller ordering", () => {
           "release-session",
           ["s1"],
           {},
-          Manager as unknown as new () => DaemonManager,
+          asDaemonManagerClass(Manager),
         );
         if (failure === "success") {
           await command;

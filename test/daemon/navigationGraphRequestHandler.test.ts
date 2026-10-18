@@ -1,3 +1,4 @@
+import { asSocket } from "./helpers/fakeSocket";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   createNavigationGraphRequestHandler,
@@ -13,7 +14,6 @@ import {
 } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { Socket } from "node:net";
 
 const EMPTY_SUMMARY: NavigationGraphSummary = {
   appId: null,
@@ -64,7 +64,7 @@ class TestableServer extends DeviceDataStreamSocketServer {
   }
 
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
-    await this.processLine(socket as unknown as Socket, line);
+    await this.processLine(asSocket(socket), line);
   }
 }
 

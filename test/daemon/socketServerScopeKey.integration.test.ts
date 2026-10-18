@@ -77,9 +77,7 @@ function createServer() {
 }
 
 function scopeKey(server: UnixSocketServer, args: unknown): string | undefined {
-  return (
-    server as unknown as { getRequestArgumentScopeKey: (a: unknown) => string | undefined }
-  ).getRequestArgumentScopeKey(args);
+  return server["getRequestArgumentScopeKey"](args);
 }
 
 describe("UnixSocketServer.getRequestArgumentScopeKey precedence", () => {

@@ -312,9 +312,7 @@ describe("UnixSocketServer notification broadcast", () => {
     subscriber.close();
     await server.close();
 
-    expect(
-      (server as unknown as { sessionReleaseUnsubscribe: unknown }).sessionReleaseUnsubscribe,
-    ).toBeNull();
+    expect(server["sessionReleaseUnsubscribe"]).toBeNull();
     expect(() => SessionReleaseBroadcaster.emit("session-a")).not.toThrow();
     expect(subscriber.frames).toHaveLength(1);
   });
@@ -330,9 +328,7 @@ describe("UnixSocketServer notification broadcast", () => {
 
     // The broadcaster subscription is released on close, so emitting after
     // close must not throw and must not attempt any socket writes.
-    expect(
-      (server as unknown as { listChangedUnsubscribe: unknown }).listChangedUnsubscribe,
-    ).toBeNull();
+    expect(server["listChangedUnsubscribe"]).toBeNull();
     expect(() => ListChangedBroadcaster.emit("tools")).not.toThrow();
     expect(subscriber.frames).toHaveLength(1);
   });

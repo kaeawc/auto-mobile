@@ -29,24 +29,15 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import type { LivenessScenarioOptions } from "../helpers/livenessScenarioHarness";
-import type { Mutex } from "async-mutex";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 
 isolateEmptyToolRegistry();
 
 const DEVICE = "emulator-5554";
 const AVD = "restart-owner-phone";
-interface Reservation {
-  ownerMcpSessionIds?: ReadonlySet<string>;
-  ownerLivenessToken?: string;
-  scheduledDeadlineMs?: number;
-  idleDeadlineMs?: number;
-  recoveryWindowEndMs?: number;
-}
 
 function reservations(s: LivenessScenario) {
-  return (s.daemon.pool as unknown as { rehydrationReservations: Map<string, Reservation> })
-    .rehydrationReservations;
+  return s.daemon.pool["rehydrationReservations"];
 }
 
 const ENV_KEYS = [
@@ -391,7 +382,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
   test("a base restore closed while waiting for assignmentMutex credits no label hold", async () => {
     const { s, base, label } = await labelHandoff();
     const pool = s.daemon.pool;
-    const mutex = (pool as unknown as { assignmentMutex: Mutex }).assignmentMutex;
+    const mutex = pool["assignmentMutex"];
     const unlock = await mutex.acquire();
     const before = { ...reservations(s).get(label)! };
     const restore = pool.restoreOwnedDeviceSessionsForMcpSession(

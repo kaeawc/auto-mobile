@@ -1,3 +1,4 @@
+import { asDeviceManager } from "./helpers/narrowStubs";
 import { spyOn } from "bun:test";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -41,12 +42,12 @@ function createFakeDeviceManager(
   devices: BootedDevice[],
   succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
 ) {
-  return {
+  return asDeviceManager({
     getBootedDevicesDetailed: mock(async () => ({
       devices,
       succeededPlatforms,
     })),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+  });
 }
 
 function createFakeDaemonState() {
@@ -164,8 +165,7 @@ describe("UnixSocketServer input/key", () => {
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server["requireCurrentFrameContext"] = () => {};
     await server.start();
 
     const { response } = await sendRequest(socketPath, "input/key", {

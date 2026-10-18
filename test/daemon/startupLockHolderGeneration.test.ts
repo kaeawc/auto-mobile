@@ -7,14 +7,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { formatLockContent, parseLockContent } from "../../src/utils/fileLock";
 
-interface HolderReader {
-  readStartupLockHolder(): {
-    present: boolean;
-    livePid: number | undefined;
-    token: string | undefined;
-  };
-}
-
 describe("startup lock holder generation", () => {
   const scratch = useScratchRoot("startup-holder-generation-");
   function fixture(
@@ -40,7 +32,13 @@ describe("startup lock holder generation", () => {
     });
     const body = formatLockContent(9999, "old-owner", "", generation || undefined);
     writeFileSync(lockPath, body);
-    return { manager, reader: manager as unknown as HolderReader, lockPath, body, probe };
+    return {
+      manager,
+      reader: { readStartupLockHolder: () => manager["readStartupLockHolder"]() },
+      lockPath,
+      body,
+      probe,
+    };
   }
 
   test("reads a provably different live generation as dead, then reclaims with the same probe", () => {

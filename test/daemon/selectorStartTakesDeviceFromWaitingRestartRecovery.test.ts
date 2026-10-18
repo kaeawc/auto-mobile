@@ -1,6 +1,5 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -33,14 +32,6 @@ const SIMULATOR: BootedDevice = {
 };
 const HOLDER = "session-holding-the-simulator";
 const NEWCOMER = "session-starting-by-selector";
-
-interface DevicePoolLossInternals {
-  evictMissingPooledDevice(
-    device: PooledDevice,
-    reason: string,
-    options?: { attemptDeviceLossRecovery?: boolean },
-  ): Promise<void>;
-}
 
 describe("a session waiting in flight for its restarting device", () => {
   let fixtures: Awaited<ReturnType<typeof createSimulatorHolder>>[];
@@ -92,11 +83,9 @@ describe("a session waiting in flight for its restarting device", () => {
     active = fixtures[index];
     const { timer, persistence, sessions, manager, pool, held } = active;
     manager.bootedDevices = [];
-    await (pool as unknown as DevicePoolLossInternals).evictMissingPooledDevice(
-      held,
-      "not present in iOS simulator discovery",
-      { attemptDeviceLossRecovery: true },
-    );
+    await pool["evictMissingPooledDevice"](held, "not present in iOS simulator discovery", {
+      attemptDeviceLossRecovery: true,
+    });
     expect((await persistence.getSession(HOLDER))?.release_reason).toBe(
       `device-restart:${SIMULATOR.deviceId}`,
     );

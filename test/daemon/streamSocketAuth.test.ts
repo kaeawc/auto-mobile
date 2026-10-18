@@ -196,7 +196,7 @@ describe("SessionScopedStreamAuthenticator", () => {
   });
 
   test("the escape hatch disables enforcement entirely", () => {
-    const env = { [STREAM_SOCKET_AUTH_ENV]: "0" } as unknown as NodeJS.ProcessEnv;
+    const env = { [STREAM_SOCKET_AUTH_ENV]: "0" } as NodeJS.ProcessEnv;
     expect(() => authenticator(sessionManager(), env).authorize({})).not.toThrow();
   });
 });

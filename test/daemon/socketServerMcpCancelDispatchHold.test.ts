@@ -39,26 +39,13 @@ function createServer(timer: FakeTimer): UnixSocketServer {
   );
 }
 
-interface Internals {
-  runKeyedMcpForward: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
-  handleIdeRequest: (
-    client: unknown,
-    request: DaemonRequest,
-    timeoutMs: number,
-    socketSessionId: string,
-    deadline: ProgressExtendableDeadline,
-    originalTimeoutMs: number,
-    signal?: AbortSignal,
-  ) => Promise<unknown>;
-}
-
 const TIMEOUT_MS = 10_000;
 const KEY = "device:A";
 
 function setup(dispatchBeforeCancel: boolean) {
   const timer = new FakeTimer();
   const server = createServer(timer);
-  const internals = server as unknown as Internals;
+  const internals = server;
   const controller = new AbortController();
   let completeDispatch: ((confirmed: boolean) => void) | undefined;
   let replyTool: ((value: unknown) => void) | undefined;
@@ -92,7 +79,7 @@ function setup(dispatchBeforeCancel: boolean) {
   };
   const first = internals
     .runKeyedMcpForward(KEY, () =>
-      internals.handleIdeRequest(
+      internals["handleIdeRequest"](
         client,
         request,
         TIMEOUT_MS,
@@ -107,7 +94,7 @@ function setup(dispatchBeforeCancel: boolean) {
       (error: unknown) => ({ error }),
     );
   let secondStarted = false;
-  const second = internals.runKeyedMcpForward(KEY, async () => {
+  const second = internals["runKeyedMcpForward"](KEY, async () => {
     secondStarted = true;
   });
   return {

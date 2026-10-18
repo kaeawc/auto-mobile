@@ -1,5 +1,6 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -23,16 +24,10 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * the real socket request path; only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const OWNER = "released-mid-input-session";
 
 describe("input/* cut by a session release (#11381)", () => {
-  let internals: Internals;
+  let internals: UnixSocketServer;
   let socket: FakeSocket;
   let tapEntered: PromiseWithResolvers<void>;
   let tapOutcome: PromiseWithResolvers<{ success: boolean }>;
@@ -62,7 +57,7 @@ describe("input/* cut by a session release (#11381)", () => {
     for (let i = 0; i < 4; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     return socket.responses.find((frame) => frame.id === "tap");
   }
 
@@ -87,10 +82,10 @@ describe("input/* cut by a session release (#11381)", () => {
       ),
       new FakeTimer(),
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals["acceptingRequests"] = true;
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals["handleConnection"](asSocket(socket));
   }
 
   function tearDown(): void {

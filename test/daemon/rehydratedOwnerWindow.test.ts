@@ -17,11 +17,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // window must start when the daemon can hear from it, and it gets the lease plus the suspect
 // grace, as a live owner would. The release is terminal, so a short window loses the session.
 
-interface DaemonMonitorInternals {
-  heartbeatMonitor: { stop(): void } | null;
-  startHeartbeatMonitor(): void;
-}
-
 /** Startup work between rehydration and the monitor start, longer than the 4 s lease. */
 const STARTUP_AFTER_REHYDRATION_MS = 6_000;
 const OWNER_WINDOW_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
@@ -36,7 +31,7 @@ async function rehydratedDaemon() {
     },
   );
   const sessionManager = daemon.getSessionManager();
-  const internals = daemon as unknown as DaemonMonitorInternals;
+  const internals = daemon;
   const released: string[] = [];
   const unsubscribe = SessionReleaseBroadcaster.subscribe((_sessionId, reason) => {
     released.push(reason ?? "");
@@ -45,10 +40,10 @@ async function rehydratedDaemon() {
     initialOwnership: "awaiting-owner",
   });
   timer.advanceTime(STARTUP_AFTER_REHYDRATION_MS);
-  internals.startHeartbeatMonitor();
+  internals["startHeartbeatMonitor"]();
   const stop = () => {
     unsubscribe();
-    internals.heartbeatMonitor?.stop();
+    internals["heartbeatMonitor"]?.stop();
     sessionManager.stopCleanupTimer();
   };
   return { timer, sessionManager, released, stop };

@@ -1,7 +1,8 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDaemonState } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   hasActiveSessionExecution,
@@ -35,14 +36,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * as `socketServer.start()` wires it.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
-  liftSessionlessStrokesOn(deviceId: string): void;
-}
-
 const NEW_OWNER = "new-owner-session";
 const DEVICE = androidDevice.deviceId;
 const IDLE_MS = 60_000;
@@ -50,7 +43,7 @@ const IDLE_MS = 60_000;
 describe("an open sessionless input stroke vs. a session acquiring its device", () => {
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let internals: UnixSocketServer;
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
   let acquisitions: string[];
@@ -76,7 +69,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       params: { platform: "android", deviceId: DEVICE, x: 1, y: 2, gestureId: "drag-1" },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -93,7 +86,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       acquisitions.push(`${sessionId}@${deviceId}`);
       executionTracker.cancelSessionlessDeviceUse(deviceId);
-      internals.liftSessionlessStrokesOn(deviceId);
+      internals["liftSessionlessStrokesOn"](deviceId);
     });
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
@@ -115,25 +108,25 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      {
+      asDaemonState({
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
+      }),
       new FakeTimer(),
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals["acceptingRequests"] = true;
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals["handleConnection"](asSocket(socket));
     // socketServer.start(): the session-release subscription that lifts a released holder's strokes.
-    sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+    sessionManager.onSessionRelease((sessionId) => void internals["liftStrokesHeldBy"](sessionId));
   });
 
   afterEach(async () => {
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     unsubscribeActivity();
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
@@ -168,14 +161,14 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     });
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     expect(strokes).toEqual(["start", "cancel"]);
   });
 
   test("a stroke on another device, and one a session holds, are left alone", async () => {
     expect(await sendSessionlessGesture("Start")).toMatchObject({ success: true });
 
-    internals.liftSessionlessStrokesOn("some-other-device");
+    internals["liftSessionlessStrokesOn"]("some-other-device");
     await settle();
     expect(strokes).toEqual(["start"]);
 
@@ -196,11 +189,11 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     expect(socket.responses.find((frame) => frame.id === "owner-start")).toMatchObject({
       success: true,
     });
-    internals.liftSessionlessStrokesOn(DEVICE);
+    internals["liftSessionlessStrokesOn"](DEVICE);
     await settle();
     expect(strokes).toEqual(["start", "cancel", "start"]);
   });
@@ -223,7 +216,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
 
     startAck.resolve({ success: true });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
 
     expect(strokes).toEqual(["start", "cancel"]);
     expect(socket.responses.find((frame) => frame.id === "gesture-Start")).toMatchObject({
@@ -232,7 +225,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     });
     socket.destroy();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     expect(strokes).toEqual(["start", "cancel"]);
   });
 
@@ -250,7 +243,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
 
     startAck.resolve({ success: false });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
 
     expect(strokes).toEqual(["start"]);
   });

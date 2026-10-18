@@ -1,6 +1,5 @@
-import { createTestUnixSocketServer } from "../../helpers/createTestUnixSocketServer";
+import { asSocket } from "./fakeSocket";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
 import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/constants";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -126,11 +125,6 @@ class RecordingSocket extends EventEmitter {
   }
 }
 
-interface SocketServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-}
-
 const setActiveDeviceTool = createSetActiveDeviceHandler({
   resumeCtrlProxy: async () => {},
   transportWait: {
@@ -177,13 +171,9 @@ class DaemonUnderTest {
       timer,
     );
     this.monitor.start();
-    const server = createTestUnixSocketServer(
-      "unused",
-      DaemonState.getInstance(),
-      timer,
-    ) as unknown as SocketServerInternals;
-    server.acceptingRequests = true;
-    server.handleConnection(this.socket as unknown as Socket);
+    const server = createHarnessServer("unused", DaemonState.getInstance(), timer);
+    server.allowRequests();
+    server.connect(asSocket(this.socket));
   }
 
   static async start(timer: FakeTimer, devices: BootedDevice[]): Promise<DaemonUnderTest> {

@@ -1,3 +1,4 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
@@ -5,39 +6,23 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-interface ForwardRoute {
-  clientKey: string;
-  executionKey: string;
-  sessionUuid?: string;
-}
-
 /** The socket server's route bookkeeping, driven as its request loop drives it. */
-interface RouteInternals {
-  recordBoundMcpClientKey(
-    request: DaemonRequest,
-    socketSessionId: string,
-    route: ForwardRoute,
-    sessionWasActiveBeforeForward: boolean,
-    response: unknown,
-  ): void;
-  boundMcpClientKeysBySocketSession: Map<string, { sessionUuid?: string }>;
-}
 
 const SOCKET = "socket-1";
 
 afterEach(() => DaemonState.getInstance().reset());
 
-function newServer(): RouteInternals {
+function newServer(): UnixSocketServer {
   const server = createTestUnixSocketServer(
     "/fake/one-call-session-route.sock",
     DaemonState.getInstance(),
     new FakeTimer(),
   );
-  return server as unknown as RouteInternals;
+  return server;
 }
 
 /** Forward one `tapOn` that routed to `sessionUuid`, carrying `boundSessionUuid` when given. */
-function forward(server: RouteInternals, sessionUuid: string, boundSessionUuid?: string): void {
+function forward(server: UnixSocketServer, sessionUuid: string, boundSessionUuid?: string): void {
   const request: DaemonRequest = {
     id: "call",
     type: "mcp_request",
@@ -55,11 +40,11 @@ function forward(server: RouteInternals, sessionUuid: string, boundSessionUuid?:
     executionKey: `session:${sessionUuid}`,
     sessionUuid,
   };
-  server.recordBoundMcpClientKey(request, SOCKET, route, false, { content: [] });
+  server["recordBoundMcpClientKey"](request, SOCKET, route, false, { content: [] });
 }
 
-function routedSession(server: RouteInternals): string | undefined {
-  return server.boundMcpClientKeysBySocketSession.get(SOCKET)?.sessionUuid;
+function routedSession(server: UnixSocketServer): string | undefined {
+  return server["boundMcpClientKeysBySocketSession"].get(SOCKET)?.sessionUuid;
 }
 
 describe("the daemon socket's route follows the connection's default, not a named session (#11347)", () => {

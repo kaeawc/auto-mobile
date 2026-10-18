@@ -14,7 +14,7 @@ function textResponse(payload: unknown, isError: boolean): TeardownToolResponse 
   return {
     ...(isError ? { isError: true } : {}),
     content: [{ type: "text", text: JSON.stringify(payload) }],
-  } as unknown as TeardownToolResponse;
+  } as TeardownToolResponse;
 }
 
 describe("WorkflowBindingDeviceDeleter", () => {

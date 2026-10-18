@@ -1,3 +1,4 @@
+import { asDaemonStateLike } from "./helpers/narrowStubs";
 import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,7 +96,7 @@ describe("daemon command characterization with fake I/O", () => {
 
   test("available-devices keeps local pool reads and eligibility queries in order", async () => {
     const events: unknown[] = [];
-    const state = {
+    const state = asDaemonStateLike({
       isInitialized: () => true,
       getDevicePool: () => ({
         // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
@@ -119,7 +120,7 @@ describe("daemon command characterization with fake I/O", () => {
           return "eligible";
         },
       }),
-    } as unknown as DaemonStateLike;
+    });
     class Manager extends SafeDaemonManager {
       override getDaemonState() {
         return state;
@@ -292,7 +293,7 @@ describe("daemon command characterization with fake I/O", () => {
     "%s rejects an unknown local session before any mutation",
     async (command) => {
       const events: unknown[] = [];
-      const state = {
+      const state = asDaemonStateLike({
         isInitialized: () => true,
         getSessionManager: () => ({
           getSession: () => {
@@ -310,7 +311,7 @@ describe("daemon command characterization with fake I/O", () => {
           events.push("get-pool");
           return { releaseDevice: unexpected };
         },
-      } as unknown as DaemonStateLike;
+      });
       class Manager extends SafeDaemonManager {
         override getDaemonState() {
           return state;
@@ -352,7 +353,7 @@ describe("daemon command characterization with fake I/O", () => {
         cacheData: { key: "value" },
         livenessPolicy: policy,
       };
-      const state = {
+      const state = asDaemonStateLike({
         isInitialized: () => true,
         getSessionManager: () => ({
           getSession: () => {
@@ -370,7 +371,7 @@ describe("daemon command characterization with fake I/O", () => {
             events.push(["heartbeat", id]);
           },
         }),
-      } as unknown as DaemonStateLike;
+      });
       class Manager extends SafeDaemonManager {
         override getDaemonState() {
           return state;

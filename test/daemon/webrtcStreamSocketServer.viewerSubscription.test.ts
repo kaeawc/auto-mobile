@@ -1,3 +1,4 @@
+import { asPeerConnection } from "../helpers/webrtcFakes";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +22,6 @@ import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
 import { WebRtcPublisher, WhipClient, type H264CaptureSource } from "../../src/features/webrtc";
-import type { RTCPeerConnection } from "werift";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
@@ -118,8 +118,7 @@ function harness(
       const publisher = new WebRtcPublisher(config, {
         ...deps,
         timer,
-        createPeerConnection: () =>
-          new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
+        createPeerConnection: () => asPeerConnection(new FakeConnectedPeerConnection()),
         createWhipClient: (opts) =>
           new WhipClient({
             ...opts,

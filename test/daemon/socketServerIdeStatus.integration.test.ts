@@ -1,3 +1,4 @@
+import { asCtrlProxyManager, asDeviceManager } from "./helpers/narrowStubs";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -846,19 +847,23 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       isEmulator: true,
       name: "Pixel",
     };
-    const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevicesDetailed: async () => ({
-        devices: [device],
-        succeededPlatforms: new Set([device.platform]),
+    const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue(
+      asDeviceManager({
+        getBootedDevicesDetailed: async () => ({
+          devices: [device],
+          succeededPlatforms: new Set([device.platform]),
+        }),
       }),
-    } as any);
-    const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      ensureCompatibleVersion: async () => ({
-        status: "skipped",
-        expectedSha256: "",
-        acceptedPreinstalled: true,
+    );
+    const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+      asCtrlProxyManager({
+        ensureCompatibleVersion: async () => ({
+          status: "skipped",
+          expectedSha256: "",
+          acceptedPreinstalled: true,
+        }),
       }),
-    } as any);
+    );
 
     try {
       const response = await sendRequest(socketPath, "ide/updateService", {

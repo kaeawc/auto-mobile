@@ -2,17 +2,12 @@ import { expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../../../src/daemon/daemon";
 import { DaemonState } from "../../../../src/daemon/daemonState";
 import { IncumbentOwnerGuard } from "../../../../src/daemon/incumbentOwnerGuard";
-import type { BrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import * as shutdownCleanup from "../../../../src/shutdownCleanup";
 import { logger } from "../../../../src/utils/logger";
 import { FakeDeviceSessionRepository } from "../../../fakes/FakeDeviceSessionRepository";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-
-interface ManagedAcquisitionShutdownWiring {
-  brokerDeviceAcquisition: { acquisition: Pick<BrokerDeviceAcquisition, "close"> } | undefined;
-}
 
 // Follow databaseFreeShutdownStages' stage-capture harness: run only the binding stage.
 // The daemon is never started, and process identity and incumbent reads are injected fakes.
@@ -37,9 +32,9 @@ test("daemon stop closes its binding acquisition in the managed execution stage"
       }),
     },
   );
-  const wiring = daemon as unknown as ManagedAcquisitionShutdownWiring;
+  const wiring = daemon;
   let closes = 0;
-  wiring.brokerDeviceAcquisition = {
+  wiring["brokerDeviceAcquisition"] = {
     acquisition: {
       close: () => {
         closes++;
@@ -63,7 +58,7 @@ test("daemon stop closes its binding acquisition in the managed execution stage"
     await daemon.stop();
     expect(runner).toHaveBeenCalledTimes(1);
     expect(closes).toBe(1);
-    expect(wiring.brokerDeviceAcquisition).toBeUndefined();
+    expect(wiring["brokerDeviceAcquisition"]).toBeUndefined();
     expect(timer.now()).toBe(0);
   } finally {
     runner.mockRestore();

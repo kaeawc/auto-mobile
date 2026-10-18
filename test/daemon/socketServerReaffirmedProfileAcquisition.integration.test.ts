@@ -81,11 +81,7 @@ function getRoute(
   request: DaemonRequest,
   socketSessionId: string,
 ): McpForwardRoute {
-  return (
-    server as unknown as {
-      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-    }
-  ).getMcpForwardRoute(request, socketSessionId);
+  return server["getMcpForwardRoute"](request, socketSessionId);
 }
 
 describe("reaffirmed tool-selection profile acquisition forwarding", () => {

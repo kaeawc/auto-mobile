@@ -1,4 +1,6 @@
 import type { DaemonStateAccess } from "../../../src/daemon/daemonRequestHandlers";
+import type { PerformanceStreamSocketRequest } from "../../../src/daemon/performanceStreamSocketTypes";
+import type { DaemonManager } from "../../../src/daemon/manager";
 import type { DaemonStateLike } from "../../../src/daemon/daemonState";
 import type { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -29,4 +31,22 @@ export function asDeviceManager(
 
 export function asEmulatorClient(stub: object): AndroidEmulatorClient {
   return stub as AndroidEmulatorClient;
+}
+
+export function asDevicePool(stub: object): ReturnType<DaemonStateLike["getDevicePool"]> {
+  return stub as ReturnType<DaemonStateLike["getDevicePool"]>;
+}
+
+export function asSessionManager(stub: object): ReturnType<DaemonStateLike["getSessionManager"]> {
+  return stub as ReturnType<DaemonStateLike["getSessionManager"]>;
+}
+
+/** A test-double class standing in for the `DaemonManager` constructor `runDaemonCommand` takes. */
+export function asDaemonManagerClass(stub: object): new () => DaemonManager {
+  return stub as new () => DaemonManager;
+}
+
+/** A request the typed contract rejects at compile time, for tests of the runtime guard. */
+export function asPerformanceStreamRequest(stub: object): PerformanceStreamSocketRequest {
+  return stub as PerformanceStreamSocketRequest;
 }

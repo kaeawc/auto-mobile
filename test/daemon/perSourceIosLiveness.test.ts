@@ -1,3 +1,4 @@
+import { asEmulatorClient } from "./helpers/narrowStubs";
 import { makePool } from "../helpers/makePool";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -5,7 +6,6 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, Platform } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -100,7 +100,7 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
           options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
         ),
       ),
-      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      asEmulatorClient(new FakeBootedEmulator()),
       undefined,
       undefined,
       {
@@ -173,7 +173,7 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
     const manager = new MultiPlatformDeviceManager(
       null,
       asManagerSimctl(new FakeBootedSimctl([SIMULATOR])),
-      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      asEmulatorClient(new FakeBootedEmulator()),
       undefined,
       undefined,
       {
@@ -283,7 +283,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     const manager = new MultiPlatformDeviceManager(
       null,
       asManagerSimctl(new FakeBootedSimctl([SIMULATOR])),
-      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      asEmulatorClient(new FakeBootedEmulator()),
       undefined,
       undefined,
       lister,

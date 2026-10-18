@@ -67,6 +67,16 @@ export class SessionToolBindingStore {
     this.attached.clear();
   }
 
+  /** Distinct keys holding any binding state; a key gone for good must not stay counted. */
+  get keyCount(): number {
+    return new Set([
+      ...this.acquiredSessions.keys(),
+      ...this.boundDeviceSessions.keys(),
+      ...this.releasedDeviceSessions.keys(),
+      ...this.toolSelectionProfiles.keys(),
+    ]).size;
+  }
+
   boundSessionUuid(key: string): string | undefined {
     return this.boundDeviceSessions.get(key);
   }

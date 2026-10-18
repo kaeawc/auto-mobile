@@ -84,12 +84,19 @@ export interface StatelessMcpHttpEndpointDeps<
     requestScopeId: string,
     reason: ExecutionCancellationReason,
   ): Promise<number>;
+  /**
+   * Forget the bindings a keyless request recorded under its one-off scope id
+   * (`daemonSessionToolBindingStore().forget`): nothing will present that id again.
+   */
+  forgetScopeBindings(requestScopeId: string): void;
   /** Why a request that closes now is cancelled: the handoff error during shutdown. */
   closeReason(): ExecutionCancellationReason;
 }
 
 interface InFlightRequest {
   readonly requestScopeId: string;
+  /** The request carried no session key, so its bindings live under its scope id. */
+  readonly keyless: boolean;
   readonly cancelKeys: readonly string[];
   /** Cancel this request's executions, then close its server and transport. Idempotent. */
   close(reason?: ExecutionCancellationReason): Promise<void>;
@@ -165,6 +172,7 @@ export class StatelessMcpHttpEndpoint<
   trackForTesting(requestScopeId: string, close: () => Promise<void>): void {
     this.inFlight.set(requestScopeId, {
       requestScopeId,
+      keyless: false,
       cancelKeys: [],
       close: async () => {
         this.inFlight.delete(requestScopeId);
@@ -256,6 +264,7 @@ export class StatelessMcpHttpEndpoint<
     let closing: Promise<void> | undefined;
     const request: InFlightRequest = {
       requestScopeId,
+      keyless: scope.requestMcpSessionId === undefined,
       cancelKeys,
       close: (reason?: ExecutionCancellationReason) => {
         closing ??= this.closeRequest(request, server, transport, reason);
@@ -297,6 +306,11 @@ export class StatelessMcpHttpEndpoint<
             `Stateless MCP request ${request.requestScopeId} teardown failed: ${describeUnknownError(result.reason)}`,
           );
         }
+      }
+      if (request.keyless) {
+        // A keyless request binds under its one-off scope id (#4678), which no later request
+        // presents: forget it once the server that recorded it is closed.
+        this.deps.forgetScopeBindings(request.requestScopeId);
       }
     }
   }

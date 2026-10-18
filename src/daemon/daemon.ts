@@ -30,6 +30,7 @@ import {
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { createMcpServer } from "../server";
+import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {
   StatelessMcpHttpEndpoint,
   type StatelessMcpRequestScope,
@@ -714,6 +715,7 @@ export class Daemon {
     createServer: (req, scope) => this.mcpRequestServerFactory(req, scope),
     cancelScopeExecutions: (requestScopeId, reason) =>
       executionTracker.cancelSessionExecutions(requestScopeId, reason),
+    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
     closeReason: () =>
       this.shutdownInProgress
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)

@@ -47,12 +47,12 @@ import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import {
   type Client,
-  SdkHttpError,
   StreamableHTTPClientTransport,
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/client";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
+import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
@@ -270,6 +270,8 @@ import {
 import {
   clearPooledIdleTimer,
   closePooledClient,
+  runWithLoopbackSessionKey,
+  withLoopbackSessionKey,
   discardTimedOutReconnect,
   getPooledClient,
   resetPooledClient,
@@ -390,17 +392,6 @@ export class DaemonSocketQueueOverflowError extends Error {
     super(`Daemon RPC socket queued bytes exceeded ${limitBytes}`);
     this.name = "DaemonSocketQueueOverflowError";
   }
-}
-
-/**
- * The loopback MCP HTTP server answers an unknown `mcp-session-id` with 404
- * before the request reaches any handler, so the forward provably never ran and
- * a replay on a fresh client cannot repeat a device action. Match the SDK's
- * structured status code rather than the shared "Session not found" wording,
- * which other lifecycles also use (issue #6383).
- */
-function isExpiredLoopbackMcpSession(error: unknown): boolean {
-  return error instanceof SdkHttpError && error.status === 404;
 }
 
 class ReleasedBoundSessionError extends Error {
@@ -564,14 +555,14 @@ function resolveSocketBindGuard(
  * - Manage concurrent client sessions
  *
  * JUnit uses one Unix socket per thread (`DaemonSocketClientManager` ThreadLocal) for parallel
- * tests. Each MCP HTTP client owns one Streamable HTTP session, so concurrent calls on the same
- * client are unsafe. MCP forwards are serialized by target key below, and each key gets its own
- * MCP client so independent devices/sessions can run concurrently.
+ * tests. MCP forwards are serialized by target key below, and each key gets its own MCP client so
+ * independent devices/sessions can run concurrently. The loopback endpoint is stateless: every
+ * forwarded request carries the socket session id in the MCP session-key header.
  *
  * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
  * The server transport allows only one such stream per session; a second GET while the first
  * is still mapped returns 409 and tears down the session. We disable that auto-reconnect here;
- * stale sessions are recovered via `getMcpClient()` + the loopback 404 retry.
+ * the loopback endpoint is stateless, so there is no session to expire or replay.
  */
 /** Matches SDK defaults except `maxRetries`, which must stay 0 to avoid duplicate GET SSE. */
 const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOptions = {
@@ -1104,6 +1095,13 @@ export class UnixSocketServer {
 
   /** Connection recording teardown seam, like the injectable factories below. */
   releaseToolCallRecording: (connectionId: string) => void = dropToolCallRecording;
+
+  /**
+   * Drops the session-tool bindings keyed on a socket session id once its socket is gone (#4678):
+   * the daemon-scoped store would otherwise keep one entry per connection forever.
+   */
+  forgetSessionToolBindings: (socketSessionId: string) => void = (socketSessionId) =>
+    daemonSessionToolBindingStore().forget(socketSessionId);
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
@@ -1769,6 +1767,16 @@ export class UnixSocketServer {
       return;
     }
     this.abortMcpRequests(sessionId);
+    this.trackRequestHandler(
+      executionTracker
+        .cancelSessionExecutions(sessionId, "socket_disconnect")
+        .then(() => undefined)
+        .catch((error) => {
+          logger.warn(
+            `Cancelling executions of socket ${sessionId} failed: ${errorMessage(error)}`,
+          );
+        }),
+    );
     this.restartAdmission.releaseAcceptanceRestartAdmissionForOwner(sessionId);
     this.sessions.delete(sessionId);
     this.clientSockets.delete(sessionId);
@@ -1778,6 +1786,7 @@ export class UnixSocketServer {
     this.releaseDevicePoolMcpSessionBindings(sessionId);
     this.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.releaseToolCallRecording(sessionId);
+    this.forgetSessionToolBindings(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
     this.trackRequestHandler(this.ownedGestures.cancelAllFor(sessionId));
@@ -3704,6 +3713,13 @@ export class UnixSocketServer {
   private async forwardMcpRequestWithRecovery(
     context: McpForwardRecoveryContext,
   ): Promise<unknown> {
+    // Every loopback request of this forward names the socket session as its MCP session key.
+    return runWithLoopbackSessionKey(context.socketSessionId, () =>
+      this.forwardKeyedMcpRequest(context),
+    );
+  }
+
+  private async forwardKeyedMcpRequest(context: McpForwardRecoveryContext): Promise<unknown> {
     context.signal?.throwIfAborted();
     const identity = this.getDeviceControlTransportIdentity(context);
     let mcpClient: Client;
@@ -3754,9 +3770,6 @@ export class UnixSocketServer {
       if (error instanceof ReleasedBoundSessionError) {
         throw error;
       }
-      if (isExpiredLoopbackMcpSession(error)) {
-        return this.retryExpiredMcpSession(context, identity, mcpClient);
-      }
       if (this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
         const recoveryIdentity = this.getDeviceControlRecoveryFailureIdentity(context, identity);
         return this.recoverDeviceControlTransport({
@@ -3767,70 +3780,6 @@ export class UnixSocketServer {
         });
       }
       throw error;
-    }
-  }
-
-  private async retryExpiredMcpSession(
-    context: McpForwardRecoveryContext,
-    identity: DeviceControlTransportIdentity,
-    failedClient: Client,
-  ): Promise<unknown> {
-    context.signal?.throwIfAborted();
-    logger.warn("MCP client session expired, reconnecting and retrying...");
-    await this.resetMcpClientIfCurrent(context.route.clientKey, failedClient);
-    context.signal?.throwIfAborted();
-    let freshClient: Client;
-    try {
-      freshClient = await this.getMcpClient(
-        context.route.clientKey,
-        context.route.sessionUuid,
-        context.route.toolSelectionProfileUuid,
-        context.route.releasedSessionUuid,
-      );
-      context.signal?.throwIfAborted();
-    } catch (error) {
-      if (!this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
-        throw error;
-      }
-      throw this.deviceControlTransportError({
-        request: context.request,
-        identity,
-        phase: "connect",
-        reconnectAttempted: true,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
-    const retryRemainingMs = this.requireRemainingMcpForwardBudget(
-      context.request,
-      context.totalTimeoutMs,
-      context.deadline,
-      "waiting in queues and reconnecting the MCP client",
-    );
-    try {
-      return await this.handleIdeRequest(
-        freshClient,
-        context.request,
-        retryRemainingMs,
-        context.socketSessionId,
-        context.deadline,
-        context.totalTimeoutMs,
-        context.signal,
-      );
-    } catch (error) {
-      if (!this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
-        throw error;
-      }
-      await this.resetMcpClientIfCurrent(context.route.clientKey, freshClient, "detach");
-      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(context, identity);
-      throw this.deviceControlTransportError({
-        request: context.request,
-        identity: failureIdentity,
-        phase: "response",
-        reconnectAttempted: true,
-        replayAttempted: true,
-        recoveryExhausted: true,
-      });
     }
   }
 
@@ -8004,7 +7953,7 @@ export class UnixSocketServer {
       throw new Error("mcpEndpoint is not set");
     }
     const transport = new StreamableHTTPClientTransport(new URL(this.mcpEndpoint), {
-      fetch: loopbackMcpFetch,
+      fetch: withLoopbackSessionKey(loopbackMcpFetch),
       reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
       ...(boundSessionUuid || toolSelectionProfileUuid || releasedSessionUuid
         ? {
@@ -8064,7 +8013,7 @@ export class UnixSocketServer {
   }
 
   private async closeMcpClient(key: string, client: Client): Promise<void> {
-    await closePooledClient(this.timer, key, client);
+    await closePooledClient(client);
   }
 
   private async resetMcpClientIfCurrent(

@@ -1,3 +1,4 @@
+import { ActionableError } from "../../src/models";
 import type {
   ForceStopOptions,
   RecordingHandle,
@@ -47,7 +48,17 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
     this.nowProvider = provider;
   }
 
+  /** Real backends reject a handle they never issued; so does the fake. */
+  private assertIssued(handle: RecordingHandle): void {
+    if (!this.startResults.some((issued) => issued.recordingId === handle.recordingId)) {
+      throw new Error("Missing backend handle for video recording.");
+    }
+  }
+
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
+    if (!config.device) {
+      throw new ActionableError("Device is required to start video recording.");
+    }
     this.startCalls.push(config);
     // No real file I/O - just return the handle
     const handle: RecordingHandle = {
@@ -61,6 +72,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
+    this.assertIssued(handle);
     this.stopCalls.push(handle);
     // No real file I/O - just return the result
 
@@ -88,6 +100,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
+    this.assertIssued(handle);
     this.forceStopCalls.push(handle);
     this.forceStopOptionsCalls.push(options);
     const failure = this.forceStopFailures.shift();

@@ -13,6 +13,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AppPreferences } from "../../../src/features/preferences/AppPreferences";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../../src/models";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 // This module gives setKeyValue/removeKeyValue/clearKeyValueFile the same reachability
 // as the setPreference/getPreference tools for Android SharedPreferences (issue #6292):
@@ -446,13 +447,7 @@ class StatefulPrefsAdb extends FakeAdbExecutor {
     return this.readCount;
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     if (command.includes("cat shared_prefs/settings.xml")) {
       // Capture the snapshot at read time (as `cat` would), then yield a microtask so a
       // concurrent, unserialized mutation gets a chance to read the SAME stale snapshot.
@@ -472,7 +467,7 @@ class StatefulPrefsAdb extends FakeAdbExecutor {
       this.storedXml = decodeBase64WritePayload(command);
       return createExecResult("", "");
     }
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, options);
   }
 }
 

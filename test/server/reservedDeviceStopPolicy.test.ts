@@ -671,7 +671,7 @@ describe("reserved device stop policy", () => {
               { sessionId: BASE, reason: "device-killed" },
             ]);
             expect(args[4]).toMatchObject({
-              expectedRowGeneration: 1,
+              expectedRowGeneration: 0,
               onlyIfOwnedByDaemon: "stop-hold-daemon",
               onlyIfRecoverable: true,
             });

@@ -1,10 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test, spyOn } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { Element } from "../../../src/models/Element";
+import type { ObserveResult } from "../../../src/models/ObserveResult";
+import type { BootedDevice } from "../../../src/models/DeviceInfo";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { HierarchyTalkBackDriver as FakeTalkBackNavigationDriver } from "../talkback/HierarchyTalkBackDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -14,6 +17,30 @@ import {
   TalkBackTapStrategy,
   TALKBACK_ACTIVATION_WARNING,
 } from "../../../src/features/talkback/TalkBackTapStrategy";
+
+const androidDevice: BootedDevice = {
+  name: "test-device",
+  platform: "android",
+  deviceId: "emulator-5554",
+};
+
+// The dispatch tests replace the private tap executors on the instance; bracket access is the
+// only seam because TapOnElement exposes no injection point for them.
+const stubCoordinateTap = (tap: TapOnElement) => {
+  const stub = mock(async () => undefined);
+  tap["executeAndroidTapWithCoordinates"] = stub;
+  return stub;
+};
+
+const stubAccessibilityTap = (tap: TapOnElement) => {
+  const stub = mock(async () => undefined);
+  tap["executeAndroidTapWithAccessibility"] = stub;
+  return stub;
+};
+
+// A few resolver tests feed hand-built hierarchies that omit the `$` attribute wrapper or use a
+// node array at the root, shapes the resolver tolerates but ViewHierarchyResult does not model.
+const looseViewHierarchy = (shape: unknown): ViewHierarchyResult => shape as ViewHierarchyResult;
 
 describe("TapOnElement TalkBack mode detection", () => {
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
@@ -30,29 +57,15 @@ describe("TapOnElement TalkBack mode detection", () => {
     fakeTimer.enableAutoAdvance();
 
     // Create a minimal TapOnElement instance for testing
-    tapOnElement = new TapOnElement(
-      {
-        name: "test-device",
-        platform: "android",
-        deviceId: "emulator-5554",
-      } as any,
-      fakeAdb as any,
-      {
-        accessibilityDetector: fakeAccessibilityDetector,
-        timer: fakeTimer,
-      },
-    );
+    tapOnElement = new TapOnElement(androidDevice, fakeAdb, {
+      accessibilityDetector: fakeAccessibilityDetector,
+      timer: fakeTimer,
+    });
 
     // Spy on the private methods to verify dispatch logic
-    executeAndroidTapWithCoordinates = spyOn(
-      tapOnElement as any,
-      "executeAndroidTapWithCoordinates",
-    ).mockResolvedValue(undefined);
+    executeAndroidTapWithCoordinates = stubCoordinateTap(tapOnElement);
 
-    executeAndroidTapWithAccessibility = spyOn(
-      tapOnElement as any,
-      "executeAndroidTapWithAccessibility",
-    ).mockResolvedValue(undefined);
+    executeAndroidTapWithAccessibility = stubAccessibilityTap(tapOnElement);
   });
 
   test("unknown TalkBack retries once and warns before the default coordinate tap", async () => {
@@ -77,7 +90,7 @@ describe("TapOnElement TalkBack mode detection", () => {
     "XML-only %s never invokes native semantic targeting",
     async (action) => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "repeated:id/row",
         "hierarchy-source": "uiautomator",
@@ -106,7 +119,7 @@ describe("TapOnElement TalkBack mode detection", () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element, undefined, {
         action: "tap",
@@ -118,10 +131,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("uses coordinate method for all action types", async () => {
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       // Test tap
       await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element);
@@ -174,10 +187,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("dispatches to accessibility-based tap method", async () => {
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       const options = { action: "tap" as const, elementId: "test:id/button" };
 
@@ -197,11 +210,11 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("delegates TalkBack taps to accessibility activation", async () => {
-      const element = {
+      const element: Element = {
         bounds: { left: 100, top: 200, right: 500, bottom: 260 },
         "resource-id": "test:id/spannable_text",
         text: "Left link and ordinary text and right link",
-      } as any;
+      };
       const options = {
         action: "tap" as const,
         elementId: "test:id/spannable_text",
@@ -222,10 +235,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("passes options to accessibility method", async () => {
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       const options = {
         action: "tap" as const,
@@ -247,10 +260,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("dispatches to accessibility-based tap method for element without resource-id", async () => {
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         text: "Settings",
-      } as any;
+      };
 
       await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element, undefined, {
         action: "tap",
@@ -261,10 +274,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("uses accessibility method for all action types", async () => {
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       // Test tap
       await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
@@ -312,10 +325,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     test("checks TalkBack state once per tap (no cross-tap caching in the executor)", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
 
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       // Each executeAndroidTap consults the detector exactly once; two taps
       // therefore produce exactly two checks. (Caching lives in the real
@@ -330,10 +343,10 @@ describe("TapOnElement TalkBack mode detection", () => {
     test("respects cache invalidation", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(false);
 
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "resource-id": "test:id/button",
-      } as any;
+      };
 
       // First call with TalkBack disabled
       await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
@@ -353,7 +366,7 @@ describe("TapOnElement TalkBack mode detection", () => {
 
   describe("clickable parent resolution", () => {
     test("uses clickable parent when child is not clickable", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
             $: {
@@ -374,27 +387,22 @@ describe("TapOnElement TalkBack mode detection", () => {
             ],
           },
         },
-      } as any;
+      };
 
-      const childElement = {
+      const childElement: Element = {
         bounds: { left: 10, top: 10, right: 50, bottom: 50 },
         text: "Markup",
         "resource-id": "android:id/text1",
-      } as any;
+      };
 
-      const result = (tapOnElement as any).resolveTapTargetElement(
-        childElement,
-        viewHierarchy,
-        "tap",
-        true,
-      );
+      const result = tapOnElement.resolveTapTargetElement(childElement, viewHierarchy, "tap", true);
 
       expect(result.usedParent).toBe(true);
       expect(result.element["resource-id"]).toBe("parent:id");
     });
 
     test("resolves text-only child to clickable parent with resource-id under TalkBack (requireResourceId=true)", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
             $: {
@@ -415,16 +423,16 @@ describe("TapOnElement TalkBack mode detection", () => {
             ],
           },
         },
-      } as any;
+      };
 
-      const textOnlyChild = {
+      const textOnlyChild: Element = {
         bounds: { left: 10, top: 10, right: 190, bottom: 70 },
         text: "Settings",
         // no resource-id
-      } as any;
+      };
 
       // requireResourceId=true simulates TalkBack mode
-      const result = (tapOnElement as any).resolveTapTargetElement(
+      const result = tapOnElement.resolveTapTargetElement(
         textOnlyChild,
         viewHierarchy,
         "tap",
@@ -437,7 +445,7 @@ describe("TapOnElement TalkBack mode detection", () => {
 
     test("keeps the selected clickable duplicate after an inert same-ID match", () => {
       const bounds = (top: number) => ({ left: 0, top, right: 100, bottom: top + 40 });
-      const viewHierarchy = {
+      const viewHierarchy = looseViewHierarchy({
         hierarchy: {
           node: [
             { "resource-id": "app:id/action", bounds: bounds(0) },
@@ -445,23 +453,18 @@ describe("TapOnElement TalkBack mode detection", () => {
             { "resource-id": "app:id/action", clickable: true, bounds: bounds(100) },
           ],
         },
-      } as any;
-      const selected = {
+      });
+      const selected: Element = {
         "resource-id": "app:id/action",
         clickable: true,
         bounds: bounds(50),
-      } as any;
-      const result = (tapOnElement as any).resolveTapTargetElement(
-        selected,
-        viewHierarchy,
-        "tap",
-        false,
-      );
+      };
+      const result = tapOnElement.resolveTapTargetElement(selected, viewHierarchy, "tap", false);
       expect(result.element.bounds).toEqual(bounds(50));
     });
 
     test("retains an inert bounded child inside the requested clickable container", () => {
-      const viewHierarchy = {
+      const viewHierarchy = looseViewHierarchy({
         hierarchy: {
           node: {
             "resource-id": "app:id/row",
@@ -470,8 +473,8 @@ describe("TapOnElement TalkBack mode detection", () => {
             node: [{ text: "Open", bounds: { left: 10, top: 10, right: 80, bottom: 40 } }],
           },
         },
-      } as any;
-      const found = (tapOnElement as any).findElementInHierarchy(
+      });
+      const found = tapOnElement.findElementInHierarchy(
         { action: "tap", text: "Open", container: { elementId: "app:id/row" } },
         viewHierarchy,
       );
@@ -479,7 +482,7 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("uses parent with click action when clickable flag is absent", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
             $: {
@@ -499,14 +502,14 @@ describe("TapOnElement TalkBack mode detection", () => {
             ],
           },
         },
-      } as any;
+      };
 
-      const textOnlyChild = {
+      const textOnlyChild: Element = {
         bounds: { left: 24, top: 24, right: 216, bottom: 72 },
         text: "Manage account",
-      } as any;
+      };
 
-      const result = (tapOnElement as any).resolveTapTargetElement(
+      const result = tapOnElement.resolveTapTargetElement(
         textOnlyChild,
         viewHierarchy,
         "tap",
@@ -518,7 +521,7 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("uses parent with long click action for longPress when flag is absent", () => {
-      const viewHierarchy = {
+      const viewHierarchy = looseViewHierarchy({
         hierarchy: {
           node: {
             $: {
@@ -536,14 +539,14 @@ describe("TapOnElement TalkBack mode detection", () => {
             },
           },
         },
-      } as any;
+      });
 
-      const textOnlyChild = {
+      const textOnlyChild: Element = {
         bounds: { left: 24, top: 24, right: 216, bottom: 72 },
         text: "Manage account",
-      } as any;
+      };
 
-      const result = (tapOnElement as any).resolveTapTargetElement(
+      const result = tapOnElement.resolveTapTargetElement(
         textOnlyChild,
         viewHierarchy,
         "longPress",
@@ -555,7 +558,7 @@ describe("TapOnElement TalkBack mode detection", () => {
     });
 
     test("prefers long-clickable parent for longPress", () => {
-      const viewHierarchy = {
+      const viewHierarchy = looseViewHierarchy({
         hierarchy: {
           node: {
             $: {
@@ -573,14 +576,14 @@ describe("TapOnElement TalkBack mode detection", () => {
             },
           },
         },
-      } as any;
+      });
 
-      const childElement = {
+      const childElement: Element = {
         bounds: { left: 10, top: 10, right: 50, bottom: 50 },
         text: "Markup",
-      } as any;
+      };
 
-      const result = (tapOnElement as any).resolveTapTargetElement(
+      const result = tapOnElement.resolveTapTargetElement(
         childElement,
         viewHierarchy,
         "longPress",
@@ -601,11 +604,10 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   let tapOnElement: TapOnElement;
   let executeAndroidTapWithCoordinates: any;
 
-  const makeElement = () =>
-    ({
-      "resource-id": "test:id/button",
-      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-    }) as any;
+  const makeElement = (): Element => ({
+    "resource-id": "test:id/button",
+    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+  });
 
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
@@ -615,37 +617,26 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     fakeTimer.enableAutoAdvance();
     fakeTalkBackStrategy = new FakeTalkBackTapStrategy();
 
-    tapOnElement = new TapOnElement(
-      {
-        name: "test-device",
-        platform: "android",
-        deviceId: "emulator-5554",
-      } as any,
-      fakeAdb as any,
-      {
-        accessibilityDetector: fakeAccessibilityDetector,
-        timer: fakeTimer,
-        talkBackStrategy: fakeTalkBackStrategy,
-      },
-    );
+    tapOnElement = new TapOnElement(androidDevice, fakeAdb, {
+      accessibilityDetector: fakeAccessibilityDetector,
+      timer: fakeTimer,
+      talkBackStrategy: fakeTalkBackStrategy,
+    });
 
-    executeAndroidTapWithCoordinates = spyOn(
-      tapOnElement as any,
-      "executeAndroidTapWithCoordinates",
-    ).mockResolvedValue(undefined);
+    executeAndroidTapWithCoordinates = stubCoordinateTap(tapOnElement);
   });
 
   describe("default (direct activation)", () => {
     test("tap directly activates the target via ACTION_CLICK, no cursor navigation", async () => {
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
         element,
         500,
-        {},
+        { action: "tap" },
         undefined,
       );
 
@@ -664,13 +655,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
         element,
         500,
-        {},
+        { action: "tap" },
         undefined,
       );
 
@@ -693,13 +684,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
         element,
         500,
-        {},
+        { action: "tap" },
         undefined,
       );
 
@@ -719,13 +710,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     test("doubleTap uses coordinate fallback (no ACTION_CLICK, no cursor navigation)", async () => {
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "doubleTap",
         50,
         50,
         element,
         500,
-        {},
+        { action: "doubleTap" },
         undefined,
       );
 
@@ -737,7 +728,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   });
 
   describe("opt-in screen-reader navigation (fidelity mode)", () => {
-    const navOptions = { screenReaderNavigation: true } as any;
+    const navOptions = { action: "tap" as const, screenReaderNavigation: true };
 
     test("tap drives the cursor via executeTap", async () => {
       fakeTalkBackStrategy.setTapResult({
@@ -751,7 +742,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      const result = await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      const result = await tapOnElement["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
@@ -772,7 +763,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     test("doubleTap also drives the cursor via executeTap (activation is always double-tap)", async () => {
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "doubleTap",
         50,
         50,
@@ -796,7 +787,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
@@ -824,7 +815,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
@@ -856,17 +847,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       const featureFlags: FeatureFlagReader = {
         isEnabled: (key: string) => flagEnabled && key === "screen-reader-navigation",
       };
-      const tap = new TapOnElement(
-        { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-        fakeAdb as any,
-        {
-          accessibilityDetector: fakeAccessibilityDetector,
-          timer: fakeTimer,
-          talkBackStrategy: fakeTalkBackStrategy,
-          featureFlags,
-        },
-      );
-      spyOn(tap as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
+      const tap = new TapOnElement(androidDevice, fakeAdb, {
+        accessibilityDetector: fakeAccessibilityDetector,
+        timer: fakeTimer,
+        talkBackStrategy: fakeTalkBackStrategy,
+        featureFlags,
+      });
+      stubCoordinateTap(tap);
       return tap;
     };
 
@@ -874,13 +861,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       const tap = makeFlaggedTapOnElement(true);
       const element = makeElement();
 
-      await (tap as any).executeAndroidTapWithAccessibility(
+      await tap["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
         element,
         500,
-        {},
+        { action: "tap" },
         undefined,
       );
 
@@ -893,13 +880,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       const tap = makeFlaggedTapOnElement(false);
       const element = makeElement();
 
-      await (tap as any).executeAndroidTapWithAccessibility(
+      await tap["executeAndroidTapWithAccessibility"](
         "tap",
         50,
         50,
         element,
         500,
-        {},
+        { action: "tap" },
         undefined,
       );
 
@@ -912,13 +899,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
     test("uses executeLongPress for longPress action", async () => {
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "longPress",
         50,
         50,
         element,
         1000,
-        {},
+        { action: "longPress" },
         undefined,
       );
 
@@ -942,13 +929,13 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await (tapOnElement as any).executeAndroidTapWithAccessibility(
+      await tapOnElement["executeAndroidTapWithAccessibility"](
         "longPress",
         50,
         50,
         element,
         1000,
-        {},
+        { action: "longPress" },
         undefined,
       );
 
@@ -1012,12 +999,18 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      const failure = await (tapOnElement as any)
-        .executeAndroidTapWithAccessibility("longPress", 50, 50, element, 1000, {}, undefined)
-        .then(
-          () => undefined,
-          (error: unknown) => error,
-        );
+      const failure = await tapOnElement["executeAndroidTapWithAccessibility"](
+        "longPress",
+        50,
+        50,
+        element,
+        1000,
+        { action: "longPress" },
+        undefined,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
       expect(failure).toBeInstanceOf(ActionableError);
       expect((failure as ActionableError).message).toBe(
@@ -1065,7 +1058,7 @@ describe("TapOnElement precise TalkBack coordinate fallback", () => {
           talkBackDriverFactory: { createDriver: () => driver },
         },
       );
-      const element = {
+      const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         text: "Unidentified action",
       };
@@ -1102,7 +1095,7 @@ describe("TapOnElement screen-reader navigation result", () => {
     "resource-id": "test:id/button",
     bounds: { left: 0, top: 0, right: 100, bottom: 100 },
     clickable: true,
-  } as any;
+  };
 
   const journey = {
     reachable: true,
@@ -1132,56 +1125,56 @@ describe("TapOnElement screen-reader navigation result", () => {
       androidGetInstanceSpy.mockReturnValue(coordinate.service);
     }
     const targetElement = coordinate?.element ?? element;
-    const observation = {
-      viewHierarchy: { hierarchy: { node: { $: targetElement } } },
+    const observation: ObserveResult = {
+      observationId: "obs-1",
+      updatedAt: 1,
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 100, height: 100 },
-    } as any;
-    const command = new TapOnElement(
-      { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-      new FakeAdbClient() as any,
-      {
-        accessibilityDetector,
-        timer,
-        talkBackStrategy: coordinate ? new TalkBackTapStrategy({ timer }) : strategy,
-        talkBackDriverFactory: {
-          createDriver: () => coordinate?.driver ?? new FakeTalkBackNavigationDriver(),
-        },
-        waitForCondition: {
-          execute: async () => ({
-            matched: false,
-            candidates: [],
-            observation,
-            polls: 0,
-            waitMs: 0,
-            timedOut: true,
-          }),
-        },
-        featureFlags: {
-          isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
-        },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { $: targetElement } } },
+    };
+    const command = new TapOnElement(androidDevice, new FakeAdbClient(), {
+      accessibilityDetector,
+      timer,
+      talkBackStrategy: coordinate ? new TalkBackTapStrategy({ timer }) : strategy,
+      talkBackDriverFactory: {
+        createDriver: () => coordinate?.driver ?? new FakeTalkBackNavigationDriver(),
       },
-    );
+      waitForCondition: {
+        execute: async () => ({
+          matched: false,
+          candidates: [],
+          observation,
+          polls: 0,
+          waitMs: 0,
+          timedOut: true,
+        }),
+      },
+      featureFlags: {
+        isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
+      },
+    });
     command.refreshViewHierarchy = async () => observation.viewHierarchy;
     coordinate?.driver.setElements([targetElement], 0);
-    spyOn(command as any, "observedInteraction").mockImplementation(async (block: any) => ({
+    spyOn(command, "observedInteraction").mockImplementation(async (block) => ({
       ...(await block(observation)),
       observation,
     }));
-    spyOn(command as any, "searchForElement").mockResolvedValue({
+    command["searchForElement"] = mock(async () => ({
       selection: { element: targetElement, indexInMatches: 0, totalMatches: 1, strategy: "first" },
       viewHierarchy: observation.viewHierarchy,
       containerFound: true,
       stats: { durationMs: 0, requestCount: 0, changeCount: 0 },
-    });
-    spyOn(command as any, "resolveTapTargetElement").mockReturnValue({
+    }));
+    spyOn(command, "resolveTapTargetElement").mockReturnValue({
       element: targetElement,
       usedParent: false,
     });
     if (!coordinate) {
-      spyOn(command as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
+      stubCoordinateTap(command);
     }
-    spyOn((command as any).selectionStateTracker, "prepare").mockResolvedValue(null);
-    spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
+    spyOn(command["selectionStateTracker"], "prepare").mockResolvedValue(null);
+    spyOn(command["selectionStateTracker"], "finalize").mockResolvedValue([]);
     return command;
   };
 

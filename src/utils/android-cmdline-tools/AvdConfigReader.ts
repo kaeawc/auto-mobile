@@ -1,4 +1,5 @@
 import { logger } from "../logger";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import {
   androidAvdConfigurationSchema,
   androidAvdConfigurationKeys,
@@ -206,10 +207,10 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     this.readFileFn = readFileFn ?? ((p: string, e: string) => fs.promises.readFile(p, e));
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const homeDir = readEnvRaw(AMBIENT_ENV.HOME) || readEnvRaw(AMBIENT_ENV.USERPROFILE);
     const androidUserHome = nonEmptyEnvironmentValue(process.env.ANDROID_USER_HOME);
     const avdHomeEnv = nonEmptyEnvironmentValue(process.env.ANDROID_AVD_HOME);
-    const androidSdkHome = nonEmptyEnvironmentValue(process.env.ANDROID_SDK_HOME);
+    const androidSdkHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_SDK_HOME));
     const configHome = this.resolveConfigHome(
       androidUserHome,
       androidSdkHome,

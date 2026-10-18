@@ -1,4 +1,4 @@
-import type { Element, ViewHierarchyResult } from "../../models";
+import type { Element, TapAtResult, ViewHierarchyResult } from "../../models";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { ActionableError } from "../../models/ActionableError";
@@ -11,22 +11,32 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 // Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 const defaultContainerSelector = new ResolverElementSelector();
 
-/** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */
-export function throwIfLongPressInterrupted(
+/** Text naming how long an interrupted Android long press may stay held; undefined when it was not interrupted. */
+export function longPressInterruptedMessage(
   error: unknown,
   durationMs: number,
   signal?: AbortSignal,
-): void {
+): string | undefined {
   if (
     signal?.aborted ||
     error instanceof AdbCommandTimeoutError ||
     (error instanceof Error && error.name === "AbortError")
   ) {
     // Killing host adb cannot cancel input's system_server injection.
-    throw new ActionableError(
-      `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
-      { cause: error },
-    );
+    return `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`;
+  }
+  return undefined;
+}
+
+/** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */
+export function throwIfLongPressInterrupted(
+  error: unknown,
+  durationMs: number,
+  signal?: AbortSignal,
+): void {
+  const message = longPressInterruptedMessage(error, durationMs, signal);
+  if (message) {
+    throw new ActionableError(message, { cause: error });
   }
 }
 
@@ -93,5 +103,30 @@ export function failedTapResult(action: string, error: string) {
     action,
     error,
     element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } as Element,
+  };
+}
+
+/** Adds each activation warning to the set, so a repeated message is reported once. */
+export function collectWarnings(warnings: Set<string>): (messages?: string[]) => void {
+  return (messages = []) => {
+    for (const warning of messages) {
+      warnings.add(warning);
+    }
+  };
+}
+
+export function partialDoubleTapNote(action: TapAtResult["action"], tapsDelivered: number): string {
+  return action === "doubleTap" && tapsDelivered === 1
+    ? " Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically."
+    : "";
+}
+
+export function tapDeliveryReporter(onTapDelivered: () => void): () => void {
+  let delivered = false;
+  return () => {
+    if (!delivered) {
+      delivered = true;
+      onTapDelivered();
+    }
   };
 }

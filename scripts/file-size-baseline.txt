@@ -5,7 +5,7 @@
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1540	src/daemon/client.ts
-5233	src/daemon/daemon.ts
+5232	src/daemon/daemon.ts
 6008	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
@@ -40,7 +40,7 @@
 1424	src/features/action/TapAtCoordinate.ts
 3788	src/features/action/TapOnElement.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
-1830	src/features/action/swipeon/SwipeOn.ts
+1833	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5888	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
@@ -79,7 +79,7 @@
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
 1661	src/server/finalizeToolResponse.ts
-3133	src/server/interactionTools.ts
+3137	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2851	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts

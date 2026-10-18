@@ -274,7 +274,11 @@ class PinchGeometryTest {
     assertEquals(1, pinchSegmentCount(5f))
     assertEquals(9, pinchSegmentCount(90f))
     assertEquals(9, pinchSegmentCount(-90f))
+    assertEquals(36, pinchSegmentCount(360f))
+    assertEquals(35, pinchSegmentCount(350f))
     assertEquals(36, pinchSegmentCount(100000f))
+    assertEquals(36, pinchSegmentCount(Float.MAX_VALUE))
+    assertEquals(1, pinchSegmentCount(Float.POSITIVE_INFINITY))
     assertEquals(1, pinchSegmentCount(Float.NaN))
   }
 

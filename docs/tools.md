@@ -1734,7 +1734,8 @@ and `clear` commands send keys and clear the focused field, respectively.
 <code>pinchOn.rotationDegrees</code> describes how far the two-finger axis rotates
 during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
-a plain pinch. Android and iOS share this convention.
+a plain pinch. Android and iOS share this convention. The value must be
+between <code>-360</code> and <code>360</code> degrees; larger magnitudes are rejected.
 
 To rotate **without zooming**, keep the finger distance constant: pass
 <code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)

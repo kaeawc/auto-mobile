@@ -84,7 +84,10 @@ private const val PINCH_PATH_MAX_SEGMENTS = 36
 internal fun pinchSegmentCount(rotationDegrees: Float): Int {
   val degrees = Math.abs(rotationDegrees.toDouble())
   if (!degrees.isFinite() || degrees == 0.0) return 1
-  return ceil(degrees / PINCH_PATH_STEP_DEGREES).toInt().coerceIn(1, PINCH_PATH_MAX_SEGMENTS)
+  // Clamp in floating point before converting so a huge value can never overflow the Int.
+  return ceil(degrees / PINCH_PATH_STEP_DEGREES)
+    .coerceIn(1.0, PINCH_PATH_MAX_SEGMENTS.toDouble())
+    .toInt()
 }
 
 /**

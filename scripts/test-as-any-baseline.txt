@@ -110,7 +110,6 @@
 1	test/features/element-resolution/HierarchyNormalization.test.ts
 4	test/features/failures/FailureRecorder.test.ts
 9	test/features/memory/MemoryAudit.test.ts
-57	test/features/memory/MemoryMetricsCollector.test.ts
 47	test/features/navigation/Explore.test.ts
 24	test/features/navigation/ExploreElementScoring.test.ts
 2	test/features/navigation/navigateToInternalNoDiffE2E.test.ts

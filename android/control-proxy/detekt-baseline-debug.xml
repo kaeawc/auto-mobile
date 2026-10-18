@@ -2,10 +2,14 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
+    <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
+    <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
+    <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
+    <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>
+    <ID>RedundantSuspendModifier:WebSocketServer.kt:WebSocketServer$suspend</ID>
     <ID>UnnecessaryNotNullOperator:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy!!</ID>
     <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$event.text?.joinToString("") { it.toString() }</ID>
-    <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$resolvedAlias?.let { deleteCaCertFromStorage(it) }</ID>
-    <ID>UnnecessarySafeCall:HierarchyDebouncer.kt:HierarchyDebouncer$resultToEmit?.let { _hierarchyFlow.emit(it) }</ID>
     <ID>UnsafeCallOnNullableType:TextInputController.kt:TextInputController$focusedNode!!</ID>
   </CurrentIssues>
 </SmellBaseline>

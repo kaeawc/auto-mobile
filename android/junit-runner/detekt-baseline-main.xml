@@ -2,5 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>SleepInsteadOfDelay:AutoMobileAgent.kt:AutoMobileAgent.WaitForTool$sleep(500)</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -2586,7 +2586,11 @@ describe("provisionDevice handler", () => {
         .getExecutedOperations()
         .filter((operation) => operation.startsWith("destroyDevice:")),
     ).toEqual([]);
-    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+    // FakeDeviceUtils overlays booted emulators onto image listings (#13153), and
+    // the committed provision left this one booted and owned by the session.
+    expect(await deviceManager.listDeviceImages("android")).toEqual([
+      { ...created.device, isRunning: true },
+    ]);
   });
 
   test.each(["android", "ios"] as const)(

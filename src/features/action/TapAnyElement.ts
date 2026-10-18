@@ -1,4 +1,14 @@
 import { isStrictlyScoped } from "../utility/ScopedSelection";
+import {
+  assertSelectedCapture,
+  TapAnyAndroidTapper,
+  type CapturedTapTarget,
+  type RefreshViewHierarchy,
+  type TapAnyAccessibilityService,
+  type TapAnyTalkBackStrategy,
+} from "./TapAnyAndroidTapper";
+import { TapAnyIosTapper } from "./TapAnyIosTapper";
+import { resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs } from "./tapAnyCtrlProxyTimeout";
 import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import {
   assertLongPressWithinHardMax,
@@ -6,18 +16,12 @@ import {
   failedTapResult,
   isContainerAvailable,
   resolveSearchUntilDuration,
-  throwIfLongPressInterrupted,
 } from "./tapSharedHelpers";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
 } from "../observe/observationReadScope";
-import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { freshTapHierarchy } from "./freshTapHierarchy";
-import {
-  isSemanticActionRejected,
-  type TalkBackTargetContext,
-} from "../talkback/resourceIdActionError";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
@@ -34,25 +38,17 @@ import {
   createDeviceHierarchyCapture,
 } from "../observe/DeviceHierarchyCapture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import {
-  resolveDisplayFence,
-  type DisplayFenceOption,
-  type DisplayFence,
-  type DisplayFenceDependencies,
-} from "./BaseVisualChange";
-import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
+import { type DisplayFence, type DisplayFenceDependencies } from "./BaseVisualChange";
 import {
   assertLongPressFitsRequestBudget,
   LONG_PRESS_TIMEOUT_HEADROOM_MS,
   ORDINARY_TAP_DURATION_MS,
-  resolveGestureCtrlProxyTimeoutMs as resolveTapAnyCtrlProxyTimeoutMs,
 } from "./gestureTransportTimeout";
 export { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
-import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,
-  getHierarchySnapshot,
   identifyObservedHierarchy,
   type HierarchyCapture,
   type HierarchySnapshot,
@@ -87,7 +83,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 import { logger } from "../../utils/logger";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
@@ -107,40 +103,19 @@ import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierar
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
-import {
-  androidDisplayTapDispatch,
-  dispatchAndroidCoordinateTap,
-  dispatchIosCoordinateTap,
-  dispatchIosDoubleTap,
-  indeterminateTapError,
-} from "./coordinateTapDispatch";
-import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
-import { dispatchAndroidLongPress } from "./androidLongPress";
-import {
-  requiresNodeSelector,
-  stableNodeSelectorForElement,
-  TalkBackTapStrategy,
-} from "../talkback/TalkBackTapStrategy";
-import { hasAccessibilityAction } from "../utility/elementProperties";
-import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
+import { androidDisplayTapDispatch } from "./coordinateTapDispatch";
+import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {
   assertAppGestureNotUnderPrototype,
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
 import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
-import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 import { deadlineRequest, resolveDeadlineActionCall, type ActionCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
-
-type TapAnyAccessibilityService = Pick<
-  AndroidCtrlProxyClient,
-  "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
-> &
-  Partial<Pick<AndroidCtrlProxy, "supportsCommand">>;
 
 interface TapAnyElementDependencies extends DisplayFenceDependencies {
   lastRenderedObservation?: RenderedObservationReader;
@@ -150,66 +125,12 @@ interface TapAnyElementDependencies extends DisplayFenceDependencies {
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetector;
-  talkBackStrategy?: Pick<
-    TalkBackTapStrategy,
-    | "executeDirectActivation"
-    | "executeCoordinateFallback"
-    | "executeLongPress"
-    | "executePreciseTap"
-  >;
+  talkBackStrategy?: TapAnyTalkBackStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   accessibilityService?: TapAnyAccessibilityService;
 }
 
-type RefreshViewHierarchy = (
-  timeoutMs: number,
-  screenSize?: ObserveResult["screenSize"],
-  signal?: AbortSignal,
-  forceCapture?: boolean,
-) => Promise<ViewHierarchyResult | null>;
-
-interface CapturedTapTarget {
-  observationScreenSize?: ObserveResult["screenSize"];
-  observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
-  scoped?: boolean;
-  talkBackState?: boolean | null;
-  /** The request's `layer`; with none, the tap point must avoid AutoMobile's prototype windows. */
-  layer?: HierarchyLayer;
-  element: Element;
-  capture: HierarchySnapshot;
-}
-
-/**
- * Established per-request default timeout that `SharedGestureDelegate.requestTapCoordinates`,
- * `CtrlProxyVoiceOver.requestAction`, and `CtrlProxyVoiceOver.requestVoiceOverActivate` each
- * apply when no `timeoutMs` is passed. An ordinary tap/doubleTap relied on this default before
- * `resolveTapAnyCtrlProxyTimeoutMs` started sizing an explicit timeout from the (short, 50ms)
- * fixed press duration -- whose unfloored duration + headroom is ~2050ms, below this floor. Applying that
- * shorter value unguarded shrinks, rather than merely budgets, the window an ordinary tap
- * already had for a slow-but-otherwise-healthy CtrlProxy round trip: XCTest performs element
- * lookup and `tap()`/activation before replying, so a device that legitimately takes 2.05-5s
- * could now report failure -- and potentially still execute the tap after that reported failure
- * -- where the same request previously succeeded (issue #6306 review, P1).
- * `resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs` below floors at this value so the tapAny-specific
- * budgeting stays additive/bounding on top of the established default, never below it.
- */
-export const TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS;
-
-/**
- * Build the INNER CtrlProxy request timeout for an ORDINARY (non-longPress) iOS tap/doubleTap
- * gesture. Same derivation as `resolveTapAnyCtrlProxyTimeoutMs` (press duration + headroom,
- * clamped to `MAX_SETTIMEOUT_DELAY_MS`), floored at
- * `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS` so sizing an explicit timeout from the tap's
- * short fixed press duration never reduces the established default the underlying CtrlProxy
- * request methods already applied (issue #6306 review, P1). The shared formula also preserves
- * this default for short long presses (issue #6327).
- */
-function resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(pressDurationMs: number): number {
-  return Math.max(
-    resolveTapAnyCtrlProxyTimeoutMs(pressDurationMs),
-    TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-  );
-}
+export { TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS } from "./tapAnyCtrlProxyTimeout";
 
 /**
  * Default `searchUntil.duration` (ms) applied when a `tapAny` call omits it
@@ -413,13 +334,9 @@ export class TapAnyElement extends BaseVisualChange {
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private featureFlags: FeatureFlagReader;
   private accessibilityDetector: AccessibilityDetector;
-  private talkBackStrategy: Pick<
-    TalkBackTapStrategy,
-    | "executeDirectActivation"
-    | "executeCoordinateFallback"
-    | "executeLongPress"
-    | "executePreciseTap"
-  >;
+  private talkBackStrategy: TapAnyTalkBackStrategy;
+  private androidTapper: TapAnyAndroidTapper;
+  private iosTapper: TapAnyIosTapper;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private refreshViewHierarchyOverrideForTesting?: (
     refresh: RefreshViewHierarchy,
@@ -502,6 +419,29 @@ export class TapAnyElement extends BaseVisualChange {
     this.talkBackStrategy =
       options.talkBackStrategy ??
       new TalkBackTapStrategy({ timer: this.timer, driverFactory: this.talkBackDriverFactory });
+    this.androidTapper = new TapAnyAndroidTapper({
+      device,
+      timer: this.timer,
+      accessibilityService: this.accessibilityService,
+      accessibilityDetector: this.accessibilityDetector,
+      featureFlags: this.featureFlags,
+      talkBackStrategy: this.talkBackStrategy,
+      talkBackDriverFactory: this.talkBackDriverFactory,
+      host: {
+        beforeTap: () => this.beforeAndroidTapForTesting?.(),
+        getAdb: () => this.adb,
+        refreshViewHierarchy: (timeoutMs, screenSize, signal, forceCapture) =>
+          this.refreshViewHierarchy(timeoutMs, screenSize, signal, forceCapture),
+        findClickableElement: (options, hierarchy, sizeOptions) =>
+          this.findClickableElement(options, hierarchy, sizeOptions),
+        resolveTapPoint: (target, sizeOptions) => this.resolveTapPoint(target, sizeOptions),
+      },
+    });
+    this.iosTapper = new TapAnyIosTapper({
+      device,
+      iosVoiceOverDetector: this.iosVoiceOverDetector,
+      featureFlags: this.featureFlags,
+    });
   }
 
   /** Test-only seam for supplying the post-gesture hierarchy probe result. */
@@ -516,362 +456,23 @@ export class TapAnyElement extends BaseVisualChange {
     this.refreshViewHierarchyOverrideForTesting = refresh;
   }
 
+  private executeAndroidTap(...args: Parameters<TapAnyAndroidTapper["executeAndroidTap"]>) {
+    return this.androidTapper.executeAndroidTap(...args);
+  }
+
+  private retryAndroidTapIfNoChange(
+    ...args: Parameters<TapAnyAndroidTapper["retryAndroidTapIfNoChange"]>
+  ) {
+    return this.androidTapper.retryAndroidTapIfNoChange(...args);
+  }
+
+  private executeIosTap(...args: Parameters<TapAnyIosTapper["executeIosTap"]>) {
+    return this.iosTapper.executeIosTap(...args);
+  }
+
   /** Test-only seam for observing when Android gesture dispatch begins. */
   setBeforeAndroidTapForTesting(callback: () => void): void {
     this.beforeAndroidTapForTesting = callback;
-  }
-
-  private async executeAndroidTap(
-    action: TapAnyElementOptions["action"],
-    x: number,
-    y: number,
-    durationMs: number,
-    target: CapturedTapTarget,
-    fenceOptions: DisplayFenceOption & {
-      signal?: AbortSignal;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    } = {},
-  ): Promise<void> {
-    const { signal } = fenceOptions;
-    const fence = resolveDisplayFence(fenceOptions);
-    const { element, capture } = target;
-    this.beforeAndroidTapForTesting?.();
-    this.assertSelectedCapture(capture);
-    // UiAutomator captures keep their existing coordinate route, but unavailable
-    // TalkBack evidence must still be retried and reported to the caller.
-    const { talkBack: talkBackState, unconfirmed } =
-      target.talkBackState === undefined
-        ? await resolveTalkBackStateConfirmation(
-            this.accessibilityDetector,
-            this.device.deviceId,
-            this.adb,
-            this.featureFlags,
-          )
-        : { talkBack: target.talkBackState, unconfirmed: false };
-    if (unconfirmed) {
-      fenceOptions.onActivationWarnings?.([TALKBACK_STATE_UNKNOWN_WARNING]);
-    }
-    const talkBackEnabled = element["hierarchy-source"] !== "uiautomator" && talkBackState === true;
-    if (
-      talkBackEnabled &&
-      (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
-        displayFence: fence,
-        scoped: target.scoped,
-        hierarchy: resolveViewHierarchyForSearch(capture.hierarchy),
-        onActivationWarnings: fenceOptions.onActivationWarnings,
-      }))
-    ) {
-      return;
-    }
-
-    if (action === "longPress") {
-      if (await this.trySemanticAndroidLongPress(element, { signal, scoped: target.scoped })) {
-        return;
-      }
-      await this.executeAndroidLongPress(x, y, durationMs, signal, { displayFence: fence });
-      return;
-    }
-
-    await this.executeAndroidCoordinateTap(
-      action,
-      { x, y },
-      {
-        signal,
-        fence,
-        onActivationWarnings: fenceOptions.onActivationWarnings,
-      },
-    );
-  }
-
-  /** One tap, or a doubleTap whose touches are timed on the device when CtrlProxy supports it. */
-  private async executeAndroidCoordinateTap(
-    action: TapAnyElementOptions["action"],
-    point: { x: number; y: number },
-    context: {
-      signal?: AbortSignal;
-      fence: { assertCurrent(): void };
-      onActivationWarnings?: (warnings?: string[]) => void;
-    },
-  ): Promise<void> {
-    const { signal, fence } = context;
-    const tapOnce = async () => {
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence.assertCurrent();
-      await dispatchAndroidCoordinateTap(
-        this.accessibilityService,
-        this.adb,
-        point.x,
-        point.y,
-        10,
-        { signal },
-      );
-    };
-    if (action !== "doubleTap") {
-      await tapOnce();
-      return;
-    }
-    await dispatchAndroidDoubleTap({
-      client: this.accessibilityService,
-      point,
-      timer: this.timer,
-      signal,
-      assertCurrent: () => fence.assertCurrent(),
-      onWarning: (warning) => context.onActivationWarnings?.([warning]),
-      tap: tapOnce,
-    });
-  }
-
-  private async executeAndroidLongPress(
-    x: number,
-    y: number,
-    durationMs: number,
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
-  ): Promise<void> {
-    const fence = resolveDisplayFence(fenceOptions);
-    throwIfAborted(signal);
-    await dispatchAndroidLongPress({
-      adb: this.adb,
-      x,
-      y,
-      durationMs,
-      signal,
-      assertCurrent: () => fence.assertCurrent(),
-      logTag: "TapAnyElement",
-    });
-  }
-
-  private throwIfLongPressInterrupted(
-    error: unknown,
-    durationMs: number,
-    signal?: AbortSignal,
-  ): void {
-    throwIfLongPressInterrupted(error, durationMs, signal);
-  }
-
-  private async trySemanticAndroidLongPress(
-    element: Element,
-    context: { signal?: AbortSignal; scoped?: boolean },
-  ): Promise<boolean> {
-    const { signal, scoped } = context;
-    const selector = stableNodeSelectorForElement(element);
-    if (!selector || scoped || element["hierarchy-source"] === "uiautomator") {
-      return false;
-    }
-    const needsNodeSelector = requiresNodeSelector(selector);
-    if (needsNodeSelector && !(await this.accessibilityService.supportsNodeActionSelectors())) {
-      return false;
-    }
-    try {
-      throwIfAborted(signal);
-      const result = needsNodeSelector
-        ? await this.accessibilityService.requestNodeAction("long_click", selector)
-        : await this.accessibilityService.requestAction("long_click", selector.resourceId);
-      if (result.success) {
-        return true;
-      }
-      const rejected = await isSemanticActionRejected({
-        advertised: hasAccessibilityAction(element.actions, "long_click"),
-        error: result.error,
-        needsNodeSelector,
-        selected: element,
-        // A forced fresh capture: the tree the element came from may predate the lookup miss.
-        readHierarchy: () =>
-          this.refreshViewHierarchy(DEFAULT_HIERARCHY_READ_TIMEOUT_MS, undefined, signal, true),
-      });
-      throwIfAborted(signal);
-      if (rejected) {
-        throw new ActionableError(
-          `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
-        );
-      }
-      logger.warn(`[TapAnyElement] Accessibility long click failed: ${result.error}`);
-    } catch (error) {
-      throwIfAborted(signal);
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      logger.warn(`[TapAnyElement] Accessibility long click error: ${error}`);
-    }
-    return false;
-  }
-
-  private async executeAndroidTalkBackTap(
-    action: TapAnyElementOptions["action"],
-    x: number,
-    y: number,
-    durationMs: number,
-    element: Element,
-    fenceOptions: DisplayFenceOption &
-      TalkBackTargetContext & {
-        scoped?: boolean;
-        onActivationWarnings?: (warnings?: string[]) => void;
-      } = {},
-  ): Promise<boolean> {
-    const fence = fenceOptions.displayFence;
-    const driver = this.talkBackDriverFactory.createDriver(this.device);
-    if (action === "longPress" && !fenceOptions.scoped) {
-      const result = await this.talkBackStrategy.executeLongPress(
-        x,
-        y,
-        durationMs,
-        element,
-        driver,
-        { ...fenceOptions, displayFence: fence },
-      );
-      if (!result.success && result.semanticActionFailure) {
-        throw new ActionableError(
-          `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
-        );
-      }
-      return result.success;
-    }
-    if (action === "tap" && !fenceOptions.scoped) {
-      const direct = await this.talkBackStrategy.executeDirectActivation(
-        element,
-        driver,
-        fenceOptions,
-      );
-      if (direct.success) {
-        return true;
-      }
-      logger.warn(
-        `[TapAnyElement] Direct accessibility activation failed (${direct.error}); trying coordinate fallback`,
-      );
-    }
-    const fallback =
-      action === "tap"
-        ? await this.talkBackStrategy.executePreciseTap(x, y, driver, fence)
-        : await this.talkBackStrategy.executeCoordinateFallback(x, y, action, durationMs, driver, {
-            displayFence: fence,
-          });
-    fenceOptions.onActivationWarnings?.(fallback.warnings);
-    return fallback.success;
-  }
-
-  private async retryAndroidTapIfNoChange(
-    preTapHash: string | null,
-    target: CapturedTapTarget,
-    action: TapAnyElementOptions["action"],
-    durationMs: number,
-    screenSize?: ObserveResult["screenSize"],
-    fenceOptions: DisplayFenceOption & {
-      signal?: AbortSignal;
-      selectionOptions?: TapAnyElementOptions;
-      refresh?: RefreshViewHierarchy;
-      dispatch?: (point: { x: number; y: number }) => Promise<void>;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    } = {},
-  ): Promise<void> {
-    const fence = fenceOptions.displayFence;
-    const { signal } = fenceOptions;
-    const reportedTarget = target;
-    if (action !== "tap" || !preTapHash) {
-      return;
-    }
-    const probe = await checkAndroidTapHierarchyChange(
-      this.timer,
-      (timeoutMs) =>
-        (fenceOptions.refresh ?? this.refreshViewHierarchy.bind(this))(
-          timeoutMs,
-          screenSize,
-          signal,
-        ),
-      (postTapHierarchy) => hierarchyFingerprint(postTapHierarchy),
-      preTapHash,
-      signal,
-    );
-    if (probe.status === "unavailable") {
-      logger.warn(
-        "[TapAnyElement] Tap hierarchy unreadable or could not be fingerprinted; skipping retry",
-      );
-      return;
-    }
-    if (probe.status === "changed") {
-      return;
-    }
-    const options = fenceOptions.selectionOptions;
-    if (options && isStrictlyScoped(options, "any-container")) {
-      const capture = identifyObservedHierarchy(
-        this.device.platform,
-        probe.hierarchy,
-        "cached-ok",
-        this.timer,
-      );
-      const refound = this.findClickableElement(options, capture.hierarchy, {
-        observationScreenSize: screenSize,
-      });
-      if (!refound.element) {
-        return;
-      }
-      target = { ...target, element: refound.element, capture };
-    }
-    // The first tap was unobserved. Retry the captured or re-resolved target once after debounce.
-    let retryPoint = this.resolveTapPoint(target, { observationScreenSize: screenSize });
-    logger.warn(
-      `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
-    );
-    await this.timer.sleep(PRE_RETRY_DELAY_MS);
-    await this.refreshTalkBackRetryTarget(
-      target,
-      options,
-      fenceOptions.refresh,
-      screenSize,
-      signal,
-    );
-    if (target.talkBackState) {
-      Object.assign(reportedTarget, target);
-    }
-    retryPoint = this.resolveTapPoint(target, { observationScreenSize: screenSize });
-    if (fenceOptions.dispatch) {
-      this.assertSelectedCapture(target.capture);
-      await fenceOptions.dispatch(retryPoint);
-      return;
-    }
-    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, {
-      signal,
-      displayFence: fence,
-      onActivationWarnings: fenceOptions.onActivationWarnings,
-    });
-  }
-
-  private async refreshTalkBackRetryTarget(
-    target: CapturedTapTarget,
-    options: TapAnyElementOptions | undefined,
-    refresh: RefreshViewHierarchy | undefined,
-    screenSize: ObserveResult["screenSize"] | undefined,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (!target.talkBackState || !options) {
-      return;
-    }
-    // The debounce wait follows the post-tap probe. Capture after that wait,
-    // then use tapAny's existing selector rather than the earlier coordinates.
-    const hierarchy = await freshTapHierarchy(
-      (timeout) => (refresh ?? this.refreshViewHierarchy.bind(this))(timeout, screenSize, signal),
-      this.timer,
-      signal,
-    );
-    const capture = identifyObservedHierarchy(this.device.platform, hierarchy, "fresh", this.timer);
-    const found = this.findClickableElement(options, capture.hierarchy, {
-      observationScreenSize: screenSize,
-    });
-    if (!found.element) {
-      throw new ActionableError(
-        "Selected element moved or is gone and no clickable target remains. Observe again before tapping.",
-      );
-    }
-    Object.assign(target, { element: found.element, capture });
-  }
-
-  private assertSelectedCapture(selectedCapture: HierarchySnapshot): void {
-    const dispatchCapture = getHierarchySnapshot(selectedCapture.hierarchy);
-    if (
-      dispatchCapture?.captureId !== selectedCapture.captureId ||
-      dispatchCapture.hierarchy !== selectedCapture.hierarchy
-    ) {
-      throw new ActionableError("Selected hierarchy capture changed before tap dispatch");
-    }
   }
 
   private createErrorResult(action: string, error: string): TapOnElementResult {
@@ -1122,286 +723,6 @@ export class TapAnyElement extends BaseVisualChange {
         : request.requestDeadlineMs - this.timer.now(),
     );
     return durationMs;
-  }
-
-  /**
-   * Execute a tap/doubleTap/longPress action on iOS via the CtrlProxy gesture API.
-   *
-   * `IOSCtrlProxyClient` has no `tap`/`doubleTap`/`longPress` methods; the real
-   * gesture API is `requestTapCoordinates`, which `TapOnElement.executeiOSTapWithCoordinates`
-   * also uses. When VoiceOver is enabled, mirror `TapOnElement.executeiOSTap`: a bare
-   * coordinate press only *focuses* an element under VoiceOver rather than activating
-   * it, so route through `requestVoiceOverActivate` instead (same detector/seam as
-   * `TapOnElement`), falling back to the coordinate path if no label is resolvable or
-   * the VoiceOver action itself fails.
-   */
-  private async executeIosTap(
-    action: string,
-    x: number,
-    y: number,
-    longPressDuration: number,
-    element?: Element,
-    fenceOptions: DisplayFenceOption & {
-      signal?: AbortSignal;
-      scoped?: boolean;
-      voiceOverEnabled?: boolean;
-    } = {},
-  ): Promise<void> {
-    const { signal } = fenceOptions;
-    const fence = fenceOptions.displayFence;
-    const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-    // Fail-safe tap-bias variant (#6267): an indeterminate probe must route
-    // through the VoiceOver activation gesture rather than a plain
-    // coordinate touch that would get reported as a successful activation.
-    // `signal` is threaded through so a caller deadline that already expired
-    // while `ensureConnected()`/auto-setup was resolving aborts this probe
-    // before dispatch, rather than after the caller has given up (issue
-    // #6306 review).
-    const isVoiceOverEnabled =
-      fenceOptions.voiceOverEnabled ??
-      (await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
-        this.device.deviceId,
-        xcTestClient,
-        this.featureFlags,
-        undefined,
-        signal,
-      ));
-
-    if (isVoiceOverEnabled && element) {
-      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, {
-        durationMs: longPressDuration,
-        scoped: fenceOptions.scoped,
-        signal,
-      });
-      return;
-    }
-
-    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, {
-      signal,
-      displayFence: fence,
-    });
-  }
-
-  /**
-   * Execute iOS tap using coordinate-based input (standard mode).
-   *
-   * CtrlProxy blocks its reply until the on-device press actually completes, so
-   * every action sizes the request timeout from its press duration —
-   * `requestTapCoordinates`'s own generic default timeout would otherwise apply
-   * to an ordinary tap/doubleTap, leaving it with no tapAny-specific floor/ceiling
-   * tailored to a quick gesture (issue #6276). An ordinary tap/doubleTap floors
-   * that explicit timeout at `TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS` --
-   * the established default `requestTapCoordinates` already applied -- so sizing
-   * it from the short fixed press duration never SHRINKS the window a slow-but-
-   * healthy CtrlProxy round trip already had (issue #6306 review, P1).
-   */
-  private async executeIosTapWithCoordinates(
-    xcTestClient: IosCtrlProxy,
-    action: string,
-    x: number,
-    y: number,
-    longPressDuration: number,
-    fenceOptions: DisplayFenceOption & { signal?: AbortSignal } = {},
-  ): Promise<void> {
-    const { signal } = fenceOptions;
-    const fence = resolveDisplayFence(fenceOptions);
-    // Short fixed duration for tap/doubleTap, caller-supplied duration for longPress.
-    const tapDuration =
-      action === "longPress" ? longPressDuration : TAP_ANY_ORDINARY_TAP_DURATION_MS;
-    const timeoutMs =
-      action === "longPress"
-        ? resolveTapAnyCtrlProxyTimeoutMs(tapDuration)
-        : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(tapDuration);
-
-    // `signal` reaches `sendCommand` as `abortSignal`: a caller deadline that
-    // already fired while `ensureConnected()` was resolving a reconnect/
-    // auto-setup (not itself cancellable) is checked right after that await
-    // and before dispatch, so the gesture is never sent to the device after
-    // the caller has already given up and returned a timeout (issue #6306
-    // review, P1/P2).
-    if (action === "doubleTap") {
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence.assertCurrent();
-      await dispatchIosDoubleTap(xcTestClient, x, y, tapDuration, undefined, { signal, timeoutMs });
-      return;
-    }
-
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence.assertCurrent();
-    throwIfAborted(signal);
-    try {
-      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
-        signal,
-        timeoutMs,
-      });
-    } catch (error) {
-      logger.warn(`[TapAnyElement] CtrlProxy iOS tap failed: ${errorMessage(error)}`, error);
-      if (action === "longPress") {
-        // The client cannot confirm native cancellation or whether dispatch occurred.
-        throw new ActionableError(
-          `iOS long press failed: ${errorMessage(error)}; press may still be held on the device for up to ${tapDuration} ms. Wait ${tapDuration} ms before retrying touch input.`,
-          { cause: error },
-        );
-      }
-      throw toActionableError(error, "CtrlProxy iOS tap failed");
-    }
-  }
-
-  /**
-   * Execute iOS tap using VoiceOver accessibility actions.
-   *
-   * Prefers activating by `resource-id` (`requestAction`, mirroring how
-   * `TapOnElement`/`TalkBackTapStrategy` activate Android elements by resourceId) —
-   * on-device this resolves the element via `elementLocator.findElement(byResourceId:)`
-   * and calls `found.tap()`/`found.press()` on the *specific* node the selector
-   * matched. Nested/unique calls instead use the selected bounds with the label,
-   * because resource-ID activation can reselect a peer outside the scope.
-   * For legacy calls, only when no usable resource-id exists does this fall back to
-   * activating by accessibility label (`requestVoiceOverActivate`): CtrlProxy
-   * resolves a label via `.firstMatch`, a global (not container-scoped) query, so
-   * an element whose label is shared by multiple controls could activate a
-   * *different*, same-labeled control than the one tapAny selected (issue #6248
-   * review, funaa). Only when NEITHER a resource-id nor a label exists — nothing to
-   * activate semantically — does this throw instead of falling back to a coordinate
-   * press: under VoiceOver a bare coordinate press only *focuses* an element rather
-   * than activating it, so reporting success after that fallback (or after a real
-   * activation attempt fails) would mask a real activation failure (issue #6248
-   * review). This mirrors the non-fallback-on-failure behavior `TapOnElement` should
-   * also have for the same reason.
-   */
-  private resolveIosVoiceOverLabel(element: Element): string | undefined {
-    // ios-accessibility-label > content-desc > text > fallback
-    return (
-      (element["ios-accessibility-label"] as string | undefined) ??
-      (typeof element["content-desc"] === "string" && element["content-desc"]
-        ? element["content-desc"]
-        : undefined) ??
-      (typeof element.text === "string" && element.text ? element.text : undefined)
-    );
-  }
-
-  private resolveIosResourceId(element: Element): string | undefined {
-    return typeof element["resource-id"] === "string" && element["resource-id"]
-      ? element["resource-id"]
-      : undefined;
-  }
-
-  /**
-   * Activate a resource-id-only target (no resolvable label) through the
-   * identifier-based node-action path rather than a coordinate press.
-   */
-  private async activateIosByResourceId(
-    xcTestClient: IosCtrlProxy,
-    resourceId: string,
-    voiceOverAction: "activate" | "long_press",
-    timeoutMs: number | undefined,
-    duration?: number,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    let dispatched = false;
-    let result: Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
-    try {
-      result = await xcTestClient.requestAction(
-        voiceOverAction,
-        resourceId,
-        undefined,
-        timeoutMs,
-        undefined,
-        {
-          ...(duration === undefined ? {} : { duration }),
-          abortSignal: signal,
-          onDispatch: () => {
-            dispatched = true;
-          },
-        },
-      );
-    } catch (error) {
-      // A socket failure after the write is unconfirmed; a refusal or the caller's abort is not.
-      if (dispatched && !(error instanceof ActionableError) && error !== signal?.reason) {
-        throw indeterminateTapError(errorMessage(error));
-      }
-      throw error;
-    }
-    this.confirmIosVoiceOverDispatch(result);
-    if (!result.success) {
-      throw new ActionableError(
-        `VoiceOver action failed for resource-id "${resourceId}": ${result.error ?? "unknown error"}`,
-      );
-    }
-  }
-
-  /** A VoiceOver activation that was written but never answered may have landed. */
-  private confirmIosVoiceOverDispatch(result: {
-    error?: string;
-    dispatched?: boolean;
-    acknowledged?: boolean;
-  }): void {
-    if (result.dispatched && result.acknowledged !== true) {
-      throw indeterminateTapError(result.error);
-    }
-  }
-
-  private async executeIosTapWithVoiceOver(
-    xcTestClient: IosCtrlProxy,
-    action: string,
-    element: Element,
-    x: number,
-    y: number,
-    pressOptions: { durationMs: number; scoped?: boolean; signal?: AbortSignal },
-  ): Promise<void> {
-    const longPressDuration = pressOptions.durationMs;
-    const label = this.resolveIosVoiceOverLabel(element);
-    const resourceId = pressOptions.scoped ? undefined : this.resolveIosResourceId(element);
-
-    if (!label && !resourceId) {
-      throw new ActionableError(
-        pressOptions.scoped
-          ? "Scoped VoiceOver activation requires a label and selected bounds; global resource-ID activation cannot preserve the scope"
-          : "VoiceOver is enabled but the selected element has no accessibility label, " +
-              "content-desc, text, or resource-id to activate; a coordinate press would " +
-              "only focus it under VoiceOver, not activate it",
-      );
-    }
-
-    const voiceOverAction: "activate" | "long_press" =
-      action === "longPress" ? "long_press" : "activate";
-    // Ordinary tap/doubleTap floors at the established default (P1 fix, issue #6306
-    // review) the same way `executeIosTapWithCoordinates` does -- longPress keeps
-    // tracking its caller-supplied duration exactly, with no floor.
-    const timeoutMs =
-      action === "longPress"
-        ? resolveTapAnyCtrlProxyTimeoutMs(longPressDuration)
-        : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(TAP_ANY_ORDINARY_TAP_DURATION_MS);
-
-    if (resourceId) {
-      await this.activateIosByResourceId(
-        xcTestClient,
-        resourceId,
-        voiceOverAction,
-        timeoutMs,
-        action === "longPress" ? longPressDuration : undefined,
-        pressOptions.signal,
-      );
-      return;
-    }
-
-    const result = await xcTestClient.requestVoiceOverActivate(
-      label as string,
-      voiceOverAction,
-      timeoutMs,
-      undefined,
-      {
-        bounds: element.bounds,
-        duration: action === "longPress" ? longPressDuration : undefined,
-      },
-    );
-
-    this.confirmIosVoiceOverDispatch(result);
-    if (!result.success) {
-      throw new ActionableError(
-        `VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}`,
-      );
-    }
   }
 
   private throwMissingClickableElement(
@@ -1760,7 +1081,7 @@ export class TapAnyElement extends BaseVisualChange {
             )
           : undefined;
         if (dispatch) {
-          this.assertSelectedCapture(selectedCapture);
+          assertSelectedCapture(selectedCapture);
           await dispatch(tapPoint);
         } else {
           await this.executeAndroidTap(
@@ -1784,7 +1105,7 @@ export class TapAnyElement extends BaseVisualChange {
       }
       case "ios":
         targetDisplay?.assertCurrent();
-        this.assertSelectedCapture(selectedCapture);
+        assertSelectedCapture(selectedCapture);
         await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration, element, {
           signal,
           displayFence: fence,

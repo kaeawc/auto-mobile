@@ -97,7 +97,6 @@
 1	src/features/action/LaunchApp.ts	auto-mobile(max-class-lines)
 1	src/features/action/Rotate.ts	auto-mobile(max-class-lines)
 1	src/features/action/SetUIState.ts	auto-mobile(max-class-lines)
-1	src/features/action/TapAnyElement.ts	auto-mobile(max-class-lines)
 1	src/features/action/TapOnElement.ts	auto-mobile(max-class-lines)
 1	src/features/action/TargetDisplayAction.ts	oxlint-disable(max-params)
 1	src/features/action/swipeon/SwipeOn.ts	auto-mobile(max-class-lines)

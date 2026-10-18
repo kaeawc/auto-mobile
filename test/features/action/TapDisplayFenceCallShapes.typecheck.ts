@@ -1,6 +1,7 @@
 import type { DisplayFence } from "../../../src/features/action/BaseVisualChange";
 import type { TapOnElement } from "../../../src/features/action/TapOnElement";
-import type { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import type { TapAnyAndroidTapper } from "../../../src/features/action/TapAnyAndroidTapper";
+import type { TapAnyIosTapper } from "../../../src/features/action/TapAnyIosTapper";
 import type { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import type { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 
@@ -247,8 +248,8 @@ void call8(...args8, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call8(...args8, { assertCurrent: 1 });
 
-// TapAnyElement.executeAndroidTap
-declare const call9: TapAnyElement["executeAndroidTap"];
+// TapAnyAndroidTapper.executeAndroidTap
+declare const call9: TapAnyAndroidTapper["executeAndroidTap"];
 declare const args9: Parameters<typeof call9>;
 void call9(...args9);
 const options9 = call9.bind(undefined, args9[0], args9[1], args9[2], args9[3], args9[4]);
@@ -269,8 +270,8 @@ void call9(...args9, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call9(...args9, { assertCurrent: 1 });
 
-// TapAnyElement.executeAndroidTalkBackTap
-declare const call10: TapAnyElement["executeAndroidTalkBackTap"];
+// TapAnyAndroidTapper.executeAndroidTalkBackTap
+declare const call10: TapAnyAndroidTapper["executeAndroidTalkBackTap"];
 declare const args10: Parameters<typeof call10>;
 void call10(...args10);
 const options10 = call10.bind(undefined, args10[0], args10[1], args10[2], args10[3], args10[4]);
@@ -291,8 +292,8 @@ void call10(...args10, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call10(...args10, { assertCurrent: 1 });
 
-// TapAnyElement.retryAndroidTapIfNoChange
-declare const call11: TapAnyElement["retryAndroidTapIfNoChange"];
+// TapAnyAndroidTapper.retryAndroidTapIfNoChange
+declare const call11: TapAnyAndroidTapper["retryAndroidTapIfNoChange"];
 declare const args11: Parameters<typeof call11>;
 void call11(...args11);
 const options11 = call11.bind(undefined, args11[0], args11[1], args11[2], args11[3], args11[4]);
@@ -313,8 +314,8 @@ void call11(...args11, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call11(...args11, { assertCurrent: 1 });
 
-// TapAnyElement.executeIosTap
-declare const call12: TapAnyElement["executeIosTap"];
+// TapAnyIosTapper.executeIosTap
+declare const call12: TapAnyIosTapper["executeIosTap"];
 declare const args12: Parameters<typeof call12>;
 void call12(...args12);
 const options12 = call12.bind(undefined, args12[0], args12[1], args12[2], args12[3], args12[4]);
@@ -335,8 +336,8 @@ void call12(...args12, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call12(...args12, { assertCurrent: 1 });
 
-// TapAnyElement.executeIosTapWithCoordinates
-declare const call13: TapAnyElement["executeIosTapWithCoordinates"];
+// TapAnyIosTapper.executeIosTapWithCoordinates
+declare const call13: TapAnyIosTapper["executeIosTapWithCoordinates"];
 declare const args13: Parameters<typeof call13>;
 void call13(...args13);
 const options13 = call13.bind(undefined, args13[0], args13[1], args13[2], args13[3], args13[4]);

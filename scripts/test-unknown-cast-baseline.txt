@@ -140,7 +140,7 @@
 53	test/daemon/socketServerInputTypeText.integration.test.ts
 2	test/daemon/socketServerInventoryCancellation.test.ts
 4	test/daemon/socketServerKeyValue.integration.test.ts
-7	test/daemon/socketServerManagedConnectionDirectFrames.test.ts
+6	test/daemon/socketServerManagedConnectionDirectFrames.test.ts
 2	test/daemon/socketServerManagedConnectionInput.test.ts
 1	test/daemon/socketServerMcpCancelDispatchHold.test.ts
 8	test/daemon/socketServerMcpForwardSerialization.integration.test.ts
@@ -352,7 +352,7 @@
 1	test/helpers/daemonHeartbeatHandler.ts
 3	test/helpers/daemonRestartScenario.ts
 4	test/helpers/devicePoolSuite.ts
-6	test/helpers/directFrameRig.ts
+5	test/helpers/directFrameRig.ts
 1	test/helpers/fakeDeviceManagerSimctl.ts
 1	test/helpers/hostCommandGuard.ts
 7	test/helpers/inMemoryDaemonWire.ts

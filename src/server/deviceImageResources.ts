@@ -220,10 +220,19 @@ export interface DeviceImagesResourceContent {
   images: DeviceImageInfo[];
 }
 
+/** The slice of the platform device manager the resource reads; fakes implement just this. */
+type DeviceImageDiscoveryManager = Pick<PlatformDeviceManager, "getDeviceImagesDetailed">;
+
+/** The slice of the AVD manager the resource reads; fakes implement just this. */
+type DeviceImageAvdManager = Pick<
+  AvdManager,
+  "listDeviceImages" | "listInstalledSystemImages" | "listDevices"
+>;
+
 // Dependencies interface for dependency injection
 interface DeviceImageResourcesDependencies {
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked">;
   timer: Timer;
   androidCatalogBudgetMs: number;
@@ -347,8 +356,8 @@ export function createDeviceImageResourcesHandler(
 }
 
 async function buildAndroidImages(
-  deviceManager: PlatformDeviceManager,
-  avdManager: AvdManager,
+  deviceManager: DeviceImageDiscoveryManager,
+  avdManager: DeviceImageAvdManager,
   timer: Timer,
   signal?: AbortSignal,
 ): Promise<AndroidConfiguredInventoryResult> {
@@ -390,14 +399,14 @@ async function buildAndroidImages(
 }
 
 async function readAvdInfo(
-  avdManager: AvdManager,
+  avdManager: DeviceImageAvdManager,
   timer: Timer,
 ): Promise<ReadonlyMap<string, AvdInfo>> {
   return AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer);
 }
 
 async function buildIosImages(
-  deviceManager: PlatformDeviceManager,
+  deviceManager: DeviceImageDiscoveryManager,
 ): Promise<{ images: DeviceImageInfo[]; observation: ConfiguredDeviceInventoryObservation }> {
   try {
     const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
@@ -424,7 +433,7 @@ async function buildIosImages(
 }
 
 async function buildIosResourceResult(
-  deviceManager: PlatformDeviceManager,
+  deviceManager: DeviceImageDiscoveryManager,
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked"> | undefined,
 ): Promise<PlatformResourceResult> {
   const images = await buildIosImages(deviceManager);
@@ -440,8 +449,8 @@ async function buildIosResourceResult(
 
 async function generateAndroidResource(
   state: AndroidImageCacheState,
-  deviceManager: PlatformDeviceManager,
-  avdManager: AvdManager,
+  deviceManager: DeviceImageDiscoveryManager,
+  avdManager: DeviceImageAvdManager,
   timer: Timer,
   budgetMs: number,
 ): Promise<PlatformResourceResult> {
@@ -479,8 +488,8 @@ function startAndroidBackgroundFetch({
   timer,
 }: {
   state: AndroidImageCacheState;
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   timer: Timer;
 }): AndroidBackgroundFetch {
   const controller = new AbortController();
@@ -615,8 +624,8 @@ function incompleteAndroidResource(
 
 async function computeAndroidResource(options: {
   state: AndroidImageCacheState;
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   timer: Timer;
   budgetMs: number;
 }): Promise<PlatformResourceResult> {
@@ -648,8 +657,8 @@ async function buildAndroidResourceResult({
   signal,
   onInventoryComplete,
 }: {
-  deviceManager: PlatformDeviceManager;
-  avdManager: AvdManager;
+  deviceManager: DeviceImageDiscoveryManager;
+  avdManager: DeviceImageAvdManager;
   timer: Timer;
   signal: AbortSignal;
   onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void;

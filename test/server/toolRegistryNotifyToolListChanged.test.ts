@@ -1,13 +1,7 @@
-import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
-
-// The one cast: FakeMcpServer implements only what the registry touches.
-function asServer(fake: FakeMcpServer): McpServer {
-  return fake as unknown as McpServer;
-}
 
 // Minimal MCP-server stand-in: registerWithServer only calls registerTool (no-op
 // here), tracks the server, and hooks the underlying Protocol onclose for
@@ -26,7 +20,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
 
   test("delegates to server.sendToolListChanged() after registerWithServer", () => {
     const server = new FakeMcpServer();
-    ToolRegistry.registerWithServer(asServer(server));
+    ToolRegistry.registerWithServer(server);
 
     ToolRegistry.notifyToolListChanged();
 
@@ -36,7 +30,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("swallows sendToolListChanged errors (best-effort, never throws)", () => {
     const server = new FakeMcpServer();
     server.shouldThrow = true;
-    ToolRegistry.registerWithServer(asServer(server));
+    ToolRegistry.registerWithServer(server);
 
     expect(() => ToolRegistry.notifyToolListChanged()).not.toThrow();
     expect(server.calls).toBe(1);
@@ -45,8 +39,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("fans out to every registered server, not just the last one (issue #3223)", () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
-    ToolRegistry.registerWithServer(asServer(first));
-    ToolRegistry.registerWithServer(asServer(second));
+    ToolRegistry.registerWithServer(first);
+    ToolRegistry.registerWithServer(second);
 
     ToolRegistry.notifyToolListChanged();
 
@@ -58,8 +52,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
     const throwing = new FakeMcpServer();
     throwing.shouldThrow = true;
     const healthy = new FakeMcpServer();
-    ToolRegistry.registerWithServer(asServer(throwing));
-    ToolRegistry.registerWithServer(asServer(healthy));
+    ToolRegistry.registerWithServer(throwing);
+    ToolRegistry.registerWithServer(healthy);
 
     expect(() => ToolRegistry.notifyToolListChanged()).not.toThrow();
     expect(healthy.calls).toBe(1);
@@ -68,8 +62,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("prunes a server when its underlying transport closes", () => {
     const closing = new FakeMcpServer();
     const surviving = new FakeMcpServer();
-    ToolRegistry.registerWithServer(asServer(closing));
-    ToolRegistry.registerWithServer(asServer(surviving));
+    ToolRegistry.registerWithServer(closing);
+    ToolRegistry.registerWithServer(surviving);
 
     // Simulate the session teardown the SDK performs on transport close.
     closing.server.onclose?.();
@@ -85,7 +79,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
     server.server.onclose = () => {
       priorHookCalls += 1;
     };
-    ToolRegistry.registerWithServer(asServer(server));
+    ToolRegistry.registerWithServer(server);
 
     server.server.onclose?.();
 
@@ -94,8 +88,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
 
   test("re-registering the same server does not double-notify", () => {
     const server = new FakeMcpServer();
-    ToolRegistry.registerWithServer(asServer(server));
-    ToolRegistry.registerWithServer(asServer(server));
+    ToolRegistry.registerWithServer(server);
+    ToolRegistry.registerWithServer(server);
 
     ToolRegistry.notifyToolListChanged();
 
@@ -110,8 +104,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
       kinds.push(kind);
     });
     try {
-      ToolRegistry.registerWithServer(asServer(ephemeral), { ephemeral: true });
-      ToolRegistry.registerWithServer(asServer(session));
+      ToolRegistry.registerWithServer(ephemeral, { ephemeral: true });
+      ToolRegistry.registerWithServer(session);
 
       ToolRegistry.notifyToolListChanged();
 
@@ -127,7 +121,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("ephemeral servers are tracked only until they close, so none leak", () => {
     const servers = Array.from({ length: 3 }, () => new FakeMcpServer());
     for (const server of servers) {
-      ToolRegistry.registerWithServer(asServer(server), { ephemeral: true });
+      ToolRegistry.registerWithServer(server, { ephemeral: true });
     }
     expect(ToolRegistry.trackedServerCountsForTesting()).toEqual({ notified: 0, ephemeral: 3 });
 

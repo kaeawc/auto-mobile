@@ -4,14 +4,13 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asMcpClient } from "./helpers/fakeMcpClient";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { InputText } from "../../src/features/action/InputText";
 import { imeActionFailedAfterTextEntered } from "../../src/features/action/imeActionFailedAfterTextEntered";
 import type { BootedDevice, ExecResult } from "../../src/models";
-import type {
-  AdbExecuteOptions,
-  AdbExecutor,
-} from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -24,6 +23,8 @@ import {
 } from "../../src/utils/deviceIncarnation";
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -43,16 +44,27 @@ import {
  * the threaded budget does not merely change an assertion — it reproduces the original
  * bug, an adb call nothing ever cancels.
  */
-class ScriptedAdbExecutor {
+class ScriptedAdbExecutor extends FakeAdbExecutor {
   readonly commands: Array<{ command: string; timeoutMs?: number }> = [];
 
   constructor(
     private readonly timer: FakeTimer,
     private readonly stallPattern?: string,
     private readonly apiLevel: string = "31",
-  ) {}
+  ) {
+    super();
+  }
 
-  async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
+  /** No own API-level probe, so `readAndroidDeviceApiLevel` takes the raw getprop fallback. */
+  override async getAndroidApiLevel(_timeoutMs?: number): Promise<number | null> {
+    return null;
+  }
+
+  override async executeCommand(
+    command: string,
+    options: AdbExecuteOptions = {},
+  ): Promise<ExecResult> {
+    const { timeoutMs } = options;
     this.commands.push({ command, timeoutMs });
 
     if (this.stallPattern !== undefined && command.includes(this.stallPattern)) {
@@ -66,12 +78,7 @@ class ScriptedAdbExecutor {
       toString: () => stdout,
       trim: () => stdout.trim(),
       includes: (search: string) => stdout.includes(search),
-    } as unknown as ExecResult;
-  }
-
-  async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
-    await options.beforeDispatch?.(options.timeoutMs);
-    return this.executeCommand(args.join(" "), options.timeoutMs);
+    };
   }
 
   /**
@@ -120,7 +127,7 @@ class ProductionShapedAdbExecutor extends ScriptedAdbExecutor {
     super(timer);
   }
 
-  async getAndroidApiLevel(timeoutMs?: number): Promise<number | null> {
+  override async getAndroidApiLevel(timeoutMs?: number): Promise<number | null> {
     this.probeCalls.push(timeoutMs);
     if (this.options.stallProbe) {
       return this.stalledSubprocess<number | null>("getAndroidApiLevel", timeoutMs);
@@ -135,7 +142,7 @@ function createAppendTextInput(
   adb: ScriptedAdbExecutor,
   timer: FakeTimer,
 ): InputText {
-  const factory = { create: () => adb as unknown as AdbExecutor };
+  const factory = { create: () => adb };
   return new InputText(device, factory, undefined, timer);
 }
 
@@ -163,7 +170,7 @@ function withWedgeGuard<T>(promise: Promise<T>, message: string): Promise<T> {
 
 describe("UnixSocketServer input/typeText", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
@@ -196,15 +203,15 @@ describe("UnixSocketServer input/typeText", () => {
   test("routes Android text input through existing platform input infrastructure", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     const createMcpClient = mock(async () => {
       throw new Error("input/typeText should not create an MCP client");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -247,16 +254,16 @@ describe("UnixSocketServer input/typeText", () => {
       await releaseOperation.promise;
       return { success: true, totalTimeMs: 1 };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-input-session";
     const sessions = new Map([
       [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(sessions), fakeTimer);
     await server.start();
 
     const response = sendRequest(socketPath, "input/typeText", {
@@ -302,16 +309,16 @@ describe("UnixSocketServer input/typeText", () => {
       sent = true;
       return { success: true, totalTimeMs: 1 };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-input-before-dispatch-session";
     const sessions = new Map([
       [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(sessions), fakeTimer);
     await server.start();
 
     const response = sendRequest(socketPath, "input/typeText", {
@@ -352,12 +359,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("append mode types with real key events and never reaches requestSetText", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ScriptedAdbExecutor(fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -390,7 +397,7 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("failed multi-character append reports the landed prefix on the error envelope", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({
         success: false,
@@ -421,11 +428,11 @@ describe("UnixSocketServer input/typeText", () => {
       error: "enter key unavailable",
       totalTimeMs: 1,
     }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({ success: true, charsSent: 2 }),
     });
@@ -457,11 +464,11 @@ describe("UnixSocketServer input/typeText", () => {
     const requestImeAction = mock(async () => {
       throw new Error("CtrlProxy send failed");
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({ success: true, charsSent: 2 }),
     });
@@ -499,11 +506,11 @@ describe("UnixSocketServer input/typeText", () => {
           );
         }),
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({ success: true, charsSent: 2 }),
     });
@@ -550,12 +557,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("a stalled adb key event fails inside the budget and frees the device queue", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     // Models a real adb subprocess: it runs until its own timeout kills it, and
     // runs FOREVER when it was handed no timeout.
     const adb = new ScriptedAdbExecutor(fakeTimer, "input keyevent");
@@ -609,12 +616,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("a timed-out later append key omits an unsafe retry boundary", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ScriptedAdbExecutor(fakeTimer, "KEYCODE_B");
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -654,12 +661,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("a stalled PRODUCTION api-level probe fails inside the budget and frees the queue", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer, { stallProbe: true });
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -724,12 +731,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("consecutive append requests for one device probe the API level once", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -769,12 +776,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("evicts the cached append helper after the direct device queue is idle", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -805,7 +812,7 @@ describe("UnixSocketServer input/typeText", () => {
     const sessions = new Map([
       ["session-a", createFakeSession("session-a", androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(sessions), fakeTimer);
     let factoryCalls = 0;
     let releaseAppend: () => void = () => {};
     let signalAppendStarted: () => void = () => {};
@@ -826,14 +833,14 @@ describe("UnixSocketServer input/typeText", () => {
       };
     };
     server.mcpClientFactory = async () =>
-      ({
+      asMcpClient({
         callTool: async () => ({ content: [] }),
         listTools: async () => ({ tools: [] }),
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
         listResourceTemplates: async () => ({ resourceTemplates: [] }),
         close: async () => {},
-      }) as any;
+      });
     await server.start();
 
     const append = (text: string) =>
@@ -879,12 +886,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("evicting the input cache forces the next append for that device to re-probe", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -925,10 +932,10 @@ describe("UnixSocketServer input/typeText", () => {
   test("re-probes append input when the pool reports a new connection incarnation", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     const discoveredDevice = androidDevice;
     let incarnation = 1;
     setDeviceIncarnationResolver(() => incarnation);
@@ -945,7 +952,7 @@ describe("UnixSocketServer input/typeText", () => {
         };
       },
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -979,10 +986,10 @@ describe("UnixSocketServer input/typeText", () => {
   test("revalidates append device identity after waiting behind same-device input", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     const discoveredDevice = androidDevice;
     let incarnation = 1;
     setDeviceIncarnationResolver(() => incarnation);
@@ -996,7 +1003,7 @@ describe("UnixSocketServer input/typeText", () => {
         };
       },
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     let releaseFirstAppend: (() => void) | undefined;
     const firstAppendReleased = new Promise<void>((resolve) => {
       releaseFirstAppend = resolve;
@@ -1016,7 +1023,7 @@ describe("UnixSocketServer input/typeText", () => {
           }
           return { success: true };
         },
-      } as InputText;
+      };
     };
     await server.start();
 
@@ -1053,12 +1060,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("documented blind spot: with no pool incarnation the cached append helper is reused", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -1095,13 +1102,13 @@ describe("UnixSocketServer input/typeText", () => {
   test("rebuilds a cached append helper once when its first use fails", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = () => {
       factoryCalls++;
@@ -1114,7 +1121,7 @@ describe("UnixSocketServer input/typeText", () => {
           call === 1
             ? { success: false, error: "stale helper", charsSent: 0 }
             : { success: true, charsSent: 1 },
-      } as unknown as InputText;
+      };
     };
     await server.start();
 
@@ -1149,13 +1156,13 @@ describe("UnixSocketServer input/typeText", () => {
   test("retries only the unconfirmed suffix after a cached helper appends part of the text", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     // What the device's focused field would hold after these appends.
     let deviceField = "";
     const textsReceived: string[] = [];
@@ -1176,7 +1183,7 @@ describe("UnixSocketServer input/typeText", () => {
           deviceField += text;
           return { success: true, charsSent: text.length };
         },
-      } as unknown as InputText;
+      };
     };
     await server.start();
 
@@ -1218,15 +1225,14 @@ describe("UnixSocketServer input/typeText", () => {
         ? { success: false, error: "Stale frame context; observe a fresh frame before retrying" }
         : { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     let deviceField = "";
     const validatorsReceived: Array<unknown> = [];
     let factoryCalls = 0;
@@ -1255,7 +1261,7 @@ describe("UnixSocketServer input/typeText", () => {
           deviceField += text;
           return { success: true, charsSent: text.length };
         },
-      } as unknown as InputText;
+      };
     };
     await server.start();
 
@@ -1293,15 +1299,14 @@ describe("UnixSocketServer input/typeText", () => {
       success: false,
       error: "Stale frame context; observe a fresh frame before retrying",
     }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     let deviceField = "";
     let factoryCalls = 0;
     server.appendTextFactory = () => {
@@ -1332,7 +1337,7 @@ describe("UnixSocketServer input/typeText", () => {
           deviceField += text;
           return { success: true, charsSent: text.length };
         },
-      } as unknown as InputText;
+      };
     };
     await server.start();
 
@@ -1371,15 +1376,14 @@ describe("UnixSocketServer input/typeText", () => {
   // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
   test("replays the whole text WITH its validator when nothing was confirmed", async () => {
     const validateFrameContext = mock(async () => ({ success: true }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     let deviceField = "";
     const validatorsReceived: Array<unknown> = [];
     let factoryCalls = 0;
@@ -1412,7 +1416,7 @@ describe("UnixSocketServer input/typeText", () => {
           deviceField += text;
           return { success: true, charsSent: text.length };
         },
-      } as unknown as InputText;
+      };
     };
     await server.start();
 
@@ -1444,13 +1448,13 @@ describe("UnixSocketServer input/typeText", () => {
   test("does not replay an append whose confirmed prefix is unknown", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const textsReceived: string[] = [];
     let factoryCalls = 0;
     server.appendTextFactory = () => {
@@ -1464,7 +1468,7 @@ describe("UnixSocketServer input/typeText", () => {
             ? { success: true, charsSent: text.length }
             : { success: false, error: "append key event failed: timeout" };
         },
-      } as unknown as InputText;
+      };
     };
     await server.start();
 
@@ -1495,12 +1499,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("append reports a failure for uppercase on a device below API 31", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ScriptedAdbExecutor(fakeTimer, undefined, "30");
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -1528,12 +1532,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("routes iOS text input through existing platform input infrastructure", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1570,12 +1574,12 @@ describe("UnixSocketServer input/typeText", () => {
   test("accepts iOS append mode and uses the CtrlProxy append primitive", async () => {
     const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestAppendText,
       requestSetText,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     for (const text of ["a", "b", "c"]) {
@@ -1596,13 +1600,12 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("forwards an iOS frame context to the CtrlProxy append primitive", async () => {
     const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestAppendText,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1623,15 +1626,15 @@ describe("UnixSocketServer input/typeText", () => {
   test("uses the socket autolock device when deviceId is omitted", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
     const mcpAutolockSessions = new Map<string, string>();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
@@ -1650,9 +1653,7 @@ describe("UnixSocketServer input/typeText", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = server.sessionIds[0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -1674,14 +1675,13 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("forwards an Android frame context to CtrlProxy text input", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
+    server.stubFrameContextCheck();
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1706,15 +1706,14 @@ describe("UnixSocketServer input/typeText", () => {
       success: false,
       error: "Stale frame context; observe a fresh frame before retrying",
     }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server.stubFrameContextCheck();
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1738,15 +1737,14 @@ describe("UnixSocketServer input/typeText", () => {
       fakeTimer.advanceTime(30_000);
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server.stubFrameContextCheck();
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1770,15 +1768,14 @@ describe("UnixSocketServer input/typeText", () => {
       validationCount += 1;
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       validateFrameContext,
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server.stubFrameContextCheck();
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1813,12 +1810,12 @@ describe("UnixSocketServer input/typeText", () => {
       return { success: true, totalTimeMs: 1 };
     });
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const firstPromise = sendRequest(socketPath, "input/typeText", {
@@ -1858,12 +1855,12 @@ describe("UnixSocketServer input/typeText", () => {
       return { success: true, totalTimeMs: 1 };
     });
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const responsePromise = sendRequest(
@@ -1915,12 +1912,12 @@ describe("UnixSocketServer input/typeText", () => {
       return { success: true, totalTimeMs: 1 };
     });
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const firstPromise = sendRequest(
@@ -1972,12 +1969,12 @@ describe("UnixSocketServer input/typeText", () => {
       error: "return key unavailable",
       totalTimeMs: 1,
     }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -2013,12 +2010,12 @@ describe("UnixSocketServer input/typeText", () => {
       return { success: true, totalTimeMs: 1 };
     });
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSetText,
       requestImeAction,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const responsePromise = sendRequest(
@@ -2063,7 +2060,7 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("rejects missing, empty, and non-string text with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/typeText", {

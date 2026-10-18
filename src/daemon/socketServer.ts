@@ -906,13 +906,13 @@ export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
   private closing = false;
-  private acceptingRequests = false;
+  protected acceptingRequests = false;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
   private readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private readonly adbClientFactory: AdbClientFactory;
-  private sessions: Map<string, SessionContext> = new Map();
+  protected sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
   private acceptedClientConnections = 0;
@@ -921,7 +921,7 @@ export class UnixSocketServer {
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
-  private pendingSocketRequests = new PendingRequestTracker();
+  protected pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private readonly resourceSubscriptions = new Map<string, Set<string>>();
@@ -1291,7 +1291,7 @@ export class UnixSocketServer {
   /**
    * Handle a new client connection
    */
-  private handleConnection(socket: Socket): void {
+  protected handleConnection(socket: Socket): void {
     if (!this.acceptingRequests) {
       // An accept callback can already be queued when quiesce closes the
       // listener. End that late connection before it can bind or issue work.
@@ -1860,7 +1860,7 @@ export class UnixSocketServer {
     this.writeFrameData(socket, sessionId, frame, onFlushed);
   }
 
-  private writeFrameData(
+  protected writeFrameData(
     socket: Socket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
@@ -1915,7 +1915,7 @@ export class UnixSocketServer {
   /**
    * Handle a request from a client
    */
-  private async handleRequest(
+  protected async handleRequest(
     sessionId: string,
     ownerSocket: Socket,
     request: DaemonRequest,
@@ -3970,7 +3970,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async handleLocalSocketRequest(
+  protected async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
     signal?: AbortSignal,
@@ -6212,7 +6212,7 @@ export class UnixSocketServer {
    * device still reports that exact context. Missing context fails closed: a caller can re-observe
    * and retry, whereas executing against an unproven screen could actuate the wrong UI.
    */
-  private requireCurrentFrameContext(
+  protected requireCurrentFrameContext(
     deviceId: string,
     frameContext: string | undefined,
     action: string,

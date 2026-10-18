@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import capture from "../../fixtures/ios/nested-selection/scroll-cart-duplicate-container-id.json";
-import type { ViewHierarchyResult } from "../../../src/models";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { untypedCapture } from "../../helpers/untypedCapture";
 
 /**
  * Issue #10266: a real iOS 26 simulator capture of the Playground nested-selection screen,
@@ -11,7 +11,7 @@ import { SearchableHierarchy } from "../../../src/features/utility/SearchableNod
  * `item_40`...`item_47` rows, and the SDK walker's `HostingScrollView` nested inside it, with
  * the same id and no rows. Scoping to the empty inner node found no targets.
  */
-const hierarchy = () => structuredClone(capture.viewHierarchy) as unknown as ViewHierarchyResult;
+const hierarchy = () => untypedCapture(structuredClone(capture.viewHierarchy));
 
 function select(
   elementId: string,

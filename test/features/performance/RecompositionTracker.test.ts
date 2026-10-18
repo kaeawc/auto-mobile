@@ -3,6 +3,8 @@ import { RecompositionTracker } from "../../../src/features/performance/Recompos
 import type { BootedDevice, ObserveResult, RecompositionNodeInfo } from "../../../src/models";
 import { createTestDatabase } from "../../db/testDbHelper";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { createObserveResultForTest } from "../observe/observeScreenTestBuilders";
+import { untypedCapture } from "../../helpers/untypedCapture";
 
 /**
  * Summary-math tests deliberately omit any package name (no activeWindow.appId and no
@@ -20,10 +22,10 @@ function node(recomposition: RecompositionNodeInfo, children: unknown[] = []): u
 }
 
 function observation(nodes: unknown[], updatedAt?: number): ObserveResult {
-  return {
-    viewHierarchy: { hierarchy: { node: nodes } },
-    ...(updatedAt === undefined ? {} : { updatedAt }),
-  } as unknown as ObserveResult;
+  return Object.assign(
+    createObserveResultForTest({ viewHierarchy: untypedCapture({ hierarchy: { node: nodes } }) }),
+    updatedAt === undefined ? {} : { updatedAt },
+  );
 }
 
 describe("RecompositionTracker", () => {
@@ -185,7 +187,7 @@ describe("RecompositionTracker", () => {
   it("coerces numeric recomposition totals provided as strings", async () => {
     const tracker = new RecompositionTracker(new FakeTimer());
     const result = observation(
-      [node({ id: "a", total: "7" as unknown as number, rolling1sAverage: 0 })],
+      [node({ id: "a", total: JSON.parse('"7"'), rolling1sAverage: 0 })],
       0,
     );
 

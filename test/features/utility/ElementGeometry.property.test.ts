@@ -11,7 +11,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
 const geometry = new DefaultElementGeometry();
 
-const elementWithBounds = (bounds: ElementBounds): Element => ({ bounds }) as unknown as Element;
+const elementWithBounds = (bounds: ElementBounds): Element => ({ bounds }) as Element;
 
 // Integer coordinates in the safe range; `left <= right` and `top <= bottom`
 // so every generated rectangle is non-inverted (the shape all callers pass).

@@ -31,7 +31,7 @@ const SNAPSHOT = {
     loadAverage1m: null,
   },
   processes: [],
-} as unknown as HostSnapshot;
+} as HostSnapshot;
 
 class ScriptedSource implements FleetHostSource {
   readonly pending: Array<(entries: SimulatorInventoryEntry[]) => void> = [];

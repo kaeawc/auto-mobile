@@ -13,7 +13,7 @@ function elementWithBounds(bounds: {
   right: number;
   bottom: number;
 }): Element {
-  return { bounds } as unknown as Element;
+  return { bounds } as Element;
 }
 
 describe("ElementGeometry getSwipeWithinBounds", () => {

@@ -39,11 +39,14 @@ function makeWindowedHierarchy(
 
 const ids = (elements: { "resource-id"?: string }[]) => elements.map((e) => e["resource-id"]);
 
+// A missing capture, which the static types forbid; JSON.parse yields an untyped value.
+const untypedNull = JSON.parse("null");
+
 describe("DefaultScrollableElementsQuery", () => {
   const query = new DefaultScrollableElementsQuery();
 
   test("returns empty for a missing hierarchy", () => {
-    expect(query.findScrollableElements(null as unknown as ViewHierarchyResult)).toEqual([]);
+    expect(query.findScrollableElements(untypedNull)).toEqual([]);
   });
 
   test("returns empty when nothing scrolls", () => {
@@ -78,7 +81,7 @@ describe("DefaultClickableElementsQuery", () => {
   const query = new DefaultClickableElementsQuery();
 
   test("returns empty for a missing hierarchy", () => {
-    expect(query.findClickableElements(null as unknown as ViewHierarchyResult)).toEqual([]);
+    expect(query.findClickableElements(untypedNull)).toEqual([]);
   });
 
   test("keeps clickable nodes and drops non-clickable ones", () => {

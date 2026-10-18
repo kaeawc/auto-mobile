@@ -81,7 +81,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
     test("rejects unsupported platform", async () => {
       const unsupportedDevice: BootedDevice = {
-        platform: "windows" as any,
+        // A platform outside the union, as an untyped caller could send (JSON.parse yields `any`).
+        platform: JSON.parse('"windows"'),
         deviceId: "test",
         name: "Test Device",
       };
@@ -285,7 +286,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         recordingId: "test",
         outputPath: path.join(tempDir, "test.mp4"),
         startedAt: new Date().toISOString(),
-        backendHandle: { wrong: "type" } as any,
+        backendHandle: { wrong: "type" },
       };
 
       await expect(backend.stop(invalidHandle)).rejects.toThrow();
@@ -399,7 +400,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       outputPath: string,
       fakeProcess: FakeChildProcess,
       exitPromise: Promise<void> = Promise.resolve(),
-    ): RecordingHandle {
+    ) {
       const androidHandle = {
         kind: "android" as const,
         process: fakeProcess,
@@ -423,7 +424,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         recordingId: "test-stop-sequence",
         outputPath,
         startedAt: new Date().toISOString(),
-        backendHandle: androidHandle as any,
+        backendHandle: androidHandle,
+        androidHandle,
       };
     }
 
@@ -653,8 +655,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       };
 
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
-      (handle.backendHandle as any).exitPromise = exitPromise;
-      (handle.backendHandle as any).exitState.exitCode = null;
+      handle.androidHandle.exitPromise = exitPromise;
+      handle.androidHandle.exitState.exitCode = null;
 
       await writeVideoFixture(handle.outputPath, "fake-video");
       await backend.stop(handle);
@@ -1089,11 +1091,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     // rather than a self-healing `?? reimplementation` fallback keeping the test
     // green against a method that no longer exists.
     function resolve(backendInstance: PlatformVideoCaptureBackend, maxDuration?: number): number {
-      return (
-        backendInstance as unknown as {
-          resolveAndroidTimeLimit(maxDuration?: number): number;
-        }
-      ).resolveAndroidTimeLimit(maxDuration);
+      return backendInstance.resolveAndroidTimeLimit(maxDuration);
     }
 
     test.each([

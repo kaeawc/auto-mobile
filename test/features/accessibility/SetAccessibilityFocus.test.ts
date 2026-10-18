@@ -132,7 +132,7 @@ describe("SetAccessibilityFocus", () => {
     service.currentFocusElement = {
       bounds: bounds(0, 0, 100, 50),
       "resource-id": "com.example:id/title",
-    } as any;
+    } as Element;
     const feature = makeFeature();
 
     const result = await feature.execute({ resourceId: "com.example:id/title" });
@@ -688,18 +688,20 @@ describe("SetAccessibilityFocus", () => {
     const hierarchy = makeViewHierarchy([
       { $: { text: "Save", "resource-id": "com.app:id/background", bounds: bounds(0, 0, 10, 10) } },
     ]);
-    hierarchy.windows = [
-      {
-        windowLayer: 9,
-        hierarchy: {
-          node: {
-            text: "Save",
-            "resource-id": "com.app:id/dialog",
-            bounds: bounds(100, 100, 400, 200),
+    Object.assign(hierarchy, {
+      windows: [
+        {
+          windowLayer: 9,
+          hierarchy: {
+            node: {
+              text: "Save",
+              "resource-id": "com.app:id/dialog",
+              bounds: bounds(100, 100, 400, 200),
+            },
           },
         },
-      },
-    ] as any;
+      ],
+    });
     observeScreen.setObserveResult(makeObserveResult(hierarchy));
     await makeFeature().execute({ text: "Save" });
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.app:id/dialog" }]);

@@ -30,6 +30,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError, toActionableError } from "../../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../../src/utils/ChildProcessTracker";
 
+/** A value the static types forbid, as arrives from an untyped caller (JSON.parse yields `any`). */
+const untyped = (value: unknown) => JSON.parse(JSON.stringify(value));
+
 describe("parseVideoRecordingConfig", () => {
   test("returns defaults for null input", () => {
     const config = parseVideoRecordingConfig(null);
@@ -47,7 +50,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("returns defaults for non-object input", () => {
-    const config = parseVideoRecordingConfig("invalid" as any);
+    const config = parseVideoRecordingConfig(untyped("invalid"));
     expect(config.qualityPreset).toBe("low");
   });
 
@@ -58,7 +61,9 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("falls back on invalid quality preset", () => {
-    expect(parseVideoRecordingConfig({ qualityPreset: "ultra" as any }).qualityPreset).toBe("low");
+    expect(parseVideoRecordingConfig({ qualityPreset: untyped("ultra") }).qualityPreset).toBe(
+      "low",
+    );
   });
 
   test("accepts valid fps", () => {
@@ -85,7 +90,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("falls back on invalid format", () => {
-    expect(parseVideoRecordingConfig({ format: "avi" as any }).format).toBe("mp4");
+    expect(parseVideoRecordingConfig({ format: untyped("avi") }).format).toBe("mp4");
   });
 
   test("caps bitrate to max throughput", () => {
@@ -149,7 +154,7 @@ describe("parseVideoRecordingConfig", () => {
     expect(
       parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution,
     ).toBeUndefined();
-    expect(parseVideoRecordingConfig({ resolution: null as any }).resolution).toBeUndefined();
+    expect(parseVideoRecordingConfig({ resolution: untyped(null) }).resolution).toBeUndefined();
   });
 });
 

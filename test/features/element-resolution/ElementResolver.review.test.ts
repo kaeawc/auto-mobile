@@ -5,12 +5,13 @@ import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { resolverSelectorSchema } from "../../../src/server/elementSelectorSchemas";
+import { untypedCapture } from "../../helpers/untypedCapture";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const node = (id: string, extra = {}) => ({ "resource-id": id, bounds, ...extra });
 const snapshot = (nodes: unknown[]) => ({
   id: "review",
-  nodes: new SearchableHierarchy().project({ hierarchy: { node: nodes } } as any),
+  nodes: new SearchableHierarchy().project(untypedCapture({ hierarchy: { node: nodes } })),
 });
 const tap = { action: "tap" as const };
 const resolver = new ElementResolver(() => 0);
@@ -349,10 +350,10 @@ test("observation keeps main-first row order but indexes duplicates in resolver 
     clickable: true,
     bounds: { left: 10, top: 10, right: 50, bottom: 50 },
   });
-  const hierarchy = {
+  const hierarchy = untypedCapture({
     hierarchy: { node: [main] },
     windows: [{ windowLayer: 10, hierarchy: { node: [dialog] } }],
-  } as any;
+  });
   const observed = projectSkeleton(
     new DefaultObserveElementCollector().collect(hierarchy, "android")!,
   ).skeleton;

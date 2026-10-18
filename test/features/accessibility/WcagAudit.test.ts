@@ -766,14 +766,17 @@ describe("WcagAudit", function () {
     // violations. These tests pin that NO heading violations are ever produced,
     // regardless of text sizes in the hierarchy.
     function hierarchyWithHeadingHeights(heights: number[]): ViewHierarchyNode {
-      return {
-        class: "View",
-        children: heights.map((h, i) => ({
-          class: "android.widget.TextView",
-          text: `Heading ${i}`,
-          bounds: { left: 0, top: i * 200, right: 300, bottom: i * 200 + h },
-        })),
-      } as unknown as ViewHierarchyNode;
+      // `children` is the legacy tree shape the model's `node` field replaced; JSON.parse yields an untyped value.
+      return JSON.parse(
+        JSON.stringify({
+          class: "View",
+          children: heights.map((h, i) => ({
+            class: "android.widget.TextView",
+            text: `Heading ${i}`,
+            bounds: { left: 0, top: i * 200, right: 300, bottom: i * 200 + h },
+          })),
+        }),
+      );
     }
 
     it.each([

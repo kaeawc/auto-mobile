@@ -525,7 +525,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * be our `screenrecord` (same unique output file) right before the kill so a reused
    * pid is never signalled; a pid that is gone or no longer ours reports "not-ours".
    */
-  private async signalDeviceRecorder(
+  async signalDeviceRecorder(
     adb: AdbExecutor,
     backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
@@ -1050,7 +1050,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     await this.cleanupDeviceRecording(adb, { deviceTempPath }, false);
   }
 
-  private resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
+  resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
     if (maxDurationSeconds && maxDurationSeconds > 0) {
       return Math.min(maxDurationSeconds, ANDROID_SCREENRECORD_MAX_SECONDS);
     }

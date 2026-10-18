@@ -31,7 +31,7 @@
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
 1298	src/features/action/BaseVisualChange.ts
-1104	src/features/action/InputText.ts
+1105	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
 2267	src/features/action/LaunchApp.ts
 2033	src/features/action/Rotate.ts

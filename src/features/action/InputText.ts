@@ -3,7 +3,11 @@ import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textT
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
-import { BaseVisualChange, type ObservedActionResult } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  type DisplayFenceDependencies,
+  type ObservedActionResult,
+} from "./BaseVisualChange";
 import {
   type AppendTextFailureSource,
   BootedDevice,
@@ -152,8 +156,9 @@ export class InputText extends BaseVisualChange {
     private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory,
     timer: Timer = defaultTimer,
     targetFocuserFactory: TextInputTargetFocuserFactory = defaultTargetFocuserFactory,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adbFactoryOrExecutor, timer);
+    super(device, adbFactoryOrExecutor, timer, undefined, collaborators);
     this.device = device;
     this.targetFocuser = targetFocuserFactory(device);
   }

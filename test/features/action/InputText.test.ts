@@ -145,11 +145,16 @@ describe("InputText", () => {
     });
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
-    (inputText as any).observeScreen = observe;
-    (inputText as any).awaitIdle = new FakeAwaitIdle();
+    const inputText = new InputText(
+      androidDevice,
+      new FakeAdbClientFactory(),
+      undefined,
+      timer,
+      undefined,
+      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
+    );
 
     await expect(
       inputText.execute("hello", undefined, false, undefined, controller.signal),
@@ -161,12 +166,17 @@ describe("InputText", () => {
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const inputText = new InputText(androidDevice, new FakeAdbClientFactory(), undefined, timer);
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observeResultWithFocusedText(""));
+    const inputText = new InputText(
+      androidDevice,
+      new FakeAdbClientFactory(),
+      undefined,
+      timer,
+      undefined,
+      { observeScreen: observe, awaitIdle: new FakeAwaitIdle() },
+    );
     observe.enableAutoVaryHierarchy();
-    (inputText as any).observeScreen = observe;
-    (inputText as any).awaitIdle = new FakeAwaitIdle();
 
     await inputText.execute("hello", undefined, false, undefined, controller.signal);
 

@@ -47,9 +47,9 @@ describe("SwipeOn autoTarget", () => {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
     (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };

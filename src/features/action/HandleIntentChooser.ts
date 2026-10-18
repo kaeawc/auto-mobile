@@ -3,7 +3,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DeepLinkManager } from "../utility/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
-import { BaseVisualChange } from "./BaseVisualChange";
+import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
@@ -36,8 +36,9 @@ export class HandleIntentChooser extends BaseVisualChange {
         signal,
       ),
     timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
     this.deepLinkManagerFactory = deepLinkManagerFactory;
   }

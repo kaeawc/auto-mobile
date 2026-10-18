@@ -135,6 +135,7 @@ export interface DisplayFenceDependencies {
   observeScreen?: ObserveScreen;
   awaitIdle?: AwaitIdle;
   window?: Window;
+  predictionAnalyzer?: Pick<PredictionAnalyzer, "recordOutcomeForAction">;
   displayTransitions?: DisplayTransitionReader;
   renderedDisplayRevision?: RenderedDisplayRevisionReader;
   renderedDisplayGeneration?: RenderedDisplayRevisionReader;
@@ -192,7 +193,7 @@ export class BaseVisualChange {
   awaitIdle: AwaitIdle;
   observeScreen: ObserveScreen;
   window: Window;
-  private predictionAnalyzer: PredictionAnalyzer;
+  private predictionAnalyzer: Pick<PredictionAnalyzer, "recordOutcomeForAction">;
   private deferredPredictionOutcomes = new WeakMap<
     object,
     (observation: ObserveResult) => Promise<void>
@@ -242,7 +243,7 @@ export class BaseVisualChange {
     // same clock or a FakeTimer's elapsed time won't shrink the ADB sub-read
     // budgets in the integrated path (issue #6289).
     this.window = displayFence.window ?? new RealWindow(device, this.adbFactory, timer);
-    this.predictionAnalyzer = new PredictionAnalyzer();
+    this.predictionAnalyzer = displayFence.predictionAnalyzer ?? new PredictionAnalyzer();
     this.timer = timer;
     this.renderedDisplayRevision = displayFence.renderedDisplayRevision ?? renderedDisplayRevision;
     this.displayTransitionReader = displayFence.displayTransitions ?? displayTransitions;

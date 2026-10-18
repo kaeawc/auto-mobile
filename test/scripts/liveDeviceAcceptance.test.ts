@@ -1744,6 +1744,19 @@ describe("live device acceptance harness", () => {
     ]);
   });
 
+  test.each([
+    ["no prefix (SDK v2 client, server message unprefixed)", "Error: "],
+    ["one prefix (SDK v2 client)", "Error: MCP error -32603: "],
+    ["two prefixes (SDK v1 client and server)", "Error: MCP error -32603: MCP error -32603: "],
+    ["two prefixes without the Error rendering", "MCP error -32603: MCP error -32603: "],
+  ])("strips the transport rendering with %s", (_form, rendering) => {
+    const diagnostic = ownerDiagnostic("emulator-5556");
+
+    expect(normalizeMcpTransportDiagnostic(`${rendering}${diagnostic}`)).toBe(
+      rendering === "Error: " ? `${rendering}${diagnostic}` : diagnostic,
+    );
+  });
+
   test.each(["unknown", "-32603.0"])("leaves non-standard MCP code %s unchanged", (code) => {
     const diagnostic = `Error: MCP error ${code}: ${ownerDiagnostic("emulator-5556")}`;
 

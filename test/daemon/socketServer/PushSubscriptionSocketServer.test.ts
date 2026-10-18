@@ -1,13 +1,14 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
+import { asSocket } from "../helpers/fakeSocket";
 import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Socket } from "node:net";
 import {
   PushSubscriptionSocketServer,
   SubscriptionResponse,
 } from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
+import type { Subscriber } from "../../../src/daemon/socketServer/SocketServerTypes";
 
 interface TestFilter {
   deviceId: string | null;
@@ -46,7 +47,6 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
    * Start without creating real socket
    */
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
     this.onServerStarted();
   }
 
@@ -55,7 +55,6 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
    */
   async closeFake(): Promise<void> {
     this.onServerClosing();
-    (this as any).server = null;
   }
 
   /**
@@ -66,11 +65,11 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
     subscriptionId: string;
   } {
     const socket = new FakeSocket();
-    const subscriptionId = `testpush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `testpush-${++this.subscriptionCounter}`;
+    const timer = this.timer as FakeTimer;
 
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: asSocket(socket),
       subscriptionId,
       lastActivity: timer.now(),
       filter: {
@@ -91,18 +90,22 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
    * run instead of being bypassed by direct map mutation.
    */
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
+    await this.processLine(asSocket(socket), line);
   }
 
   closeConnectionForTest(socket: FakeSocket): void {
-    (this as any).onConnectionClose(socket as unknown as Socket);
+    this.onConnectionClose(asSocket(socket));
+  }
+
+  getSubscriber(subscriptionId: string): Subscriber<TestFilter> | undefined {
+    return this.subscribers.get(subscriptionId);
   }
 
   /**
    * Trigger keepalive check
    */
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
 
   /**
@@ -149,7 +152,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
     return {
       type: "test_push",
       data,
-      timestamp: (this as any).timer.now(),
+      timestamp: this.timer.now(),
       subscriptionId,
     };
   }
@@ -432,7 +435,7 @@ describe("PushSubscriptionSocketServer", () => {
       // Peer finally drains — our listener should bump lastActivity.
       socket.emit("drain");
 
-      const subscriber = (server as any).subscribers.get(subscriptionId);
+      const subscriber = server.getSubscriber(subscriptionId)!;
       expect(subscriber.lastActivity).toBe(5_000);
       expect(subscriber.drainPending).toBe(false);
     });
@@ -460,7 +463,7 @@ describe("PushSubscriptionSocketServer", () => {
       // peer is alive — so it must not bump lastActivity.
       server.pushData({ deviceId: "device-1", packageName: "com.app", value: 42 });
 
-      const subscriber = (server as any).subscribers.get(subscriptionId);
+      const subscriber = server.getSubscriber(subscriptionId)!;
       expect(socket.destroyed).toBe(false);
       expect(subscriber.lastActivity).toBe(0);
     });
@@ -492,7 +495,7 @@ describe("PushSubscriptionSocketServer", () => {
 
       // Should only have one drain listener attached.
       expect(socket.listenerCount("drain")).toBe(1);
-      const subscriber = (server as any).subscribers.get(subscriptionId);
+      const subscriber = server.getSubscriber(subscriptionId)!;
       expect(subscriber.drainPending).toBe(true);
     });
   });

@@ -914,17 +914,17 @@ export class UnixSocketServer {
   private readonly adbClientFactory: AdbClientFactory;
   protected sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
-  private clientSockets: Map<string, Socket> = new Map();
+  protected clientSockets: Map<string, Socket> = new Map();
   private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
   private readonly controlConnections = new WeakMap<Socket, ControlConnection>();
   /** Request handlers that can continue after their client socket is destroyed. */
-  private activeRequestHandlers: Set<Promise<void>> = new Set();
+  protected activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
   protected pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
-  private notificationSubscribers: Set<string> = new Set();
-  private readonly resourceSubscriptions = new Map<string, Set<string>>();
+  protected notificationSubscribers: Set<string> = new Set();
+  protected readonly resourceSubscriptions = new Map<string, Set<string>>();
   /**
    * The session that owned each resolved input target at resolution time, so a rebind between
    * resolution and execution cannot leave the input running as an unowned call (#9958).
@@ -1555,7 +1555,7 @@ export class UnixSocketServer {
     }
   }
 
-  private releaseSocketSession(sessionId: string, socket: Socket): void {
+  protected releaseSocketSession(sessionId: string, socket: Socket): void {
     // Session IDs are expected to be unique, but teardown must still be
     // incarnation-safe: a delayed close/error from an older socket must not
     // remove or abort work registered by a newer socket with the same ID.
@@ -1706,7 +1706,7 @@ export class UnixSocketServer {
     }
   }
 
-  private broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
+  protected broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
     for (const [sessionId, subscriptions] of this.resourceSubscriptions) {
       const socket = this.clientSockets.get(sessionId);
       if (!socket) {

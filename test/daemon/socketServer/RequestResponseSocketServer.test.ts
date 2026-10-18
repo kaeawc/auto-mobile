@@ -1,7 +1,7 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
+import { asSocket } from "../helpers/fakeSocket";
 import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Socket } from "node:net";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
 import { SocketRequest, SocketResponse } from "../../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -29,17 +29,15 @@ class TestableRequestResponseServer extends RequestResponseSocketServer<TestRequ
   /**
    * Start without creating real socket
    */
-  async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
-  }
+  async startFake(): Promise<void> {}
 
   /**
    * Simulate a client sending a line
    */
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
+    await this.processLine(asSocket(socket), line);
     // Wait for pending promise to complete
-    const pending = (this as any).pendingBySocket.get(socket);
+    const pending = this.pendingBySocket.get(asSocket(socket));
     if (pending) {
       await pending;
     }
@@ -96,6 +94,14 @@ class GatedSequencingServer extends RequestResponseSocketServer<TestRequest, Tes
   public readonly order: string[] = [];
   private readonly gate: Promise<void>;
   private releaseGate!: () => void;
+
+  enqueueLine(socket: FakeSocket, line: string): Promise<void> {
+    return this.processLine(asSocket(socket), line);
+  }
+
+  pendingFor(socket: FakeSocket): Promise<void> | undefined {
+    return this.pendingBySocket.get(asSocket(socket));
+  }
 
   constructor(timer: FakeTimer) {
     super("/fake/path/seq.sock", timer, "Seq");
@@ -196,14 +202,8 @@ describe("RequestResponseSocketServer", () => {
     // Fire both requests WITHOUT awaiting the first. pendingBySocket — not the
     // test — must be what serializes them. processLine returns immediately after
     // chaining onto the per-socket promise, so both are queued back-to-back.
-    void (sequencer as any).processLine(
-      seqSocket as unknown as Socket,
-      JSON.stringify({ id: "1", action: "noop" }),
-    );
-    void (sequencer as any).processLine(
-      seqSocket as unknown as Socket,
-      JSON.stringify({ id: "2", action: "noop" }),
-    );
+    void sequencer.enqueueLine(seqSocket, JSON.stringify({ id: "1", action: "noop" }));
+    void sequencer.enqueueLine(seqSocket, JSON.stringify({ id: "2", action: "noop" }));
 
     // The first handler has started and is now blocked on its gate. If the class
     // ran handlers concurrently, req2 would already have run here.
@@ -212,7 +212,7 @@ describe("RequestResponseSocketServer", () => {
 
     // Releasing the gate lets the first finish, and only then may the second run.
     sequencer.release();
-    await (sequencer as any).pendingBySocket.get(seqSocket);
+    await sequencer.pendingFor(seqSocket);
 
     expect(sequencer.order).toEqual(["req1-start", "req1-end", "req2-start", "req2-end"]);
   });

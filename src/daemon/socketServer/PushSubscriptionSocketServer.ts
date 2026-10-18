@@ -59,7 +59,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
   protected deviceSessionResolver: DeviceSessionResolver | null = null;
   private connections: Map<Socket, ConnectionState> = new Map();
   private readonly backfills = new Map<string, BackfillState<TPushData>>();
-  private subscriptionCounter = 0;
+  protected subscriptionCounter = 0;
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   protected readonly keepaliveConfig: KeepaliveConfig;
 

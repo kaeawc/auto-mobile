@@ -1,4 +1,5 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
+import { asSocket } from "./helpers/fakeSocket";
 import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
@@ -25,18 +26,15 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Simulate starting the server without creating real socket file
    */
   async startFake(): Promise<void> {
-    // Mark as listening without creating real socket
-    (this as any).server = { listening: true };
     // Start keepalive using injected timer
-    (this as any).onServerStarted();
+    this.onServerStarted();
   }
 
   /**
    * Simulate closing the server
    */
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
   }
 
   /**
@@ -49,10 +47,10 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
     const socket = new FakeSocket();
 
     // Create subscription directly using protected members
-    const subscriptionId = `performancepush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `performancepush-${++this.subscriptionCounter}`;
+    const timer = this.timer as FakeTimer;
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: asSocket(socket),
       subscriptionId,
       lastActivity: timer.now(),
       filter: {
@@ -72,7 +70,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
   simulatePong(subscriptionId: string): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
-      const timer = (this as any).timer as FakeTimer;
+      const timer = this.timer as FakeTimer;
       subscriber.lastActivity = timer.now();
     }
   }
@@ -100,7 +98,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
    * Trigger keepalive check manually
    */
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
 }
 

@@ -1,4 +1,5 @@
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
+import { asSocket } from "./helpers/fakeSocket";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { WEBRTC_ENV } from "../../src/features/webrtc/webrtcStreamingConfig";
 import {
@@ -6,7 +7,6 @@ import {
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import { Socket } from "node:net";
 import {
   resolveWebRtcStreamDevice,
   WebRtcStreamSocketServer,
@@ -31,18 +31,15 @@ import {
   type DeviceAdmissionGate,
 } from "../../src/utils/deviceAdmissionGate";
 import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
-import type {
-  AndroidH264Source,
-  WebRtcStreamDescriptor,
-  WebRtcStreamingOverrides,
-} from "../../src/features/webrtc";
+import type { WebRtcStreamDescriptor, WebRtcStreamingOverrides } from "../../src/features/webrtc";
 import type { WhipClientOptions } from "../../src/features/webrtc/WhipClient";
-import type { RTCPeerConnection } from "werift";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   createSuccessfulWhipFetch,
   FakeConnectedPeerConnection,
+  asAndroidH264Source,
+  asPeerConnection,
   FakeH264Source,
   type RecordedWhipRequest,
 } from "../helpers/webrtcFakes";
@@ -101,9 +98,12 @@ class TestableServer extends WebRtcStreamSocketServer {
   ) {
     super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator, admissionGate);
   }
+  async simulateRaw(socket: FakeSocket, line: string): Promise<void> {
+    await this.processLine(asSocket(socket), line);
+  }
   async simulate(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, JSON.stringify(request));
-    const pending = (this as any).pendingBySocket.get(socket);
+    await this.processLine(asSocket(socket), JSON.stringify(request));
+    const pending = this.pendingBySocket.get(asSocket(socket));
     if (pending) {
       await pending;
     }
@@ -656,8 +656,7 @@ describe("WebRtcStreamSocketServer", () => {
       createPublisher: (config, deps) =>
         new WebRtcPublisher(config, {
           ...deps,
-          createPeerConnection: () =>
-            new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
+          createPeerConnection: () => asPeerConnection(new FakeConnectedPeerConnection()),
           createWhipClient: (options: WhipClientOptions) =>
             new WhipClient({
               ...options,
@@ -670,7 +669,7 @@ describe("WebRtcStreamSocketServer", () => {
       createSource: () => {
         const source = new FakeH264Source();
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return asAndroidH264Source(source);
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-14T00:00:00.000Z"),
@@ -742,7 +741,7 @@ describe("WebRtcStreamSocketServer", () => {
   test("invalid JSON yields an error response", async () => {
     const server = new TestableServer(makeDeps());
     const socket = new FakeSocket();
-    await (server as any).processLine(socket as unknown as Socket, "{not json");
+    await server.simulateRaw(socket, "{not json");
     const response = lastResponse(socket);
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid JSON");

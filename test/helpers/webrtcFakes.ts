@@ -1,3 +1,5 @@
+import type { RTCPeerConnection } from "werift";
+import type { AndroidH264Source } from "../../src/features/webrtc/AndroidH264Source";
 import type { FetchLike } from "../../src/features/webrtc/WhipClient";
 
 /**
@@ -48,6 +50,20 @@ export class FakeConnectedPeerConnection {
   async close() {
     this.closed = true;
   }
+}
+
+/**
+ * Narrowing point for the peer connection double: the publisher takes werift's concrete
+ * `RTCPeerConnection`, which a few-method fake cannot satisfy structurally. An `object` ->
+ * class assertion is legal, so call sites need no cast through `unknown`.
+ */
+export function asPeerConnection(fake: object): RTCPeerConnection {
+  return fake as RTCPeerConnection;
+}
+
+/** Narrowing point for {@link FakeH264Source}; same rationale as {@link asPeerConnection}. */
+export function asAndroidH264Source(fake: object): AndroidH264Source {
+  return fake as AndroidH264Source;
 }
 
 export class FakeH264Source {

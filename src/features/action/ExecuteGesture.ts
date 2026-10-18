@@ -1,5 +1,5 @@
 import { capLookForTravel } from "./swipeon/lookForScroll";
-import { clampedIosCoordinateSwipeDuration } from "./swipeon/swipeDurationReport";
+import { iosSwipeDurationReport } from "./swipeon/swipeDurationReport";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { Element } from "../../models";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
@@ -425,7 +425,7 @@ export class ExecuteGesture extends BaseVisualChange {
       logger.info(
         `[SWIPE] CtrlProxy iOS swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`,
       );
-      const clamped = clampedIosCoordinateSwipeDuration(Math.hypot(x2 - x1, y2 - y1), duration);
+      const durationReport = iosSwipeDurationReport(Math.hypot(x2 - x1, y2 - y1), duration, result);
       return {
         success: true,
         x1,
@@ -435,9 +435,7 @@ export class ExecuteGesture extends BaseVisualChange {
         duration,
         a11yTotalTimeMs: result.totalTimeMs,
         a11yGestureTimeMs: result.gestureTimeMs,
-        ...(clamped
-          ? { effectiveDurationMs: clamped.effectiveDurationMs, warnings: [clamped.warning] }
-          : {}),
+        ...durationReport,
       };
     } else {
       logger.error(`[SWIPE] CtrlProxy iOS swipe failed: ${result.error}`);

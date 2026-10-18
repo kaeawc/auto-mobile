@@ -127,6 +127,7 @@ import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { boundsEqual } from "../../utils/bounds";
+import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { hasOwnPrototype, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
@@ -156,7 +157,6 @@ import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMe
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
-import { sequenceBackoff } from "../../utils/Backoff";
 import {
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
@@ -224,12 +224,6 @@ interface TapOnElementDependencies extends DisplayFenceDependencies {
   tapStrategy?: TapStrategy;
 }
 
-const ENSURE_CHECKED_POLL_BACKOFF_MS = [50, 100, 200, 400] as const;
-const ensureCheckedPollBackoff = sequenceBackoff(ENSURE_CHECKED_POLL_BACKOFF_MS);
-const ENSURE_CHECKED_POLL_TIMEOUT_MS = ENSURE_CHECKED_POLL_BACKOFF_MS.reduce(
-  (total, delayMs) => total + delayMs,
-  0,
-);
 /** How long an iOS focus tap re-reads the screen for the field to report focus (#10266). */
 const IOS_FOCUS_SETTLE_TIMEOUT_MS = 1500;
 
@@ -295,6 +289,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     hashViewHierarchy: (hierarchy) => this.hashViewHierarchy(hierarchy),
     deriveTapEffect: (previous, current) => this.deriveTapEffect(previous, current),
     compareActiveWindow: (previous, current) => this.compareActiveWindow(previous, current),
+  });
+  private readonly ensureChecked = new TapEnsureCheckedPhase({
+    timer: this.timer,
+    tapVerificationRefresh: (context) => this.tapVerificationRefresh(context),
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    withObservationScreenSize: (options, observation) =>
+      this.withObservationScreenSize(options, observation),
+    replaceObservationHierarchy: (observation, hierarchy, refreshed) =>
+      this.replaceObservationHierarchy(observation, hierarchy, refreshed),
+    elementAffordances: (element) => this.elementAffordances(element),
+    elementIdentity: (element) => this.elementIdentity(element),
   });
   private readonly explicitDisplay = new TapExplicitDisplayPhase({
     device: this.device,
@@ -1650,141 +1655,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     selectedElement: TapOnSelectedElement | undefined,
     searchUntil: SearchUntilStats,
   ): TapOnElementResult | undefined {
-    if (options.ensureChecked === undefined) {
-      return undefined;
-    }
-    if (!isTruthyFlag(element.checkable)) {
-      const affordances = this.elementAffordances(element);
-      throw new ActionableError(
-        `tapOn ensureChecked requires a toggle element; ${this.elementIdentity(element)} has affordances: ${affordances.join(", ") || "none"}`,
-      );
-    }
-    if (isTruthyFlag(element.checked) !== options.ensureChecked) {
-      return undefined;
-    }
-    return {
-      success: true,
-      action: options.action,
-      element,
-      selectedElement,
-      searchUntil,
-      skipped: "already-checked",
-    };
+    return this.ensureChecked.beforeTap(options, element, selectedElement, searchUntil);
   }
 
-  private async refreshEnsureCheckedSelection(
+  private refreshEnsureCheckedSelection(
     options: TapVerificationOptions,
     observation: ObserveResult,
     selection: ElementSelectionResult,
     signal?: AbortSignal,
   ): Promise<{ selection: ElementSelectionResult; viewHierarchy: ViewHierarchyResult }> {
-    if (options.ensureChecked === undefined) {
-      return { selection, viewHierarchy: observation.viewHierarchy as ViewHierarchyResult };
-    }
-    const freshHierarchy = await this.tapVerificationRefresh({
-      refresh: options.verification?.refresh,
-      screenSize: observation.screenSize,
-      signal,
-    })(POST_TAP_REFRESH_TIMEOUT_MS);
-    if (!freshHierarchy) {
-      throw new ActionableError("tapOn ensureChecked: unable to refresh toggle before tapping");
-    }
-    const refound = this.findElementInHierarchy(
-      this.withObservationScreenSize(options, observation),
-      freshHierarchy,
-    ).selection;
-    if (!refound.element) {
-      throw new ActionableError("tapOn ensureChecked: toggle not found in fresh hierarchy");
-    }
-    this.replaceObservationHierarchy(observation, freshHierarchy, true);
-    return { selection: refound, viewHierarchy: freshHierarchy };
+    return this.ensureChecked.refreshSelection(options, observation, selection, signal);
   }
 
-  private async ensureCheckedAfterTap(
-    options: TapVerificationOptions,
-    observation: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    if (options.ensureChecked === undefined) {
-      return undefined;
-    }
-    const readChecked = (): boolean | "not found" => {
-      const refound = observation.viewHierarchy
-        ? this.findElementInHierarchy(
-            this.withObservationScreenSize(options, observation),
-            observation.viewHierarchy,
-          ).selection.element
-        : undefined;
-      return refound ? isTruthyFlag(refound.checked) : "not found";
-    };
-    let observed: boolean | "not found" = readChecked();
-    if (observed !== options.ensureChecked) {
-      observed = await this.pollEnsureCheckedAfterTap(
-        readChecked,
-        options.ensureChecked,
-        observation,
-        { signal, refresh: options.verification?.refresh },
-      );
-    }
-    return observed === options.ensureChecked
-      ? undefined
-      : `tapOn ensureChecked: tapped element but checked is now ${observed} (expected ${options.ensureChecked})`;
-  }
-
-  private async applyEnsureCheckedResult(
+  private applyEnsureCheckedResult(
     result: TapOnElementResult,
     options: TapVerificationOptions,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (options.ensureChecked === undefined) {
-      return;
-    }
-    const observation = result.observation;
-    if (observation === undefined) {
-      return;
-    }
-    const ensureCheckedError = await this.ensureCheckedAfterTap(options, observation, signal);
-    if (ensureCheckedError !== undefined) {
-      result.success = false;
-      result.error = ensureCheckedError;
-    }
-  }
-
-  private async pollEnsureCheckedAfterTap(
-    readChecked: () => boolean | "not found",
-    expected: boolean,
-    observation: ObserveResult,
-    context: { signal?: AbortSignal; refresh?: AndroidTapVerification["refresh"] } = {},
-  ): Promise<boolean | "not found"> {
-    const { signal } = context;
-    const deadline = this.timer.now() + ENSURE_CHECKED_POLL_TIMEOUT_MS;
-    let observed = readChecked();
-    for (let attempt = 1; this.timer.now() < deadline; attempt++) {
-      throwIfAborted(signal);
-      const delayMs = Math.min(
-        ensureCheckedPollBackoff.delayForAttempt(attempt),
-        deadline - this.timer.now(),
-      );
-      await this.timer.sleep(delayMs);
-      const remainingMs = deadline - this.timer.now();
-      if (remainingMs <= 0) {
-        break;
-      }
-      const freshHierarchy = await this.tapVerificationRefresh({
-        refresh: context.refresh,
-        screenSize: observation.screenSize,
-        signal,
-      })(Math.min(POST_TAP_REFRESH_TIMEOUT_MS, remainingMs));
-      if (!freshHierarchy) {
-        continue;
-      }
-      this.replaceObservationHierarchy(observation, freshHierarchy, true);
-      observed = readChecked();
-      if (observed === expected) {
-        return observed;
-      }
-    }
-    return observed;
+    return this.ensureChecked.applyResult(result, options, signal);
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */

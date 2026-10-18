@@ -64,7 +64,7 @@ import {
   subscribeToolCallEndActivity,
 } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
-import { DatabaseHealthLateness } from "./databaseHealthLateness";
+import { createDaemonHealthCheck, type HealthFailureKind } from "./daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -449,7 +449,6 @@ function shutdownStage(
   return shutdownStageFrom(DAEMON_SHUTDOWN_STAGES, name, waitingOn, run);
 }
 
-type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DeviceSessionRoutingTargets = {
   deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
   performancePush: ReturnType<typeof getPerformancePushServer>;
@@ -688,7 +687,7 @@ export class Daemon {
   private host: string;
   private readonly strictPort: boolean;
   private debug: boolean;
-  private healthCheckTimer: NodeJS.Timeout | null = null;
+  private healthCheck: SingleFlightInterval | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
@@ -2649,116 +2648,28 @@ export class Daemon {
     });
   }
 
-  private checkHealthListeners(
-    recordHealthCheckFailure: (kind: HealthFailureKind) => void,
-  ): boolean {
-    // Check if HTTP server is responsive
-    const httpServer = this.httpIngress.server;
-    if (!httpServer) {
-      logger.warn("Health check failed: HTTP server not initialized");
-      recordHealthCheckFailure("http");
-      return false;
-    }
-    if (!httpServer.listening) {
-      logger.warn("Health check failed: HTTP server not listening");
-      recordHealthCheckFailure("http");
-      return false;
-    }
-    // Check socket servers before probing shared dependencies; clients
-    // can only subscribe to advertised streams while their socket paths exist.
-    if (!this.socketServer || !this.socketServer.isListening()) {
-      logger.warn("Health check failed: Socket server not listening");
-      recordHealthCheckFailure("socket");
-      return false;
-    }
-    if (!this.observationStreamHealth.isHealthy()) {
-      logger.warn("Health check failed: Observation stream socket unavailable");
-      recordHealthCheckFailure("socket");
-      return false;
-    }
-    return true;
-  }
-
   /**
    * Start periodic health checks
    */
   private startHealthCheckTimer(): void {
-    const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
-    const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
-    const lateness = new DatabaseHealthLateness(this.timer, HEALTH_CHECK_INTERVAL);
-    let failedCheckCount = 0;
-    let lastFailureKind: HealthFailureKind = "unknown";
-    const recordHealthCheckFailure = (failureKind: HealthFailureKind): void => {
-      // Recovery behavior depends on the failure kind, so only same-kind streaks
-      // should reach a kind-specific recovery action.
-      if (lastFailureKind !== failureKind) {
-        failedCheckCount = 0;
-      }
-      lastFailureKind = failureKind;
-      failedCheckCount++;
-    };
-    const resetHealthCheckFailures = (): void => {
-      failedCheckCount = 0;
-      lastFailureKind = "unknown";
-    };
-
-    const checkDatabaseHealth = async (
-      tickGap: ReturnType<DatabaseHealthLateness["tick"]>,
-    ): Promise<boolean> => {
-      const timeoutIsInconclusive = lateness.beginProbe(tickGap);
-      try {
-        await this.databaseHealthProbe.check();
-        this.lastDatabaseHealthFailure = undefined;
-        // Health check passed
-        resetHealthCheckFailures();
-        logger.debug("Health check passed");
-      } catch (error) {
-        if (timeoutIsInconclusive(error, failedCheckCount)) {
-          return false;
-        }
-        this.lastDatabaseHealthFailure = errorMessage(error);
-        logger.warn(`Health check failed: Database probe failed: ${error}`);
-        recordHealthCheckFailure("database");
-      }
-      return true;
-    };
-
-    const checkHealth = async (): Promise<void> => {
-      const tickGap = lateness.tick();
-      try {
-        if (this.checkHealthListeners(recordHealthCheckFailure)) {
-          if (!(await checkDatabaseHealth(tickGap))) {
-            return;
-          }
-        }
-
-        // If too many failures, attempt recovery
-        if (failedCheckCount >= MAX_FAILED_CHECKS) {
-          logger.error(`Health check failed ${failedCheckCount} times, attempting recovery...`);
-          await this.attemptRecovery(lastFailureKind);
-          resetHealthCheckFailures();
-        }
-      } catch (error) {
-        logger.warn(`Health check error: ${error}`);
-        recordHealthCheckFailure("unknown");
-      }
-    };
-    this.healthCheckTimer = this.timer.setInterval(() => {
-      // checkHealth logs failures and updates the failure counter internally.
-      void checkHealth();
-    }, HEALTH_CHECK_INTERVAL);
-
-    // Keep timer alive even if there are no other references
-    if (typeof (this.healthCheckTimer as { unref?: () => void }).unref === "function") {
-      (this.healthCheckTimer as { unref: () => void }).unref();
-    }
+    this.healthCheck = createDaemonHealthCheck({
+      timer: this.timer,
+      httpServer: () => this.httpIngress.server,
+      socketServerListening: () => this.socketServer?.isListening() ?? false,
+      observationStreamHealthy: () => this.observationStreamHealth.isHealthy(),
+      databaseHealthProbe: () => this.databaseHealthProbe,
+      onDatabaseFailureChanged: (message) => {
+        this.lastDatabaseHealthFailure = message;
+      },
+      recover: (kind) => this.attemptRecovery(kind),
+    });
+    this.healthCheck.start();
   }
 
-  private stopHealthCheckTimer(): void {
-    if (this.healthCheckTimer) {
-      this.timer.clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
+  private async stopHealthCheckTimer(): Promise<void> {
+    const healthCheck = this.healthCheck;
+    this.healthCheck = null;
+    await healthCheck?.stop();
   }
 
   /**
@@ -4592,7 +4503,7 @@ export class Daemon {
         () => cleanupDaemonChildProcesses(),
       ),
       shutdownStage("health check timer", "the database health probe", async () => {
-        this.stopHealthCheckTimer();
+        await this.stopHealthCheckTimer();
         await this.databaseHealthProbe.dispose?.();
       }),
       shutdownStage("location routes", "nothing (synchronous)", () =>

@@ -433,10 +433,11 @@ value is refused, never rounded. Everything else fails with a capability error b
 and never falls back to a finger touch: iOS, `doubleTap`, `display`, an Android release before
 API 31, and a device whose API level cannot be read. API 31 (Android 12) is the first release whose
 `input` command sets the injected event's tool type from its source (read from the AOSP tags:
-`android-12.0.0_r1` assigns it, while `android-9.0.0_r61` through `android-11.0.0_r48` build the event
+`android-12.0.0_r1` assigns it, while `android-7.0.0_r36` through `android-11.0.0_r48` build the event
 without one). That minimum is read from source; a probe app on a device that observes `TOOL_TYPE_STYLUS`
 is tracked in #13082. A recorded stylus step keeps its `pointer`, so a replay on a device that cannot
-honor it fails instead of becoming a finger touch. Tilt, eraser, hover, pressure curves and `dragPath`
+honor it fails instead of becoming a finger touch. TalkBack routing is bypassed (a stylus tap is a raw `input` event), and whether TalkBack's touch exploration
+intercepts stylus events is unverified (#13082). Tilt, eraser, hover, pressure curves and `dragPath`
 are not supported.
 
 `recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
@@ -1348,11 +1349,11 @@ settled screenshot is eligible.
 
 | Tool                          | What it does                                                                                                                                                        |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                            |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap, and a stylus `pointer` on Android 12+.                     |
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.         |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
-| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals; opt-in with `setToolEnabled`.                                                                                |
+| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals, optionally with a stylus `pointer` on Android 12+; opt-in with `setToolEnabled`.                             |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
 | ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                    |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |

@@ -1,17 +1,24 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
+import type { TapAtResult } from "../../models";
 import type { PointerOption } from "../../models/PointerOption";
 import { LONG_PRESS_DEFAULT_MS } from "./tapAtGesture";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
-import { executeShellInput, inputDurationArgument } from "./touchscreenInput";
+import { indeterminateTapError } from "./coordinateTapDispatch";
+import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  InputCommandRejectedError,
+  executeShellInput,
+  inputDurationArgument,
+} from "./touchscreenInput";
 
 /**
  * First Android release whose `input` command sets the injected event's tool type from its source.
  * Read from the AOSP tags: `android-12.0.0_r1` `InputShellCommand.injectMotionEvent` assigns
- * `toolType = getToolType(inputSource)` (`TOOL_TYPE_STYLUS` for the stylus source), while
- * `android-9.0.0_r61` to `android-11.0.0_r48` `Input.java` build the event with the legacy
- * `MotionEvent.obtain` overload that carries no tool type. Releases before API 28 were not read
- * and are refused with the rest. A device-side probe of the received tool type is still pending (#13082).
+ * `toolType = getToolType(inputSource)` (`TOOL_TYPE_STYLUS` for the stylus source), while `Input.java`
+ * from `android-7.0.0_r36` through `android-11.0.0_r48` builds the event with the legacy
+ * `MotionEvent.obtain` overload that carries no tool type, so API 24 to 30 are refused. Releases
+ * before API 24 were not read. A device-side probe of the received tool type is still pending (#13082).
  */
 export const STYLUS_INPUT_MIN_SDK = 31;
 
@@ -43,6 +50,9 @@ export async function checkStylusPointer(
   const { pointer, platform, gesture, display } = request;
   if (pointer === undefined) {
     return undefined;
+  }
+  if (pointer.toolType !== "stylus") {
+    return `pointer.toolType "${pointer.toolType}" is not supported; only "stylus" can be injected`;
   }
   if (platform !== "android") {
     return 'pointer.toolType "stylus" is Android-only; omit pointer on iOS';
@@ -105,6 +115,23 @@ export function stylusTapRefusal(
   );
 }
 
+/** The failed `tapAt` result for a refused stylus request; nothing was sent to the device. */
+export function refusedTap(
+  error: string,
+  point: { x: number; y: number },
+  action: TapAtResult["action"] = "tap",
+): TapAtResult {
+  return { success: false, x: point.x, y: point.y, action, error };
+}
+
+/**
+ * True when a failure came after the command was sent and the device did not refuse it: a timeout,
+ * a lost connection or a cancelled hold may have left the gesture applied, so a retry could repeat it.
+ */
+export function failedAfterDispatch(error: unknown, dispatched: boolean): boolean {
+  return dispatched && !(error instanceof InputCommandRejectedError);
+}
+
 /** A stylus tap, or a long press expressed as a zero-distance swipe with a duration. */
 export async function dispatchStylusTap(
   adb: AdbExecutor,
@@ -113,16 +140,27 @@ export async function dispatchStylusTap(
   options: StylusDispatchOptions = {},
 ): Promise<void> {
   const { x, y } = point;
-  if (gesture.action !== "longPress") {
-    await executeShellInput(adb, stylusInputCommand(`tap ${x} ${y}`), options);
-    return;
-  }
   const durationMs = gesture.durationMs ?? LONG_PRESS_DEFAULT_MS;
-  await executeShellInput(
-    adb,
-    stylusInputCommand(`swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`),
-    { ...options, timeoutMs: resolveGestureCtrlProxyTimeoutMs(durationMs) },
-  );
+  const longPress = gesture.action === "longPress";
+  const command = longPress
+    ? stylusInputCommand(`swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`)
+    : stylusInputCommand(`tap ${x} ${y}`);
+  let dispatched = false;
+  try {
+    await executeShellInput(adb, command, {
+      ...options,
+      timeoutMs: longPress ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
+      onDispatch: () => {
+        dispatched = true;
+        options.onDispatch?.();
+      },
+    });
+  } catch (error) {
+    if (failedAfterDispatch(error, dispatched)) {
+      throw indeterminateTapError(errorMessage(error));
+    }
+    throw error;
+  }
 }
 
 /** A straight two-point stylus swipe. */

@@ -71,6 +71,47 @@ describe("tapAt stylus pointer (#13081)", () => {
     expect(fake.iosDispatches).toEqual([]);
   });
 
+  test.each([
+    ["a tap", stylusTap(), "input stylus tap"],
+    ["a long press", stylusTap({ action: "longPress", durationMs: 800 }), "input stylus swipe"],
+  ] as const)(
+    "%s that fails after the command was sent is indeterminate: do not retry",
+    async (_name, options, pattern) => {
+      const fake = androidWithSdk(34);
+      fake.adb.setCommandError(pattern, new Error("adb connection lost"));
+      const result = await fake.tapAt.execute(options);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("indeterminate");
+      expect(result.error).toContain("Do not retry automatically");
+      expect(fake.androidDispatches).toEqual([]);
+    },
+  );
+
+  test("a cancellation after the command was sent is indeterminate, not a retryable abort", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError(
+      "input stylus tap",
+      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+    );
+    const result = await fake.tapAt.execute(stylusTap());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Do not retry automatically");
+  });
+
+  test("a command the device rejected is a plain failure, safe to retry", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandResponse("input stylus tap", {
+      stdout: "",
+      stderr: "Error: unknown source",
+    } as never);
+    const result = await fake.tapAt.execute(stylusTap());
+
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain("indeterminate");
+  });
+
   test("a failing stylus command reports the failure instead of falling back to a finger", async () => {
     const fake = androidWithSdk(34);
     fake.adb.setCommandResponse("input stylus tap", {

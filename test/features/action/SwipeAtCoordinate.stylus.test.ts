@@ -77,6 +77,41 @@ describe("swipeAt stylus pointer (#13081)", () => {
     expect(fake.swipes).toEqual([]);
   });
 
+  test("a swipe that fails after the command was sent is indeterminate", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError("input stylus swipe", new Error("adb connection lost"));
+    const result = await fake.swipeAt.execute(stylusSwipe());
+
+    expect(result.success).toBe(false);
+    expect(result.outcomeIndeterminate).toBe(true);
+    expect(result.error).toContain("do not retry automatically");
+    expect(fake.swipes).toEqual([]);
+  });
+
+  test("a cancellation after the command was sent is indeterminate, not a retryable abort", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError(
+      "input stylus swipe",
+      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+    );
+    const result = await fake.swipeAt.execute(stylusSwipe());
+
+    expect(result.success).toBe(false);
+    expect(result.outcomeIndeterminate).toBe(true);
+  });
+
+  test("a command the device rejected is not indeterminate, so a retry is safe", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandResponse("input stylus swipe", {
+      stdout: "",
+      stderr: "Error: unknown source",
+    } as never);
+    const result = await fake.swipeAt.execute(stylusSwipe());
+
+    expect(result.success).toBe(false);
+    expect(result.outcomeIndeterminate).toBeUndefined();
+  });
+
   test("a failing stylus command reports the failure instead of falling back to a finger", async () => {
     const fake = androidWithSdk(34);
     fake.adb.setCommandResponse("input stylus swipe", {

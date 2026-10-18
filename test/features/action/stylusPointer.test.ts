@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   STYLUS_INPUT_MIN_SDK,
   checkStylusPointer,
+  dispatchStylusTap,
   stylusInputCommand,
 } from "../../../src/features/action/stylusPointer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -101,11 +102,57 @@ describe("stylus pointer capability (#13081)", () => {
     expect(refusal).toContain("could not read");
   });
 
+  test("a tool type other than stylus is refused rather than injected as one", async () => {
+    const adb = adbWithSdk(34);
+    const refusal = await checkStylusPointer(adb, {
+      pointer: { toolType: "eraser" } as never,
+      platform: "android",
+      gesture: "tap",
+    });
+    expect(refusal).toContain("eraser");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
   test("a request without a pointer is untouched", async () => {
     const adb = adbWithSdk(null);
     expect(
       await checkStylusPointer(adb, { pointer: undefined, platform: "ios", gesture: "tap" }),
     ).toBeUndefined();
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("stylus tap dispatch fence (#13081)", () => {
+  test("a changed display refuses the tap before any command is spawned", async () => {
+    const adb = new FakeAdbExecutor();
+    const stale = new Error("display changed");
+
+    await expect(
+      dispatchStylusTap(
+        adb,
+        { x: 1, y: 2 },
+        { action: "tap" },
+        {
+          assertCurrent: () => {
+            throw stale;
+          },
+        },
+      ),
+    ).rejects.toBe(stale);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("a current display lets the tap through the fence", async () => {
+    const adb = new FakeAdbExecutor();
+    let checked = 0;
+
+    await dispatchStylusTap(
+      adb,
+      { x: 1, y: 2 },
+      { action: "tap" },
+      { assertCurrent: () => void checked++ },
+    );
+    expect(checked).toBe(1);
+    expect(adb.getExecutedCommands()).toEqual(["shell input stylus tap 1 2"]);
   });
 });

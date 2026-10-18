@@ -69,7 +69,7 @@ import {
 import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./tapAtGesture";
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote, tapDeliveryReporter } from "./tapSharedHelpers";
-import { dispatchStylusTap, stylusTapRefusal } from "./stylusPointer";
+import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
 
 class TapAtGeometryError extends ActionableError {}
 
@@ -517,8 +517,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     );
     const error = await stylusTapRefusal(this.adb, this.device.platform, options, signal);
     if (error) {
-      const { x, y } = inputPoint(options);
-      return { success: false, x, y, action: options.action ?? "tap", error };
+      return refusedTap(error, inputPoint(options), options.action);
     }
     return this.executeTap(options, progress, signal, planContext);
   }
@@ -613,7 +612,10 @@ export class TapAtCoordinate extends BaseVisualChange {
             case "android": {
               if (options.pointer) {
                 // Stylus goes straight through `input stylus`: no TalkBack routing and no finger fallback.
-                await dispatchStylusTap(this.adb, resolved, options, { signal });
+                await dispatchStylusTap(this.adb, resolved, options, {
+                  signal,
+                  assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+                });
                 onTapDelivered();
                 break;
               }

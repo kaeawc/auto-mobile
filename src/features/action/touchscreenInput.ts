@@ -11,10 +11,13 @@ export function touchscreenInputCommand(action: string, displayId?: number): str
   return `shell input touchscreen${display} ${action}`;
 }
 
+/** The `input` command ran and refused the request, so nothing was injected and a retry is safe. */
+export class InputCommandRejectedError extends ActionableError {}
+
 export function assertTouchscreenInputSucceeded(command: string, result: ExecResult): void {
   const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
   if (/(?:^|\r?\n)(?:Unknown command:|Error:|Usage: input\b)/.test(output)) {
-    throw new ActionableError(`Android command failed: ${command}: ${output.trim()}`);
+    throw new InputCommandRejectedError(`Android command failed: ${command}: ${output.trim()}`);
   }
 }
 

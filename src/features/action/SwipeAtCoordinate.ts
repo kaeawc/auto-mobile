@@ -26,7 +26,7 @@ import {
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { checkStylusPointer, dispatchStylusSwipe } from "./stylusPointer";
+import { checkStylusPointer, dispatchStylusSwipe, failedAfterDispatch } from "./stylusPointer";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import {
   selectedDisplayPin,
@@ -398,14 +398,16 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       );
       return { success: true, ...base, duration };
     } catch (error) {
+      // A cancellation after the command went out may still have applied the swipe: report that
+      // as an indeterminate outcome instead of an abort the caller could retry.
       if (
         error instanceof StaleDisplayError ||
-        (error instanceof Error && error.name === "AbortError")
+        (error instanceof Error && error.name === "AbortError" && !dispatched)
       ) {
         throw error;
       }
       logger.warn(`${TOOL_NAME} stylus dispatch failed: ${errorMessage(error)}`, error);
-      return dispatched
+      return failedAfterDispatch(error, dispatched)
         ? {
             success: false,
             ...base,

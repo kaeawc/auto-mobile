@@ -11,6 +11,7 @@ import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
 import { extname, resolve, isAbsolute } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
 import { runExecSeam } from "../ExecSeam";
@@ -682,7 +683,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
 
     // 2. Check standard macOS Android SDK location
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const homeDir = readEnvRaw(AMBIENT_ENV.HOME) || readEnvRaw(AMBIENT_ENV.USERPROFILE);
     if (homeDir) {
       potentialPaths.push(path.join(homeDir, "Library/Android/sdk/emulator/emulator"));
       potentialPaths.push(path.join(homeDir, ".android/emulator/emulator"));
@@ -841,10 +842,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const unset = "<unset>";
     return [
       `  resolved emulator path: ${this.emulatorPath || unset}`,
-      `  ANDROID_HOME=${process.env.ANDROID_HOME ?? unset}`,
-      `  ANDROID_SDK_ROOT=${process.env.ANDROID_SDK_ROOT ?? unset}`,
-      `  ANDROID_SDK_HOME=${process.env.ANDROID_SDK_HOME ?? unset}`,
-      `  PATH=${process.env.PATH ?? unset}`,
+      ...(["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME", "PATH"] as const).map(
+        (key) => `  ${key}=${readEnvRaw(AMBIENT_ENV[key]) ?? unset}`,
+      ),
     ].join("\n");
   }
 
@@ -1969,7 +1969,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   private emulatorAudioArguments(): string[] {
-    return process.env.AUTOMOBILE_EMULATOR_AUDIO === "false" ? ["-no-audio"] : [];
+    return readEnvRaw(ENV.EMULATOR_AUDIO) === "false" ? ["-no-audio"] : [];
   }
 
   /**

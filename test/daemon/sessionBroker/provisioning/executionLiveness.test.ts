@@ -5,8 +5,8 @@ import {
   type DaemonStateAccess,
 } from "../../../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../../../src/daemon/deviceSessionRegistry";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
   resolveManagedExecutionIdleTimeoutMs,

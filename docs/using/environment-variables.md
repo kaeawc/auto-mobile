@@ -210,6 +210,20 @@ need the provider's capacity or pool configuration. See
 [the session broker experiment](../design-docs/session-broker-experiment.md)
 for their versioned formats and release obligations.
 
+## Control-socket forwarding
+
+<div class="environment-variable-table" markdown>
+
+| Variable                           | Use and accepted values                                                                                                                           | Default |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `AUTOMOBILE_MCP_FORWARD_TRANSPORT` | How the daemon runs MCP calls its control socket receives: `in-process` runs each call over an in-memory pair; anything else keeps loopback HTTP. | `http`  |
+
+</div>
+
+A rollout switch for the in-process forward (#11820); it is removed once in-process is the
+default. The daemon's HTTP MCP endpoint keeps serving the desktop app and external clients
+either way.
+
 ## Session heartbeat timeout
 
 <div class="environment-variable-table" markdown>

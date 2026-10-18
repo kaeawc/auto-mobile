@@ -271,6 +271,7 @@ import {
   clearPooledIdleTimer,
   closePooledClient,
   runWithLoopbackSessionKey,
+  currentLoopbackSessionKey,
   withLoopbackSessionKey,
   discardTimedOutReconnect,
   getPooledClient,
@@ -291,6 +292,11 @@ import {
   createDeviceSessionErrorResolver,
   DeviceSessionSupersededByRestoreError,
 } from "./deviceSessionResolver";
+import {
+  type InProcessMcpDispatcher,
+  type McpForwardTransport,
+  mcpForwardTransportFromEnv,
+} from "./inProcessMcpDispatcher";
 import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
@@ -1077,6 +1083,9 @@ export class UnixSocketServer {
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
   >;
+  private readonly mcpDispatcher?: Pick<InProcessMcpDispatcher, "connect">;
+  /** In process, every forward opens its own client and server; over HTTP clients are pooled. */
+  private readonly mcpForwardTransport: McpForwardTransport;
   /** Forwarded MCP requests are cancelled when their owner socket disconnects. */
   private readonly mcpRequestAbortControllers = new Map<string, Set<AbortController>>();
   /**
@@ -1170,6 +1179,10 @@ export class UnixSocketServer {
       acceptanceDiscoveryCapability?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
       onFrameTrace?: (event: SocketFrameTraceEvent) => void;
+      /** Runs forwards in process instead of over the loopback HTTP endpoint (#11820). */
+      mcpDispatcher?: Pick<InProcessMcpDispatcher, "connect">;
+      /** Which path forwards take; defaults to `AUTOMOBILE_MCP_FORWARD_TRANSPORT`. */
+      mcpForwardTransport?: McpForwardTransport;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
     bindGuard: SocketBindGuardOptions = {},
@@ -1180,6 +1193,11 @@ export class UnixSocketServer {
     this.daemonState = daemonState;
     this.timer = timer;
     this.onFrameTrace = handshakeConfig.onFrameTrace;
+    this.mcpDispatcher = handshakeConfig.mcpDispatcher;
+    this.mcpForwardTransport = mcpForwardTransportFromEnv(
+      process.env,
+      handshakeConfig.mcpForwardTransport,
+    );
     this.idGenerator = idGenerator;
     // The reclaim lock's per-instance owner token comes from the module default
     // generator, NOT the injected `idGenerator` — that one is reserved for socket
@@ -3719,7 +3737,45 @@ export class UnixSocketServer {
     );
   }
 
+  /** Whether forwards run in process (#11820): one client and server per forward, no pool. */
+  private forwardsInProcess(): boolean {
+    return this.mcpForwardTransport === "in-process";
+  }
+
+  /** One in-process forward: its own client, closed (with its server) when the forward ends. */
+  private async forwardInProcessMcpRequest(context: McpForwardRecoveryContext): Promise<unknown> {
+    context.signal?.throwIfAborted();
+    const identity = this.getDeviceControlTransportIdentity(context);
+    const mcpClient = await this.mcpClientFactory(
+      context.route.sessionUuid,
+      context.route.toolSelectionProfileUuid,
+      context.route.releasedSessionUuid,
+    );
+    try {
+      context.signal?.throwIfAborted();
+      const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
+        context.request,
+        context.totalTimeoutMs,
+        context.deadline,
+        "waiting in queues and preparing the MCP client",
+      );
+      return await this.forwardConnectedMcpRequest(
+        context,
+        identity,
+        mcpClient,
+        forwardRemainingMs,
+      );
+    } finally {
+      await mcpClient.close().catch((error: unknown) => {
+        logger.warn(`Closing an in-process MCP forward failed: ${errorMessage(error)}`, error);
+      });
+    }
+  }
+
   private async forwardKeyedMcpRequest(context: McpForwardRecoveryContext): Promise<unknown> {
+    if (this.forwardsInProcess()) {
+      return this.forwardInProcessMcpRequest(context);
+    }
     context.signal?.throwIfAborted();
     const identity = this.getDeviceControlTransportIdentity(context);
     let mcpClient: Client;
@@ -7947,6 +8003,14 @@ export class UnixSocketServer {
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
   ): Promise<Client> {
+    if (this.forwardsInProcess() && this.mcpDispatcher) {
+      return await this.mcpDispatcher.connect({
+        boundSessionUuid,
+        toolSelectionProfileUuid,
+        releasedSessionUuid,
+        sessionKey: currentLoopbackSessionKey(),
+      });
+    }
     logger.info(`Creating MCP client with endpoint: "${this.mcpEndpoint}"`);
     if (!this.mcpEndpoint) {
       logger.error(`ERROR: mcpEndpoint is empty or undefined when creating client!`);

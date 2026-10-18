@@ -50,6 +50,47 @@ export function clampedIosCoordinateSwipeDuration(
   };
 }
 
+export interface IosSwipeRouteReport {
+  swipeRoute?: string;
+  effectiveDurationMs?: number;
+}
+
+/**
+ * The iOS duration report for a successful swipe (#13145). When the runner says which route ran
+ * and the duration it dispatched, that is authoritative and the XCUICoordinate velocity clamp is
+ * not assumed for the synthesized routes. Without a report (older runner) it falls back to
+ * assuming the XCUICoordinate route.
+ */
+export function iosSwipeDurationReport(
+  distancePt: number,
+  durationMs: number,
+  reported: IosSwipeRouteReport,
+): { dispatchRoute?: string; effectiveDurationMs?: number; warnings?: string[] } {
+  const { swipeRoute, effectiveDurationMs } = reported;
+  if (swipeRoute === undefined || effectiveDurationMs === undefined) {
+    const clamped = clampedIosCoordinateSwipeDuration(distancePt, durationMs);
+    return clamped
+      ? { effectiveDurationMs: clamped.effectiveDurationMs, warnings: [clamped.warning] }
+      : {};
+  }
+  if (Math.abs(effectiveDurationMs - durationMs) <= 1) {
+    return { dispatchRoute: swipeRoute };
+  }
+  return {
+    dispatchRoute: swipeRoute,
+    effectiveDurationMs,
+    warnings: [
+      swipeRoute === "xcuiCoordinate"
+        ? `durationMs ${durationMs} was clamped on the iOS XCUICoordinate swipe route: velocity is ` +
+          `limited to ${IOS_COORDINATE_SWIPE_VELOCITY_MIN_PT_S}-${IOS_COORDINATE_SWIPE_VELOCITY_MAX_PT_S} pt/s, ` +
+          `so this swipe ran for about ${effectiveDurationMs} ms (effectiveDurationMs).`
+        : `durationMs ${durationMs} was adjusted on the iOS ${swipeRoute} swipe route: the runner ` +
+          `dispatched ${effectiveDurationMs} ms (effectiveDurationMs; the synthesized route floors ` +
+          `the stroke at ${IOS_SYNTHESIZED_SWIPE_MIN_MS} ms).`,
+    ],
+  };
+}
+
 export const TALKBACK_SEMANTIC_SCROLL_DURATION_WARNING =
   "durationMs was ignored: the TalkBack semantic scroll route (ACTION_SCROLL on the container) " +
   "performs a discrete scroll with no timed stroke, so the reported duration is a nominal value. " +

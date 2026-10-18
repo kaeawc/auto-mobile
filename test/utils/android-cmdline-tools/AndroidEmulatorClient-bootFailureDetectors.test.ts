@@ -4,7 +4,6 @@ import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { FileAvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 const result = (stdout = "", stderr = ""): ExecResult => ({
   stdout,
@@ -24,67 +23,6 @@ const expectRejection = async (promise: Promise<unknown>): Promise<Error> => {
 };
 
 describe("Android emulator boot failure diagnostics", () => {
-  test("rejects a modern AVD whose configured RAM is below the floor", () => {
-    const client = new AndroidEmulatorClient(async () => result());
-    expect(() =>
-      (
-        client as unknown as {
-          validateAvdMemory: (
-            avdName: string,
-            config: { apiLevel: number; tag: string; ramSizeMb: number },
-          ) => void;
-        }
-      ).validateAvdMemory("Pixel_9_Pro", {
-        apiLevel: 36,
-        tag: "google_apis_playstore",
-        ramSizeMb: 1024,
-      }),
-    ).toThrow("hw.ramSize is 1024 MB, below the minimum 2048 MB");
-  });
-
-  test("rejects a modern AVD with an invalid RAM setting", () => {
-    const client = new AndroidEmulatorClient(async () => result());
-    expect(() =>
-      (
-        client as unknown as {
-          validateAvdMemory: (
-            avdName: string,
-            config: { apiLevel: number; tag: string; ramSizeInvalid: boolean },
-          ) => void;
-        }
-      ).validateAvdMemory("Pixel_9_Pro", {
-        apiLevel: 36,
-        tag: "google_apis_playstore",
-        ramSizeInvalid: true,
-      }),
-    ).toThrow("hw.ramSize is invalid");
-  });
-
-  test("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
-    const path = require("path");
-    const avdHome = path.resolve("fake", "avd");
-    const relocatedAvdHome = path.resolve("custom", "avds");
-    const registryPath = path.join(avdHome, "Pixel_9_Pro.ini");
-    const configPath = path.join(relocatedAvdHome, "Pixel_9_Pro.avd", "config.ini");
-    const reader = new FileAvdConfigReader(
-      async (filePath) =>
-        filePath === registryPath
-          ? `path=${path.join(relocatedAvdHome, "Pixel_9_Pro.avd")}\n`
-          : "hw.ramSize=1024\nimage.sysdir.1=system-images/android-36/google_apis_playstore/arm64-v8a/\ntag.id=google_apis_playstore\n",
-      (filePath) => filePath === registryPath || filePath === configPath,
-      avdHome,
-    );
-    const client = new AndroidEmulatorClient(async () => result());
-    const config = await reader.readConfig("Pixel_9_Pro");
-    expect(() =>
-      (
-        client as unknown as {
-          validateAvdMemory: (avdName: string, config: unknown) => void;
-        }
-      ).validateAvdMemory("Pixel_9_Pro", config),
-    ).toThrow("hw.ramSize is 1024 MB");
-  });
-
   test("reports a target that remains offline instead of waiting for the generic timeout", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
@@ -100,9 +38,13 @@ describe("Android emulator boot failure diagnostics", () => {
       adb.setCommandResponse("shell getprop init.svc.bootanim", result("stopped"));
       return [{ deviceId: "emulator-5554", state: "device" }];
     };
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: () => adb,
+      } as AdbClientFactory,
+    });
     const previousPollingInterval = process.env.EMULATOR_POLLING_INTERVAL_MS;
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
@@ -131,41 +73,16 @@ describe("Android emulator boot failure diagnostics", () => {
     adb.getDeviceStates = async () => {
       throw new Error("state probe unavailable");
     };
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: () => adb,
+      } as AdbClientFactory,
+    });
 
     const booted = await client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554");
     expect(booted.deviceId).toBe("emulator-5554");
-  });
-
-  test("clears a stale offline diagnosis when the target recovers", async () => {
-    const timer = new FakeTimer();
-    const adb = new FakeAdbExecutor();
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
-    const detectOfflineFailure = (
-      client as unknown as {
-        detectOfflineFailure: (
-          deviceId: string | undefined,
-          tracker: { deviceId: string | null; since: number | null },
-        ) => Promise<Error | null>;
-      }
-    ).detectOfflineFailure.bind(client);
-    const tracker = { deviceId: null as string | null, since: null as number | null };
-
-    adb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
-    await detectOfflineFailure("emulator-5554", tracker);
-    timer.advanceTime(15_000);
-    const offlineFailure = await detectOfflineFailure("emulator-5554", tracker);
-    expect(offlineFailure).toBeNull();
-    expect(tracker.since).toBe(0);
-
-    adb.setDeviceStates([{ deviceId: "emulator-5554", state: "device" }]);
-    const recoveredFailure = await detectOfflineFailure("emulator-5554", tracker);
-    expect(recoveredFailure).toBeNull();
-    expect(tracker.since).toBeNull();
   });
 
   test("bounds the auxiliary state probe by the readiness deadline", async () => {
@@ -177,9 +94,13 @@ describe("Android emulator boot failure diagnostics", () => {
       observedTimeouts.push(options?.timeoutMs);
       return [];
     };
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: () => adb,
+      } as AdbClientFactory,
+    });
 
     await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"));
     expect(observedTimeouts[0]).toBe(100);

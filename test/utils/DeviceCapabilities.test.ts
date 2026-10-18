@@ -12,6 +12,7 @@ import { setDeviceIncarnationResolver } from "../../src/utils/deviceIncarnation"
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const DISPLAY_MODES_CAPTURE = readFileSync(
   join(import.meta.dir, "../fixtures/android-display/phone-display-device-info.txt"),
@@ -54,20 +55,9 @@ describe("DeviceCapabilitiesDetector", () => {
     class BudgetAdvancingAdb extends FakeAdbClient {
       override async executeCommand(
         command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-        waitForProcessSettlementAfterAbort?: boolean,
+        options?: AdbExecuteOptions,
       ): Promise<ExecResult> {
-        const result = await super.executeCommand(
-          command,
-          timeoutMs,
-          maxBuffer,
-          noRetry,
-          signal,
-          waitForProcessSettlementAfterAbort,
-        );
+        const result = await super.executeCommand(command, options);
         timer.advanceTime(REFRESH_RATE_DETECTION_BUDGET_MS);
         return result;
       }

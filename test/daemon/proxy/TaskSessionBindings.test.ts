@@ -251,4 +251,65 @@ describe("TaskSessionBindings (#4668)", () => {
     expect(released).toEqual(["a", "b"]);
     expect(bindings.isPending("a")).toBe(false);
   });
+
+  test("a task that becomes bound cancels its expiry timer (#13155)", async () => {
+    const { timer, bindings } = harness();
+    bindings.defer("t", "a");
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+
+    await bindings.settle("t", { status: "completed", result: {} });
+
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a poll that fails transiently keeps the task alive for its retry (#13155)", async () => {
+    const { timer, bindings, bound } = harness();
+    bindings.defer("t", "a");
+    timer.advanceTime(TASK_BINDING_IDLE_MS - 1);
+
+    const transport = Object.assign(new Error("connection lost"), {});
+    await expect(
+      bindings.relayed("tasks/get", { taskId: "t" }, Promise.reject(transport)),
+    ).rejects.toThrow("connection lost");
+    timer.advanceTime(TASK_BINDING_IDLE_MS - 1);
+
+    expect(bindings.isPending("t")).toBe(true);
+    await bindings.settle("t", { status: "completed", result: { n: 1 } });
+    expect(bound).toEqual([["a", { n: 1 }]]);
+  });
+
+  test("drain reports a binding it abandons at the deadline (#13155)", async () => {
+    const timer = new FakeTimer();
+    let abandoned = 0;
+    const bindings = new TaskSessionBindings<string>({
+      timer,
+      bind: () => new Promise<void>(() => {}),
+      retain: () => {},
+      release: () => {},
+      abandon: () => {
+        abandoned += 1;
+      },
+    });
+    bindings.defer("t", "a");
+    void bindings.settle("t", { status: "completed", result: {} });
+
+    const draining = bindings.drain(1000);
+    timer.advanceTime(1000);
+    await draining;
+    expect(abandoned).toBe(1);
+
+    const quick = new TaskSessionBindings<string>({
+      timer,
+      bind: async () => {},
+      retain: () => {},
+      release: () => {},
+      abandon: () => {
+        abandoned += 1;
+      },
+    });
+    quick.defer("t", "a");
+    await quick.settle("t", { status: "completed", result: {} });
+    await quick.drain(1000);
+    expect(abandoned).toBe(1);
+  });
 });

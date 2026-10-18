@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import type { Writable } from "node:stream";
+import { Writable } from "node:stream";
 import { describe, expect, spyOn, test } from "bun:test";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -160,7 +159,7 @@ class NeverStoppingFrameCaptureHelper extends FakeFrameCaptureHelper {
   }
 }
 
-class BackpressuredWritable extends EventEmitter {
+class BackpressuredWritable extends Writable {
   writes: Buffer[] = [];
   ended = false;
 
@@ -173,6 +172,26 @@ class BackpressuredWritable extends EventEmitter {
     this.ended = true;
     return this;
   }
+}
+
+const killSignalsByEncoder = new WeakMap<FakeChildProcess, NodeJS.Signals[]>();
+
+/** Replaces kill() with a recorder; optionally exits promptly on SIGTERM. */
+function recordKillSignals(
+  encoder: FakeChildProcess,
+  { exitOnSigterm = false }: { exitOnSigterm?: boolean } = {},
+): void {
+  const signals: NodeJS.Signals[] = [];
+  killSignalsByEncoder.set(encoder, signals);
+  encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
+    const name = (typeof signal === "number" ? "SIGTERM" : (signal ?? "SIGTERM")) as NodeJS.Signals;
+    signals.push(name);
+    encoder.killed = true;
+    if (exitOnSigterm && name === "SIGTERM") {
+      encoder.emit("exit", null, "SIGTERM");
+    }
+    return true;
+  };
 }
 
 function frame(width: number, height: number, fill: number, bytesPerRow = width * 4): DecodedFrame {
@@ -233,7 +252,7 @@ function createHarness(
     },
     spawner: (command, args) => {
       encoderSpawns.push({ command, args });
-      return encoder as unknown as ChildProcessWithoutNullStreams;
+      return encoder;
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
@@ -261,7 +280,7 @@ function createHarnessWithOverrides(
     createHelper: () => helper,
     spawner: (command, args) => {
       encoderSpawns.push({ command, args });
-      return encoder as unknown as ChildProcessWithoutNullStreams;
+      return encoder;
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
@@ -295,7 +314,7 @@ function createRestartHarness(
       const encoder = new FakeChildProcess();
       configureEncoder?.(encoder);
       encoders.push(encoder);
-      return encoder as unknown as ChildProcessWithoutNullStreams;
+      return encoder;
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
@@ -332,7 +351,7 @@ function createReconnectHarness(
       encoderSpawns.push({ command, args });
       const encoder = new FakeChildProcess();
       encoders.push(encoder);
-      return encoder as unknown as ChildProcessWithoutNullStreams;
+      return encoder;
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: successfulCommandRunner,
@@ -361,7 +380,7 @@ function createResolverHarness(
       helperTargets.push(options.target);
       return helper;
     },
-    spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+    spawner: () => encoder,
     forceRawPipeline: true,
     commandRunner: async (command, args) => {
       if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
@@ -610,7 +629,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       createHelper: () => helper,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: async (command, args) => {
         if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
           return {
@@ -645,7 +664,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       createHelper: () => helper,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: async (command, args) => {
         if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
           return {
@@ -707,7 +726,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => encoder,
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
     });
@@ -744,7 +763,7 @@ describe("IosH264Source", () => {
       onError: (error) => errors.push(error),
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
       timer,
@@ -792,7 +811,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
       timer,
@@ -838,7 +857,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => resolvedWindowIds[resolveCalls++] ?? 99,
       commandRunner: successfulCommandRunner,
       timer,
@@ -890,7 +909,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => {
         resolveCalls++;
         return 42;
@@ -939,7 +958,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
     });
@@ -985,7 +1004,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
     });
@@ -1033,7 +1052,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
       timer,
@@ -1084,7 +1103,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
       timer,
@@ -1119,7 +1138,7 @@ describe("IosH264Source", () => {
       firstFrameTimeoutMs: 1,
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
       timer,
@@ -1153,7 +1172,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       simulatorHelperPool: pool,
       forceRawPipeline: true,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
     });
@@ -1197,7 +1216,7 @@ describe("IosH264Source", () => {
         helpers.push(helper);
         return helper;
       },
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: successfulCommandRunner,
     });
 
@@ -1226,7 +1245,7 @@ describe("IosH264Source", () => {
       timer,
       onData: () => {},
       createHelper: () => helper,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: successfulCommandRunner,
     });
 
@@ -1261,7 +1280,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       createHelper: () => helper,
       simulatorWindowResolver: async () => 42,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: successfulCommandRunner,
     });
 
@@ -1374,7 +1393,7 @@ describe("IosH264Source", () => {
       },
       spawner: (command, args) => {
         encoderSpawns.push({ command, args });
-        return encoder as unknown as ChildProcessWithoutNullStreams;
+        return encoder;
       },
       simulatorWindowResolver: async () => 42,
       commandRunner: successfulCommandRunner,
@@ -1566,7 +1585,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       onError: (error) => errors.push(error),
       createHelper: () => helper,
-      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => encoder,
       commandRunner: successfulCommandRunner,
       runningReconnectMaxAttempts: 0,
     });
@@ -1601,7 +1620,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: (chunk) => chunks.push(chunk),
       createHelper: () => helper,
-      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => encoder,
       commandRunner: successfulCommandRunner,
     });
 
@@ -1767,7 +1786,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       onError: (error) => errors.push(error),
       createHelper: () => helper,
-      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => encoder,
       commandRunner: successfulCommandRunner,
     });
 
@@ -2393,7 +2412,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       createHelper: () => helper,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: async (command, args) => {
         if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
           return {
@@ -2506,7 +2525,7 @@ describe("IosH264Source", () => {
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       createHelper: () => helper,
-      spawner: () => new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => new FakeChildProcess(),
       commandRunner: async (command, args) => {
         if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
           return {
@@ -2596,14 +2615,14 @@ describe("IosH264Source", () => {
     const helper = new FakeFrameCaptureHelper();
     const encoder = new FakeChildProcess();
     const stdin = new BackpressuredWritable();
-    encoder.stdin = stdin as unknown as Writable;
+    encoder.stdin = stdin;
     const source = new IosH264Source({
       device: IOS_DEVICE,
       helperPath: FAKE_HELPER_PATH,
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
       createHelper: () => helper,
-      spawner: () => encoder as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => encoder,
       commandRunner: successfulCommandRunner,
     });
 
@@ -2630,7 +2649,7 @@ describe("IosH264Source", () => {
     const inputs: BackpressuredWritable[] = [];
     const { source, helper, encoders } = createRestartHarness({}, (encoder) => {
       const input = new BackpressuredWritable();
-      encoder.stdin = input as unknown as Writable;
+      encoder.stdin = input;
       inputs.push(input);
     });
 
@@ -2706,7 +2725,7 @@ describe("IosH264Source", () => {
       onData: () => {},
       onError: (error) => errors.push(error),
       createHelper: () => helpers[helperIndex++],
-      spawner: () => encoders[encoderIndex++] as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => encoders[encoderIndex++],
       commandRunner: successfulCommandRunner,
     });
 
@@ -2824,15 +2843,7 @@ describe("IosH264Source", () => {
     const timer = new FakeTimer();
     const { source, helper, encoders } = createRestartHarness({ timer }, (encoder) => {
       // A slow / signal-ignoring h264_videotoolbox never emits "exit" on SIGTERM.
-      const signals: NodeJS.Signals[] = [];
-      (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
-      encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
-        signals.push(
-          (typeof signal === "number" ? "SIGTERM" : (signal ?? "SIGTERM")) as NodeJS.Signals,
-        );
-        encoder.killed = true;
-        return true;
-      };
+      recordKillSignals(encoder);
     });
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
@@ -2840,7 +2851,7 @@ describe("IosH264Source", () => {
     await flush();
 
     expect(source.requestKeyFrame()).toBe(true);
-    const oldSignals = (encoders[0] as unknown as { killSignals: NodeJS.Signals[] }).killSignals;
+    const oldSignals = killSignalsByEncoder.get(encoders[0]);
 
     // The restart SIGTERMs the outgoing encoder but must not force-kill it until
     // the bounded grace window elapses without an exit.
@@ -2857,20 +2868,7 @@ describe("IosH264Source", () => {
   test("does not force-kill the outgoing encoder that exits within the grace window", async () => {
     const timer = new FakeTimer();
     const { source, helper, encoders } = createRestartHarness({ timer }, (encoder) => {
-      const signals: NodeJS.Signals[] = [];
-      (encoder as unknown as { killSignals: NodeJS.Signals[] }).killSignals = signals;
-      encoder.kill = (signal?: NodeJS.Signals | number): boolean => {
-        const name = (
-          typeof signal === "number" ? "SIGTERM" : (signal ?? "SIGTERM")
-        ) as NodeJS.Signals;
-        signals.push(name);
-        encoder.killed = true;
-        if (name === "SIGTERM") {
-          // Honour SIGTERM promptly: exit before the grace window elapses.
-          encoder.emit("exit", null, "SIGTERM");
-        }
-        return true;
-      };
+      recordKillSignals(encoder, { exitOnSigterm: true });
     });
 
     await startWithFrame(source, helper, frame(2, 2, 0x11));
@@ -2882,7 +2880,7 @@ describe("IosH264Source", () => {
     timer.advanceTime(IOS_ENCODER_RESTART_GRACE_MS);
     await flush();
 
-    const oldSignals = (encoders[0] as unknown as { killSignals: NodeJS.Signals[] }).killSignals;
+    const oldSignals = killSignalsByEncoder.get(encoders[0]);
     expect(oldSignals).toEqual(["SIGTERM"]);
   });
 
@@ -3033,7 +3031,7 @@ describe("IosH264Source", () => {
         createHelper: () => helper,
         spawner: (command) => {
           commands.push(command);
-          return encoder as unknown as ChildProcessWithoutNullStreams;
+          return encoder;
         },
         commandRunner: async (command, args) => {
           commands.push(command);
@@ -3076,7 +3074,7 @@ describe("IosH264Source", () => {
         createHelper: () => helper,
         spawner: (command) => {
           commands.push(command);
-          return encoder as unknown as ChildProcessWithoutNullStreams;
+          return encoder;
         },
         commandRunner: async (command, args) => {
           commands.push(command);
@@ -3129,7 +3127,7 @@ function createEncodedHarness(
     },
     spawner: (command, args) => {
       encoderSpawns.push({ command, args });
-      return new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams;
+      return new FakeChildProcess();
     },
     simulatorWindowResolver: async () => 42,
     commandRunner: async (command, args) => {

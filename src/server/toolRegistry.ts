@@ -66,6 +66,7 @@ import {
   PlanLifecycleManager,
   DefaultPlanLifecycleManager,
 } from "./pipeline/planLifecycle";
+import { holdSessionForCurrentTask } from "./tasks/runAsTask";
 import {
   isDeviceReadOnlyCall,
   isReadOnlyCall,
@@ -375,6 +376,8 @@ export class ToolRegistryClass {
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
+        // Under an MCP task, keep this session alive until the task settles (#4668).
+        holdSessionForCurrentTask(sessionUuid);
         if (selectionContext?.execution && !selectionContext.deviceAwareDispatch && !sessionUuid) {
           executionTracker.setResolvedAutolockSessionUuid(
             selectionContext.execution.executionId,

@@ -36,6 +36,7 @@ import type {
   ObserveResult,
   ViewHierarchyResult,
 } from "../../../src/models";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const POLL_INTERVAL_MS = 250;
 // Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
@@ -114,22 +115,8 @@ class TapLatencyFakeAdbExecutor extends SequencedFakeAdbExecutor {
     super(timestamps);
   }
 
-  async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ) {
-    const result = await super.executeCommand(
-      command,
-      timeoutMs,
-      maxBuffer,
-      noRetry,
-      signal,
-      waitForProcessSettlementAfterAbort,
-    );
+  async executeCommand(command: string, options?: AdbExecuteOptions) {
+    const result = await super.executeCommand(command, options);
     if (command.includes("input tap")) {
       this.timer.advanceTime(this.tapLatencyMs);
     }

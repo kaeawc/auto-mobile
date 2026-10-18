@@ -279,8 +279,12 @@ keeps the full panel rect while `false` uses its content edge. Android gesture
 navigation reserves a strip at the physical left and right edges for back, and the
 bottom edge for home, so a very-near-edge swipe there may be taken by the system rather
 than the app; prefer the default content-edge mode or a larger `edgeInset` when that
-happens. Named system gestures ("system back") are not provided. `swipeAt` support for
-these options follows once that tool lands.
+happens. Named system gestures ("system back") are not provided. Edge-anchored swipes
+are a `swipeOn` option only: `swipeAt` does not take `fromEdge`, `edgeInset`, or `at`.
+For a coordinate swipe that starts at an edge, pass a `from` point at the edge (for
+example `x: 0` with `coordinateSpace: "normalized"` for the left edge). The far edges
+are exclusive, so a normalized `1` (or an absolute value equal to the screen size) is
+rejected as out of bounds; use a value just inside, such as `0.999` or `width - 1`.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional

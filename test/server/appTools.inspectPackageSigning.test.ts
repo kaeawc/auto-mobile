@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { inspectPackageSigningSchema, registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { PackageSigningInspection } from "../../src/models/PackageSigningInspection";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const inspection: PackageSigningInspection = {
   appId: "com.example.app",

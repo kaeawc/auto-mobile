@@ -57,6 +57,9 @@ import { reportToolDispatched } from "../../../src/utils/ToolDispatchContext";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import type { LaunchAppCall } from "../../../src/features/action/LaunchApp";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification

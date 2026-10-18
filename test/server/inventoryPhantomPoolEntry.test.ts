@@ -21,6 +21,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Inventory contract: every surface reports the same devices and the same counts. The
 // booted-devices resource deliberately counts "from the live booted list so phantom (shut-down)

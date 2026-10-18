@@ -29,7 +29,7 @@ import * as realDeviceGestureRecordingManager from "../../src/server/deviceGestu
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { z } from "zod/v4";
-import { getRemovedToolHint } from "../../src/models/removedTools";
+import { getRemovedToolHint } from "../../src/utils/removedTools";
 import { executionTracker } from "../../src/server/executionTracker";
 
 isolateToolRegistry();

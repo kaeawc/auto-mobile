@@ -33,6 +33,9 @@ import {
   isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 /**

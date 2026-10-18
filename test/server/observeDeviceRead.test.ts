@@ -48,6 +48,9 @@ import { snapshotReferences } from "../../src/features/observe/SnapshotReference
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const callDeviceRead = (args: Record<string, unknown>) =>

@@ -1,4 +1,4 @@
-import type { PrototypeHiddenReason } from "../features/prototype/prototypeHidden";
+import type { PrototypeHiddenReason } from "./PrototypeHiddenReason";
 import type { PanelFingerprint } from "./DisplayPanel";
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";

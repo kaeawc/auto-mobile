@@ -21,6 +21,7 @@ import {
 } from "./socketServer/controlRoutes";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
+import type { IdeMutationCall } from "./socketServer/ideMutationCall";
 import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
 import {
   DISPATCH_HELD_INPUT_METHODS,
@@ -48,7 +49,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -658,25 +659,6 @@ interface McpForwardContext {
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
-
-/** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
-interface IdeMutationCall {
-  /**
-   * Keep `execution` in flight until the route settles. The holder's own call (`asHolder`) is also
-   * cut by a release of its session; a forced call acts for no session and runs to its end.
-   */
-  track(execution: ActiveExecution, asHolder: boolean): void;
-  /** The holder's session admission passed for `execution`: its dispatch will be session use. */
-  admit(execution: ActiveExecution): void;
-  /**
-   * The SDK write was sent successfully, or the direct-file fallback passed its abort check and
-   * is about to act on the device: only now is the holder's call session use (#11596, #11750).
-   * A route refused or cancelled while connecting ends unstamped.
-   */
-  dispatching(): void;
-  /** The socket session that sent the frame: a managed connection mutates only its binding devices. */
-  readonly socketSessionId: string | undefined;
-}
 
 /**
  * One `input/*` frame's device work. It calls `dispatching` once every pre-dispatch check passed
@@ -4096,6 +4078,7 @@ export class UnixSocketServer {
     const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
       args.platform,
       args.deviceId,
+      ideMutation?.signal,
     );
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
@@ -4117,7 +4100,7 @@ export class UnixSocketServer {
       ideMutation,
     );
     if (args.platform === "android") {
-      getAbortSignal()?.throwIfAborted();
+      ideMutation?.signal.throwIfAborted();
       ideMutation?.dispatching();
       AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
       const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
@@ -4133,7 +4116,7 @@ export class UnixSocketServer {
       };
     } else {
       const manager = IOSCtrlProxyManager.getInstance(targetDevice);
-      getAbortSignal()?.throwIfAborted();
+      ideMutation?.signal.throwIfAborted();
       ideMutation?.dispatching();
       IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
       await manager.forceRestart();
@@ -4170,7 +4153,7 @@ export class UnixSocketServer {
         appId,
         fileName,
         {
-          dispatching: () => ideMutation?.dispatching(),
+          ideMutation,
           viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
           viaDirectFile: (adb) =>
             removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
@@ -4189,7 +4172,7 @@ export class UnixSocketServer {
         appId,
         fileName,
         {
-          dispatching: () => ideMutation?.dispatching(),
+          ideMutation,
           viaSdk: (onDispatch) =>
             client.setPreference(appId, fileName, key, value, type, { onDispatch }),
           viaDirectFile: (adb) =>
@@ -4234,7 +4217,7 @@ export class UnixSocketServer {
       appId,
       fileName,
       {
-        dispatching: () => ideMutation?.dispatching(),
+        ideMutation,
         viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
         viaDirectFile: (adb) =>
           removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
@@ -4273,7 +4256,7 @@ export class UnixSocketServer {
       appId,
       fileName,
       {
-        dispatching: () => ideMutation?.dispatching(),
+        ideMutation,
         viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
         viaDirectFile: (adb) =>
           clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
@@ -4412,8 +4395,10 @@ export class UnixSocketServer {
     let tracked: ActiveExecution | undefined;
     let cutByRelease: ActiveExecution | undefined;
     let admitted: ActiveExecution | undefined;
+    const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
     const call: IdeMutationCall = {
       socketSessionId,
+      signal,
       admit: (execution) => {
         admitted = execution;
       },
@@ -4438,7 +4423,6 @@ export class UnixSocketServer {
       },
     };
     try {
-      const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
       signal.throwIfAborted();
       return await runWithAbortSignal(signal, () => run(call));
     } catch (error) {
@@ -4461,8 +4445,9 @@ export class UnixSocketServer {
   private async listBootedDevicesForIdeAction(
     platform: "android" | "ios",
     serial: string,
+    signal?: AbortSignal,
   ): Promise<BootedDevice[]> {
-    getAbortSignal()?.throwIfAborted();
+    signal?.throwIfAborted();
     const manager = PlatformDeviceManagerFactory.getInstance();
     const discovery = expectingPooledSources(
       await manager.getBootedDevicesDetailed(platform),
@@ -4480,7 +4465,7 @@ export class UnixSocketServer {
         ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
         : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
     }
-    getAbortSignal()?.throwIfAborted();
+    signal?.throwIfAborted();
     return discovery.devices;
   }
 
@@ -4491,10 +4476,11 @@ export class UnixSocketServer {
   private async resolveIdeActionDevices(
     platform: "android" | "ios",
     serial: string,
+    signal?: AbortSignal,
   ): Promise<CanonicalFrameDiscovery & { deviceId: string }> {
     const canonical = await this.canonicalFrameDiscovery(
       platform,
-      await this.listBootedDevicesForIdeAction(platform, serial),
+      await this.listBootedDevicesForIdeAction(platform, serial, signal),
       serial,
     );
     return { devices: canonical.devices, deviceId: canonical.deviceId ?? serial };
@@ -4571,7 +4557,7 @@ export class UnixSocketServer {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
     const { devices: bootedDevices, deviceId: canonicalDeviceId } =
-      await this.resolveIdeActionDevices(platform, deviceId);
+      await this.resolveIdeActionDevices(platform, deviceId, ideMutation?.signal);
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
     this.assertDeviceActionable(canonicalDeviceId, "to mutate stored values");
@@ -4580,7 +4566,7 @@ export class UnixSocketServer {
       throw new Error(`Device not found: ${deviceId}`);
     }
     await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
-    getAbortSignal()?.throwIfAborted();
+    ideMutation?.signal.throwIfAborted();
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
@@ -4605,7 +4591,7 @@ export class UnixSocketServer {
     appId: string,
     fileName: string,
     mutation: {
-      dispatching: () => void;
+      ideMutation: IdeMutationCall | undefined;
       viaSdk: (onDispatch: () => void) => Promise<PreferenceStoreResolution | void>;
       viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
     },
@@ -4619,10 +4605,10 @@ export class UnixSocketServer {
         return;
       }
       dispatched = true;
-      mutation.dispatching();
+      mutation.ideMutation?.dispatching();
     };
     if (platform !== "android") {
-      getAbortSignal()?.throwIfAborted();
+      mutation.ideMutation?.signal.throwIfAborted();
       const resolution = (await mutation.viaSdk(onDispatch)) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
@@ -4632,12 +4618,12 @@ export class UnixSocketServer {
       fileName,
       () => this.adbClientFactory.create(device),
       async () => {
-        getAbortSignal()?.throwIfAborted();
+        mutation.ideMutation?.signal.throwIfAborted();
         resolution = (await mutation.viaSdk(onDispatch)) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
       (adb) => {
-        getAbortSignal()?.throwIfAborted();
+        mutation.ideMutation?.signal.throwIfAborted();
         onDispatch();
         return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
       },

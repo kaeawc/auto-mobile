@@ -5,12 +5,11 @@ import { withAndroidImeLock, type AndroidImeRecoverySnapshot } from "../androidI
 import { redactPasswordImeFailure, withImeFailure } from "../imeFailureDiagnostics";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { ImeRestorationError } from "./ImeRestorationError";
 
 type SendKeysCommandExecution = Awaited<
   ReturnType<NonNullable<SendKeysCommandExecutor["withImeSpan"]>>
 >;
-
-export class ImeRestorationError extends Error {}
 
 export function isImeRestorationFailure(error: unknown): boolean {
   return (

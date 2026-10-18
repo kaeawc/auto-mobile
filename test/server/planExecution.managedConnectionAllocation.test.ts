@@ -19,6 +19,9 @@ import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #11397: a managed connection may not acquire devices. `getAndroid`, `getApple`, `startDevice` and

@@ -1,3 +1,4 @@
+import type { SnapshotCropResult } from "../../../models/SnapshotCropResult";
 import { ActionableError } from "../../../models/ActionableError";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import { nativeBoundsInRaster, snapRasterBounds } from "./rasterGeometry";
@@ -6,20 +7,7 @@ import type { ImageBackend, ImageOperation } from "../../../utils/image/backend/
 import { snapshotRasterGeometry, type SnapshotGeometry } from "./snapshotRasterGeometry";
 export type { SnapshotGeometry } from "./snapshotRasterGeometry";
 
-export interface SnapshotCropResult {
-  png: Buffer;
-  requestedBounds: ElementBounds;
-  clippedBounds: ElementBounds;
-  screenSize: SnapshotGeometry["screenSize"];
-  /** Dimensions of the upright output PNG. */
-  imageSize: { width: number; height: number };
-  pixelsPerNativeUnit: { x: number; y: number };
-  scaleProvenance: "raster-dimensions" | "native-scale-confirmed";
-  clipped: boolean;
-  rasterBounds: { left: number; top: number; right: number; bottom: number };
-  /** Orientation of the output crop, not the source framebuffer. */
-  screenshotOrientation: "display" | "native";
-}
+export type { SnapshotCropResult };
 
 /** Pure geometry plus an injected image backend; the caller owns capture and persistence. */
 // oxlint-disable-next-line complexity -- validation, clipping, and raster bounds form one atomic crop mapping.

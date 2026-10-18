@@ -4,6 +4,9 @@ import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const executePlanError = new Error("Simulated executePlan failure: device disconnected");
 

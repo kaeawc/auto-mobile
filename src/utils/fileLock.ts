@@ -5,19 +5,17 @@ import { basename, dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "./processLiveness";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
+import type {
+  LockOwnerGenerationProbe,
+  LockOwnerGenerationVerdict,
+} from "../models/LockOwnerGeneration";
 import { toActionableError } from "../models/ActionableError";
 
 const isProcessRunningWithDebug = (pid: number): boolean =>
   defaultIsProcessRunning(pid, { debugLog: logger.debug });
 
 /** Verdict on whether a LIVE pid is still the process generation a lock recorded. */
-export type LockOwnerGenerationVerdict = "same" | "different" | "unknown";
-export interface LockOwnerGenerationProbe {
-  /** Token for a lock pid is taking now; undefined when unavailable. Must not throw. */
-  current(pid: number): string | undefined;
-  /** Compare a live pid with its recorded token; unknown means unreadable/incomparable. Must not throw. */
-  compare(pid: number, recorded: string): LockOwnerGenerationVerdict;
-}
+export type { LockOwnerGenerationProbe, LockOwnerGenerationVerdict };
 
 /**
  * The canonical cross-process file-lock primitive (issue #2794).

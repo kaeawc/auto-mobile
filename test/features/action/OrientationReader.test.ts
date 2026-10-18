@@ -3,10 +3,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   AndroidOrientationReader,
-  IosOrientationReader,
   orientationFromRotation,
   rotationForOrientation,
 } from "../../../src/features/action/OrientationReader";
+import { IosOrientationReader } from "../../../src/features/action/IosOrientationReader";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 

@@ -42,6 +42,11 @@ import { logger } from "../../utils/logger";
 import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import { checkForeignLeaseHolders } from "./foreignLeaseHolders";
+import { checkDeviceOwnership } from "./deviceOwnership";
+import {
+  DeviceOwnershipView,
+  createDefaultDeviceOwnershipSources,
+} from "../../daemon/deviceOwnershipView";
 import { checkOrphanedDaemons } from "./orphanedDaemons";
 import { listForwardLeaseHolders } from "../../daemon/forwardLeaseHolders";
 
@@ -72,6 +77,7 @@ export interface AutoMobileCheckDependencies {
   checkDaemonBuildIdentity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkOrphanedDaemons?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkForeignLeaseHolders?: () => Promise<CheckResult>;
+  checkDeviceOwnership?: () => Promise<CheckResult>;
   /** Android-branch seams so unit tests avoid real CtrlProxy/ADB I/O. */
   checkCtrlProxy?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkWorkProfileAccessibility?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
@@ -727,6 +733,15 @@ export async function runAutoMobileChecks(
     (
       dependencies.checkForeignLeaseHolders ??
       (() => checkForeignLeaseHolders({ lister: { listHolders: () => listForwardLeaseHolders() } }))
+    )(),
+  );
+  await run(() =>
+    (
+      dependencies.checkDeviceOwnership ??
+      (() =>
+        checkDeviceOwnership({
+          view: new DeviceOwnershipView(createDefaultDeviceOwnershipSources()),
+        }))
     )(),
   );
 

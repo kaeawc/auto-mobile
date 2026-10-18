@@ -8,7 +8,7 @@ import {
   computeBindingScopeKey,
   type ManagedDeviceEntry,
 } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -223,7 +223,7 @@ describe("direct frames from a managed connection outside its slots", () => {
           return { key, enabled };
         },
         listFlags: async () => flags,
-      } as unknown as FeatureFlagService,
+      } satisfies FeatureFlagAdmin,
       // The storage tools are enabled, so the frames reach the ownership gate.
       {
         sessionToolSelectionService: {

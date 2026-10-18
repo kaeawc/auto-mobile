@@ -133,33 +133,41 @@ export class TapElementFinder {
       if (options.sibling) {
         return {
           selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.deps.elementSelector().selectClickableSiblingOfText(viewHierarchy, text, {
-              container: options.container,
-              screenSizeOptions: options.screenSizeOptions,
-              fuzzyMatch: true,
-              caseSensitive: false,
-              strategy: options.selectionStrategy,
-              intentAction,
-              selectionIntent,
-              index: options.index,
-            }),
+            this.deps.elementSelector().select(
+              viewHierarchy,
+              { sibling: { text } },
+              {
+                container: options.container,
+                screenSizeOptions: options.screenSizeOptions,
+                fuzzyMatch: true,
+                caseSensitive: false,
+                strategy: options.selectionStrategy,
+                intentAction,
+                selectionIntent,
+                index: options.index,
+              },
+            ),
           ),
           containerFound,
         };
       }
 
       return {
-        selection: this.deps.elementSelector().selectByText(viewHierarchy, text, {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          partialMatch: true,
-          caseSensitive: false,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          allowHintFallback: options.action === "tap" || options.action === "focus",
-          index: options.index,
-          selectionIntent,
-        }),
+        selection: this.deps.elementSelector().select(
+          viewHierarchy,
+          { text },
+          {
+            container: options.container,
+            screenSizeOptions: options.screenSizeOptions,
+            partialMatch: true,
+            caseSensitive: false,
+            strategy: options.selectionStrategy,
+            intentAction: lookupAction,
+            allowHintFallback: options.action === "tap" || options.action === "focus",
+            index: options.index,
+            selectionIntent,
+          },
+        ),
         containerFound,
       };
     }
@@ -174,29 +182,37 @@ export class TapElementFinder {
       for (const text of options.textAny) {
         const selection = options.sibling
           ? this.selectVariantOrSiblingOrMiss(options, () =>
-              this.deps.elementSelector().selectClickableSiblingOfText(viewHierarchy, text, {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                fuzzyMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction,
-                selectionIntent,
-                index: options.index,
-              }),
+              this.deps.elementSelector().select(
+                viewHierarchy,
+                { sibling: { text } },
+                {
+                  container: options.container,
+                  screenSizeOptions: options.screenSizeOptions,
+                  fuzzyMatch: true,
+                  caseSensitive: false,
+                  strategy: options.selectionStrategy,
+                  intentAction,
+                  selectionIntent,
+                  index: options.index,
+                },
+              ),
             )
           : this.selectVariantOrSiblingOrMiss(options, () =>
-              this.deps.elementSelector().selectByText(viewHierarchy, text, {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                partialMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction: lookupAction,
-                allowHintFallback: options.action === "tap" || options.action === "focus",
-                index: options.index,
-                selectionIntent,
-              }),
+              this.deps.elementSelector().select(
+                viewHierarchy,
+                { text },
+                {
+                  container: options.container,
+                  screenSizeOptions: options.screenSizeOptions,
+                  partialMatch: true,
+                  caseSensitive: false,
+                  strategy: options.selectionStrategy,
+                  intentAction: lookupAction,
+                  allowHintFallback: options.action === "tap" || options.action === "focus",
+                  index: options.index,
+                  selectionIntent,
+                },
+              ),
             );
         lastSelection = selection;
         if (selection.element) {
@@ -238,45 +254,53 @@ export class TapElementFinder {
       if (options.sibling) {
         return {
           selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.deps
-              .elementSelector()
-              .selectClickableSiblingOfResourceId(viewHierarchy, elementId, {
+            this.deps.elementSelector().select(
+              viewHierarchy,
+              { sibling: { elementId } },
+              {
                 container: options.container,
                 screenSizeOptions: options.screenSizeOptions,
                 partialMatch: false,
                 strategy: options.selectionStrategy,
                 intentAction,
                 index: options.index,
-              }),
+              },
+            ),
           ),
           containerFound,
         };
       }
 
       return {
-        selection: this.deps.elementSelector().selectByResourceId(viewHierarchy, elementId, {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          partialMatch: false,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          index: options.index,
-        }),
+        selection: this.deps.elementSelector().select(
+          viewHierarchy,
+          { elementId },
+          {
+            container: options.container,
+            screenSizeOptions: options.screenSizeOptions,
+            partialMatch: false,
+            strategy: options.selectionStrategy,
+            intentAction: lookupAction,
+            index: options.index,
+          },
+        ),
         containerFound,
       };
     }
 
     return {
-      selection: this.deps
-        .elementSelector()
-        .selectByTestTag(viewHierarchy, requireTestTag(options), {
+      selection: this.deps.elementSelector().select(
+        viewHierarchy,
+        { testTag: requireTestTag(options) },
+        {
           container: options.container,
           screenSizeOptions: options.screenSizeOptions,
           strategy: options.selectionStrategy,
           intentAction: lookupAction,
           selectionIntent,
           index: options.index,
-        }),
+        },
+      ),
       containerFound,
     };
   }
@@ -312,19 +336,27 @@ export class TapElementFinder {
       strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
     };
     if (container.elementId) {
-      return this.deps.elementSelector().selectByResourceId(viewHierarchy, container.elementId, {
-        ...scopedOptions,
-        intentAction: "inspect",
-        screenSizeOptions: options.screenSizeOptions,
-      }).element as Element | undefined;
+      return this.deps.elementSelector().select(
+        viewHierarchy,
+        { elementId: container.elementId },
+        {
+          ...scopedOptions,
+          intentAction: "inspect",
+          screenSizeOptions: options.screenSizeOptions,
+        },
+      ).element as Element | undefined;
     }
     if (container.text) {
-      return this.deps.elementSelector().selectByText(viewHierarchy, container.text, {
-        ...scopedOptions,
-        intentAction: "inspect",
-        screenSizeOptions: options.screenSizeOptions,
-        caseSensitive: false,
-      }).element as Element | undefined;
+      return this.deps.elementSelector().select(
+        viewHierarchy,
+        { text: container.text },
+        {
+          ...scopedOptions,
+          intentAction: "inspect",
+          screenSizeOptions: options.screenSizeOptions,
+          caseSensitive: false,
+        },
+      ).element as Element | undefined;
     }
     return undefined;
   }

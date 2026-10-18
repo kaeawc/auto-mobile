@@ -84,7 +84,7 @@ final class SdkEndpointResolverTests: XCTestCase {
                 guard state.foreground == bundleId else {
                     return .respond(status: 409, body: Data("{\"error\":\"app_not_active\"}".utf8))
                 }
-                if request.url?.path == "/health" {
+                if request.url?.path == SdkRoute.health.path {
                     return try .respond(status: 200, body: JSONEncoder().encode([
                         "status": "ok", "bundleId": bundleId, "simulatorUdid": udid,
                     ]))
@@ -153,7 +153,7 @@ final class SdkEndpointResolverTests: XCTestCase {
                 XCTAssertTrue(message.contains(udid))
             }
             XCTAssertEqual(apps.recordedRequests.last?.url?.port, 8766)
-            XCTAssertEqual(apps.recordedRequests.last?.url?.path, "/health")
+            XCTAssertEqual(apps.recordedRequests.last?.url?.path, SdkRoute.health.path)
             XCTAssertEqual(apps.recordedRequests.filter { $0.url?.path == "/hierarchy" }.count, 1)
         }
     }
@@ -328,7 +328,7 @@ final class SdkEndpointResolverTests: XCTestCase {
         XCTAssertEqual(first.port, Int(SdkSimulatorPort.simulatorPort(udid: udid)))
         XCTAssertEqual(first, second)
         XCTAssertEqual(stub.recordedRequests.count, 1)
-        XCTAssertEqual(stub.recordedRequests[0].url?.path, "/health")
+        XCTAssertEqual(stub.recordedRequests[0].url?.path, SdkRoute.health.path)
         XCTAssertEqual(stub.recordedRequests[0].value(forHTTPHeaderField: SdkEndpointResolver.identityHeader), udid)
     }
 

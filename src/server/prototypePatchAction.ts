@@ -55,7 +55,7 @@ export interface PrototypePatchDependencies {
   /** Retires the device's cached observation after an applied patch. */
   retire: (result: PrototypeResult) => void;
 }
-export interface PrototypePatchArgs {
+export interface PrototypePatchInput {
   id: string;
   ops: unknown;
   baseRevision?: number;
@@ -94,7 +94,7 @@ function patchSpec(
 
 async function sendPatch(
   deps: PrototypePatchDependencies,
-  args: PrototypePatchArgs,
+  args: PrototypePatchInput,
 ): Promise<PrototypePatchReply> {
   try {
     return await deps.transport.patch(
@@ -115,7 +115,7 @@ async function sendPatch(
 async function queuedPatch(
   deps: PrototypePatchDependencies,
   deviceId: string,
-  args: PrototypePatchArgs,
+  args: PrototypePatchInput,
   signal?: AbortSignal,
 ): Promise<PrototypePatchOutput> {
   const read = deps.store.shownSpecs.read(deviceId, args.id);
@@ -151,7 +151,7 @@ async function queuedPatch(
 async function finishPatch(
   deps: PrototypePatchDependencies,
   deviceId: string,
-  args: PrototypePatchArgs,
+  args: PrototypePatchInput,
   sent: {
     read: { version: number };
     applied: Extract<ReturnType<typeof patchSpec>, { spec: unknown }>;
@@ -186,7 +186,7 @@ async function finishPatch(
 function plannedPatch(
   deps: PrototypePatchDependencies,
   deviceId: string,
-  args: PrototypePatchArgs,
+  args: PrototypePatchInput,
   spec: ShownSpecJson,
 ): ReturnType<typeof patchSpec> {
   const applied = patchSpec(spec, args.ops);
@@ -197,7 +197,7 @@ function plannedPatch(
 function dataWriteGuard(
   deps: PrototypePatchDependencies,
   deviceId: string,
-  args: PrototypePatchArgs,
+  args: PrototypePatchInput,
 ): PrototypePatchOutput | undefined {
   const guard = deps.store.shownSpecs.dataPatchGuard(
     deviceId,
@@ -238,7 +238,7 @@ function successfulPatchOutput(
 export async function performPrototypePatch(
   deps: PrototypePatchDependencies,
   deviceId: string,
-  args: PrototypePatchArgs,
+  args: PrototypePatchInput,
   signal?: AbortSignal,
 ): Promise<PrototypePatchOutput> {
   const supported = await deps.supportsPatch();

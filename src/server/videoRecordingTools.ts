@@ -7,10 +7,7 @@ import {
   ActionableError,
   BootedDevice,
   DeviceInfo,
-  VideoFormat,
   VideoRecordingHighlightEntry,
-  VideoRecordingHighlightInput,
-  VideoQualityPreset,
   VideoRecordingMetadata,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -44,11 +41,12 @@ import { logger } from "../utils/logger";
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,
-  type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -408,28 +406,7 @@ interface RecordingToolContext {
   requesterResolver: RecordingRequesterResolver;
 }
 
-export interface VideoRecordingArgs {
-  action: "start" | "stop";
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: "android" | "ios";
-  deviceId?: string;
-  qualityPreset?: VideoQualityPreset;
-  targetBitrateKbps?: number;
-  maxThroughputMbps?: number;
-  fps?: number;
-  resolution?: {
-    width: number;
-    height: number;
-  };
-  format?: VideoFormat;
-  maxDuration?: number;
-  outputName?: string;
-  recordingId?: string;
-  sessionUuid?: string;
-  device?: string;
-  highlights?: VideoRecordingHighlightInput[];
-  display?: string;
-}
+export type VideoRecordingArgs = z.output<typeof videoRecordingSchema>;
 
 const resolutionSchema = z.object({
   width: z.number().int().positive(),
@@ -689,10 +666,10 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
     assertLifecycleCallerHoldsDevice({ ...input, force: false });
   },
   baseSessionUuid(sessionUuid) {
-    if (!DaemonState.getInstance().isInitialized()) {
+    const sessionManager = defaultDaemonContext.sessionManager();
+    if (!sessionManager) {
       return sessionUuid;
     }
-    const sessionManager = DaemonState.getInstance().getSessionManager();
     return resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) ?? sessionUuid;
   },
   connectionOwnsDeviceSession(mcpSessionId, deviceId, ownerBaseSessionUuid) {
@@ -711,10 +688,8 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
       : undefined;
   },
   isDeviceHeld(deviceId) {
-    return (
-      DaemonState.getInstance().isInitialized() &&
-      DaemonState.getInstance().getSessionManager().getSessionForDevice(deviceId) !== null
-    );
+    const owner = defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId);
+    return owner !== undefined && owner !== null;
   },
 };
 

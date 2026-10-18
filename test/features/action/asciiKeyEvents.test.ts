@@ -118,6 +118,17 @@ describe("buildAndroidInputTextPlan", () => {
     ]);
   });
 
+  test("a pre-31 chunk types in at most half of the 15 s ADB command timeout (#13172)", () => {
+    // Measured on an API 30 emulator: 13 ms per character (1000 chars took 13 s, 4096 took 47 s).
+    const measuredMsPerChar = 13;
+    const adbCommandTimeoutMs = 15_000;
+    const plan = buildAndroidInputTextPlan("a".repeat(6000), 30);
+    const longest = Math.max(
+      ...plan.commands.map((command) => (decodeInputTextCommand(command) ?? "").length),
+    );
+    expect(longest * measuredMsPerChar).toBeLessThanOrEqual(adbCommandTimeoutMs / 2);
+  });
+
   test("keeps a space with the character after it at a pre-31 chunk boundary", () => {
     const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
     const plan = buildAndroidInputTextPlan("a".repeat(size - 1) + " b", 30);
@@ -140,6 +151,15 @@ describe("buildAndroidInputTextPlan", () => {
     const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
     const plan = buildAndroidInputTextPlan(" ".repeat(size + 1), 30);
     expect(plan.commands.length).toBe(2);
+  });
+
+  test("keeps one space with the next letter after a whole chunk of spaces", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan(" ".repeat(size) + "b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand(" ".repeat(size - 1)),
+      buildAndroidInputTextCommand(" b"),
+    ]);
   });
 
   test("chunks at 32 characters on API 31+ and when the level is unknown", () => {

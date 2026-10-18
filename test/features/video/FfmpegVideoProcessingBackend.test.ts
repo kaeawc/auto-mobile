@@ -32,10 +32,11 @@ import { parseSimulatorDisplays } from "../../../src/utils/ios-cmdline-tools/Sim
 import type { FfmpegClient } from "../../../src/utils/media/FfmpegClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeRecordingProcess } from "../../fakes/FakeRecordingProcess";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbProcess } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 import {
@@ -774,12 +775,13 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const captureSpawned = new Promise<void>((resolve) => {
       resolveCaptureSpawned = resolve;
     });
-    const adb = {
-      spawn: async () => {
+    class SpawnSignalAdb extends FakeAdbExecutor {
+      override async spawn(): Promise<AdbProcess> {
         resolveCaptureSpawned?.();
         return captureProcess;
-      },
-    } as unknown as AdbExecutor;
+      }
+    }
+    const adb = new SpawnSignalAdb();
     const controller = new AbortController();
     backend = new FfmpegVideoProcessingBackend(
       new FakeAdbClientFactory(adb),

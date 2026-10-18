@@ -665,6 +665,24 @@ describe("CtrlProxyManager", function () {
     });
   });
 
+  test.each([
+    ["serial-qualified", "error: device 'test-device' not found", "deviceConnection"],
+    ["unqualified", "error: device not found", "deviceConnection"],
+    ["another device's serial", "error: device 'emulator-9999' not found", "unknown"],
+  ] as const)(
+    "classifies a %s missing-device compatibility failure (#13392)",
+    async (_name, error, category) => {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeAdb,
+        new FakeTimer(),
+      );
+      manager.ensureCompatibleVersion = async () => ({ status: "failed", error });
+      const result = await manager.setup();
+      expect(result).toMatchObject({ success: false, error, category });
+    },
+  );
+
   test("quotes a hostile installed APK path before sha256sum", async function () {
     const apkPath = "/data/app/base$(id).apk";
     fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {

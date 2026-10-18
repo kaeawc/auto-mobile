@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   readCaptureStageRecords,
@@ -39,13 +39,10 @@ function sampleRecord(overrides: Partial<CaptureStageRecord> = {}): CaptureStage
 
 describe("#4387 aggregate-egress-baseline script", () => {
   let dir: string;
+  const scratch = useScratchRoot("egress-baseline-");
 
   beforeEach(() => {
-    dir = mkdtempSync(path.join(tmpdir(), "egress-baseline-"));
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    dir = scratch.next();
   });
 
   test("reads every stage-latency record under the directory, recursing into per-run subdirs", async () => {

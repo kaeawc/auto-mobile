@@ -72,6 +72,8 @@ export interface HierarchySyncClient {
 export interface DeviceHierarchyCaptureDependencies {
   adbFactory?: AdbClientFactory;
   syncClientFactory?: (device: BootedDevice) => HierarchySyncClient;
+  /** Where Android clients come from when no `syncClientFactory` is injected. */
+  androidClients?: AndroidHierarchyClients;
   settle?: SettleObserve;
   viewHierarchy?: ViewHierarchyRequestReader;
   timer?: Timer;
@@ -140,24 +142,36 @@ async function requestSyncHierarchy(
   return synced;
 }
 
+/** The Android client lookups a capture uses; `AndroidCtrlProxyClient`'s statics satisfy it. */
+export interface AndroidHierarchyClients {
+  getInstance(device: BootedDevice, adbFactory?: AdbClientFactory): HierarchySyncClient;
+  createForObservationRead(
+    device: BootedDevice,
+    adbFactory?: AdbClientFactory,
+    existing?: AndroidCtrlProxyClient,
+  ): HierarchySyncClient;
+}
+
 function newHierarchyClient(
   device: BootedDevice,
-  adbFactory?: AdbClientFactory,
+  dependencies: DeviceHierarchyCaptureDependencies,
   transient = false,
   existing?: AndroidCtrlProxyClient | IOSCtrlProxyClient | null,
 ): HierarchySyncClient {
+  const { adbFactory } = dependencies;
+  const clients = dependencies.androidClients ?? AndroidCtrlProxyClient;
   if (device.platform === "ios") {
     return transient
       ? IOSCtrlProxyClient.createForObservationRead(device)
       : IOSCtrlProxyClient.getInstance(device);
   }
   return transient
-    ? AndroidCtrlProxyClient.createForObservationRead(
+    ? clients.createForObservationRead(
         device,
         adbFactory,
         existing instanceof AndroidCtrlProxyClient ? existing : undefined,
       )
-    : AndroidCtrlProxyClient.getInstance(device, adbFactory);
+    : clients.getInstance(device, adbFactory);
 }
 
 function resolveHierarchyClient(
@@ -171,7 +185,7 @@ function resolveHierarchyClient(
   const existing = existingHierarchyClient(device);
   if (!observerMode) {
     return {
-      syncClient: existing ?? newHierarchyClient(device, dependencies.adbFactory),
+      syncClient: existing ?? newHierarchyClient(device, dependencies),
       transient: false,
       owned: false,
     };
@@ -187,7 +201,7 @@ function resolveHierarchyClient(
     return { syncClient: existing, transient: false, owned };
   }
   return {
-    syncClient: newHierarchyClient(device, dependencies.adbFactory, true, existing),
+    syncClient: newHierarchyClient(device, dependencies, true, existing),
     transient: true,
     owned: false,
   };

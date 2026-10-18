@@ -174,7 +174,9 @@ than the `adb shell input stylus` cells has been demonstrated.
    lost. A pressure _curve_ is carried by an optional per-point `pressure` on
    `dragPath` points, which already carry per-segment timing; `tapAt` and `swipeAt`
    carry the constant only. The first slice accepts the constant only, because no
-   curve is proven injectable yet.
+   curve is proven injectable yet, and on the `adb shell input` backend that constant
+   can only be `1.0` (the shell hard-codes it): that backend's capability is
+   `pressure: 1.0`, and any other value is rejected under point 2, not rounded.
 2. **Fail loudly instead of downgrading.** If the active device or path cannot honor
    a requested `pointer`, return an actionable error naming the missing capability.
    Never fall back to a finger touch: a silent downgrade is exactly the failure
@@ -188,30 +190,44 @@ than the `adb shell input stylus` cells has been demonstrated.
    pressure curve, hover) in the device or session description so a client can
    choose without trial and error, and so the error in point 2 is derived from the
    same data.
-5. **Stage by what is proven.** First slice: `pointer.toolType: "stylus"` with
-   constant pressure on Android through the `adb shell input` source prefix (the
-   only path demonstrated in source, no root). Pressure curves, tilt, eraser and
-   hover wait for the experiments below.
+5. **Stage by what is proven.** First slice: `pointer.toolType: "stylus"` at the
+   backend's fixed pressure (`1.0`) on `tapAt` and a straight two-point `swipeAt`, on
+   Android through the `adb shell input` source prefix (the only path demonstrated in
+   source, no root). `dragPath` is deferred: the shell offers a two-point `swipe` that
+   interpolates a single segment, and `motionevent` calls that each get a fresh
+   timestamp and down-time, and nothing in the source shows a 2–100-point,
+   per-segment-timed path staying one continuous contact instead of lifting between
+   invocations. Pressure curves, tilt, eraser and hover wait for the experiments
+   below.
 
 ## Recording
 
 Extending `recordDeviceGestures` needs the gesture event to carry a tool type and a
-pressure series, and the exported `swipeAt`/`dragPath` step to carry `pointer`:
+pressure series, and the exported `tapAt`, `swipeAt` or `dragPath` step to carry
+`pointer`:
 
 - `GetEventReader`/`TouchFrameReconstructor` must read `ABS_MT_TOOL_TYPE`,
   `BTN_TOOL_PEN`, `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and keep per-contact pressure over
   time, not just the last value.
 - Event-node discovery must find and read the pen's node as well as the multitouch
   one, and handle non-multitouch contact coordinates (`ABS_X`/`ABS_Y`).
+- Recorded pressure is a raw integer in the device's own range, but the contract is
+  0–1. `TouchNodeDiscovery` must therefore parse the pressure axis minimum and maximum
+  from `getevent -p`, and export normalizes against it. A missing or degenerate range
+  (no axis, or `max <= min`) exports no `pressure` and warns, rather than writing a
+  contract-invalid sample.
 - `GestureClassifier` must keep the tool type through classification, and
   hover-only sequences (pen in range, no `BTN_TOUCH`) must not be dropped as noise.
 - A drawn stroke needs path sampling and a drag classification (a new
   `GestureEventType`) exported as `dragPath`, with the sampled pressure written to the
   per-point `pressure`; attaching `pointer` to a `swipeAt` keeps only the endpoints. A
   stationary stylus contact exports as `tapAt` with `pointer`.
-- Export must degrade visibly: a plan step recorded from stylus input and replayed
-  on a platform that cannot honor it should warn at export (as the existing geometry
-  warnings do), not silently become a finger step.
+- Export preserves `pointer` and does not guess the replay target: the device is only
+  chosen when `executePlan` runs, so the capability check and its error from point 2
+  of the API shape happen at replay, when the active device is resolved. Export-time
+  warnings are limited to source-side uncertainty (an unknown tool type, a missing
+  pressure range, a path that was sampled coarsely), as the existing geometry
+  warnings are. A stylus step never silently becomes a finger step at either point.
 
 ## Verification plan
 
@@ -234,8 +250,9 @@ follow-up issue (see below) so it can be done where the hardware exists:
 
 The feasible parts, filed from this note:
 
-- #13081: `pointer.toolType` (stylus, constant pressure) on `swipeAt`/`dragPath`
-  through `adb shell input`, with capability-gated errors. Per-device capability
+- #13081: `pointer.toolType` (stylus, pressure fixed at `1.0`) on `tapAt` and a
+  straight `swipeAt` through `adb shell input`, with capability-gated errors;
+  `dragPath` waits for #13082. Per-device capability
   reporting (recommendation 4) starts here, as the data those errors are derived from.
 - #13082: Android emulator and device experiments (pressure curve, tilt, hover,
   `uinput`, minimum API level).

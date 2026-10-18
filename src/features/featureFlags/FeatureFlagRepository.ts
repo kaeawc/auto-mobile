@@ -1,6 +1,9 @@
 import type { Kysely } from "kysely";
+import { z } from "zod";
 import { ensureMigrations, getDatabase } from "../../db/database";
 import type { Database } from "../../db/types";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger, type Logger } from "../../utils/logger";
 import type {
   FeatureFlagConfig,
   FeatureFlagDefinition,
@@ -24,11 +27,38 @@ export interface FeatureFlagRepository {
   ): Promise<void>;
 }
 
+const featureFlagConfigSchema = z.record(z.string(), z.unknown());
+
+/**
+ * Decode a stored `config_json`. A malformed or wrongly shaped value must neither throw (which
+ * would fail the whole flag listing and service startup) nor silently drive behaviour, so it
+ * logs a warning and reads as null; the service then falls back to the definition default (#11859).
+ */
+export function parseFeatureFlagConfig(
+  key: string,
+  configJson: string | null,
+  log: Logger = logger,
+): FeatureFlagConfig | null {
+  if (!configJson) {
+    return null;
+  }
+  try {
+    return featureFlagConfigSchema.parse(JSON.parse(configJson));
+  } catch (error) {
+    log.warn(
+      `[FeatureFlagRepository] Ignoring invalid config_json for flag "${key}": ${errorMessage(error)}`,
+    );
+    return null;
+  }
+}
+
 export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   private readonly injectedDb: Kysely<Database> | null;
+  private readonly logger: Logger;
 
-  constructor(db?: Kysely<Database>) {
+  constructor(db?: Kysely<Database>, log?: Logger) {
     this.injectedDb = db ?? null;
+    this.logger = log ?? logger;
   }
 
   private async ensureReady(): Promise<void> {
@@ -74,7 +104,7 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
     return rows.map((row) => ({
       key: row.key as FeatureFlagKey,
       enabled: row.enabled === 1,
-      config: row.config_json ? JSON.parse(row.config_json) : null,
+      config: parseFeatureFlagConfig(row.key, row.config_json, this.logger),
       updatedAt: row.updated_at,
     }));
   }

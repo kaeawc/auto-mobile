@@ -981,6 +981,80 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
   public func webView(_ webView: WKWebView, didCommit _: WKNavigation!)
   public func webViewWebContentProcessDidTerminate(_ webView: WKWebView)
 
+// sdk-wire/NetworkWireModels.swift
+public struct NetworkMockRuleDTO: Codable, Sendable, Equatable
+  public let mockId: String
+  public let host: String
+  public let path: String
+  public let method: String
+  public let limit: Int?
+  public let remaining: Int?
+  public let statusCode: Int
+  public let responseHeaders: [String: String]
+  public let responseBody: String
+  public let contentType: String
+  public init( mockId: String, host: String, path: String, method: String, limit: Int?, remaining: Int?, statusCode: Int, responseHeaders: [String: String], responseBody: String, contentType: String )
+public struct RejectedMockRule: Codable, Equatable, Sendable
+  public let mockId: String
+  public let reason: String
+  public init(mockId: String, reason: String)
+public struct NetworkErrorSimulationDTO: Codable, Sendable, Equatable
+  public let enabled: Bool
+  public let errorType: String?
+  public let limit: Int?
+  public let expiresAtEpochMs: Int64?
+  public let remainingMs: Int64?
+  public init( enabled: Bool, errorType: String?, limit: Int?, expiresAtEpochMs: Int64?, remainingMs: Int64? = nil )
+public enum NetworkFaultTransport: String, Codable, Equatable, Sendable
+  case urlSession
+  case webSocket
+  case nwConnection
+  case webView
+public enum NetworkFaultAction: String, Codable, Equatable, Sendable
+  case response
+  case status
+  case error
+  case latency
+  case bandwidth
+  case dropBytes
+  case closeConnection
+  case rejectFrame
+public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable
+  public let faultId: String
+  public let transport: NetworkFaultTransport?
+  public let host: String?
+  public let port: Int?
+  public let scheme: String?
+  public let path: String?
+  public let method: String?
+  public let headers: [String: String]?
+  public let origin: String?
+  public let connectionId: String?
+  public let sessionId: String?
+  public let action: NetworkFaultAction
+  public let statusCode: Int?
+  public let responseHeaders: [String: String]?
+  public let responseBody: String?
+  public let contentType: String?
+  public let errorType: String?
+  public let delayMs: Int?
+  public let bandwidthBytesPerSecond: Int?
+  public let dropBytes: Int?
+  public let limit: Int?
+  public let expiresAtEpochMs: Int64?
+  public let scope: String?
+  public let dryRun: Bool
+  public init( faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String]?, origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction, statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?, contentType: String?, errorType: String?, delayMs: Int?, bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?, expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool )
+public struct SetMockRulesBody: Codable, Sendable
+  public let rules: [NetworkMockRuleDTO]
+  public init(rules: [NetworkMockRuleDTO])
+public struct SetNetworkFaultRulesBody: Codable, Sendable
+  public let rules: [NetworkFaultRuleDTO]
+  public init(rules: [NetworkFaultRuleDTO])
+public struct SetMockRulesReply: Codable, Sendable
+  public let rejected: [RejectedMockRule]?
+  public init(rejected: [RejectedMockRule]?)
+
 // sdk-wire/SdkBounds.swift
 public enum BoundsArithmetic
   public static func signedDifference(_ end: Int, _ start: Int) -> Int

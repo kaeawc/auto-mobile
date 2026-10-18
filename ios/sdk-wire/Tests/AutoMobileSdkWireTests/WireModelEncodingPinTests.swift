@@ -73,11 +73,25 @@ final class WireModelEncodingPinTests: XCTestCase {
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(bare)) as? [String: Any]
         )
-        for key in ["accessibilityLabel", "accessibilityIdentifier", "backgroundColor", "borderColor", "semanticLinks", "children"] {
+        for key in [
+            "accessibilityLabel",
+            "accessibilityIdentifier",
+            "backgroundColor",
+            "borderColor",
+            "semanticLinks",
+            "children",
+        ] {
             XCTAssertNil(object[key], key)
         }
-        XCTAssertFalse(String(decoding: try JSONEncoder().encode(bare), as: UTF8.self).contains("null"))
-        let empty = SdkViewHierarchy(timestamp: 0, bundleId: nil, screenScale: 1, screenWidth: 1, screenHeight: 1, root: nil)
+        XCTAssertFalse(try String(decoding: JSONEncoder().encode(bare), as: UTF8.self).contains("null"))
+        let empty = SdkViewHierarchy(
+            timestamp: 0,
+            bundleId: nil,
+            screenScale: 1,
+            screenWidth: 1,
+            screenHeight: 1,
+            root: nil
+        )
         let hierarchy = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(empty)) as? [String: Any]
         )

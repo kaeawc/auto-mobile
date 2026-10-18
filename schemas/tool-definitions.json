@@ -3785,6 +3785,93 @@
       "required": ["scope", "key"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "suite": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean",
+          "const": true
+        },
+        "valueFormat": {
+          "type": "string",
+          "enum": ["canonical-json", "sdk-description"]
+        },
+        "warning": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "storeRoute": {
+          "type": "string",
+          "enum": ["sdk", "container-plist", "defaults"]
+        }
+      },
+      "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -16079,6 +16166,31 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["call", "accept", "cancel", "busy", "hold"]
+        },
+        "phoneNumber": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "supported", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -31264,6 +31376,30 @@
       },
       "required": ["phoneNumber", "message"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "phoneNumber": {
+          "type": "string"
+        },
+        "messageLength": {
+          "type": "number"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "phoneNumber", "messageLength", "supported", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33158,6 +33294,93 @@
       },
       "required": ["scope", "key", "value", "type"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "suite": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean",
+          "const": true
+        },
+        "valueFormat": {
+          "type": "string",
+          "enum": ["canonical-json", "sdk-description"]
+        },
+        "warning": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "storeRoute": {
+          "type": "string",
+          "enum": ["sdk", "container-plist", "defaults"]
+        }
+      },
+      "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
+      "additionalProperties": {}
     }
   },
   {

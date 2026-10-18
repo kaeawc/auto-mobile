@@ -292,7 +292,6 @@
 1	src/utils/android-cmdline-tools/AdbClient.ts	eslint(max-params)
 1	src/utils/android-cmdline-tools/AdbClient.ts	oxlint-disable(auto-mobile/no-unknown-cast)
 1	src/utils/android-cmdline-tools/AdbClientFactory.ts	eslint(max-classes-per-file)
-1	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	eslint(max-params)
 1	src/utils/android-cmdline-tools/AndroidUserTargetResolver.ts	eslint(max-classes-per-file)
 1	src/utils/android-cmdline-tools/AvdManagerClient.ts	eslint(max-classes-per-file)
 1	src/utils/android-cmdline-tools/EmulatorConsoleClient.ts	eslint(max-classes-per-file)

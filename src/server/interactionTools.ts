@@ -71,7 +71,7 @@ import {
 } from "../models/ShakeOptions";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { runSessionRotationMutation } from "./sessionRotation";
 import { Rotate, type RotateOptions } from "../features/action/Rotate";
 import {
@@ -2607,8 +2607,8 @@ export async function rotateHandler(
       throw new ActionableError("lockOrientation is supported only on Android devices.");
     }
     const manager =
-      args.sessionUuid && device.platform === "android" && DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
+      args.sessionUuid && device.platform === "android"
+        ? defaultDaemonContext.sessionManager()
         : undefined;
     const deadlineMs = resolveTransportDeadlineMs(args);
     const rotate = (deps.rotateFactory ?? defaultRotateFactory)(device, {

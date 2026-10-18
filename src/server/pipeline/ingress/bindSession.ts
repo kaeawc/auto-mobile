@@ -1,5 +1,5 @@
-import { DaemonState } from "../../../daemon/daemonState";
 import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
+import type { SessionManager } from "../../../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
 import { SessionReleaseBroadcaster } from "../../sessionReleaseBroadcast";
 import {
@@ -67,8 +67,8 @@ export async function admitNamedSession(
     providedSessionUuid,
     plan.context.requestMcpSessionId,
   );
-  await DaemonState.getInstance()
-    .getSessionManager()
+  await defaultDaemonContext
+    .requireSessionManager()
     .admitIssuedSessionForAutomation(
       providedSessionUuid,
       sessionExecutionMetadataOf(execution),
@@ -137,9 +137,7 @@ function isRecordingStopById(name: string, parsedParams: unknown): boolean {
   return params.action === "stop" && typeof params.recordingId === "string";
 }
 
-type DaemonSessionManager = ReturnType<
-  ReturnType<typeof DaemonState.getInstance>["getSessionManager"]
->;
+type DaemonSessionManager = SessionManager;
 
 /** Whether the named session is one this call may bind: admitted for automation, or a direct session. */
 function namedSessionIsBindable(
@@ -201,15 +199,15 @@ export async function bindNamedSession(
 
 async function attachToPool(sessionUuid: string, mcpSessionId: string | undefined): Promise<void> {
   if (mcpSessionId) {
-    await DaemonState.getInstance()
-      .getDevicePool()
+    await defaultDaemonContext
+      .requireDevicePoolWrites()
       .attachExplicitSessionUuidCall(sessionUuid, mcpSessionId);
   }
 }
 
 function ownedByOtherConnection(sessionUuid: string, mcpSessionId: string | undefined): boolean {
-  return DaemonState.getInstance()
-    .getDevicePool()
+  return defaultDaemonContext
+    .requireFullDevicePool()
     .isSessionOwnedByOtherConnection(sessionUuid, mcpSessionId);
 }
 

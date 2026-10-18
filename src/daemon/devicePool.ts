@@ -5325,7 +5325,12 @@ export class DevicePool {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string> {
-    return this.deviceAllocation.assignDeviceToSession(sessionId, platform, recoveryTarget);
+    return this.deviceAllocation.assignDeviceToSession(
+      sessionId,
+      platform,
+      recoveryTarget,
+      getAbortSignal(),
+    );
   }
 
   /**
@@ -5398,6 +5403,7 @@ export class DevicePool {
       platform,
       recoveryTarget,
       settledRecoveryLoss,
+      getAbortSignal(),
     );
   }
 
@@ -5405,7 +5411,7 @@ export class DevicePool {
     sessionId: string,
     platform?: Platform,
   ): ReturnType<DevicePool["tryAssignDevice"]> {
-    return this.deviceAllocation.tryAssignUnownedDevice(sessionId, platform);
+    return this.deviceAllocation.tryAssignUnownedDevice(sessionId, platform, getAbortSignal());
   }
 
   /**
@@ -5634,35 +5640,7 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    return this.deviceAllocation.tryAssignDeviceWithCriteria(sessionId, criteria);
-  }
-
-  private tryAssignFrom(
-    sessionId: string,
-    selectCandidates: () => PooledDevice[],
-    emptyCandidatePoolReason: string,
-    hasPendingRecovery: () => boolean,
-    recoveryTarget?: SessionRecoveryTarget,
-    settledRecoveryLoss = false,
-  ): Promise<{
-    success: boolean;
-    deviceId?: string;
-    session?: Session;
-    shouldWait: boolean;
-    totalDevices: number;
-    livenessUnknown?: boolean;
-    refreshCompleteness?: DiscoveryCompleteness;
-    refreshFailure?: string;
-    refreshCompleted?: boolean;
-  }> {
-    return this.deviceAllocation.tryAssignFrom(
-      sessionId,
-      selectCandidates,
-      emptyCandidatePoolReason,
-      hasPendingRecovery,
-      recoveryTarget,
-      settledRecoveryLoss,
-    );
+    return this.deviceAllocation.tryAssignDeviceWithCriteria(sessionId, criteria, getAbortSignal());
   }
 
   /**

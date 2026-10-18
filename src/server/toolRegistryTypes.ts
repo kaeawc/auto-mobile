@@ -144,12 +144,33 @@ export interface ToolTraits {
   recordsNavigation?: boolean;
   /** Read-only: nothing happened on the device, so an artifact write failure stays loud. */
   loudArtifactWrites?: boolean;
+  /**
+   * An action whose embedded observation defaults to the compact skeleton (#5872, #5886). Declared
+   * only by tools that also expose the `raw`/`project` opt-out, so the default never becomes a
+   * one-way door (`test/server/skeletonDefaultDrift.test.ts`).
+   */
+  defaultsToSkeletonObservation?: boolean;
 }
+
+/** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
+export const SKELETON_OBSERVATION = { defaultsToSkeletonObservation: true } as const;
 
 /** Just the trait fields of a registration's options, for the registered tool and the recorder. */
 export function pickToolTraits(options: ToolTraits): ToolTraits {
-  const { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites } = options;
-  return { stopsApp, replacesProcess, recordsNavigation, loudArtifactWrites };
+  const {
+    stopsApp,
+    replacesProcess,
+    recordsNavigation,
+    loudArtifactWrites,
+    defaultsToSkeletonObservation,
+  } = options;
+  return {
+    stopsApp,
+    replacesProcess,
+    recordsNavigation,
+    loudArtifactWrites,
+    defaultsToSkeletonObservation,
+  };
 }
 
 export interface DeviceAwareToolOptions<T = Record<string, unknown>>

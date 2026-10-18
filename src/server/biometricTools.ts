@@ -1,4 +1,5 @@
 import { toActionableError } from "../models/ActionableError";
+import { SKELETON_OBSERVATION } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth, BiometricAuthOptions } from "../features/action/BiometricAuth";
@@ -166,6 +167,6 @@ export function registerBiometricTools() {
     "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     biometricAuthSchema,
     biometricAuthHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
   );
 }

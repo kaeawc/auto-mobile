@@ -1,4 +1,5 @@
 import { defineDeviceTool } from "./defineTool";
+import { SKELETON_OBSERVATION } from "./toolRegistryTypes";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import {
   getAppPermissionsResultSchema,
@@ -1554,7 +1555,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. prototype:true (iOS simulators only) relaunches the app with the prototype agent injected, so its current state is lost.",
     launchAppSchema,
     launchAppHandler,
-    { defaultEnabled: true, transportRecovery: "connect", outputSchema: launchAppResultSchema },
+    {
+      defaultEnabled: true,
+      transportRecovery: "connect",
+      outputSchema: launchAppResultSchema,
+      ...SKELETON_OBSERVATION,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1562,7 +1568,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Terminate app by package name",
     terminateAppSchema,
     terminateAppHandler,
-    { defaultEnabled: true, outputSchema: terminateAppResultSchema, stopsApp: true },
+    {
+      defaultEnabled: true,
+      outputSchema: terminateAppResultSchema,
+      stopsApp: true,
+      ...SKELETON_OBSERVATION,
+    },
   );
 
   ToolRegistry.registerDeviceAware(

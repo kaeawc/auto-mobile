@@ -1,4 +1,5 @@
 import { defineDeviceTool } from "./defineTool";
+import { SKELETON_OBSERVATION } from "./toolRegistryTypes";
 import { resolveTransportDeadlineMs } from "./formTools";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
@@ -2695,6 +2696,7 @@ const defaultWakeAndUnlockFactory: NonNullable<
 
 /** UI interactions that may cause in-app navigation (the navigation recorder records them). */
 const NAV = { recordsNavigation: true } as const;
+const NAV_SKELETON = { ...NAV, ...SKELETON_OBSERVATION } as const;
 
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
@@ -2705,7 +2707,7 @@ export const pressButtonTool = defineDeviceTool({
     outputSchema: pressButtonResultSchema,
     defaultEnabled: true,
     supportsProgress: true,
-    ...NAV,
+    ...NAV_SKELETON,
   },
 });
 
@@ -2725,7 +2727,7 @@ export const recentAppsTool = defineDeviceTool({
   name: "recentApps",
   description: "Open recent apps",
   input: recentAppsInput,
-  options: { defaultEnabled: true, supportsProgress: true },
+  options: { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
 });
 
 export const recentAppsSchema = recentAppsTool.schema;
@@ -2734,7 +2736,7 @@ const homeScreenTool = defineDeviceTool({
   name: "homeScreen",
   description: "Go to home screen",
   input: homeScreenInput,
-  options: { defaultEnabled: true, supportsProgress: true },
+  options: { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
 });
 
 export const homeScreenSchema = homeScreenTool.schema;
@@ -2743,7 +2745,7 @@ export const selectAllTextTool = defineDeviceTool({
   name: "selectAllText",
   description: "Select all text in focused input",
   input: selectAllTextInput,
-  options: { defaultEnabled: false, supportsProgress: true },
+  options: { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
 });
 
 export const selectAllTextSchema = selectAllTextTool.schema;
@@ -2752,7 +2754,7 @@ export const shakeTool = defineDeviceTool({
   name: "shake",
   description: "Shake device; iOS Simulator only.",
   input: shakeInput,
-  options: { defaultEnabled: false, supportsProgress: true },
+  options: { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
 });
 
 export const shakeSchema = shakeTool.schema;
@@ -2761,7 +2763,12 @@ export const rotateTool = defineDeviceTool({
   name: "rotate",
   description: "Rotate device orientation",
   input: rotateInput,
-  options: { defaultEnabled: false, supportsProgress: true, outputSchema: rotateResultSchema },
+  options: {
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: rotateResultSchema,
+    ...SKELETON_OBSERVATION,
+  },
 });
 
 export const rotateSchema = rotateTool.schema;
@@ -3132,7 +3139,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3140,7 +3147,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     sendKeysSchema,
     sendKeysHandler,
-    { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema, ...NAV },
+    {
+      defaultEnabled: true,
+      supportsProgress: true,
+      outputSchema: sendKeysResultSchema,
+      ...NAV_SKELETON,
+    },
   );
 
   wakeAndUnlockTool.register(ToolRegistry, wakeAndUnlockHandler);
@@ -3150,7 +3162,11 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Open URL in browser",
     openLinkSchema,
     openLinkHandler,
-    { defaultEnabled: false, outputSchema: openLinkResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: openLinkResultSchema,
+      ...SKELETON_OBSERVATION,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3158,7 +3174,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     tapOnSchema,
     (device, args, progress, signal) => tapOnHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema, ...NAV },
+    {
+      defaultEnabled: true,
+      supportsProgress: true,
+      outputSchema: tapOnResultSchema,
+      ...NAV_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3166,7 +3187,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
     (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3174,7 +3195,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     dragPathSchema,
     dragPathHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3192,7 +3213,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
     (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3200,7 +3221,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag and drop element",
     dragAndDropSchema,
     (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, supportsProgress: true, ...NAV },
+    { defaultEnabled: false, supportsProgress: true, ...NAV_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3208,7 +3229,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
     (device, args, progress, signal) => swipeOnHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...NAV },
+    { defaultEnabled: true, supportsProgress: true, ...NAV_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3219,7 +3240,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       defaultEnabled: false,
       supportsProgress: true,
-      ...NAV,
+      ...NAV_SKELETON,
     },
   );
 

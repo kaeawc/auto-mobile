@@ -304,6 +304,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const finalizedResponse = finalizeToolResponse(response, {
       name,
       loudArtifactWrites: traits?.loudArtifactWrites,
+      defaultsToSkeletonObservation: traits?.defaultsToSkeletonObservation,
       outputSchema,
       args,
       sessionUuid,

@@ -484,6 +484,7 @@ describe("finalizeToolResponse", () => {
     // covered separately in "action-tool skeleton default (#5872)".
     const finalized = finalizeToolResponse(response, {
       name: "tapOn",
+      defaultsToSkeletonObservation: true,
       sessionUuid: "s1",
       args: { project: "full" },
     });
@@ -516,7 +517,7 @@ describe("finalizeToolResponse", () => {
         const embeddedFull = (
           finalizeToolResponse(
             createStructuredToolResponse({ success: true, observation: load() }),
-            { name: "tapOn", args: { project: "full" } },
+            { name: "tapOn", defaultsToSkeletonObservation: true, args: { project: "full" } },
           ).structuredContent as { observation: ObserveResult }
         ).observation;
         const standaloneSkeleton = finalizeToolResponse(createStructuredToolResponse(load()), {
@@ -526,7 +527,7 @@ describe("finalizeToolResponse", () => {
         const embeddedSkeleton = (
           finalizeToolResponse(
             createStructuredToolResponse({ success: true, observation: load() }),
-            { name: "tapOn", args: { project: "skeleton" } },
+            { name: "tapOn", defaultsToSkeletonObservation: true, args: { project: "skeleton" } },
           ).structuredContent as { observation: ObserveResult }
         ).observation;
         const rootBounds = (observation: ObserveResult) => {
@@ -550,7 +551,10 @@ describe("finalizeToolResponse", () => {
           success: true,
           observation: makeObserveResult(),
         });
-        const finalized = finalizeToolResponse(response, { name });
+        const finalized = finalizeToolResponse(response, {
+          name,
+          defaultsToSkeletonObservation: true,
+        });
         const observation = structuredPayload(finalized).observation;
         expect(Array.isArray(observation.skeleton)).toBe(true);
         expect(observation.viewHierarchy).toBeUndefined();
@@ -570,6 +574,7 @@ describe("finalizeToolResponse", () => {
       });
       const finalized = finalizeToolResponse(response, {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         args: { project: "full" },
       });
       const observation = structuredPayload(finalized).observation;
@@ -584,6 +589,7 @@ describe("finalizeToolResponse", () => {
       });
       const finalized = finalizeToolResponse(response, {
         name: "sendKeys",
+        defaultsToSkeletonObservation: true,
         args: { raw: true, commands: [{ action: "type", text: "hello" }] },
       });
       const observation = structuredPayload(finalized).observation;
@@ -597,7 +603,10 @@ describe("finalizeToolResponse", () => {
         packageName: "com.example",
         observation: makeObserveResult(),
       });
-      const finalized = finalizeToolResponse(response, { name: "launchApp" });
+      const finalized = finalizeToolResponse(response, {
+        name: "launchApp",
+        defaultsToSkeletonObservation: true,
+      });
       const observation = structuredPayload(finalized).observation;
       expect(Array.isArray(observation.skeleton)).toBe(true);
       expect(observation.viewHierarchy).toBeUndefined();
@@ -608,7 +617,11 @@ describe("finalizeToolResponse", () => {
         success: true,
         observation: makeObserveResult(),
       });
-      const finalized = finalizeToolResponse(response, { name: "tapOn", internal: true });
+      const finalized = finalizeToolResponse(response, {
+        name: "tapOn",
+        defaultsToSkeletonObservation: true,
+        internal: true,
+      });
       const observation = structuredPayload(finalized).observation;
       expect(observation.viewHierarchy).toBeDefined();
       expect(observation.skeleton).toBeUndefined();
@@ -623,7 +636,10 @@ describe("finalizeToolResponse", () => {
           success: true,
           observation: makeObserveResult(),
         });
-        const finalized = finalizeToolResponse(response, { name: "swipeOn" });
+        const finalized = finalizeToolResponse(response, {
+          name: "swipeOn",
+          defaultsToSkeletonObservation: true,
+        });
         const observation = structuredPayload(finalized).observation;
         expect(Array.isArray(observation.skeleton)).toBe(true);
         expect(observation.viewHierarchy).toBeUndefined();
@@ -637,6 +653,7 @@ describe("finalizeToolResponse", () => {
         });
         const finalized = finalizeToolResponse(response, {
           name: "swipeOn",
+          defaultsToSkeletonObservation: true,
           args: { project: "full" },
         });
         const observation = structuredPayload(finalized).observation;
@@ -651,6 +668,7 @@ describe("finalizeToolResponse", () => {
         });
         const finalized = finalizeToolResponse(response, {
           name: "swipeOn",
+          defaultsToSkeletonObservation: true,
           args: { raw: true },
         });
         const observation = structuredPayload(finalized).observation;
@@ -668,7 +686,10 @@ describe("finalizeToolResponse", () => {
             success: true,
             observation: makeObserveResult(),
           });
-          const finalized = finalizeToolResponse(response, { name: toolName });
+          const finalized = finalizeToolResponse(response, {
+            name: toolName,
+            defaultsToSkeletonObservation: true,
+          });
           const observation = structuredPayload(finalized).observation;
           expect(Array.isArray(observation.skeleton)).toBe(true);
           expect(observation.viewHierarchy).toBeUndefined();
@@ -763,7 +784,10 @@ describe("finalizeToolResponse", () => {
   test("EC5: non-observe/non-observation responses pass through unchanged", () => {
     const payload = { success: true, message: "done" };
     const response = createStructuredToolResponse(payload);
-    const finalized = finalizeToolResponse(response, { name: "pressButton" });
+    const finalized = finalizeToolResponse(response, {
+      name: "pressButton",
+      defaultsToSkeletonObservation: true,
+    });
     expect(structuredPayload(finalized)).toEqual(payload);
     expect(finalized.content[0].text).toBe(stringifyToolResponse(payload));
   });
@@ -816,7 +840,10 @@ describe("finalizeToolResponse", () => {
     };
     const response = createStructuredToolResponse({ success: true, observation });
 
-    const finalized = finalizeToolResponse(response, { name: "tapOn" });
+    const finalized = finalizeToolResponse(response, {
+      name: "tapOn",
+      defaultsToSkeletonObservation: true,
+    });
 
     expect(structuredPayload(finalized).observation.perfTiming).toBeUndefined();
     expect(observation.perfTiming).toBeDefined();
@@ -868,7 +895,10 @@ describe("finalizeToolResponse", () => {
       success: true,
       observation: makeObserveResult(),
     });
-    const finalized = finalizeToolResponse(response, { name: "tapOn" });
+    const finalized = finalizeToolResponse(response, {
+      name: "tapOn",
+      defaultsToSkeletonObservation: true,
+    });
     expect(structuredPayload(finalized).observation.elements).toBeUndefined();
     expect(JSON.parse(finalized.content[0].text).observation.elements).toBeUndefined();
   });
@@ -925,6 +955,7 @@ describe("finalizeToolResponse", () => {
     });
     const finalized = finalizeToolResponse(response, {
       name: "tapOn",
+      defaultsToSkeletonObservation: true,
       sessionUuid: "s1",
       args: { project: "full" },
     });
@@ -1036,6 +1067,7 @@ describe("finalizeToolResponse", () => {
       });
       const finalized = finalizeToolResponse(response, {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         args: { project: "full" },
       });
@@ -1060,6 +1092,7 @@ describe("finalizeToolResponse", () => {
       });
       const finalized = finalizeToolResponse(response, {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         args: { project: "full" },
       });
 
@@ -1216,6 +1249,7 @@ describe("finalizeToolResponse", () => {
 
       finalizeToolResponse(tap(), {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: trackedStore,
         delivered: false,
@@ -1231,6 +1265,7 @@ describe("finalizeToolResponse", () => {
       expect(revisions).toEqual([]);
       const next = finalizeToolResponse(tap(), {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: trackedStore,
       });
@@ -1256,6 +1291,7 @@ describe("finalizeToolResponse", () => {
 
       finalizeToolResponse(tap(), {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: trackedStore,
         delivered: false,
@@ -1263,6 +1299,7 @@ describe("finalizeToolResponse", () => {
       expect(revisions).toEqual([]);
       finalizeToolResponse(tap(), {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: trackedStore,
       });
@@ -1278,6 +1315,7 @@ describe("finalizeToolResponse", () => {
       });
       const finalized = finalizeToolResponse(response, {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: store,
         // project:"full" opts out of the #5872 skeleton default so the "full, not a
@@ -1302,7 +1340,12 @@ describe("finalizeToolResponse", () => {
       const { store } = makeStore();
       const disabled = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
       const hint: string = JSON.parse(disabled.content[0].text).observationDiff.hint;
       expect(hint).toContain("--actions-diff-observe");
@@ -1317,7 +1360,7 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
       const missingSession = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", baselineStore: store },
+        { name: "tapOn", defaultsToSkeletonObservation: true, baselineStore: store },
       );
       expectObservationDiff(missingSession, {
         mode: "full",
@@ -1359,7 +1402,13 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1408,7 +1457,12 @@ describe("finalizeToolResponse", () => {
       // repro hit: a diff response with no skeleton to act on.
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1449,7 +1503,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1476,7 +1535,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const observation = structuredPayload(finalized).observation;
@@ -1554,7 +1618,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const observation = structuredPayload(finalized).observation;
@@ -1619,6 +1688,7 @@ describe("finalizeToolResponse", () => {
         const response = createStructuredToolResponse({ success: true, observation: action });
         await settleEmbeddedObservationInResponse(response, {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           internal: false,
           createSettleObserve: () => new RealSettleObserve(fake, timer),
         });
@@ -1627,7 +1697,10 @@ describe("finalizeToolResponse", () => {
         expect(capture).toHaveBeenCalledTimes(1);
         expect(capture.mock.calls[0][2]?.observationId).toBe(adopted.observationId);
         expect(reads.mock.calls.every(([options]) => options?.skipScreenshot === true)).toBe(true);
-        const finalized = finalizeToolResponse(response, { name: "tapOn" });
+        const finalized = finalizeToolResponse(response, {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+        });
         const emitted = structuredPayload(finalized).observation;
         expect(emitted.observationScreenshotResourceUri).toBe(
           buildObservationScreenshotUri(action.deviceId, adopted.observationId),
@@ -1667,7 +1740,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const observation = structuredPayload(finalized).observation;
@@ -1696,7 +1774,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1751,7 +1834,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation as ObserveResult;
@@ -1793,7 +1881,12 @@ describe("finalizeToolResponse", () => {
         "Changed title";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const diff = structuredPayload(finalized).observation;
@@ -1828,7 +1921,12 @@ describe("finalizeToolResponse", () => {
 
         const finalized = finalizeToolResponse(
           createStructuredToolResponse({ success: true, observation: next }),
-          { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            sessionUuid: "s1",
+            baselineStore: store,
+          },
         );
         const diff = structuredPayload(finalized).observation;
         const standaloneRoot = flatRoot(standaloneFull.viewHierarchy!.hierarchy.node);
@@ -1866,7 +1964,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1892,7 +1995,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const observation = structuredPayload(finalized).observation;
@@ -1920,7 +2028,13 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1940,7 +2054,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -1964,7 +2083,13 @@ describe("finalizeToolResponse", () => {
         next.viewHierarchy!.windows![1].truncationReasons = ["max_nodes"];
         const finalized = finalizeToolResponse(
           createStructuredToolResponse({ success: true, observation: next }),
-          { name: "tapOn", sessionUuid: "s1", baselineStore: store, args },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            sessionUuid: "s1",
+            baselineStore: store,
+            args,
+          },
         );
         const diff = structuredPayload(finalized).observation;
         expect(diff.isDiff).toBe(true);
@@ -1982,7 +2107,13 @@ describe("finalizeToolResponse", () => {
             success: true,
             observation: loadAndroidHomeObserve().observe,
           }),
-          { name: "tapOn", sessionUuid: "s1", baselineStore: store, args },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            sessionUuid: "s1",
+            baselineStore: store,
+            args,
+          },
         );
         expect(structuredPayload(complete).observation.isDiff).toBe(true);
         expect("windowTruncations" in structuredPayload(complete).observation).toBe(false);
@@ -2017,7 +2148,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -2060,7 +2196,13 @@ describe("finalizeToolResponse", () => {
       // independently rather than emitting `skeleton: []`.
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -2112,7 +2254,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -2162,6 +2309,7 @@ describe("finalizeToolResponse", () => {
           createStructuredToolResponse({ success: true, observation: next }),
           {
             name: "tapOn",
+            defaultsToSkeletonObservation: true,
             args: { project },
             sessionUuid: "s1",
             baselineStore: store,
@@ -2217,7 +2365,12 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -2239,7 +2392,13 @@ describe("finalizeToolResponse", () => {
           effect: { screenChanged: true, basis: "viewHierarchy changed" },
           observation: sameScreenObserve(),
         }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const observation = structuredPayload(finalized).observation;
@@ -2268,12 +2427,19 @@ describe("finalizeToolResponse", () => {
 
       const first = finalizeToolResponse(
         createStructuredToolResponse({ success: false, observation: hierarchyLess(12) }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
       const second = finalizeToolResponse(
         createStructuredToolResponse({ success: false, observation: hierarchyLess(13) }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2310,6 +2476,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2340,6 +2507,7 @@ describe("finalizeToolResponse", () => {
       flatChild(next.viewHierarchy!.hierarchy.node, 0).checked = "true";
       finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: store,
       });
@@ -2355,6 +2523,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2371,7 +2540,12 @@ describe("finalizeToolResponse", () => {
     test("falls back to the full observation when the session baseline store is missing", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          args: { project: "full" },
+        },
       );
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -2386,7 +2560,7 @@ describe("finalizeToolResponse", () => {
     test("default projection still skeletonizes a missing-session full fallback", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1" },
+        { name: "tapOn", defaultsToSkeletonObservation: true, sessionUuid: "s1" },
       );
       const observation = structuredPayload(finalized).observation;
       expect(observation.isDiff).toBeUndefined();
@@ -2436,7 +2610,12 @@ describe("finalizeToolResponse", () => {
           success: true,
           observation: screenWithRows(["b1", "b2", "b3", "b4"]),
         }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       expect(structuredPayload(finalized).observation.isDiff).toBeUndefined();
@@ -2478,7 +2657,12 @@ describe("finalizeToolResponse", () => {
           success: true,
           observation: screenWithRows(["a1", "a2", "a3", "b4"]),
         }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       expect(structuredPayload(finalized).observation.isDiff).toBe(true);
@@ -2499,7 +2683,13 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: otherScreen }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -2523,7 +2713,12 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: otherScreen }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
       const observation = structuredPayload(finalized).observation;
 
@@ -2548,6 +2743,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2582,6 +2778,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2613,7 +2810,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -2636,6 +2838,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2664,6 +2867,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           baselineStore: store,
           args: { project: "full" },
@@ -2824,7 +3028,12 @@ describe("finalizeToolResponse", () => {
       const { store, map } = makeStore();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", baselineStore: store, args: { project: "full" } },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -2870,6 +3079,7 @@ describe("finalizeToolResponse", () => {
       const before = JSON.stringify(next);
       finalizeToolResponse(createStructuredToolResponse({ success: true, observation: next }), {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         sessionUuid: "s1",
         baselineStore: store,
       });
@@ -2911,7 +3121,12 @@ describe("finalizeToolResponse", () => {
       ];
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -2986,6 +3201,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "skeleton",
           baselineStore: skeletonStore,
         },
@@ -3009,6 +3225,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           args: { project: "full" },
           sessionUuid: "full",
           baselineStore: fullStore,
@@ -3143,6 +3360,7 @@ describe("finalizeToolResponse", () => {
         // payload handed to the artifact writer.
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           args: { project: "full" },
           artifactWriter: writer,
@@ -3189,6 +3407,7 @@ describe("finalizeToolResponse", () => {
         createStructuredToolResponse({ success: true, observation: next }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           sessionUuid: "s1",
           args: { project: "full" },
           baselineStore: store,
@@ -3240,7 +3459,13 @@ describe("finalizeToolResponse", () => {
       const writer = new FakeObservationArtifactWriter();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          artifactWriter: writer,
+        },
       );
       const observation = structuredPayload(finalized).observation;
       expect(observationOutputSchema.safeParse(observation).success).toBe(true);
@@ -3263,7 +3488,13 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", internal: true, artifactWriter: writer },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          internal: true,
+          artifactWriter: writer,
+        },
       );
 
       expect(writer.writes).toHaveLength(0);
@@ -3297,7 +3528,12 @@ describe("finalizeToolResponse", () => {
       try {
         const finalized = finalizeToolResponse(
           createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-          { name: "tapOn", sessionUuid: "s1", artifactWriter: writer },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            sessionUuid: "s1",
+            artifactWriter: writer,
+          },
         );
 
         const structured = structuredPayload(finalized);
@@ -3323,7 +3559,12 @@ describe("finalizeToolResponse", () => {
       try {
         const finalized = finalizeToolResponse(
           createStructuredToolResponse({ success: true, observation }),
-          { name: "tapOn", artifactMode: "oversized", artifactWriter: writer },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            artifactMode: "oversized",
+            artifactWriter: writer,
+          },
         );
 
         const structured = structuredPayload(finalized);
@@ -3359,7 +3600,13 @@ describe("finalizeToolResponse", () => {
       try {
         const finalized = finalizeToolResponse(
           createStructuredToolResponse({ success: true, observation: next }),
-          { name: "tapOn", sessionUuid: "s1", baselineStore: store, artifactWriter: writer },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            sessionUuid: "s1",
+            baselineStore: store,
+            artifactWriter: writer,
+          },
         );
 
         expect(structuredPayload(finalized).success).toBe(true);
@@ -3432,6 +3679,7 @@ describe("finalizeToolResponse", () => {
 
       const oversizedCtx = (writer: FakeObservationArtifactWriter) => ({
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         artifactMode: "oversized",
         artifactWriter: writer,
       });
@@ -3512,6 +3760,7 @@ describe("finalizeToolResponse", () => {
     describe("residual overflow after the observation spill (#6870)", () => {
       const oversizedCtx = (writer: FakeObservationArtifactWriter) => ({
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         artifactMode: "oversized",
         artifactWriter: writer,
       });
@@ -3673,7 +3922,12 @@ describe("finalizeToolResponse", () => {
             requiredBySomeSchema: "must remain absent without that schema",
             pad: "z".repeat(90_000),
           }),
-          { name: "tapOn", artifactMode: "oversized", artifactWriter: writer },
+          {
+            name: "tapOn",
+            defaultsToSkeletonObservation: true,
+            artifactMode: "oversized",
+            artifactWriter: writer,
+          },
         );
 
         const structured = structuredPayload(finalized);
@@ -3797,7 +4051,7 @@ describe("finalizeToolResponse", () => {
             timeoutReason,
             pad: "z".repeat(90_000),
           }),
-          { ...oversizedCtx(writer), name: "openLink" },
+          { ...oversizedCtx(writer), name: "openLink", defaultsToSkeletonObservation: true },
         );
 
         expect(structuredPayload(finalized)).toMatchObject({
@@ -4250,7 +4504,11 @@ describe("finalizeToolResponse", () => {
         success: true,
         observation: makeObserveResult(),
       });
-      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+      const finalized = finalizeToolResponse(response, {
+        name: "tapOn",
+        defaultsToSkeletonObservation: true,
+        sessionUuid: "s1",
+      });
 
       expect(structuredPayload(finalized).observation).toBeUndefined();
       expect(structuredPayload(finalized).observationDiff).toEqual({
@@ -4280,7 +4538,7 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsNoObserveEnabled(false);
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn" },
+        { name: "tapOn", defaultsToSkeletonObservation: true },
       );
       expect(structuredPayload(finalized).observation).toBeDefined();
     });
@@ -4298,7 +4556,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+        },
       );
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc).toBeUndefined(); // stripped, not a diff
@@ -4315,6 +4578,7 @@ describe("finalizeToolResponse", () => {
       const payload = { success: true, message: "done" };
       const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
         name: "pressButton",
+        defaultsToSkeletonObservation: true,
       });
       expect(structuredPayload(finalized)).toEqual(payload);
     });
@@ -4384,7 +4648,13 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          internal: true,
+        },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -4404,7 +4674,13 @@ describe("finalizeToolResponse", () => {
 
       finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: true },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          internal: true,
+        },
       );
 
       // Internal calls neither read a diff nor advance the agent-facing baseline.
@@ -4417,7 +4693,7 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", internal: true },
+        { name: "tapOn", defaultsToSkeletonObservation: true, sessionUuid: "s1", internal: true },
       );
 
       const obsSc = structuredPayload(finalized).observation;
@@ -4430,7 +4706,7 @@ describe("finalizeToolResponse", () => {
       serverConfig.setActionsDiffObserveEnabled(true);
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", internal: true },
+        { name: "tapOn", defaultsToSkeletonObservation: true, sessionUuid: "s1", internal: true },
       );
       const node = structuredPayload(finalized).observation.viewHierarchy.hierarchy.node;
       // Sanitization (issue #2758) is independent of the diff guard.
@@ -4446,7 +4722,13 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store, internal: false },
+        {
+          name: "tapOn",
+          defaultsToSkeletonObservation: true,
+          sessionUuid: "s1",
+          baselineStore: store,
+          internal: false,
+        },
       );
 
       expect(structuredPayload(finalized).observation.isDiff).toBe(true);
@@ -4534,7 +4816,7 @@ describe("finalizeToolResponse", () => {
           success: true,
           observation: observeWithActionableElements(),
         }),
-        { name: "tapOn", sessionUuid: "s1" },
+        { name: "tapOn", defaultsToSkeletonObservation: true, sessionUuid: "s1" },
       );
       const obsSc = structuredPayload(finalized).observation as ObserveResult;
       // Issue #5872: the skeleton default extended to the action tools' embedded
@@ -4854,6 +5136,7 @@ describe("actions-compact-metadata", () => {
   ) {
     return finalizeToolResponse(createStructuredToolResponse(payload), {
       name: "tapOn",
+      defaultsToSkeletonObservation: true,
       sessionUuid: "s1",
       baselineStore: store,
       ...overrides,
@@ -5037,7 +5320,12 @@ describe("actions-compact-metadata", () => {
     expect(structuredPayload(emit(failed)).element).toEqual(element);
     const error = createStructuredToolResponse(action());
     Object.assign(error, { isError: true });
-    finalizeToolResponse(error, { name: "tapOn", sessionUuid: "fresh", baselineStore: store });
+    finalizeToolResponse(error, {
+      name: "tapOn",
+      defaultsToSkeletonObservation: true,
+      sessionUuid: "fresh",
+      baselineStore: store,
+    });
     expect(records.get("fresh")?.blocks).toEqual(metadata);
     expect(observation(emit()).gfxMetrics).toEqual(metadata.gfxMetrics);
     expect(structuredPayload(emit({ success: false, error: "failed" }))).toEqual({
@@ -5245,7 +5533,12 @@ describe("actions-compact-metadata", () => {
       if (kind === "isError") {
         Object.assign(response, { isError: true });
       }
-      finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1", baselineStore: store });
+      finalizeToolResponse(response, {
+        name: "tapOn",
+        defaultsToSkeletonObservation: true,
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
       expect(structuredPayload(response).element).toEqual(element);
       expect(observation(response).insets).toEqual(insetsB);
       expect(records.get("s1")?.blocks.insets).toEqual(insetsB);

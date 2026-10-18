@@ -121,44 +121,6 @@ const OBSERVE_WAIT_METADATA_KEYS = [
 ] as const;
 
 /**
- * Action tools that embed a post-action observation AND expose the `raw`/`project`
- * response-shape control (issues #5872, #5886). Their embedded observation defaults
- * to the compact skeleton, opt-out-able per call. The default is scoped to exactly
- * the tools that carry the opt-out so the two never diverge: a tool that
- * skeletonizes by default but cannot be asked for the raw tree would be a silent
- * one-way door. #5872 shipped the first three; #5886 extends both the default and
- * the opt-out to every remaining observation-producing action tool, together.
- * Membership is checked in both directions against advertised defaults/opt-outs
- * by test/server/skeletonDefaultDrift.test.ts, with explicit exemptions for
- * tools whose payloads do not embed an observation.
- * `observe` is not here — it owns the projection at the payload top level, not
- * under `.observation`.
- */
-export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
-  "tapOn",
-  "tapAt",
-  "sendKeys",
-  "launchApp",
-  "tapAny",
-  "dragAndDrop",
-  "dragPath",
-  "selectAllText",
-  "pressButton",
-  "systemTray",
-  "swipeOn",
-  "swipeAt",
-  "pinchOn",
-  "multiTouch",
-  "openLink",
-  "shake",
-  "recentApps",
-  "homeScreen",
-  "rotate",
-  "terminateApp",
-  "biometricAuth",
-]);
-
-/**
  * Resolve the observe output projection (issue #4388). An explicit per-call
  * `project` arg always wins; otherwise `raw: true` forces `"full"` (the raw tree
  * is the documented disambiguation escape hatch). The skeleton projection is now
@@ -322,6 +284,12 @@ export interface FinalizeToolResponseContext {
   name: string;
   /** The tool is read-only, so its artifact write failure stays loud (`loudArtifactWrites` trait). */
   loudArtifactWrites?: boolean;
+  /**
+   * The tool's embedded observation defaults to the compact skeleton
+   * (`defaultsToSkeletonObservation` trait, #5872/#5886); `raw`/`project` opts out per call.
+   * `observe` does not declare it: it owns the projection at the payload top level.
+   */
+  defaultsToSkeletonObservation?: boolean;
   /** Injectable JSON clone boundary for deterministic clone-count tests. */
   cloneObservation?: ObserveResultCloner;
   /**
@@ -638,7 +606,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       // Action observations default to the compact skeleton (issue #5872) — the
       // same response-shape control `observe` already has — so a client no longer
       // pays the full raw hierarchy on every tapOn/sendKeys/launchApp. Scoped to
-      // SKELETON_DEFAULT_ACTION_TOOLS (the tools that also expose the `raw`/`project`
+      // the `defaultsToSkeletonObservation` trait (the tools that also expose the `raw`/`project`
       // opt-out), so the default and the escape hatch never diverge. The compact
       // form lands under the same `skeleton` key `observe` uses; `raw:true` /
       // `project:"full"` opts back into the raw `viewHierarchy`. Internal
@@ -646,7 +614,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       // replaces the action observation only on the path that emits a diff.
       const servedObservation =
         !ctx.internal &&
-        SKELETON_DEFAULT_ACTION_TOOLS.has(ctx.name) &&
+        ctx.defaultsToSkeletonObservation === true &&
         resolveObserveProjection(ctx.args) === "skeleton"
           ? projectSanitizedObserveSkeleton(sanitized, rawObservation)
           : sanitized;

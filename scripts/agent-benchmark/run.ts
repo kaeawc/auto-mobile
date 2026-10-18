@@ -641,6 +641,48 @@ export function assertDirectlyLaunchable(
   }
 }
 
+/** An absolute path for a command, so it runs the same from another working directory. */
+export function resolveCommand(
+  command: string,
+  which: (command: string) => string | null = (name) => Bun.which(name),
+  cwd: string = process.cwd(),
+): string {
+  if (command.includes("/") || command.includes("\\")) {
+    return resolve(cwd, command);
+  }
+  return which(command) ?? command;
+}
+
+/**
+ * The device-use check classifies tools from the committed `schemas/tool-definitions.json`
+ * (generated from `src/`), while the run executes `dist/`. A build older than the sources
+ * could classify a tool differently from the server that runs, so it is refused.
+ */
+export function staleBuildSource(
+  builtMs: number,
+  sources: Array<{ path: string; mtimeMs: number }>,
+): string | undefined {
+  return sources.find((source) => source.mtimeMs > builtMs)?.path;
+}
+
+function assertFreshBuild(serverEntry: string): void {
+  const files = (dir: string) =>
+    readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" }).map((path) =>
+      join(REPO_ROOT, dir, path),
+    );
+  const sources = [...files("src"), join(REPO_ROOT, "schemas", "tool-definitions.json")]
+    .map((path) => ({ path, stat: statSync(path) }))
+    .filter(({ stat }) => stat.isFile())
+    .map(({ path, stat }) => ({ path, mtimeMs: stat.mtimeMs }));
+  const stale = staleBuildSource(statSync(serverEntry).mtimeMs, sources);
+  if (stale) {
+    throw new Error(
+      `${relative(REPO_ROOT, serverEntry)} is older than ${relative(REPO_ROOT, stale)}; ` +
+        "run `bun run build` (or use `bun run bench:agent`, which builds first).",
+    );
+  }
+}
+
 /** SHA-256 of a file's content, read in 1 MiB chunks. */
 export function fileSha256(path: string): string {
   const hash = createHash("sha256");
@@ -755,8 +797,11 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
   }
-  assertDirectlyLaunchable(options.claude);
-  const serverBuild = await serverDigest(options.claude);
+  assertFreshBuild(serverEntry);
+  // Claude runs from an empty temp directory, so a relative command must be resolved here.
+  const claudeCommand = resolveCommand(options.claude);
+  assertDirectlyLaunchable(claudeCommand);
+  const serverBuild = await serverDigest(claudeCommand);
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];
   for (const suite of suites) {
@@ -768,7 +813,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
           runtime: process.execPath,
           serverEntry,
           serverBuild,
-          claudeCommand: options.claude,
+          claudeCommand,
           deviceSerial: options.device,
           modelOverride: options.model,
         },

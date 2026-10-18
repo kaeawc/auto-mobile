@@ -15,7 +15,9 @@ import {
   killProcessGroupRemnants,
   killProcessTree,
   parseCliArgs,
+  resolveCommand,
   resolveSuitePath,
+  staleBuildSource,
 } from "../../../scripts/agent-benchmark/run";
 
 describe("agent benchmark process tree kill", () => {
@@ -64,6 +66,26 @@ describe("agent benchmark process tree kill", () => {
     const windows: number[] = [];
     killProcessGroupRemnants(42, "win32", (pid) => windows.push(pid));
     expect(windows).toEqual([]);
+  });
+});
+
+describe("agent benchmark build freshness and command resolution", () => {
+  test("a build older than any source is stale", () => {
+    const sources = [
+      { path: "src/a.ts", mtimeMs: 100 },
+      { path: "schemas/tool-definitions.json", mtimeMs: 300 },
+    ];
+    expect(staleBuildSource(200, sources)).toBe("schemas/tool-definitions.json");
+    expect(staleBuildSource(300, sources)).toBeUndefined();
+  });
+
+  test("a relative command resolves against the invocation directory", () => {
+    const cwd = resolve("/work");
+    expect(resolveCommand("./bin/claude", () => null, cwd)).toBe(resolve(cwd, "bin/claude"));
+    expect(resolveCommand("claude", () => "/usr/local/bin/claude", cwd)).toBe(
+      "/usr/local/bin/claude",
+    );
+    expect(resolveCommand("claude", () => null, cwd)).toBe("claude");
   });
 });
 

@@ -12,6 +12,7 @@ import {
   isRunShapingClaudeVariable,
 } from "../../../scripts/agent-benchmark/invocation";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 
 const pathDigest = (path: string) => createHash("sha256").update(path).digest("hex").slice(0, 12);
 
@@ -188,6 +189,28 @@ describe("agent benchmark isolated server environment", () => {
   });
 });
 
+describe("agent benchmark launch paths", () => {
+  test("relative PATH entries and credentials paths are made absolute for the temp cwd", () => {
+    const posix = claudeLaunchEnv(
+      { PATH: "./bin::/usr/bin", GOOGLE_APPLICATION_CREDENTIALS: "creds.json" },
+      PATHS,
+      "linux",
+      "/work",
+    );
+    // An empty POSIX entry means the current directory, so it becomes /work too.
+    expect(posix.PATH).toBe("/work/bin:/work:/usr/bin");
+    expect(posix.GOOGLE_APPLICATION_CREDENTIALS).toBe("/work/creds.json");
+    const windows = claudeLaunchEnv({ Path: "bin;C:\\tools" }, PATHS, "win32", "C:\\work");
+    expect(windows.Path).toBe("C:\\work\\bin;C:\\tools");
+  });
+
+  test("Windows provider keys count in any case", () => {
+    expect(
+      providerIdentity({ anthropic_bedrock_base_url: "https://br.example" }, undefined, "win32"),
+    ).toBe("ANTHROPIC_BEDROCK_BASE_URL=https://br.example");
+  });
+});
+
 describe("agent benchmark Windows environment casing", () => {
   test("classifies keys case-insensitively on Windows, exactly elsewhere", () => {
     const inherited = { Path: "C:\\bin", node_env: "test", claude_code_max_turns: "1" };
@@ -246,6 +269,16 @@ describe("agent benchmark provider identity", () => {
     expect(id("/a.json")).toBe(id("/b.json"));
     expect(id("/a.json")).not.toBe(id("/c.json"));
     expect(id("/missing.json")).toBe("unreadable:file");
+    // The impersonated service account is part of an external_account file's identity.
+    const external = (url: string) =>
+      googleCredentialsIdentity("/x.json", () =>
+        JSON.stringify({
+          type: "external_account",
+          audience: "aud",
+          service_account_impersonation_url: url,
+        }),
+      );
+    expect(external("https://iam/sa-a")).not.toBe(external("https://iam/sa-b"));
     expect(
       providerIdentity(
         { CLAUDE_CODE_USE_VERTEX: "1", GOOGLE_APPLICATION_CREDENTIALS: "/a.json" },
@@ -285,7 +318,7 @@ describe("agent benchmark provider identity", () => {
       PATHS,
     );
     expect(launch.CLAUDE_CODE_SHELL_PREFIX).toBeUndefined();
-    expect(launch.PATH).toBe("/bin");
+    expect(launch.PATH).toBe(resolve("/bin"));
     expect(isRunShapingClaudeVariable("ANTHROPIC_BETAS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")).toBe(true);

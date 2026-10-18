@@ -25,6 +25,7 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { posix, win32 } from "node:path";
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
 
 /** The one AutoMobile setting shared with any resident daemon: device claims. */
@@ -194,17 +195,58 @@ function canonicalKey(key: string, platform: NodeJS.Platform): string {
   return platform === "win32" ? key.toUpperCase() : key;
 }
 
+/** The environment with keys in canonical case; on Windows a later duplicate wins, as there. */
+function canonicalEnv(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform,
+): Record<string, string | undefined> {
+  return platform === "win32"
+    ? Object.fromEntries(
+        Object.entries(env).map(([key, value]) => [canonicalKey(key, platform), value]),
+      )
+    : env;
+}
+
+/**
+ * Claude runs from an empty temp directory, so a relative PATH entry or credentials path
+ * that resolved from the invocation directory would resolve somewhere else (or nowhere)
+ * there. They are made absolute against the invocation directory first.
+ */
+function absolutizeInheritedPaths(
+  env: Record<string, string>,
+  cwd: string,
+  platform: NodeJS.Platform,
+): Record<string, string> {
+  const path = platform === "win32" ? win32 : posix;
+  const absolute = (entry: string) => path.resolve(cwd, entry);
+  return Object.fromEntries(
+    Object.entries(env).map(([key, value]) => {
+      const canonical = canonicalKey(key, platform);
+      if (canonical === "PATH") {
+        // An empty POSIX entry means the current directory, which is also relative.
+        return [key, value.split(path.delimiter).map(absolute).join(path.delimiter)];
+      }
+      if (canonical === "GOOGLE_APPLICATION_CREDENTIALS" && value !== "") {
+        return [key, absolute(value)];
+      }
+      return [key, value];
+    }),
+  );
+}
+
 /** The launch environment for Claude: isolated server env without run-shaping Claude overrides. */
 export function claudeLaunchEnv(
   inherited: Record<string, string | undefined>,
   paths: ServerPaths,
   platform: NodeJS.Platform = process.platform,
+  cwd: string = process.cwd(),
 ): Record<string, string> {
-  return Object.fromEntries(
+  const kept = Object.fromEntries(
     Object.entries(isolatedServerEnv(inherited, paths, platform)).filter(
       ([key]) => !isRunShapingClaudeVariable(canonicalKey(key, platform)),
     ),
   );
+  return absolutizeInheritedPaths(kept, cwd, platform);
 }
 
 /**
@@ -415,6 +457,8 @@ export function googleCredentialsIdentity(
   }
   const record =
     typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  // service_account_impersonation_url names the account an external_account file mints
+  // tokens for, so two files with the same audience can still act as different accounts.
   const fields = [
     "type",
     "project_id",
@@ -422,15 +466,20 @@ export function googleCredentialsIdentity(
     "client_email",
     "client_id",
     "audience",
+    "service_account_impersonation_url",
   ];
   const identity = Object.fromEntries(fields.map((key) => [key, record[key] ?? null]));
   return `sha256:${createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 12)}`;
 }
 
 export function providerIdentity(
-  env: Record<string, string | undefined>,
+  inherited: Record<string, string | undefined>,
   credentialsIdentity: (path: string) => string = googleCredentialsIdentity,
+  platform: NodeJS.Platform = process.platform,
 ): string {
+  // Windows names are case-insensitive (anthropic_base_url is ANTHROPIC_BASE_URL there), so
+  // every key is matched in canonical case.
+  const env = canonicalEnv(inherited, platform);
   const host = (value: string) => {
     try {
       const url = new URL(value);

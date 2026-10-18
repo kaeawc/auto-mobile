@@ -22,7 +22,9 @@ bun run bench:agent -- --suite bug-repro
 ```
 
 `bench:agent` builds first, because the MCP server runs from `dist/src/index.js`. To skip the
-build, call the script directly:
+build, call the script directly. A run still refuses a `dist/src/index.js` older than any file in
+`src/` or `schemas/tool-definitions.json`, since the device-use check classifies tools from the
+sources while the run executes the build:
 
 ```bash
 bun scripts/agent-benchmark/run.ts --suite bug-repro

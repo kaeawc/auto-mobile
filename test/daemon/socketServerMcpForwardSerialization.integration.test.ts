@@ -1284,7 +1284,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     // (device:device-a) but would otherwise swap B's session-specific client for
     // the shared unbound client, running the admitted tool with no capability
     // profile. The admitted client/session must be preserved (issue #4610). The
-    // disconnect is driven deterministically via the same clearBoundMcpClientKey
+    // disconnect is driven deterministically via the same boundMcpClients.clear
     // seam the socket "close" handler uses.
     await server.close();
     socketPath = join(tmpdir(), `mcp-disconnect-admit-${randomUUID()}.sock`);
@@ -1373,9 +1373,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
       mcpAutolockSessions.set(socketSessionId, "session-a");
       (
         server as unknown as {
-          clearBoundMcpClientKey(socketSessionId: string): void;
+          boundMcpClients: { clear(socketSessionId: string): void };
         }
-      ).clearBoundMcpClientKey(socketSessionId);
+      ).boundMcpClients.clear(socketSessionId);
 
       // Release socket A's op so socket B's queued call runs post-disconnect.
       releaseBlocker();
@@ -1893,9 +1893,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(socketSessionId).toBeDefined();
       (
         server as unknown as {
-          clearBoundMcpClientKey(socketSessionId: string): void;
+          boundMcpClients: { clear(socketSessionId: string): void };
         }
-      ).clearBoundMcpClientKey(socketSessionId);
+      ).boundMcpClients.clear(socketSessionId);
       await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
 
       try {

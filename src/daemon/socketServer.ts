@@ -122,11 +122,7 @@ import {
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
-import {
-  toolSelectionProfileUuidFromResponse,
-  IDE_SET_SESSION_TOOL_ENABLED_METHOD,
-  SET_TOOL_ENABLED_TOOL_NAME,
-} from "../features/toolSelection/toolSelectionControl";
+import { IDE_SET_SESSION_TOOL_ENABLED_METHOD } from "../features/toolSelection/toolSelectionControl";
 import {
   evaluateClientHandshake,
   extractClientHandshake,
@@ -137,13 +133,11 @@ import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFai
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { DaemonState } from "./daemonState";
 import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
-import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
 import { ControlConnection } from "./socketServer/ControlConnection";
-import { isRetryableSessionRecoveryResult } from "./socketServer/DeviceControlTransportRecovery";
 import { ReleasedBoundSessionError } from "./socketServer/ReleasedBoundSessionError";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -256,7 +250,7 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
-import { isTaskRelayMethod, parseTaskRelayFrame } from "../server/tasks/taskRelay";
+import { isTaskRelayMethod } from "../server/tasks/taskRelay";
 import {
   callForwardedTool,
   forwardTaskRequest,
@@ -267,9 +261,13 @@ import {
   currentForwardTaskOwnerKey,
   FORWARD_KEY_IDLE_MS,
   type McpClientFactory,
-  runWithForwardSessionKey,
 } from "./socketServer/forwardSessionKey";
 import { createMcpForwardPipeline } from "./socketServer/forwardPipeline";
+import { BoundMcpClientRegistry } from "./socketServer/BoundMcpClientRegistry";
+import {
+  forwardMcpRequestInProcess,
+  type McpForwardContext,
+} from "./socketServer/inProcessForward";
 import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import {
   MAX_MCP_FORWARD_REROUTES,
@@ -569,14 +567,6 @@ interface CachedAppendTextInput {
   incarnationToken: string | undefined;
 }
 
-interface BoundMcpClient {
-  clientKey: string;
-  executionKey: string;
-  sessionUuid?: string;
-  toolSelectionProfileUuid?: string;
-  requiresLiveDaemonSession: boolean;
-}
-
 /** Recovery lookup is optional only for older socket-state fakes. */
 interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
@@ -609,23 +599,6 @@ const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, 
 
 /** How long a closed socket's late executions may still write bindings that are then forgotten. */
 const LATE_BINDING_FORGET_WINDOW_MS = 15 * 60 * 1000;
-
-interface McpForwardContext {
-  request: DaemonRequest;
-  route: McpForwardRoute;
-  socketSessionId: string;
-  /** Aborted when the Unix-socket client that owns this forward disconnects. */
-  signal?: AbortSignal;
-  totalTimeoutMs: number;
-  /**
-   * Mutable: a progress notification for THIS request extends `.value`, up to
-   * its own bounded ceiling (issue #6222 review, P1). Every consumer must
-   * read `.value` live rather than caching it, so a pre-flight budget check
-   * made after progress has already extended the deadline sees the extended
-   * value, not the original one.
-   */
-  deadline: ProgressExtendableDeadline;
-}
 
 /** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
 interface IdeMutationCall {
@@ -902,7 +875,18 @@ export class UnixSocketServer {
    * device session. Follow-up requests can omit their session UUID, so reuse
    * this client to preserve the selected tool-selection profile.
    */
-  private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
+  private readonly boundMcpClients = new BoundMcpClientRegistry({
+    isReleasedBoundSession: (args, socketSessionId) =>
+      this.isReleasedBoundSession(args, socketSessionId),
+    isSessionOwnedByOtherConnection: (sessionUuid, socketSessionId) =>
+      this.isSessionOwnedByOtherConnection(sessionUuid, socketSessionId),
+    hasActiveSession: (sessionUuid) => this.hasActiveDaemonSession(sessionUuid),
+    isDaemonStateInitialized: () => this.daemonState.isInitialized(),
+  });
+  /** Same map the registry owns; kept so daemon tests can inspect the bindings. */
+  private get boundMcpClientKeysBySocketSession() {
+    return this.boundMcpClients.entries;
+  }
   /** Promise tails that serialize MCP forwards only within the same execution target. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
   /** Direct device forwards that need cleanup after every successor tail has settled. */
@@ -1220,7 +1204,7 @@ export class UnixSocketServer {
     this.sessionReleaseUnsubscribe?.();
     this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
       (sessionId, reason, snapshot, extras) => {
-        this.clearBoundMcpClientsForReleasedSession(sessionId);
+        this.boundMcpClients.clearForReleasedSession(sessionId);
         void this.liftStrokesHeldBy(sessionId);
         this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
       },
@@ -1538,7 +1522,7 @@ export class UnixSocketServer {
     this.clientSockets.delete(sessionId);
     this.notificationSubscribers.delete(sessionId);
     this.resourceSubscriptions.delete(sessionId);
-    this.clearBoundMcpClientKey(sessionId);
+    this.boundMcpClients.clear(sessionId);
     this.releaseDevicePoolMcpSessionBindings(sessionId);
     this.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.releaseToolCallRecording(sessionId);
@@ -2488,7 +2472,7 @@ export class UnixSocketServer {
       isReleasedBoundSession: (args, socketSessionId) =>
         this.isReleasedBoundSession(args, socketSessionId),
       boundClientRoute: (socketSessionId, recoverable) =>
-        this.getBoundMcpClientRoute(socketSessionId, recoverable),
+        this.boundMcpClients.routeFor(socketSessionId, recoverable),
       requestArgumentScopeKey: (args) => this.getRequestArgumentScopeKey(args),
       implicitAutolockScopeKey: (mcpSessionId, args) =>
         this.getImplicitAutolockScopeKey(mcpSessionId, args),
@@ -2683,44 +2667,6 @@ export class UnixSocketServer {
     }
   }
 
-  private recordBoundMcpClientKey(
-    request: DaemonRequest,
-    socketSessionId: string,
-    route: McpForwardRoute,
-    sessionWasActiveBeforeForward: boolean,
-    response: unknown,
-  ): void {
-    if (request.method !== "tools/call") {
-      return;
-    }
-    if (isDeviceInventoryTool(request.params?.name)) {
-      return;
-    }
-    const sessionUuid = readSessionUuid(request.params?.arguments);
-    if (!sessionUuid) {
-      this.recordGeneratedToolSelectionProfile(request, response, socketSessionId, route);
-      return;
-    }
-    if (
-      this.isReleasedBoundSession(request.params?.arguments, socketSessionId) &&
-      isRetryableSessionRecoveryResult(response, sessionUuid)
-    ) {
-      // Recovery is still using the admitted identity; keep its transport binding.
-      return;
-    }
-    // A profile reaffirm routed onto the acquired device session binds the
-    // socket to THAT session's client (#7005); every other explicit-session
-    // route carries the request's own session.
-    this.recordSessionBoundMcpClientKey(
-      socketSessionId,
-      route,
-      route.sessionUuid ?? sessionUuid,
-      sessionWasActiveBeforeForward,
-      request.params?.name,
-      request.params?.arguments,
-    );
-  }
-
   private isSessionOwnedByOtherConnection(sessionUuid: string, socketSessionId: string): boolean {
     return (
       this.daemonState.isInitialized() &&
@@ -2755,186 +2701,32 @@ export class UnixSocketServer {
     );
   }
 
-  private recordSessionBoundMcpClientKey(
+  private recordBoundMcpClientKey(
+    request: DaemonRequest,
     socketSessionId: string,
     route: McpForwardRoute,
-    sessionUuid: string,
     sessionWasActiveBeforeForward: boolean,
-    toolName: unknown,
-    args: unknown,
+    response: unknown,
   ): void {
-    if (this.isReleasedBoundSession(args, socketSessionId)) {
-      this.clearBoundMcpClientKey(socketSessionId);
-      return;
-    }
-    if (this.isSessionOwnedByOtherConnection(sessionUuid, socketSessionId)) {
-      // Naming a session another connected client owns is not ownership (#11235, #11344): this
-      // socket keeps its own route so its sessionless calls never follow it.
-      return;
-    }
-    if (this.targetsOneCallOnly(args, sessionUuid)) {
-      // The proxy named its own binding beside an explicit session: the call targeted that
-      // session only, and the connection's default route does not move (#11347).
-      return;
-    }
-    const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
-    if (
-      (sessionWasActiveBeforeForward || toolName === "executePlan") &&
-      !sessionIsActiveAfterForward
-    ) {
-      this.clearBoundMcpClientKey(socketSessionId);
-      return;
-    }
-    this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
-      clientKey: route.clientKey,
-      executionKey: route.executionKey,
-      sessionUuid,
-      toolSelectionProfileUuid: route.toolSelectionProfileUuid,
-      requiresLiveDaemonSession: sessionWasActiveBeforeForward || sessionIsActiveAfterForward,
-    });
-  }
-
-  /**
-   * Whether the call carried the connection's bound session ({@link DAEMON_BOUND_SESSION_PARAM})
-   * beside a different session it routed to. Only setActiveDevice or an acquisition moves a
-   * connection's default (#11347); an explicit `sessionUuid` targets its own call.
-   */
-  private targetsOneCallOnly(args: unknown, routedSessionUuid: string): boolean {
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return false;
-    }
-    const bound = (args as Record<string, unknown>)[DAEMON_BOUND_SESSION_PARAM];
-    return isNonBlankSessionUuid(bound) && bound !== routedSessionUuid;
-  }
-
-  private recordGeneratedToolSelectionProfile(
-    request: DaemonRequest,
-    response: unknown,
-    socketSessionId: string,
-    route: McpForwardRoute,
-  ): boolean {
-    const toolSelectionProfileUuid = this.getGeneratedToolSelectionProfileUuid(request, response);
-    if (!toolSelectionProfileUuid) {
-      return false;
-    }
-    this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
-      clientKey: route.clientKey,
-      executionKey: route.executionKey,
-      toolSelectionProfileUuid,
-      requiresLiveDaemonSession: false,
-    });
-    return true;
-  }
-
-  private getBoundMcpClientRoute(
-    socketSessionId: string,
-    recoverableSessionUuid?: string,
-  ): McpForwardRoute | undefined {
-    const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
-    if (!boundClient) {
-      return undefined;
-    }
-    if (
-      !boundClient.requiresLiveDaemonSession ||
-      !this.daemonState.isInitialized() ||
-      (recoverableSessionUuid !== undefined && boundClient.sessionUuid === recoverableSessionUuid)
-    ) {
-      return {
-        clientKey: boundClient.clientKey,
-        executionKey: boundClient.executionKey,
-        sessionUuid: boundClient.sessionUuid,
-        toolSelectionProfileUuid: boundClient.toolSelectionProfileUuid,
-      };
-    }
-    if (boundClient.sessionUuid && this.hasActiveDaemonSession(boundClient.sessionUuid)) {
-      return {
-        clientKey: boundClient.clientKey,
-        executionKey: boundClient.executionKey,
-        sessionUuid: boundClient.sessionUuid,
-        toolSelectionProfileUuid: boundClient.toolSelectionProfileUuid,
-      };
-    }
-    this.clearBoundMcpClientKey(socketSessionId);
-    return undefined;
-  }
-
-  private getGeneratedToolSelectionProfileUuid(
-    request: DaemonRequest,
-    response: unknown,
-  ): string | undefined {
-    if (request.params?.name !== SET_TOOL_ENABLED_TOOL_NAME) {
-      return undefined;
-    }
-    return toolSelectionProfileUuidFromResponse(response);
-  }
-
-  private clearBoundMcpClientKey(socketSessionId: string): void {
-    const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
-    if (!boundClient) {
-      return;
-    }
-    this.boundMcpClientKeysBySocketSession.delete(socketSessionId);
-  }
-
-  private clearBoundMcpClientsForReleasedSession(sessionUuid: string): void {
-    for (const [socketSessionId, boundClient] of this.boundMcpClientKeysBySocketSession) {
-      if (boundClient.sessionUuid === sessionUuid) {
-        this.clearBoundMcpClientKey(socketSessionId);
-      }
-    }
-  }
-
-  private isMcpClientKeyBound(key: string): boolean {
-    for (const boundClient of this.boundMcpClientKeysBySocketSession.values()) {
-      if (boundClient.clientKey === key) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Forward one request in process (#11820): its own MCP client and stateless server, named by
-   * the socket session as its MCP session key, closed (cancelling what it left running) when the
-   * forward ends.
-   */
-  private async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
-    context.signal?.throwIfAborted();
-    const mcpClient = await runWithForwardSessionKey(
-      context.socketSessionId,
-      () =>
-        this.mcpClientFactory(
-          context.route.sessionUuid,
-          context.route.toolSelectionProfileUuid,
-          context.route.releasedSessionUuid,
-        ),
-      parseTaskRelayFrame(context.request.tasks)?.ownerKey,
+    this.boundMcpClients.record(
+      request,
+      socketSessionId,
+      route,
+      sessionWasActiveBeforeForward,
+      response,
     );
-    try {
-      context.signal?.throwIfAborted();
-      const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
-        context.request,
-        context.totalTimeoutMs,
-        context.deadline,
-        "waiting in queues and preparing the MCP client",
-      );
-      return await this.handleIdeRequest(
-        mcpClient,
-        context.request,
-        forwardRemainingMs,
-        context.socketSessionId,
-        context.deadline,
-        context.totalTimeoutMs,
-        context.signal,
-      );
-    } finally {
-      // A close failure must never replace the forward's own answer.
-      await Promise.resolve()
-        .then(() => mcpClient.close())
-        .catch((error: unknown) => {
-          logger.warn(`Closing an MCP forward failed: ${errorMessage(error)}`, error);
-        });
-    }
+  }
+
+  private forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
+    return forwardMcpRequestInProcess(
+      {
+        mcpClientFactory: () => this.mcpClientFactory,
+        requireRemainingBudget: (request, totalTimeoutMs, deadline, phase) =>
+          this.requireRemainingMcpForwardBudget(request, totalTimeoutMs, deadline, phase),
+        handleIdeRequest: (...args) => this.handleIdeRequest(...args),
+      },
+      context,
+    );
   }
 
   private getSessionForDevice(deviceId: string): string | undefined {
@@ -6397,7 +6189,7 @@ export class UnixSocketServer {
    */
   private onForwardKeyIdle(key: string): void {
     this.forwardKeyIdleTimers.delete(key);
-    if (this.mcpForwardTails.has(key) || this.isMcpClientKeyBound(key)) {
+    if (this.mcpForwardTails.has(key) || this.boundMcpClients.isClientKeyBound(key)) {
       return;
     }
     const devicePrefix = "device:";
@@ -6638,7 +6430,7 @@ export class UnixSocketServer {
     this.resourceSubscriptions.clear();
     this.server = null;
 
-    this.boundMcpClientKeysBySocketSession.clear();
+    this.boundMcpClients.clearAll();
     for (const timer of this.forwardKeyIdleTimers.values()) {
       this.timer.clearTimeout(timer);
     }

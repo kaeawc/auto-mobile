@@ -2,7 +2,8 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { GetDeepLinks } from "../features/utility/GetDeepLinks";
 import { BootedDevice, DeepLinkResult, toActionableError } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { getDeepLinksResultSchema } from "./deepLinkToolOutputSchemas";
 import { logger } from "../utils/logger";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 
@@ -35,7 +36,7 @@ export function createGetDeepLinksHandler(
     try {
       const getDeepLinks = getDeepLinksFactory(device);
       const result = await getDeepLinks.execute(args.appId);
-      const response = createJSONToolResponse({
+      const response = createStructuredToolResponse({
         message: result.success
           ? `Discovered deep links for app ${args.appId}`
           : (result.error ?? `Failed to get deep links for ${args.appId}`),
@@ -67,6 +68,6 @@ export function registerDeepLinkTools() {
     getDeepLinksSchema,
     createGetDeepLinksHandler(),
     // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, deviceReadOnly: true },
+    { defaultEnabled: false, deviceReadOnly: true, outputSchema: getDeepLinksResultSchema },
   );
 }

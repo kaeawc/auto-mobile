@@ -599,6 +599,27 @@
       "required": ["lock", "deviceCount"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "lock": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceCount": {
+          "type": "number"
+        }
+      },
+      "required": ["success", "lock", "deviceId", "deviceCount"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/planOnly": true
     }
@@ -659,6 +680,51 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"]
+        },
+        "modality": {
+          "type": "string",
+          "enum": ["any", "fingerprint", "face"]
+        },
+        "fingerprintId": {
+          "type": "number"
+        },
+        "errorCode": {
+          "type": "number"
+        },
+        "supported": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "partial"
+            }
+          ]
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "message", "action", "modality", "supported"],
+      "additionalProperties": {}
     }
   },
   {
@@ -2996,6 +3062,107 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "schemes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "intentFilters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "category": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "scheme": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathPattern": {
+                      "type": "string"
+                    },
+                    "pathPrefix": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": ["action", "category"],
+            "additionalProperties": {}
+          }
+        },
+        "supportedMimeTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "rawOutput": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "appId",
+        "schemes",
+        "hosts",
+        "intentFilters",
+        "supportedMimeTypes"
+      ],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true

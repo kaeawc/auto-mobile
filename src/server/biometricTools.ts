@@ -3,12 +3,13 @@ import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth, BiometricAuthOptions } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import {
   addDeviceTargetingToSchema,
   addSessionUuidToSchema,
   responseShapeControlFields,
 } from "./toolSchemaHelpers";
+import { biometricAuthResultSchema } from "./biometricToolOutputSchemas";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 import { DaemonState } from "../daemon/daemonState";
@@ -130,7 +131,7 @@ export function registerBiometricTools() {
         throw new ActionableError(result.error || `Failed to execute biometric ${args.action}`);
       }
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: result.message || `Biometric ${args.action} executed`,
         observation: result.observation,
         ...result,
@@ -164,6 +165,6 @@ export function registerBiometricTools() {
     "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     biometricAuthSchema,
     biometricAuthHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, outputSchema: biometricAuthResultSchema },
   );
 }

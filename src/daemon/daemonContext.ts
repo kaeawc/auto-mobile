@@ -19,11 +19,17 @@ export type RenderedDisplaySessionReads = Pick<
 export interface DaemonContext {
   /** Rendered-display session reads, or undefined when the daemon is not initialized (stdio, tests). */
   renderedDisplaySessions(): RenderedDisplaySessionReads | undefined;
+  /** The daemon's SessionManager, or undefined when the daemon is not initialized (stdio, tests). */
+  sessionManager(): SessionManager | undefined;
 }
 
 /** Bridge onto the `DaemonState` singleton; resolves it lazily on every read. */
 export const defaultDaemonContext: DaemonContext = {
   renderedDisplaySessions() {
+    const daemon = DaemonState.getInstance();
+    return daemon.isInitialized() ? daemon.getSessionManager() : undefined;
+  },
+  sessionManager() {
     const daemon = DaemonState.getInstance();
     return daemon.isInitialized() ? daemon.getSessionManager() : undefined;
   },

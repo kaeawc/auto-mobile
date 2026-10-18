@@ -12,6 +12,8 @@ const DEVICE_ALLOCATION = "src/daemon/deviceAllocation.ts";
 const SESSION_MANAGER = "src/daemon/sessionManager.ts";
 const SESSION_DEVICE_STATE_RESTORE = "src/daemon/sessionDeviceStateRestore.ts";
 const EXPLICIT_DEVICE_BIND = "src/daemon/explicitDeviceBind.ts";
+const DEVICE_AUTOLOCK_MANAGER = "src/daemon/deviceAutolockManager.ts";
+const DEVICE_RUNTIME_IDENTITY = "src/daemon/deviceRuntimeIdentity.ts";
 const AMBIENT_READ = /\bgetAbortSignal\s*\(/;
 
 describe("control-socket server reads no ambient abort signal (#11817)", () => {
@@ -38,10 +40,15 @@ describe("control-socket server reads no ambient abort signal (#11817)", () => {
   // Slice c + d: session creation, rebind and acquisition take the caller's signal in their
   // options, and dispatchDeviceRestore / the device-state restorers take the restore's scope
   // (RestoreSignalOptions: the teardown shield, the forced signal, the caller's signal) explicitly.
-  test.each([SESSION_MANAGER, SESSION_DEVICE_STATE_RESTORE, EXPLICIT_DEVICE_BIND])(
-    "%s never calls getAbortSignal()",
-    (file) => {
-      expect(AMBIENT_READ.test(readFileSync(path.join(ROOT, file), "utf8"))).toBe(false);
-    },
-  );
+  // Slice f: DevicePool.autolockDevice / reconcileDiscoveryObservation read the ambient signal once
+  // and hand it to the autolock manager and the runtime-identity tracker explicitly.
+  test.each([
+    SESSION_MANAGER,
+    SESSION_DEVICE_STATE_RESTORE,
+    EXPLICIT_DEVICE_BIND,
+    DEVICE_AUTOLOCK_MANAGER,
+    DEVICE_RUNTIME_IDENTITY,
+  ])("%s never calls getAbortSignal()", (file) => {
+    expect(AMBIENT_READ.test(readFileSync(path.join(ROOT, file), "utf8"))).toBe(false);
+  });
 });

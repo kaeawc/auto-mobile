@@ -9,7 +9,6 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
 function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
   const timer = new FakeTimer();
@@ -624,9 +623,20 @@ describe("DeviceAutolockManager", () => {
     setPersistence(async () => {
       controller.abort(new Error("cancelled"));
     });
+    // The caller's signal is forwarded explicitly (#11817); no ambient request scope is entered.
     await expect(
-      runWithAbortSignal(controller.signal, () =>
-        manager.autolockDevice(device.id, "android", "mcp-1"),
+      manager.autolockDevice(
+        device.id,
+        "android",
+        "mcp-1",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("cancelled");
     expect(events).toContain("restore");

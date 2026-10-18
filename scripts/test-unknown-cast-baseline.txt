@@ -394,7 +394,7 @@
 2	test/server/resources/deviceImages.test.ts
 1	test/server/resources/navigationUnscopedSession.test.ts
 1	test/server/restartReservationOwnerOtherAvdOnReservedSerial.test.ts
-5	test/server/restartReservationStartAdmission.test.ts
+1	test/server/restartReservationStartAdmission.test.ts
 1	test/server/setActiveDevice.refusedBeforeResume.test.ts
 10	test/server/storageResources.test.ts
 1	test/server/telephonyTools.test.ts

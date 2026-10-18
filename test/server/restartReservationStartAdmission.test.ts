@@ -568,7 +568,7 @@ describe("start admission and owner resume for restart reservations", () => {
 
   function coldBoot(f: Fixture) {
     const child = new FakeChildProcess(f.timer);
-    const process = child as unknown as HostChildProcess;
+    const process: HostChildProcess = child;
     f.manager.setMockChildProcess(f.device.name, process);
     cleanups.push(() => {
       child.simulateExit();
@@ -1213,7 +1213,7 @@ describe("start admission and owner resume for restart reservations", () => {
   test("owner admitted then terminally released during boot never mints a replacement", async () => {
     const f = await fixture();
     const child = new FakeChildProcess(f.timer);
-    f.manager.setMockChildProcess(f.device.name, child as unknown as HostChildProcess);
+    f.manager.setMockChildProcess(f.device.name, child);
     f.manager.beforeReady = async () => {
       await f.sessions.releaseSession(HOLDER, "explicit-release");
     };
@@ -1305,7 +1305,7 @@ describe("start admission and owner resume for restart reservations", () => {
   test("owner resume records its cold-boot process and source AVD", async () => {
     const f = await fixture();
     const child = new FakeChildProcess(f.timer);
-    const process = child as unknown as HostChildProcess;
+    const process: HostChildProcess = child;
     f.manager.setMockChildProcess(f.device.name, process);
     await resumed(f, () => f.start(undefined, HOLDER));
     expect(f.pool.hasStartedDeviceProcess(f.device.deviceId, process)).toBe(true);
@@ -1341,7 +1341,7 @@ describe("start admission and owner resume for restart reservations", () => {
     test(`owner ${selector ? "selector" : "exact"} window expires during boot without a replacement mint`, async () => {
       const f = await fixture();
       const child = new FakeChildProcess(f.timer);
-      f.manager.setMockChildProcess(f.device.name, child as unknown as HostChildProcess);
+      f.manager.setMockChildProcess(f.device.name, child);
       f.manager.beforeReady = async () => {
         f.timer.advanceTime(180_001);
         await drainMicrotasks(40);

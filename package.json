@@ -31,6 +31,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
     "schemas"
   ],
   "main": "dist/src/index.js",

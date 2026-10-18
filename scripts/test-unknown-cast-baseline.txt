@@ -351,7 +351,6 @@
 1	test/server/prototypeTools.test.ts
 1	test/server/proxyServerProgress.test.ts
 1	test/server/releaseCallerOrderingPreservedSession.test.ts
-10	test/server/resourceDeviceResolver.test.ts
 2	test/server/resourceNotifySlowSibling.test.ts
 1	test/server/resourceRegistryListChanged.test.ts
 4	test/server/resourceRegistryMalformedUri.test.ts
@@ -366,7 +365,6 @@
 10	test/server/storageResources.test.ts
 1	test/server/telephonyTools.test.ts
 1	test/server/terminalPersistedRecoveryTransport.integration.test.ts
-19	test/server/toolParamErrorHint.test.ts
 2	test/server/toolRegistry.collaborators.integration.test.ts
 1	test/server/toolRegistry.reachability.test.ts
 1	test/server/toolRegistry.readOnlyDeviceAccess.test.ts
@@ -376,7 +374,6 @@
 1	test/server/watchedDeviceReadTools.test.ts
 3	test/server/webrtcStreamManager.publishFailure.test.ts
 3	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts
-29	test/server/webrtcStreamManager.test.ts
 2	test/setup/fixedCtrlProxyPortFetchGuard.test.ts
 1	test/setup/fixedCtrlProxyPortFetchGuard.ts
 1	test/setup/realDeviceToolSpawnGuard.test.ts

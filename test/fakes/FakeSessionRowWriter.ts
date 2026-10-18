@@ -14,6 +14,8 @@ import type {
 } from "../../src/db/deviceSessionRepository";
 import type { BackoffPolicy } from "../../src/utils/Backoff";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { SupersededRowReasserts } from "../../src/daemon/supersededRowReasserts";
+import { FakeTimer } from "./FakeTimer";
 
 /** Manually landed release desires, with no persistence or clock access. */
 export class FakeSessionRowWriter implements SessionRowWriter {
@@ -24,6 +26,14 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   >();
   private draining = false;
   private seq = 0;
+  /** Real superseded-row ledger on its own fake clock; owed retries fire only when it advances. */
+  readonly supersededTimer = new FakeTimer();
+  readonly superseded = new SupersededRowReasserts({
+    timer: this.supersededTimer,
+    logger: { warn: () => undefined },
+    draining: () => this.draining,
+    trackDrainWrite: (write) => this.trackDrainWrite(write),
+  });
   private readonly liveSequences = new Map<string, number>();
   private readonly releaseSequences = new WeakMap<SessionReleaseSnapshot, number>();
 

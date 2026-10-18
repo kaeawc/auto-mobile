@@ -1,6 +1,5 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import {
   DeviceShuttingDownError,
@@ -182,7 +181,7 @@ describe("exact Android binding during transitional adb presence", () => {
     test(`${autolock ? "autolock" : "explicit bind"}: live first-boot process holds offline then absent transport until the same serial returns`, async () => {
       const h = await setup(true);
       const child = new FakeChildProcess(h.timer);
-      const process = child as unknown as ChildProcess;
+      const process = child;
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
       expect(await h.manager.getBootedDevices("android")).toEqual([device]);
@@ -228,7 +227,7 @@ describe("exact Android binding during transitional adb presence", () => {
             device.deviceId,
             "android",
             image,
-            live ? (child as unknown as ChildProcess) : undefined,
+            live ? child : undefined,
           ),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
@@ -273,13 +272,7 @@ describe("exact Android binding during transitional adb presence", () => {
       const shutdown = spyOn(h.pool, "markIntentionalShutdown");
       try {
         const pending = track(
-          h.pool.bindOrReuseDeviceSession(
-            "owner",
-            device.deviceId,
-            "android",
-            image,
-            child as unknown as ChildProcess,
-          ),
+          h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android", image, child),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
           description: "offline wait before absence",

@@ -2,10 +2,10 @@ import { makePool } from "../helpers/makePool";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { ActionableError } from "../../src/models/ActionableError";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import { type PooledDevice } from "../../src/daemon/devicePool";
+import { ActionableError } from "../../src/models/ActionableError";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
@@ -907,12 +907,7 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
     emulatorLossIncidentStore: incidents,
     recoveryPolicy: { onLoss: false, maxAttempts: 1 },
   });
-  const child = Object.assign(new EventEmitter(), {
-    exitCode: null as number | null,
-    signalCode: null,
-    stdout: null,
-    stderr: null,
-  }) as ChildProcess;
+  const child = new StreamlessChildProcess();
   await pool.addDevice(original, image);
   await pool.bindOrReuseDeviceSession(
     "owner",
@@ -960,13 +955,8 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   expect(sessions.getSession("new-session")).toBeNull();
 });
 
-function exitedChild(): ChildProcess & { exitCode: number | null } {
-  return Object.assign(new EventEmitter(), {
-    exitCode: null as number | null,
-    signalCode: null,
-    stdout: null,
-    stderr: null,
-  }) as ChildProcess & { exitCode: number | null };
+function exitedChild(): StreamlessChildProcess {
+  return new StreamlessChildProcess();
 }
 
 async function setupProcessExitPool(

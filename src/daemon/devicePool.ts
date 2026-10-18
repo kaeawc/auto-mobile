@@ -84,7 +84,7 @@ import {
 } from "./deviceHealthMarkers";
 import { type BackoffPolicy } from "../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
-import type { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";

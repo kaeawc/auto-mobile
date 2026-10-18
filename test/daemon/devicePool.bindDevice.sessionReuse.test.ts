@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
@@ -11,8 +10,8 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import {
-  FakeChildProcess,
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
@@ -198,7 +197,7 @@ describe("DevicePool", () => {
             isRunning: true,
             source: "local",
           },
-          new FakeChildProcess() as unknown as ChildProcess,
+          new FakeChildProcess(),
           undefined,
           false,
           undefined,

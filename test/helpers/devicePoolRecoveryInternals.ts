@@ -1,5 +1,3 @@
-import type { ChildProcess } from "node:child_process";
-import type { EventEmitter } from "node:events";
 import type { Mutex } from "async-mutex";
 import type {
   AndroidRecoveryRecord,
@@ -17,6 +15,7 @@ import type {
   SessionPreservingRecovery,
 } from "../../src/daemon/deviceRecoveryCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import type { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
 
 /**
@@ -69,12 +68,12 @@ export function recoveryInternals(pool: DevicePool): DevicePoolRecoveryInternals
  * `Reflect.get` (which returns `any`), so no type assertion is needed or counted.
  */
 export interface DevicePoolInternals {
-  startedDeviceProcesses: Map<string, ChildProcess>;
+  startedDeviceProcesses: Map<string, HostChildProcess>;
   startedDeviceProcessOutput: Map<string, unknown>;
   releasedDeviceCaptures: Map<string, { deviceId: string }>;
   trackStartedDeviceProcess(
     device: BootedDevice,
-    child: ChildProcess | EventEmitter | null | undefined,
+    child: HostChildProcess | null | undefined,
   ): Promise<void>;
   evictMissingPooledDevice(
     device: PooledDevice,

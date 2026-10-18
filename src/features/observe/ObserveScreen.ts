@@ -12,10 +12,7 @@ import { recordObservationRead } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
 import { publishScreenshotPaths } from "./ScreenshotRetention";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
-import {
-  screenshotPathProtection,
-  type ScreenshotPathProtection,
-} from "./ScreenshotPathProtection";
+import { type ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "./DeviceHierarchyCapture";
 import { type SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
 import {
@@ -26,15 +23,11 @@ import {
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { BootedDevice, ObserveResult, type ViewHierarchyResult } from "../../models";
-import { ViewHierarchy } from "./ViewHierarchy";
-import { Window } from "./Window";
-import { TakeScreenshot } from "./TakeScreenshot";
 import type {
   ObserveScreenshotOptions,
   ScreenshotEncodingOptions,
 } from "./screenshot/screenshotOptions";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
-import { GetBackStack } from "./GetBackStack";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -67,7 +60,6 @@ import {
 } from "./hierarchyCaptureRoutes";
 import { isConfirmedFrameworkErrorDialog } from "./frameworkErrorDialog";
 import { StaleHierarchyRecovery } from "./StaleHierarchyRecovery";
-import { PredictiveUIState } from "./PredictiveUIState";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -85,7 +77,11 @@ import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
 import type { RecentObserveCacheEntry } from "./cache/ObserveResultCacheStore";
 import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
-import { createObserveScreenWiring, installObserveStores } from "./ObserveScreenWiring";
+import { createObserveScreenWiring } from "./ObserveScreenWiring";
+import {
+  resolveObserveScreenDependencies,
+  resolveObserveViewHierarchy,
+} from "./ObserveScreenDefaults";
 import type { HierarchyCollector } from "./collectors/HierarchyCollector";
 import {
   platformObservationTraits,
@@ -115,13 +111,9 @@ import { resolveScreenshotMode, type ScreenshotMode } from "./automaticScreensho
 import { toActionableError } from "../../models/ActionableError";
 import { errorMessage as describeError } from "../../utils/describeUnknownError";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
-import {
-  enforceHierarchyPlatform,
-  HierarchyPlatformValidator,
-  RealHierarchyPlatformValidator,
-} from "./HierarchyPlatformValidator";
+import { enforceHierarchyPlatform, HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
-import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLockStateProbe";
+import { type IosLockStateProbe } from "./ios/IosLockStateProbe";
 import {
   computeFreshness,
   inheritWrongWindowEvidence,
@@ -168,16 +160,6 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
   const capped = capLayoutWarnings(result.layoutWarnings);
   return capped === result.layoutWarnings ? result : { ...result, layoutWarnings: capped };
 }
-
-const unavailableReadOnlyHierarchy: ViewHierarchyInterface = {
-  getViewHierarchy: async () => ({
-    hierarchy: { error: "Hierarchy connection unavailable", unavailableReason: "connection_lost" },
-  }),
-  configureRecompositionTracking: async () => {},
-  findFocusedElement: () => null,
-  findAccessibilityFocusedElement: () => null,
-  filterOffscreenNodes: (hierarchy) => hierarchy,
-};
 
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
@@ -329,49 +311,33 @@ export class RealObserveScreen implements ObserveScreen {
       },
     });
 
-    // Data sources (either injected or default)
-    this.viewHierarchy =
-      dependencies?.viewHierarchy ??
-      (dependencies?.deviceReadOnly
-        ? unavailableReadOnlyHierarchy
-        : new ViewHierarchy(device, this.adbFactory));
-    this.hierarchyCapture =
-      dependencies?.hierarchyCapture ?? wiring.createHierarchyCapture(timer, idGenerator);
-    const window = dependencies?.window ?? new Window(device, this.adbFactory);
-    const screenshotUtil =
-      dependencies?.screenshot ??
-      (dependencies?.deviceReadOnly
-        ? TakeScreenshot.forObservationRead(device)
-        : new TakeScreenshot(device, this.adbFactory));
-    this.screenshotService = screenshotUtil;
-    const backStack = dependencies?.backStack ?? new GetBackStack(device, this.adbFactory);
-    this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
-
-    installObserveStores(dependencies);
-
-    // Composed services
-    this.pathProtection = dependencies?.screenshotPathProtection ?? screenshotPathProtection;
-    this.screenshotRecorder =
-      dependencies?.screenshotRecorder ??
-      wiring.createScreenshotRecorder(screenshotUtil, this.pathProtection);
-    this.screenshotEvidenceFiles = dependencies?.screenshotEvidenceFiles;
-    this.hierarchyCollector =
-      dependencies?.hierarchyCollector ?? wiring.createHierarchyCollector(dependencies);
-    this.deviceStateCollector =
-      dependencies?.deviceStateCollector ?? wiring.createDeviceStateCollector(window, backStack);
-    this.iosLockStateProbe = dependencies?.iosLockStateProbe ?? new NotifyutilIosLockStateProbe();
-    this.performanceAuditor = dependencies?.performanceAuditor ?? wiring.createPerformanceAuditor();
-    this.accessibilityAuditor =
-      dependencies?.accessibilityAuditor ?? wiring.createAccessibilityAuditor();
-    this.accessibilityStateDetector =
-      dependencies?.accessibilityStateDetector ?? wiring.createAccessibilityStateDetector();
+    const defaultsContext = {
+      device,
+      adbFactory: this.adbFactory,
+      timer,
+      idGenerator,
+      wiring,
+      dependencies,
+    };
+    this.viewHierarchy = resolveObserveViewHierarchy(defaultsContext);
+    const { sources, services } = resolveObserveScreenDependencies(defaultsContext);
+    this.hierarchyCapture = sources.hierarchyCapture;
+    this.screenshotService = sources.screenshotService;
+    this.predictiveUIState = sources.predictiveUIState;
+    this.pathProtection = services.pathProtection;
+    this.screenshotRecorder = services.screenshotRecorder;
+    this.screenshotEvidenceFiles = services.screenshotEvidenceFiles;
+    this.hierarchyCollector = services.hierarchyCollector;
+    this.deviceStateCollector = services.deviceStateCollector;
+    this.iosLockStateProbe = services.iosLockStateProbe;
+    this.performanceAuditor = services.performanceAuditor;
+    this.accessibilityAuditor = services.accessibilityAuditor;
+    this.accessibilityStateDetector = services.accessibilityStateDetector;
     this.elementsBuilder = new ObserveElementsBuilder();
-    this.platformValidator =
-      dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
+    this.platformValidator = services.platformValidator;
     this.safeAreaAuditor = new SafeAreaAuditor();
-    this.windowIdentity =
-      dependencies?.windowIdentityFreshnessResolver ?? wiring.createWindowIdentity();
-    this.reconciler = dependencies?.activeWindowAttributionReconciler ?? wiring.createReconciler();
+    this.windowIdentity = services.windowIdentity;
+    this.reconciler = services.reconciler;
     this.settledScreenshots = new SettledScreenshotCapture({
       device: () => this.device,
       timer: () => this.timer,

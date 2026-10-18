@@ -35,6 +35,7 @@ class PointerProbeFormatterTest {
     assertEquals("TOUCHSCREEN", PointerProbeFormatter.sourceNames(0x1002))
     assertEquals("STYLUS", PointerProbeFormatter.sourceNames(0x4002))
     assertEquals("STYLUS|TOUCHSCREEN", PointerProbeFormatter.sourceNames(0x1002 or 0x4002))
+    assertEquals("STYLUS|BLUETOOTH_STYLUS", PointerProbeFormatter.sourceNames(0xC002))
     assertEquals("0x0", PointerProbeFormatter.sourceNames(0))
   }
 

@@ -54,10 +54,11 @@ object PointerProbeFormatter {
     mapOf(0 to "UNKNOWN", 1 to "FINGER", 2 to "STYLUS", 3 to "MOUSE", 4 to "ERASER", 5 to "PALM")
 
   // Full InputDevice.SOURCE_* values; a flag matches when all of its bits are present.
+  // BLUETOOTH_STYLUS is 0x8000 | SOURCE_STYLUS (0x4002).
   private val SOURCE_NAMES =
     listOf(
       0x00004002 to "STYLUS",
-      0x00008002 to "BLUETOOTH_STYLUS",
+      0x0000C002 to "BLUETOOTH_STYLUS",
       0x00001002 to "TOUCHSCREEN",
       0x00002002 to "MOUSE",
       0x00020004 to "MOUSE_RELATIVE",

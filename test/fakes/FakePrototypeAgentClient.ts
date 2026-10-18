@@ -5,10 +5,15 @@ import type {
   PrototypeAgentRequestType,
   PrototypeAgentResult,
 } from "../../src/features/prototype/ios/prototypeAgentClient";
+import { ActionableError } from "../../src/models/ActionableError";
 
 export const FAKE_PROTOTYPE_AGENT_CAPABILITIES = [
   "show_prototype",
+  "patch_prototype",
   "dismiss_prototype",
+  "clear_prototype_storage",
+  "hide_for_capture",
+  "restore_after_capture",
   "put_prototype_asset",
   "remove_prototype_asset",
   "get_prototype_status",
@@ -54,6 +59,17 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
     type: PrototypeAgentRequestType,
     body: PrototypeAgentMessage = {},
   ): Promise<PrototypeAgentResult> {
+    // Like the real client: a closed connection or an unadvertised type is refused before
+    // anything is sent, so it is neither recorded nor does it consume a queued reply.
+    if (this.closed) {
+      throw new ActionableError("Prototype agent connection was closed by the host.");
+    }
+    if (!this.handshake.capabilities.includes(type)) {
+      throw new ActionableError(
+        `Prototype agent ${this.handshake.agentVersion} does not support ${type}. ` +
+          `Supported: ${this.handshake.capabilities.join(", ")}.`,
+      );
+    }
     this.requests.push({ type, body });
     if (type === "patch_prototype") {
       this.patchRequests.push(structuredClone(body));

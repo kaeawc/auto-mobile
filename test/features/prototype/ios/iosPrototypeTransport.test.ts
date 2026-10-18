@@ -297,7 +297,7 @@ describe("iOS patch transport", () => {
     const agent = new FakePrototypeAgentClient({
       agentVersion: "new",
       protocolVersion: 1,
-      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+      capabilities: ["patch_prototype", PROTOTYPE_PATCH_CAPABILITY],
     });
     agent.setPatchResult(new Error("socket closed"));
     expect(await new IosPrototypeTransport(agent).patch({ id: "orders", ops: patchOps })).toEqual({
@@ -311,7 +311,7 @@ describe("iOS patch transport", () => {
     const agent = new FakePrototypeAgentClient({
       agentVersion: "new",
       protocolVersion: 1,
-      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+      capabilities: ["patch_prototype", PROTOTYPE_PATCH_CAPABILITY],
     });
     const transport = new IosPrototypeTransport(agent);
     agent.setPatchResult({ success: true, revision: 13 });

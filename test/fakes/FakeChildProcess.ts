@@ -19,6 +19,7 @@ export class FakeChildProcess
   killed = false;
   pid: number | undefined;
 
+  private exited = false;
   private spawnDelay: number = 0;
   private exitDelay: number = 0;
   private shouldError = false;
@@ -129,6 +130,7 @@ export class FakeChildProcess
    */
   simulateExit(code: number = 0, signal: NodeJS.Signals | null = null): void {
     this.timer.setTimeout(() => {
+      this.exited = true;
       this.exitCode = code;
       this.signalCode = signal;
       this.stdout.push(null); // End stdout stream
@@ -142,8 +144,12 @@ export class FakeChildProcess
    * Kill the process (simulated)
    */
   kill(signal?: NodeJS.Signals | number): boolean {
-    if (this.killed || this.exitCode !== null) {
+    if (this.exited) {
       return false;
+    }
+    if (this.killed) {
+      // Like node: signalling an already-signalled child that has not exited yet still succeeds.
+      return true;
     }
 
     this.killed = true;

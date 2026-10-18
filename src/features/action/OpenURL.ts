@@ -313,7 +313,7 @@ export class OpenURL extends BaseVisualChange {
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
-  private async executeAndroidOpenURL(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
+  async executeAndroidOpenURL(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
     // Pass URL through as-is to am start without any reformatting.
     // Android's Intent system handles both hierarchical (scheme://authority/path)
     // and opaque (scheme:scheme-specific-part) URIs correctly.
@@ -346,7 +346,7 @@ export class OpenURL extends BaseVisualChange {
   }
 
   /** Execute iOS URL opening through the selected transport backend. */
-  private async executeiOSOpenURL(
+  async executeiOSOpenURL(
     url: string,
     previousObservation?: ObserveResult,
     signal?: AbortSignal,

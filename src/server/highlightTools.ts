@@ -311,7 +311,7 @@ const resolveSourceDimensions = (
 
 interface HighlightToolDependencies {
   hierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
-  highlightClientFactory?: () => VisualHighlightClient;
+  highlightClientFactory?: () => Pick<VisualHighlightClient, "addHighlight">;
   viewHierarchyClientFactory?: (device: BootedDevice) => HierarchySyncClient;
   generateHighlightId?: () => string;
 }

@@ -11,6 +11,7 @@ import { swipeScreenSize } from "../../../src/features/action/swipeon/iosChromeI
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import { getScreenBounds } from "../../../src/utils/screenBounds";
 import demosRawHierarchy from "../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json";
+import { wireCapture } from "../../helpers/wireCapture";
 test("outer application bounds stay authoritative when cleanup collapses wrappers to one button", () => {
   const hierarchy = {
     hierarchy: {
@@ -243,7 +244,7 @@ test("invalid iOS scale or pixel fields do not override the tree proof", () => {
 // Captured 2026-10-08 on an unfolded iPhone Duo (iOS 27.1): the Playground Demos list has
 // rows below the inner panel's bottom edge and the runner reports portrait pixels (#8379).
 function capturedDemosHierarchy(): ViewHierarchyResult {
-  return structuredClone(demosRawHierarchy) as unknown as ViewHierarchyResult;
+  return wireCapture(structuredClone(demosRawHierarchy));
 }
 
 test("captured Duo Demos list with rows past the panel bottom resolves landscape", () => {

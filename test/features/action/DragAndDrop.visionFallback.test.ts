@@ -76,10 +76,8 @@ describe("DragAndDrop vision fallback", () => {
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
-    } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as any,
-    );
+    });
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
   });
 
   afterEach(() => {

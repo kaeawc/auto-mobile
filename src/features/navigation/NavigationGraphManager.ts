@@ -18,6 +18,7 @@ import type {
 import {
   NavigationGraph,
   NavigationEvent,
+  IncomingNavigationEvent,
   HierarchyNavigationEvent,
   NavigationNode,
   NavigationEdge,
@@ -51,8 +52,7 @@ import type {
   NavigationEdgeTarget,
 } from "../../db/navigationRepository";
 
-// Re-export types for convenience
-export type { NavigationEvent, NavigationEdge, UIState };
+export type { NavigationEvent, IncomingNavigationEvent, NavigationEdge, UIState };
 
 /** Whether replaying this stored edge is remembered as having failed (#10031). */
 type IsReplayFailed = (edge: DBNavigationEdge) => boolean;
@@ -234,7 +234,7 @@ export interface NavigationGraphService
   recordBackStack(backStack: BackStackInfo): Promise<void>;
 
   // Navigation events
-  recordNavigationEvent(event: NavigationEvent): Promise<void>;
+  recordNavigationEvent(event: IncomingNavigationEvent): Promise<void>;
   recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void>;
 
   // Tool call correlation
@@ -1166,7 +1166,7 @@ export class NavigationGraphManager implements NavigationGraphService {
    * If the event contains an applicationId, automatically sets/switches the current app.
    * This creates a "named node" in the navigation graph.
    */
-  public async recordNavigationEvent(event: NavigationEvent): Promise<void> {
+  public async recordNavigationEvent(event: IncomingNavigationEvent): Promise<void> {
     // Capture receipt before any async app switch or DB work. Tool calls use this
     // same host clock; the SDK timestamp remains the graph's persisted event time.
     const receivedAt = this.timer.now();
@@ -1176,7 +1176,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   private async recordNavigationEventUnlocked(
-    event: NavigationEvent,
+    event: IncomingNavigationEvent,
     receivedAt: number,
     epoch: number,
   ): Promise<void> {
@@ -1356,7 +1356,7 @@ export class NavigationGraphManager implements NavigationGraphService {
    * filtering), fire-and-forget after the graph write committed.
    */
   private pushNavigationTelemetry(
-    event: NavigationEvent,
+    event: IncomingNavigationEvent,
     written: { appId: string; nodeId: number; screenName: string; timestamp: number },
   ): void {
     const { appId, nodeId, screenName, timestamp } = written;

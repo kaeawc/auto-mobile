@@ -147,11 +147,7 @@ describe("PressButton Android keycode dispatch", () => {
       undefined,
       window ? { window } : {},
     );
-    const result = await (
-      pressButton as unknown as {
-        executeAndroidButtonPress(button: string): ReturnType<PressButton["press"]>;
-      }
-    ).executeAndroidButtonPress(button);
+    const result = await pressButton.executeAndroidButtonPress(button);
     expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
     return result;
   };
@@ -405,11 +401,9 @@ describe("PressButton Android keycode dispatch", () => {
   // press as failed for the rest of the cache window.
   describe("home verification self-heals a stale launcher cache", () => {
     const verifier = (window: WindowInterface): PressButton => {
-      const pressButton = Object.create(PressButton.prototype) as PressButton;
-      (pressButton as any).timer = fakeTimer;
-      (pressButton as any).adb = fakeAdb;
-      (pressButton as any).device = androidDevice;
-      (pressButton as any).window = window;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window,
+      });
       return pressButton;
     };
 
@@ -423,7 +417,7 @@ describe("PressButton Android keycode dispatch", () => {
       });
 
       await expect(
-        (verifier(sequencedWindow(["com.other.app"])) as any).verifyAndroidHomeForeground({
+        verifier(sequencedWindow(["com.other.app"])).testHooks.verifyAndroidHomeForeground({
           retryDelaysMs: [],
         }),
       ).resolves.toBe(false);
@@ -445,7 +439,7 @@ describe("PressButton Android keycode dispatch", () => {
       });
 
       await expect(
-        (verifier(sequencedWindow(["com.launcher.a"])) as any).verifyAndroidHomeForeground({
+        verifier(sequencedWindow(["com.launcher.a"])).testHooks.verifyAndroidHomeForeground({
           retryDelaysMs: [],
         }),
       ).resolves.toBe(true);
@@ -473,7 +467,7 @@ describe("PressButton Android keycode dispatch", () => {
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
         window,
       });
-      const result = await (pressButton as any).executeAndroidButtonPress(
+      const result = await pressButton.executeAndroidButtonPress(
         "home",
         undefined,
         undefined,
@@ -505,9 +499,7 @@ describe("PressButton Android keycode dispatch", () => {
       // aborted. Because the fallback COMBINES the (absent) forwarded signal
       // with the ambient one, the ADB keyevent is still cancelled.
       await expect(
-        runWithAbortSignal(controller.signal, () =>
-          (pressButton as any).executeAndroidButtonPress("home"),
-        ),
+        runWithAbortSignal(controller.signal, () => pressButton.executeAndroidButtonPress("home")),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
       expect(fakeAdb.getExecutedArgv()).toEqual([]);
@@ -528,7 +520,7 @@ describe("PressButton Android keycode dispatch", () => {
       // Supply a 1234ms budget: the post-keyevent home verification must forward
       // the leftover budget into getActive rather than letting it fall back to
       // the 5s default (which would overrun a nearly-spent caller deadline).
-      await (pressButton as any).executeAndroidButtonPress("home", 1234);
+      await pressButton.executeAndroidButtonPress("home", 1234);
 
       const verifyOptions = window.getGetActiveOptions();
       expect(verifyOptions.length).toBeGreaterThan(0);
@@ -543,38 +535,35 @@ describe("PressButton Android keycode dispatch", () => {
       // verifyAndroidHomeForeground only needs these collaborators. Avoid the
       // production constructor here because it allocates a CtrlProxy port that
       // is unrelated to this pre-read deadline gate.
-      const pressButton = Object.create(PressButton.prototype) as PressButton;
-      (pressButton as any).timer = fakeTimer;
-      (pressButton as any).adb = fakeAdb;
-      (pressButton as any).device = androidDevice;
-      (pressButton as any).window = window;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window,
+      });
 
       await expect(
-        (pressButton as any).verifyAndroidHomeForeground({ timeoutMs: 0 }),
+        pressButton.testHooks.verifyAndroidHomeForeground({ timeoutMs: 0 }),
       ).resolves.toBe(false);
 
       expect(window.getGetActiveCallCount()).toBe(0);
     });
 
     test("does not accept launcher evidence after the foreground read spends the budget", async () => {
-      const window = {
-        async getActive() {
+      class BudgetSpendingWindow extends FakeWindow {
+        override async getActive(): ReturnType<FakeWindow["getActive"]> {
           fakeTimer.advanceTime(1);
           return {
             appId: "com.android.launcher3",
             activityName: "Launcher",
             layoutSeqSum: 0,
           };
-        },
-      };
-      const pressButton = Object.create(PressButton.prototype) as PressButton;
-      (pressButton as any).timer = fakeTimer;
-      (pressButton as any).adb = fakeAdb;
-      (pressButton as any).device = androidDevice;
-      (pressButton as any).window = window;
+        }
+      }
+      const window = new BudgetSpendingWindow();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window,
+      });
 
       await expect(
-        (pressButton as any).verifyAndroidHomeForeground({ timeoutMs: 1 }),
+        pressButton.testHooks.verifyAndroidHomeForeground({ timeoutMs: 1 }),
       ).resolves.toBe(false);
       expect(fakeAdb.getCommandCalls()).toEqual([]);
     });
@@ -599,12 +588,7 @@ describe("PressButton Android keycode dispatch", () => {
         window: launcherWindow(),
       });
 
-      await (pressButton as any).executeAndroidButtonPress(
-        "home",
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      await pressButton.executeAndroidButtonPress("home", undefined, undefined, controller.signal);
 
       expect(capturedSignal).toBe(controller.signal);
     });
@@ -625,7 +609,7 @@ describe("PressButton Android keycode dispatch", () => {
       const controller = new AbortController();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
 
-      const result = await (pressButton as any).executeAndroidButtonPress(
+      const result = await pressButton.executeAndroidButtonPress(
         "back",
         500,
         "frame-1",
@@ -656,7 +640,7 @@ describe("PressButton Android keycode dispatch", () => {
 
       await expect(
         runWithAbortSignal(controller.signal, () =>
-          (pressButton as any).verifyAndroidHomeForeground({}),
+          pressButton.testHooks.verifyAndroidHomeForeground({}),
         ),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
       // Exactly one read attempt: the abort broke the loop, no retry backoffs ran.
@@ -674,7 +658,7 @@ describe("PressButton Android keycode dispatch", () => {
     });
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
-    const result = await (pressButton as any).executeAndroidButtonPress("back", 500, "epoch:2");
+    const result = await pressButton.executeAndroidButtonPress("back", 500, "epoch:2");
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Stale frame context");
@@ -690,11 +674,7 @@ describe("PressButton Android keycode dispatch", () => {
     });
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
-    const result = await (pressButton as any).executeAndroidButtonPress(
-      "volume_up",
-      500,
-      "epoch:3",
-    );
+    const result = await pressButton.executeAndroidButtonPress("volume_up", 500, "epoch:3");
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Stale frame context");
@@ -723,10 +703,8 @@ beforeOutputSchema(() => {
 });
 afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
 
-// Existing dispatch tests intentionally exercise the private transport seam.
-const dispatchPrototype = PressButton.prototype as unknown as {
-  executeAndroidButtonPress: PressButton["press"];
-};
+// Existing dispatch tests intentionally exercise the transport seam.
+const dispatchPrototype = PressButton.prototype;
 const dispatchForOutputSchema = dispatchPrototype.executeAndroidButtonPress;
 let dispatchOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
 beforeOutputSchema(() => {

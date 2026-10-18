@@ -923,7 +923,7 @@ describe("findWaitForElement rich predicates", () => {
         elementId: "home_tab",
         className: "android.widget.BottomNavigationView",
         contentDescription: "Home tab",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -946,7 +946,7 @@ describe("findWaitForElement rich predicates", () => {
       finder,
       {
         className: "android.widget.BottomNavigationView",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -978,7 +978,7 @@ describe("findWaitForElement rich predicates", () => {
       finder,
       {
         contentDescription: "Home tab",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1016,7 +1016,7 @@ describe("findWaitForElement rich predicates", () => {
       {
         elementId: "home_tab",
         text: "Home",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1047,7 +1047,7 @@ describe("findWaitForElement rich predicates", () => {
       {
         elementId: "home_tab",
         text: "Home",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1097,7 +1097,7 @@ describe("findWaitForElement rich predicates", () => {
         className: "UITabBar",
         contentDescription: "Settings tab",
         container: { elementId: "target_container" },
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1122,7 +1122,7 @@ describe("findWaitForElement rich predicates", () => {
         className: "UITabBar",
         contentDescription: "Home tab",
         container: { elementId: "missing_container" },
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1148,7 +1148,7 @@ describe("findWaitForElement rich predicates", () => {
         text: "Home",
         className: "UITabBar",
         matchType: "all",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1187,7 +1187,7 @@ describe("findWaitForElement rich predicates", () => {
         text: "Home",
         className: "UITabBar",
         matchType: "any",
-      } as any,
+      },
       hierarchy,
     );
 
@@ -1201,18 +1201,13 @@ describe("findWaitForElement rich predicates", () => {
     ]);
 
     expect(
-      findWaitForElement(finder, { text: "Home", textMatch: "contains" } as any, hierarchy)?.text,
+      findWaitForElement(finder, { text: "Home", textMatch: "contains" }, hierarchy)?.text,
     ).toBe("Welcome Home");
     expect(
-      findWaitForElement(
-        finder,
-        { text: "^Welcome\\s+Home$", textMatch: "regex" } as any,
-        hierarchy,
-      )?.text,
+      findWaitForElement(finder, { text: "^Welcome\\s+Home$", textMatch: "regex" }, hierarchy)
+        ?.text,
     ).toBe("Welcome Home");
-    expect(
-      findWaitForElement(finder, { text: "Home", textMatch: "exact" } as any, hierarchy),
-    ).toBeNull();
+    expect(findWaitForElement(finder, { text: "Home", textMatch: "exact" }, hierarchy)).toBeNull();
   });
 
   test("exact textMatch preserves surrounding whitespace while normalizing quotes and case", () => {
@@ -1248,23 +1243,15 @@ describe("findWaitForElement rich predicates", () => {
     expect(
       findWaitForElement(
         finder,
-        { contentDescription: "Home tab", textMatch: "exact" } as any,
+        { contentDescription: "Home tab", textMatch: "exact" },
         hierarchy,
       )?.["content-desc"],
     ).toBe("Home tab");
     expect(
-      findWaitForElement(
-        finder,
-        { contentDescription: "Home", textMatch: "contains" } as any,
-        hierarchy,
-      ),
+      findWaitForElement(finder, { contentDescription: "Home", textMatch: "contains" }, hierarchy),
     ).toBeNull();
     expect(
-      findWaitForElement(
-        finder,
-        { contentDescription: "^Home", textMatch: "regex" } as any,
-        hierarchy,
-      ),
+      findWaitForElement(finder, { contentDescription: "^Home", textMatch: "regex" }, hierarchy),
     ).toBeNull();
   });
 
@@ -1284,7 +1271,7 @@ describe("findWaitForElement rich predicates", () => {
       finder,
       {
         contentDescription: "Home",
-      } as any,
+      },
       hierarchy,
       "ios",
     );
@@ -1308,7 +1295,7 @@ describe("findWaitForElement rich predicates", () => {
       finder,
       {
         contentDescription: "Home",
-      } as any,
+      },
       hierarchy,
       "ios",
     );
@@ -1332,7 +1319,7 @@ describe("findWaitForElement rich predicates", () => {
       finder,
       {
         contentDescription: "Home",
-      } as any,
+      },
       hierarchy,
       "android",
     );
@@ -2156,7 +2143,7 @@ describe("waitForObservation activeWindow", () => {
         activeWindow: { appId: "com.example.app" },
         className: "UITabBar",
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2194,7 +2181,7 @@ describe("waitForObservation activeWindow", () => {
         activeWindow: { appId: "com.example.app" },
         className: "UITabBar",
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2236,7 +2223,7 @@ describe("waitForObservation activeWindow", () => {
         activeWindow: { appId: "com.example.app" },
         className: "UITabBar",
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2269,7 +2256,7 @@ describe("waitForObservation activeWindow", () => {
         for: "stable",
         timeout: 500,
         stableReads: 2,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2299,7 +2286,7 @@ describe("waitForObservation activeWindow", () => {
           activityName: "com.example.app.HomeActivity",
         },
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2326,7 +2313,7 @@ describe("waitForObservation activeWindow", () => {
           activityName: "com.example.app.HomeActivity",
         },
         timeout: 250,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2350,7 +2337,7 @@ describe("waitForObservation activeWindow", () => {
           activityName: "com.example.ios.IgnoredActivity",
         },
         timeout: 250,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2391,7 +2378,7 @@ describe("waitForObservation activeWindow", () => {
         activeWindow: { appId: "com.example.app" },
         className: "UITabBar",
         timeout: 250,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2465,7 +2452,7 @@ describe("waitForObservation settled", () => {
         elementId: "home_tab_bar",
         settled: { quietPeriodMs: 300 },
         timeout: 5000,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2495,7 +2482,7 @@ describe("waitForObservation settled", () => {
         elementId: "home_tab_bar",
         settled: { quietPeriodMs: 300 },
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2834,7 +2821,7 @@ describe("waitForObservation absent", () => {
         absent: { className: "UIActivityIndicatorView" },
         elementId: "message_list",
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2857,7 +2844,7 @@ describe("waitForObservation absent", () => {
         absent: { className: "UIActivityIndicatorView" },
         elementId: "message_list",
         timeout: 250,
-      } as any,
+      },
       undefined,
       false,
       timer,
@@ -2879,7 +2866,7 @@ describe("waitForObservation absent", () => {
       {
         absent: { className: "UIActivityIndicatorView" },
         timeout: 500,
-      } as any,
+      },
       undefined,
       false,
       timer,

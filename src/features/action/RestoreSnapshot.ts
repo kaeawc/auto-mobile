@@ -34,7 +34,11 @@ import {
   evaluateVmSnapshotResult,
   formatVmSnapshotExecutionError,
 } from "../../utils/android-cmdline-tools/vmSnapshot";
-import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
+import {
+  DeviceSnapshotStore,
+  type DeviceSnapshotStorePort,
+  SnapshotPathOptions,
+} from "../../utils/DeviceSnapshotStore";
 import { assertSafeSnapshotName } from "../../utils/snapshotNameValidation";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
@@ -122,7 +126,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
-  private store: DeviceSnapshotStore;
+  private store: DeviceSnapshotStorePort;
   private timer: Timer;
   private iosSnapshotBackend: IosSnapshotBackend;
   private iosRestoreOperations: IosRestoreOperations;
@@ -132,7 +136,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     emulator?: AndroidEmulatorClient,
     timer: Timer = defaultTimer,
-    store: DeviceSnapshotStore = new DeviceSnapshotStore(),
+    store: DeviceSnapshotStorePort = new DeviceSnapshotStore(),
     simctl?: IosSnapshotBackendDeps["simctl"],
     private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
     iosRestoreOperations?: IosRestoreOperations,

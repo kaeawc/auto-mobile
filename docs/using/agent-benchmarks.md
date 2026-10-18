@@ -154,7 +154,7 @@ A run's verdict comes only from hard signals; baselines never change it.
 Every suite must have at least one `verify.screenIncludes` entry: the device screen is the oracle,
 since an answer alone can be produced without touching the app. `verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
 must stand alone: it can't run on into a letter or digit in any script, so `EXPECTED_COUNT: 3`
-doesn't match `EXPECTED_COUNT: 30` (or `3.5`, or `3,000`) and `完了` doesn't match inside `未完了`. Expected `KEY: value` strings must be the reply's last nonblank lines (code fences aside), each exactly one expected line apart from case, spacing, backticks, and a trailing period, in the suite's order, so a reply that reports a different value, adds text to the line, or adds a disclaimer after it fails. A run must also make at
+doesn't match `EXPECTED_COUNT: 30` (or `3.5`, or `3,000`) and `完了` doesn't match inside `未完了`. Expected `KEY: value` strings (a word, then a colon, in any case) must be the reply's last nonblank lines (code fences aside), each exactly one expected line apart from case, spacing, backticks, and a trailing period, in the suite's order, so a reply that reports a different value, adds text to the line, or adds a disclaimer after it fails. A run must also make at
 least one non-error call to a device-aware auto-mobile tool (one whose generated schema takes a
 `device` label); inventory and control tools such as `listDevices` and `setToolEnabled` don't count,
 so an answer produced without touching the device fails. Suite prompts ask for a fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent

@@ -276,6 +276,8 @@ describe("verification text matching", () => {
     );
     // Inline backticks, case, spacing, and a trailing period do not matter.
     expect(missingFromAnswer("`expected_count:  3`\nDISPLAYED_COUNT: 2.", needles)).toEqual([]);
+    // A lowercase key is a report line too, so a later contradiction fails it.
+    expect(missingFromAnswer("count: 3\nCOUNT: 9", ["count: 3"])).toEqual(["count: 3"]);
     // A needle listed twice needs two lines; the second here is UNRELATED.
     expect(missingFromAnswer("COUNT: 3\nUNRELATED", ["COUNT: 3", "COUNT: 3"])).toEqual([
       "COUNT: 3",

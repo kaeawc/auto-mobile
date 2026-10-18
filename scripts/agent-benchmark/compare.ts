@@ -255,8 +255,11 @@ function missingFrom(haystack: string, needles: string[]): string[] {
   return needles.filter((needle) => !containsBounded(haystack, needle));
 }
 
-/** A `KEY: value` report line, as the prompts ask the agent to end with. */
-const KEYED_NEEDLE = /^[A-Z][A-Z0-9_]*:/;
+/**
+ * A `KEY: value` report line, as the prompts ask the agent to end with. Matching is
+ * case-insensitive like the rest of the answer check, so `count: 3` is a report line too.
+ */
+const KEYED_NEEDLE = /^[A-Z][A-Z0-9_]*:/i;
 
 /** A Markdown code fence line (```, ```text), which frames the report lines. */
 const FENCE_LINE = /^(`{3,}|~{3,})[\w-]*$/;

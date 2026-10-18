@@ -1,7 +1,7 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { ErrorCode, McpError } from "../../src/server/mcpError";
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { daemonResponseError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";

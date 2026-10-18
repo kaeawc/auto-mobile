@@ -1,7 +1,7 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ambiguousSessionSelectorResult, createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonAmbiguousSessionSelectorError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";

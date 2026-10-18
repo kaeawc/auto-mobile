@@ -1,9 +1,9 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/server/mcpError";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/constants";

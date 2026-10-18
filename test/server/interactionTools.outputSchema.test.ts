@@ -2,8 +2,8 @@ import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import type { JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import type { JsonSchemaValidator } from "@modelcontextprotocol/client";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import type { BootedDevice, KeyboardResult } from "../../src/models";
 import type { SendKeysResult } from "../../src/features/action/SendKeys";
 import { AndroidImeCatalog } from "../../src/features/action/AndroidImeCatalog";

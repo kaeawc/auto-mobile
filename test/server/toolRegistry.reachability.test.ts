@@ -1,6 +1,6 @@
+import type { McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 

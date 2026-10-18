@@ -1,8 +1,5 @@
+import type { Transport, TransportSendOptions } from "@modelcontextprotocol/server";
 import { describe, expect, test } from "bun:test";
-import type {
-  Transport,
-  TransportSendOptions,
-} from "@modelcontextprotocol/sdk/shared/transport.js";
 import { EarlyStartTransport } from "../../src/server/earlyStartTransport";
 import { OutputGatedTransport } from "../../src/server/outputGatedTransport";
 

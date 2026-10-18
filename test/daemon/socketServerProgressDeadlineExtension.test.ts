@@ -1,8 +1,8 @@
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/server";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { describe, expect, mock, test } from "bun:test";
-import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -155,7 +155,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     },
   );
 
-  test("list/read options stay second and callTool options stay third", async () => {
+  test("list/read and callTool options stay second (SDK v2 callTool signature)", async () => {
     const timer = new FakeTimer();
     const server = createServer(timer);
     const controller = new AbortController();
@@ -172,11 +172,9 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const readResource = mock(
       async (_params: { uri: string }, _options?: CapturedCallToolOptions) => ({ contents: [] }),
     );
-    const callTool = mock(
-      async (_params: unknown, _schema?: unknown, _options?: CapturedCallToolOptions) => ({
-        content: [],
-      }),
-    );
+    const callTool = mock(async (_params: unknown, _options?: CapturedCallToolOptions) => ({
+      content: [],
+    }));
     const client = { listTools, listResources, listResourceTemplates, readResource, callTool };
     const uri = "automobile:devices/booted/android";
     for (const method of [
@@ -206,9 +204,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     expect(listResources.mock.calls).toEqual([[undefined, options]]);
     expect(listResourceTemplates.mock.calls).toEqual([[undefined, options]]);
     expect(readResource.mock.calls).toEqual([[{ uri }, options]]);
-    expect(callTool.mock.calls).toEqual([
-      [expect.objectContaining({ name: "observe" }), undefined, options],
-    ]);
+    expect(callTool.mock.calls).toEqual([[expect.objectContaining({ name: "observe" }), options]]);
   });
 
   test("device-control recovery reconnects after the original budget when progress extends the live deadline", async () => {
@@ -287,11 +283,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     ).mcpRequestSignal(socketSessionId);
     let forwardedSignal: AbortSignal | undefined;
     const fakeMcpClient = {
-      callTool: async (
-        _params: unknown,
-        _resultSchema: unknown,
-        options: CapturedCallToolOptions,
-      ) => {
+      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
         forwardedSignal = options.signal;
         return await completed.promise;
       },
@@ -410,11 +402,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
 
     let capturedOptions: CapturedCallToolOptions | undefined;
     const fakeMcpClient = {
-      callTool: async (
-        _params: unknown,
-        _resultSchema: unknown,
-        options: CapturedCallToolOptions,
-      ) => {
+      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
         capturedOptions = options;
         return { content: [] };
       },
@@ -459,11 +447,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const deadline = new ProgressExtendableDeadline(fakeTimer.now(), initialTimeoutMs);
 
     const fakeMcpClient = {
-      callTool: async (
-        _params: unknown,
-        _resultSchema: unknown,
-        options: CapturedCallToolOptions,
-      ) => {
+      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
         // Simulate slow device work: tick progress every 20s, well past what
         // the ORIGINAL 30s deadline would have allowed, for 100s total.
         for (let i = 0; i < 5; i++) {
@@ -510,11 +494,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
 
     let capturedOptions: CapturedCallToolOptions | undefined;
     const fakeMcpClient = {
-      callTool: async (
-        _params: unknown,
-        _resultSchema: unknown,
-        options: CapturedCallToolOptions,
-      ) => {
+      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
         capturedOptions = options;
         return { content: [] };
       },
@@ -559,11 +539,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
   } {
     let captured: CapturedCallToolOptions | undefined;
     return {
-      callTool: async (
-        _params: unknown,
-        _resultSchema: unknown,
-        options: CapturedCallToolOptions,
-      ) => {
+      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
         captured = options;
         return await new Promise((resolve, reject) => {
           if (options.signal?.aborted) {
@@ -788,7 +764,6 @@ describe("request timeout preserves iOS text dispatch evidence", () => {
         const timeout = new Error("Request timed out after 4000ms");
         const callTool = (
           _params: { arguments: Record<string, unknown> },
-          _schema: unknown,
           options: CapturedCallToolOptions,
         ) => {
           key = _params.arguments[INTERNAL_LIVE_DEADLINE_KEY_PARAM] as string;

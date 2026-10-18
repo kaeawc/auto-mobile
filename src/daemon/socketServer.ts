@@ -45,12 +45,13 @@ import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
+  type Client,
+  SdkHttpError,
   StreamableHTTPClientTransport,
-  StreamableHTTPError,
   type StreamableHTTPReconnectionOptions,
-} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+} from "@modelcontextprotocol/client";
+import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
 import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
@@ -399,7 +400,7 @@ export class DaemonSocketQueueOverflowError extends Error {
  * which other lifecycles also use (issue #6383).
  */
 function isExpiredLoopbackMcpSession(error: unknown): boolean {
-  return error instanceof StreamableHTTPError && error.code === 404;
+  return error instanceof SdkHttpError && error.status === 404;
 }
 
 class ReleasedBoundSessionError extends Error {
@@ -7810,7 +7811,6 @@ export class UnixSocketServer {
                     name: request.params.name,
                     arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
                   },
-                  undefined,
                   callOptions,
                 ),
               );
@@ -7869,7 +7869,6 @@ export class UnixSocketServer {
         };
         return await mcpClient.callTool(
           { name: "getNavigationGraph", arguments: args },
-          undefined,
           requestOptions,
         );
       }
@@ -8026,7 +8025,7 @@ export class UnixSocketServer {
         : {}),
     });
 
-    const client = new Client(
+    const client = new LoopbackMcpClient(
       {
         name: "auto-mobile-daemon-client",
         version: "1.0.0",

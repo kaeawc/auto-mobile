@@ -1,3 +1,4 @@
+import { ErrorCode, McpError } from "../../src/server/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
@@ -5,8 +6,7 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -45,8 +45,17 @@ function createFakeMcpClient(overrides: Partial<FakeMcpClient> = {}): FakeMcpCli
 }
 
 /** What the SDK client raises when the loopback server 404s an expired session. */
-function expiredLoopbackSession(): StreamableHTTPError {
-  return new StreamableHTTPError(404, 'Error POSTing to endpoint: {"error":"Session not found"}');
+function expiredLoopbackSession(): SdkHttpError {
+  const text = '{"error":"Session not found"}';
+  return new SdkHttpError(
+    SdkErrorCode.ClientHttpNotImplemented,
+    `Error POSTing to endpoint: ${text}`,
+    {
+      status: 404,
+      statusText: "Not Found",
+      text,
+    },
+  );
 }
 
 function socketClosedError(sensitiveDetail = ""): Error {

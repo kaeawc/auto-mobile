@@ -220,7 +220,7 @@ describe("UnixSocketServer cancel frame (issue #6384)", () => {
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
       // Settles only when the test says so, or rejects on abort like the MCP SDK client.
-      callTool: (params: { name: string }, _schema: unknown, options?: { signal?: AbortSignal }) =>
+      callTool: (params: { name: string }, options?: { signal?: AbortSignal }) =>
         new Promise((resolve, reject) => {
           const signal = options?.signal;
           calls.push({ name: params.name, signal, settle: resolve });
@@ -375,7 +375,6 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
       listTools: async () => ({ tools: [] }),
       callTool: (
         params: { name: string; arguments?: Record<string, unknown> },
-        _schema: unknown,
         options?: { signal?: AbortSignal },
       ) =>
         new Promise((resolve, reject) => {

@@ -199,6 +199,13 @@ export const ENV = {
     default: "unset",
     doc: "Select settled screenshot mode with true or 1.",
   },
+  MCP_FORWARD_TRANSPORT: {
+    name: "AUTOMOBILE_MCP_FORWARD_TRANSPORT",
+    kind: "enum",
+    default: "http",
+    values: ["http", "in-process"],
+    doc: "How control-socket forwards reach the daemon's MCP server (#11820 rollout switch).",
+  },
 } as const satisfies Record<string, EnvVarSpec>;
 
 export const ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(ENV);

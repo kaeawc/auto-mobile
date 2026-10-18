@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { AsyncResource } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
@@ -18,6 +17,7 @@ import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
 } from "../../src/daemon/proxyLivenessRecovery";
+import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { currentLoopbackSessionKey } from "../../src/daemon/socketServer/loopbackMcpClientPool";
 import { StatelessMcpHttpEndpoint } from "../../src/daemon/statelessMcpHttpEndpoint";
@@ -49,7 +49,6 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeBindLock } from "../helpers/createTestUnixSocketServer";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { inMemoryMcpClientFactory } from "../helpers/inMemoryMcpForward";
 import { buildRefusalWireFixtures } from "../helpers/refusalWireFixtures";
 
 /**
@@ -59,7 +58,7 @@ import { buildRefusalWireFixtures } from "../helpers/refusalWireFixtures";
  * The context-leak probe checks that a handler reached in memory sees its own request's
  * AsyncLocalStorage stores, not the stores of the socket chain that forwarded it.
  */
-type ForwardPath = "http" | "in-memory" | "in-memory-unrooted";
+type ForwardPath = "http" | "in-process" | "in-process-unrooted";
 
 const RESULT_TOOL = "parityResult";
 const ACTIONABLE_TOOL = "parityActionableError";
@@ -147,8 +146,15 @@ async function startHarness(
   ) => executionTracker.cancelSessionExecutions(scope, reason);
   let httpServer: Server | undefined;
   let endpointUrl = "http://127.0.0.1:1/unused";
-  // Captured where the daemon would capture it: at start, outside any request's stores.
-  const root = new AsyncResource("mcp-forward-parity-root");
+  // Built where the daemon builds it: at start, outside any request's stores.
+  const dispatcher = new InProcessMcpDispatcher({
+    idGenerator: scopeIds,
+    createServer: (context, scope) => createStatelessMcpServer(serverBase, context, scope),
+    cancelScopeExecutions,
+    forgetScopeBindings: (scope) => store.forget(scope),
+    closeReason: () => "streamable_http_onclose",
+    ...(path === "in-process-unrooted" ? { serverScope: { run: (fn) => fn() } } : {}),
+  });
   if (path === "http") {
     const endpoint = new StatelessMcpHttpEndpoint<
       IncomingMessage,
@@ -189,20 +195,12 @@ async function startHarness(
     fakeDaemonState(),
     defaultTimer,
     null,
-    {},
+    path === "http"
+      ? { mcpForwardTransport: "http" }
+      : { mcpForwardTransport: "in-process", mcpDispatcher: dispatcher },
     new CountingIdGenerator("socket"),
     { bindLock: fakeBindLock },
   );
-  if (path !== "http") {
-    socketServer.mcpClientFactory = inMemoryMcpClientFactory({
-      idGenerator: scopeIds,
-      root: path === "in-memory" ? root : undefined,
-      createServer: (context, scope) => createStatelessMcpServer(serverBase, context, scope),
-      cancelScopeExecutions,
-      forgetScopeBindings: (scope) => store.forget(scope),
-      closeReason: () => "streamable_http_onclose",
-    });
-  }
   const start = () => socketServer.start();
   await (options.socketSideStores ? withSocketSideStores(start) : start());
   return {
@@ -311,12 +309,12 @@ async function linesPerPath(
 }
 
 async function expectByteParity(script: (conversation: Conversation) => Promise<void>) {
-  const lines = await linesPerPath(["http", "in-memory"], script);
-  expect(lines.get("in-memory")).toEqual(lines.get("http")!);
+  const lines = await linesPerPath(["http", "in-process"], script);
+  expect(lines.get("in-process")).toEqual(lines.get("http")!);
   return lines.get("http")!;
 }
 
-describe("control-socket forward byte parity: HTTP loopback vs in-memory (#11820)", () => {
+describe("control-socket forward byte parity: HTTP loopback vs in process (#11820)", () => {
   let restoreFixture: () => void;
   let holdStarted: (() => void) | undefined;
   let holdSignals: AbortSignal[] = [];
@@ -514,10 +512,10 @@ describe("control-socket forward byte parity: HTTP loopback vs in-memory (#11820
       return probes.slice(before);
     };
     const [http] = await run("http");
-    const [inMemory] = await run("in-memory");
-    const [unrooted] = await run("in-memory-unrooted");
+    const [inProcess] = await run("in-process");
+    const [unrooted] = await run("in-process-unrooted");
 
-    expect(inMemory).toEqual(http);
+    expect(inProcess).toEqual(http);
     expect(http).toEqual({
       abortSignalIsRequestOwn: true,
       requestContextIsSocketSide: false,
@@ -530,7 +528,7 @@ describe("control-socket forward byte parity: HTTP loopback vs in-memory (#11820
     });
     expect(http.callerMcpSessionId).not.toBe("socket-side-caller");
     expect(http.labelSessionUuids).not.toEqual(["socket-side-label"]);
-    // The probe is sensitive: an in-memory pair entered from the forward's own context leaks.
+    // The probe is sensitive: a pair entered from the forward's own context leaks.
     expect(unrooted).not.toEqual(http);
   });
 });

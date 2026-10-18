@@ -335,8 +335,6 @@
 1	test/features/video/IosPhysicalVideoCaptureBackend.test.ts
 1	test/features/video/PlatformVideoCaptureBackend.test.ts
 1	test/features/video/PlatformVideoCaptureBackendDevicePid.test.ts
-4	test/features/webrtc/AndroidH264Source.test.ts
-1	test/features/webrtc/PersistentEncoderH264Source.test.ts
 1	test/fixtures/observe/observeFixture.ts
 1	test/helpers/daemonHeartbeatHandler.ts
 3	test/helpers/daemonRestartScenario.ts

@@ -1,6 +1,6 @@
 import { GestureOptions } from "../../src/models";
 import { SwipeResult } from "../../src/models/SwipeResult";
-import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 import { GestureExecutor } from "../../src/features/action/swipeon";
 
 export class FakeGestureExecutor implements GestureExecutor {
@@ -18,7 +18,7 @@ export class FakeGestureExecutor implements GestureExecutor {
     x2: number,
     y2: number,
     options: GestureOptions = {},
-    _perf: PerformanceTracker | undefined = undefined,
+    _call: ActionCall | undefined = undefined,
   ): Promise<SwipeResult> {
     this.swipeCalls.push({ x1, y1, x2, y2, options });
     return {

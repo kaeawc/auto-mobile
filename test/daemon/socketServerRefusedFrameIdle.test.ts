@@ -28,6 +28,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
+import { spyOnIosClientFactory } from "../helpers/iosCtrlProxyClientSpies";
 
 /**
  * A control frame counts as use of the holder's session only when it actually runs (#10698,
@@ -247,20 +248,17 @@ describe("a holder's control frame refused before it reaches the device", () => 
         clearPreferenceStore: record("clearPreferenceStore", 2),
       };
     });
-    spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-          requestTapCoordinates: record("tap", 7),
-          requestDrag: record("swipe", 10),
-          requestSetText: record("setText", 1),
-          requestAppendText: record("appendText", 4),
-          requestImeAction: record("ime", 4),
-          setPreference: record("setPreference", 5),
-          removePreference: record("removePreference", 3),
-          clearPreferenceStore: record("clearPreferenceStore", 2),
-        }) as unknown as IOSCtrlProxyClient,
-    );
+    spyOnIosClientFactory(() => ({
+      getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
+      requestTapCoordinates: record("tap", 7),
+      requestDrag: record("swipe", 10),
+      requestSetText: record("setText", 1),
+      requestAppendText: record("appendText", 4),
+      requestImeAction: record("ime", 4),
+      setPreference: record("setPreference", 5),
+      removePreference: record("removePreference", 3),
+      clearPreferenceStore: record("clearPreferenceStore", 2),
+    }));
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       () =>
         ({

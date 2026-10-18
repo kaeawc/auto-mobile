@@ -1,5 +1,4 @@
 import { expect, describe, test, beforeEach } from "bun:test";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
@@ -26,6 +25,7 @@ import {
   IosRunnerBusyError,
   IosRunnerStalledError,
 } from "../../../src/features/observe/ios/runnerErrorCodes";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Synthetic focused-value variants of the representative iOS forms fixture, not captures.
 function focusedIOSForm(value?: string): ViewHierarchyResult {
@@ -482,8 +482,8 @@ describe("Clipboard iOS", () => {
       invalidateCache: () => {
         invalidations.push(timer.now());
       },
-    } as IOSCtrlProxyClient;
-    const ios = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    };
+    const ios = spyOnIosClientInstance(client);
     const read = spyOn(ViewHierarchy.prototype, "getViewHierarchy")
       .mockResolvedValueOnce(focusedIOSForm("AB"))
       .mockResolvedValueOnce(focusedIOSForm("Z1"));

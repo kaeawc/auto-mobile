@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
@@ -45,6 +44,11 @@ import type {
   OnSubscriberConnectedCallback,
   RequestedObservation,
 } from "../../src/daemon/deviceDataStreamSocketServer";
+import {
+  spyOnIosClientFactory,
+  spyOnIosExistingFactory,
+  spyOnIosExistingInstance,
+} from "../helpers/iosCtrlProxyClientSpies";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
@@ -680,21 +684,15 @@ describe("Daemon stream wiring", () => {
         return false;
       },
     };
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
-      (device) =>
-        ({
-          ensureConnected: () => fakeClient.ensureConnected(device.deviceId),
-        }) as unknown as IOSCtrlProxyClient,
-    );
-    const getExistingInstance = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockImplementation(
-      (deviceId) =>
-        ({
-          ensureConnected: () => fakeClient.ensureConnected(deviceId),
-          refreshObservationStreamScreenshotCadence: () => {
-            void fakeClient.ensureConnected(deviceId);
-          },
-        }) as unknown as IOSCtrlProxyClient,
-    );
+    const getInstance = spyOnIosClientFactory((device) => ({
+      ensureConnected: () => fakeClient.ensureConnected(device.deviceId),
+    }));
+    const getExistingInstance = spyOnIosExistingFactory((deviceId) => ({
+      ensureConnected: () => fakeClient.ensureConnected(deviceId),
+      refreshObservationStreamScreenshotCadence: () => {
+        void fakeClient.ensureConnected(deviceId);
+      },
+    }));
     const bootedDevices: BootedDevice[] = [
       { deviceId: "sim-a", name: "iPhone A", platform: "ios" },
       { deviceId: "sim-b", name: "iPhone Duo", platform: "ios" },
@@ -797,13 +795,11 @@ describe("Daemon stream wiring", () => {
     const androidClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
       ensureConnected: async () => false,
     }));
-    const iosClient = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
-      () => ({ ensureConnected: async () => false }) as unknown as IOSCtrlProxyClient,
-    );
+    const iosClient = spyOnIosClientFactory(() => ({ ensureConnected: async () => false }));
     const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
       null,
     );
-    const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(null);
+    const iosExisting = spyOnIosExistingInstance(null);
     try {
       for (const allowlisted of [false, true]) {
         if (allowlisted) {

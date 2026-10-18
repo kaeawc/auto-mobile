@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import { spyOnIosClientFactory } from "../../helpers/iosCtrlProxyClientSpies";
 
 let restore: () => void;
 let tap: TapOnElement;
@@ -18,7 +18,7 @@ beforeEach(() => {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   client = new FakeIOSCtrlProxy();
   read = spyOn(client, "getAccessibilityHierarchy");
-  const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(() => client as any);
+  const instance = spyOnIosClientFactory(() => client);
   restore = () => instance.mockRestore();
   tap = new TapOnElement(
     { name: "test", platform: "ios", deviceId: "test-ios-budget" },

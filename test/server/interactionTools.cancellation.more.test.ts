@@ -13,7 +13,6 @@ import { Rotate } from "../../src/features/action/Rotate";
 import { SetPosture } from "../../src/features/device/SetPosture";
 import { AwaitIdle } from "../../src/features/observe/AwaitIdle";
 import { BaseVisualChange } from "../../src/features/action/BaseVisualChange";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -34,6 +33,7 @@ import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { createExecResult } from "../../src/utils/execResult";
 import type { SettingsNamespace } from "../../src/features/observe/android/types";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 // Every system rotation setting reads "1"; the device has no secure device_state_rotation_lock.
 const systemSettingsOne = async (namespace: SettingsNamespace) =>
@@ -662,9 +662,7 @@ describe("registered interaction handlers honor cancellation", () => {
       updatedAt: 1,
       hierarchy: { className: "XCUIApplication" },
     });
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     const reads = spyOn(client, "requestHierarchySync");
     const launches: string[][] = [];
     setPressButtonFactory(

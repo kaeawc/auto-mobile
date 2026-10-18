@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { IosLockScreenUnlocker } from "../../../src/features/action/IosLockScreenUnlocker";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../src/models";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const device: BootedDevice = { deviceId: "ios-unlock-real-swipe", platform: "ios", name: "iOS" };
 
@@ -21,9 +21,7 @@ afterEach(() => {
 async function unlockWith(swipeResult: Parameters<FakeIOSCtrlProxy["setSwipeResult"]>[0]) {
   const proxy = new FakeIOSCtrlProxy();
   proxy.setSwipeResult(swipeResult);
-  clientSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    proxy as unknown as IOSCtrlProxyClient,
-  );
+  clientSpy = spyOnIosClientInstance(proxy);
   const observe = new FakeObserveScreen();
   observe.setObserveResult({
     timestamp: 0,

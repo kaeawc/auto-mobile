@@ -27,6 +27,7 @@ import {
   finishSockets,
   type Harness,
 } from "../helpers/socketServerInputHoldHarness";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const variants = [
   "key android",
@@ -73,9 +74,9 @@ function runInput(handler: Harness, request: DaemonRequest, signal?: AbortSignal
 }
 function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: Promise<void>) {
   const android = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-  const ios = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+  const ios = Object.create(IOSCtrlProxyClient.prototype);
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
-  spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(ios);
+  spyOnIosClientInstance(ios);
   spyOn(android, "getScreenScaleMetadata").mockReturnValue(null);
   spyOn(ios, "getScreenScaleMetadata").mockReturnValue(null);
   spyOn(ios, "requestHierarchySyncWithoutObservationStreamPush").mockResolvedValue(

@@ -6,6 +6,7 @@ import { ActionableError, type BootedDevice } from "../../../src/models";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const device: BootedDevice = { deviceId: "ios-swipe", platform: "ios", name: "iPhone" };
 
@@ -36,9 +37,7 @@ class ScriptedSwipeClient extends FakeIOSCtrlProxy {
 let spy: ReturnType<typeof spyOn> | undefined;
 
 function use(client: FakeIOSCtrlProxy): void {
-  spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    client as unknown as IOSCtrlProxyClient,
-  );
+  spy = spyOnIosClientInstance(client);
 }
 
 afterEach(() => {

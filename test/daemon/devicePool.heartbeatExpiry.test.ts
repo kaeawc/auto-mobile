@@ -1,12 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
 async function setup() {
@@ -18,9 +17,7 @@ async function setup() {
   const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "test-daemon", { timer, deviceManager: utils }),
-  );
+  const pool = makePool(manager, "test-daemon", { timer, deviceManager: utils });
   await pool.initializeWithDevices([device]);
   await manager.createSession("owner", device.deviceId, "android", {
     timeoutMs: 1_000,

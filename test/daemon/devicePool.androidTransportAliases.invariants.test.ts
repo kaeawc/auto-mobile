@@ -1,7 +1,7 @@
+import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { createListingHandlers } from "../../src/server/deviceToolsListing";
 import {
@@ -15,9 +15,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 type Outcome = "success" | "failure" | "timeout";
 interface Snapshot {
@@ -148,15 +146,12 @@ describe("Android alias invariants across refreshes and acquisitions (#10201)", 
         return client;
       },
     };
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "invariant-daemon", {
-        timer,
-        idGenerator: new FakeIdGenerator(),
-        deviceManager: manager,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        androidAdbFactory: factory,
-      }),
-    );
+    const pool = makePool(sessions, "invariant-daemon", {
+      timer,
+      idGenerator: new FakeIdGenerator(),
+      deviceManager: manager,
+      androidAdbFactory: factory,
+    });
     const held = new Map<string, { sessionId: string; incarnation: number | undefined }>();
     const provenTransports = new Set<string>();
     const aliases = pool.getAndroidTransportRouting();

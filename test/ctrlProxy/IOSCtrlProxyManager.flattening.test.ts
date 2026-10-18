@@ -2,6 +2,8 @@ import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { logger } from "../../src/utils/logger";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
@@ -39,6 +41,25 @@ function remoteRunner(): RemoteRunner {
     stop: async () => ({ success: true }),
     status: async () => ({ success: true, data: { running: false } }),
   };
+}
+
+/**
+ * Setup reads the installed app hash through DeviceAppManager. The default instance would spawn a
+ * real `xcrun simctl get_app_container` on macOS (Linux skips it), so inject one whose executor
+ * answers "no installed app" without touching the host.
+ */
+function fakeDeviceAppManager(): DeviceAppManager {
+  return new DeviceAppManager({
+    platform: () => "darwin",
+    execute: async () => createExecResult("", ""),
+    readFile: async () => "",
+    mkdtemp: async () => "/tmp/flattening-device-app-manager",
+    rm: async () => undefined,
+    readdir: async () => [],
+    stat: async () => ({ isDirectory: () => false }),
+    tmpdir: () => "/tmp",
+    logger: { debug: () => {}, warn: () => {} },
+  });
 }
 
 describe("IOSCtrlProxyManager flattening characterization", () => {
@@ -123,6 +144,8 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
         timer,
         builder,
         new FakeProcessExecutor(),
+        undefined,
+        fakeDeviceAppManager(),
       );
       const result = { success: branch !== "failed build", message: "built", error: "build error" };
       const pin = spyOn(IosCtrlProxyBuilder, "isPinnedVersionUnverifiable").mockReturnValue(false);

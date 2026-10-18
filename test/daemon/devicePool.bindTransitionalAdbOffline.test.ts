@@ -1,7 +1,7 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
@@ -13,9 +13,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 
@@ -37,15 +35,12 @@ async function setup(pooled: boolean) {
   const timer = new FakeTimer();
   sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new FakeDeviceManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      deviceManager: manager,
-      env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   if (pooled) {
     await pool.addDevice(device, image);
   }

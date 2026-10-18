@@ -55,7 +55,6 @@ import {
   withAppIdAliases,
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
-import { DaemonState } from "../daemon/daemonState";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -79,10 +78,7 @@ async function resumeCtrlProxyIfCurrentlyBooted(
   if (!bootedDevices.some((device) => device.deviceId === deviceId)) {
     return;
   }
-  if (
-    DaemonState.getInstance().isInitialized() &&
-    (await DaemonState.getInstance().getDevicePool().isShutdownReserved(deviceId))
-  ) {
+  if (await defaultDaemonContext.devicePool()?.isShutdownReserved(deviceId)) {
     return;
   }
   ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, deviceId);

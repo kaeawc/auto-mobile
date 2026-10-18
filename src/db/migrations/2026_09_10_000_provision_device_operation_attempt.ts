@@ -6,7 +6,7 @@ import { type Kysely, sql } from "kysely";
 // reclaimed (expiry sweep, or a retry after a failure) stamps its stale result
 // over the replacement attempt's row. Pre-existing rows default to the empty
 // token: no live attempt can present it, so their first `begin()` claims them.
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   const existingColumn = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('provision_device_operations')
     WHERE name = 'attempt_id'
@@ -20,6 +20,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.alterTable("provision_device_operations").dropColumn("attempt_id").execute();
 }

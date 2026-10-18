@@ -26,7 +26,7 @@ import { Kysely, sql } from "kysely";
  * with no duplicates the de-dup statements are no-ops and the index create uses
  * `IF NOT EXISTS`.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     // 1. Repoint occurrences from loser groups onto their signature's keeper —
     //    BEFORE any delete, so CASCADE cannot wipe them. A "loser" is any group
@@ -149,7 +149,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   });
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     await sql`DROP INDEX IF EXISTS idx_failure_occurrences_group_session`.execute(trx);
     await sql`DROP INDEX IF EXISTS idx_failure_groups_signature`.execute(trx);

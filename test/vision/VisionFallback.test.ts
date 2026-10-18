@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { VisionFallback, MAX_VISION_CACHE_ENTRIES } from "../../src/vision/VisionFallback";
+import {
+  VisionFallback,
+  MAX_VISION_CACHE_ENTRIES,
+  resolveVisionProvider,
+} from "../../src/vision/VisionFallback";
 import type { ViewHierarchyNode } from "../../src/models/ViewHierarchyResult";
 import type {
   VisionClient,
@@ -88,12 +92,11 @@ describe("VisionFallback orchestrator", () => {
     );
   });
 
-  test("rejects a provider with no implementation before attempting a paid analysis", async () => {
-    const fallback = new VisionFallback(config({ provider: "local" }), timer, undefined, checksums);
-
-    await expect(
-      fallback.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login")),
-    ).rejects.toThrow("Unsupported vision provider: local");
+  test("rejects an unsupported provider before attempting a paid analysis", () => {
+    expect(() => resolveVisionProvider("unsupported")).toThrow(
+      "Unsupported vision provider: unsupported",
+    );
+    expect(resolveVisionProvider("claude")).toBe("claude");
   });
 
   test("caches a result: an identical query hits the analyzer only once", async () => {

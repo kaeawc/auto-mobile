@@ -1,7 +1,7 @@
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs, type Dirent } from "fs";
-import * as os from "os";
 import * as path from "path";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
@@ -30,12 +30,10 @@ function syntheticDirent(parentPath: string, name: string, directory = false): D
 describe("snapshot journal enumeration and discard", () => {
   let root: string;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-journal-list-");
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-journal-list-"));
+    root = scratch.next();
     store = new DeviceSnapshotStore(root, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
-  });
-  afterEach(async () => {
-    await fs.rm(root, { recursive: true, force: true });
   });
 
   async function artifact(relativePath: string, directory = false): Promise<void> {

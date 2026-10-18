@@ -4,8 +4,7 @@ import { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { type SessionManager } from "../../daemon/sessionManager";
-import { DaemonState } from "../../daemon/daemonState";
-import type { DevicePool } from "../../daemon/devicePool";
+import { defaultDaemonContext, type DevicePoolWrites } from "../../daemon/daemonContext";
 import { releasePlanSessionAndDevice } from "../../daemon/releaseSessionAndDevice";
 import {
   type AppCleanupConfig,
@@ -109,7 +108,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     devices: BootedDevice[],
     planSessions: ReadonlySet<string>,
   ): BootedDevice[] {
-    const sessionManager = DaemonState.getInstance().getSessionManager();
+    const sessionManager = defaultDaemonContext.requireSessionManager();
     return devices.filter((device) => {
       const owner = sessionManager.getSessionForDevice(device.deviceId);
       if (owner !== null && !planSessions.has(owner)) {
@@ -138,13 +137,12 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       }
       return true;
     };
-    const state = DaemonState.getInstance();
-    if (!baseSessionUuid || !state.isInitialized()) {
+    const sessionManager = baseSessionUuid ? defaultDaemonContext.sessionManager() : undefined;
+    const devicePool = sessionManager ? defaultDaemonContext.devicePool() : undefined;
+    if (!baseSessionUuid || !sessionManager || !devicePool) {
       return [primaryDevice].filter(isNotLost);
     }
 
-    const sessionManager = state.getSessionManager();
-    const devicePool = state.getDevicePool();
     const sessions = this.planSessionFamily(baseSessionUuid);
     const devices = [...sessions].flatMap((sessionUuid): BootedDevice[] => {
       const session = sessionManager.getSession(sessionUuid);
@@ -284,10 +282,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       ...outcome.failures.map((failure) => failure.deviceId),
       ...outcome.unfinishedDeviceIds,
     ]);
-    if (dirty.size === 0 || !DaemonState.getInstance().isInitialized()) {
+    const sessionManager = dirty.size === 0 ? undefined : defaultDaemonContext.sessionManager();
+    if (!sessionManager) {
       return;
     }
-    const sessionManager = DaemonState.getInstance().getSessionManager();
     for (const cleanupDevice of devices.filter((d) => dirty.has(d.deviceId))) {
       sessionManager.markDeviceNeedsAppCleanup(
         cleanupDevice.deviceId,
@@ -351,22 +349,20 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionToolSelectionService,
     } = input;
     const lifecycleSessionUuid = baseSessionUuid ?? sessionUuid;
-    const ownsPoolSession =
+    const wantsPoolSession =
       shouldResolveDevice &&
       sessionUuid !== undefined &&
       lifecycleSessionUuid !== undefined &&
-      name === "executePlan" &&
-      DaemonState.getInstance().isInitialized();
+      name === "executePlan";
+    const poolSessionManager = wantsPoolSession ? defaultDaemonContext.sessionManager() : undefined;
+    const ownsPoolSession = wantsPoolSession && poolSessionManager !== undefined;
     const heldForRecovery =
       ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid);
     // A cleanup deferred by an earlier failed run on this session (#11139) is superseded once
     // this run's own lifecycle cleans and releases it.
     const deferredCleanup =
-      ownsPoolSession && !heldForRecovery
-        ? takeHeldPlanAppCleanup(
-            DaemonState.getInstance().getSessionManager(),
-            lifecycleSessionUuid,
-          )
+      ownsPoolSession && poolSessionManager && !heldForRecovery
+        ? takeHeldPlanAppCleanup(poolSessionManager, lifecycleSessionUuid)
         : undefined;
 
     if (device && name === "executePlan" && args?.cleanupAppId) {
@@ -380,7 +376,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         this.reportIncompleteCleanup(outcome, cleanupConfig.appId, lifecycleSessionUuid);
         this.markIncompleteCleanupDevices(outcome, targets, cleanupService, cleanupConfig);
       };
-      if (heldForRecovery) {
+      if (poolSessionManager && heldForRecovery) {
         // The caller's recovery and resumed plan need the app as the failure left it (#11139):
         // clean up only once the held session is finally released.
         logger.info(
@@ -391,7 +387,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         // another session (#11164): skip, at run time, any device now owned outside this plan.
         const planSessions = this.planSessionFamily(lifecycleSessionUuid);
         deferHeldPlanAppCleanup(
-          DaemonState.getInstance().getSessionManager(),
+          poolSessionManager,
           lifecycleSessionUuid,
           () => runCleanup(this.devicesNotOwnedByOtherSessions(devices, planSessions)),
           PLAN_APP_CLEANUP_CAP_MS,
@@ -403,9 +399,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       await deferredCleanup();
     }
 
-    if (ownsPoolSession && !heldForRecovery) {
-      const sessionManager = DaemonState.getInstance().getSessionManager();
-      const devicePool = DaemonState.getInstance().getDevicePool();
+    if (ownsPoolSession && poolSessionManager && !heldForRecovery) {
+      const sessionManager = poolSessionManager;
+      const devicePool = defaultDaemonContext.requireDevicePoolWrites();
       const releaseSessionUuid = lifecycleSessionUuid;
       // Track exactly which sessions this release actually frees so the
       // server-side transport binding is torn down for each (issue #4611 Gap
@@ -418,9 +414,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       // lifetime (#11421). Its broker grant is fixed and a `plan-auto-release` UUID is not reusable,
       // so releasing it would strand the connection. A generic connection's base session is
       // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
-      if (
-        DaemonState.getInstance().getBrokerConnectionScopes().forGrantedSession(releaseSessionUuid)
-      ) {
+      if (defaultDaemonContext.brokerConnectionScopes()?.forGrantedSession(releaseSessionUuid)) {
         logger.info(
           `[PlanLifecycle] Keeping binding session ${releaseSessionUuid} and its device ` +
             "after executePlan: it belongs to its connection",
@@ -456,7 +450,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
    */
   private async releasePlanBaseSession(
     sessionManager: SessionManager,
-    devicePool: DevicePool,
+    devicePool: DevicePoolWrites,
     releaseSessionUuid: string,
   ): Promise<boolean> {
     const session = sessionManager.getSession(releaseSessionUuid);

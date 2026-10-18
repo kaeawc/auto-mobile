@@ -3046,6 +3046,45 @@ describe("AndroidCtrlProxyClient", function () {
         return { client, timer, socket, getSocket, push, pushes, backoff, requestIds, request };
       };
 
+      test("pushes a domain-shaped ViewHierarchyResult to the observation stream, not the wire frame", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const bounds = { left: 0, top: 0, right: 1080, bottom: 2340 };
+          h.socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              timestamp: h.timer.now(),
+              data: {
+                ...hierarchyWithScreenSize(1080, 2340),
+                updatedAt: 4242,
+                hierarchy: {
+                  className: "android.widget.FrameLayout",
+                  bounds,
+                  node: [
+                    { className: "android.widget.TextView", text: "one", bounds },
+                    { className: "android.widget.Button", text: "two", bounds },
+                  ],
+                },
+              },
+            }),
+          );
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          const pushed = h.pushes.mock.calls[0]![1];
+          const root = pushed.hierarchy as { class?: string; node?: Array<{ class?: string }> };
+          // The domain converter emits `class` (wire carries only `className`) and keeps `node` an array.
+          expect(root.class).toBe("android.widget.FrameLayout");
+          expect(Array.isArray(root.node)).toBe(true);
+          expect(root.node?.map((child) => child.class)).toEqual([
+            "android.widget.TextView",
+            "android.widget.Button",
+          ]);
+          expect(pushed.updatedAt).toBe(4242);
+          expect(pushed.sources).toEqual(["control-proxy"]);
+        } finally {
+          await h.client.close();
+        }
+      });
+
       test("debounced push stays live and the later explicit response stays suppressed", async () => {
         const h = await createSuppressionHarness();
         try {

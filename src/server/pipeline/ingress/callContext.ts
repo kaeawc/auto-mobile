@@ -123,6 +123,31 @@ export interface CallContext {
 export interface ParseCallContextOptions {
   readonly daemonMode: boolean;
   readonly acceptanceDiscoveryCapability: string | undefined;
+  /** The request's explicit session key (the session-key header, or a forward's connection key). */
+  readonly sessionKey?: string;
+  /**
+   * The call came over the daemon's own in-process forward: its in-band `__mcpSessionId`
+   * identifies the originating client and outranks `sessionKey` (#13315).
+   */
+  readonly trustForwardedSessionId?: boolean;
+}
+
+/**
+ * The one session identity of a daemon call (#13315, owner decision). The session-key header
+ * wins; the exception is a trusted forwarder, whose in-band id names the client behind the
+ * forwarding connection. A direct request with no header still falls back to its in-band id.
+ * A call with no in-band id yields none: the key alone is the server's binding key.
+ */
+function resolveRequestMcpSessionId(
+  params: unknown,
+  options: ParseCallContextOptions,
+): string | undefined {
+  const inBand = extractInternalMcpSessionId(params);
+  if (inBand === undefined) {
+    // No in-band carrier: the key stays the server's binding key, not an implicit-autolock id.
+    return undefined;
+  }
+  return options.trustForwardedSessionId === true ? inBand : (options.sessionKey ?? inBand);
 }
 
 /**
@@ -135,7 +160,7 @@ export interface ParseCallContextOptions {
 export function parseCallContext(params: unknown, options: ParseCallContextOptions): CallContext {
   const { daemonMode } = options;
   return {
-    requestMcpSessionId: daemonMode ? extractInternalMcpSessionId(params) : undefined,
+    requestMcpSessionId: daemonMode ? resolveRequestMcpSessionId(params, options) : undefined,
     requestOneShotCli: daemonMode && extractInternalOneShotCli(params),
     requestedToolResultsNoStructuredContent: daemonMode
       ? extractInternalToolResultsNoStructuredContent(params)

@@ -2,6 +2,7 @@ import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryI
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import type { Daemon } from "../../src/daemon/daemon";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -282,8 +283,16 @@ export interface DaemonDeferredRecoverySweepInternals {
   trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
 }
 
-export interface DevicePoolProcessExitInternals {
-  trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
+/** Typed view of the Daemon members the disconnect-recovery suites seed and call. */
+export function daemonDisconnectInternals(daemon: Daemon): DaemonDisconnectInternals {
+  return Reflect.get({ daemon }, "daemon");
+}
+
+/** Typed view of the Daemon's deferred-recovery sweep tracking. */
+export function daemonDeferredRecoverySweepInternals(
+  daemon: Daemon,
+): DaemonDeferredRecoverySweepInternals {
+  return Reflect.get({ daemon }, "daemon");
 }
 
 export function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {

@@ -1,3 +1,4 @@
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
@@ -133,15 +134,8 @@ describe("DevicePool.create", () => {
     };
     const factoryPool = DevicePool.create(deps);
     const directPool = new DevicePool(deps);
-    const factoryInternals = factoryPool as unknown as {
-      timer: FakeTimer;
-      installedAppsRepository: FakeInstalledAppsRepository;
-      deviceManager: FakeDeviceManager;
-      retryExecutor: DefaultRetryExecutor;
-      criteriaMatcher: DeviceCriteriaMatcher;
-      onDeviceReady: typeof onDeviceReady;
-    };
-    const directInternals = directPool as unknown as typeof factoryInternals;
+    const factoryInternals = poolInternals(factoryPool);
+    const directInternals = poolInternals(directPool);
 
     expect(factoryInternals.timer).toBe(deps.timer);
     expect(factoryInternals.installedAppsRepository).toBe(deps.installedAppsRepository);

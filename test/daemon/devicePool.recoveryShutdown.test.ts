@@ -1,11 +1,10 @@
 import { makePool } from "../helpers/makePool";
-import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import { ActionableError } from "../../src/models/ActionableError";
-import { type PooledDevice } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
@@ -29,7 +28,6 @@ import {
   KillTrackingShutdownManager,
   setup,
   setupPassiveRestart,
-  DevicePoolProcessExitInternals,
   assertNoRecoveryReservationsRemain,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -378,13 +376,7 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
     throw new Error("Expected emulator-loss incident to be recorded");
   }
   try {
-    const eviction = pool as unknown as {
-      evictMissingPooledDevice(
-        device: PooledDevice,
-        reason: string,
-        options: { attemptDeviceLossRecovery: boolean; incidentId: string },
-      ): Promise<void>;
-    };
+    const eviction = poolInternals(pool);
     await eviction.evictMissingPooledDevice(captured, "not present in adb devices", {
       attemptDeviceLossRecovery: true,
       incidentId,
@@ -907,12 +899,7 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
     emulatorLossIncidentStore: incidents,
     recoveryPolicy: { onLoss: false, maxAttempts: 1 },
   });
-  const child = Object.assign(new EventEmitter(), {
-    exitCode: null as number | null,
-    signalCode: null,
-    stdout: null,
-    stderr: null,
-  }) as ChildProcess;
+  const child = new StreamlessChildProcess();
   await pool.addDevice(original, image);
   await pool.bindOrReuseDeviceSession(
     "owner",
@@ -960,13 +947,8 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   expect(sessions.getSession("new-session")).toBeNull();
 });
 
-function exitedChild(): ChildProcess & { exitCode: number | null } {
-  return Object.assign(new EventEmitter(), {
-    exitCode: null as number | null,
-    signalCode: null,
-    stdout: null,
-    stderr: null,
-  }) as ChildProcess & { exitCode: number | null };
+function exitedChild(): StreamlessChildProcess {
+  return new StreamlessChildProcess();
 }
 
 async function setupProcessExitPool(
@@ -989,7 +971,7 @@ async function setupProcessExitPool(
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   const child = exitedChild();
-  const internals = pool as unknown as DevicePoolProcessExitInternals;
+  const internals = poolInternals(pool);
   await internals.trackStartedDeviceProcess(original, child);
   await pool.bindOrReuseDeviceSession(
     "session",

@@ -1,5 +1,3 @@
-import type { ChildProcess } from "node:child_process";
-import type { EventEmitter } from "node:events";
 import type { Mutex } from "async-mutex";
 import type {
   AndroidRecoveryRecord,
@@ -8,7 +6,9 @@ import type {
 } from "../../src/daemon/androidRecoveryRecordLedger";
 import type {
   AdbServerResetRecoveryReservation,
+  DiscoveryReconcileOptions,
   DevicePool,
+  DevicePoolDependencies,
   PooledDevice,
   SessionPreservingRecoveryResult,
 } from "../../src/daemon/devicePool";
@@ -16,7 +16,10 @@ import type {
   DeviceRecoveryCoordinator,
   SessionPreservingRecovery,
 } from "../../src/daemon/deviceRecoveryCoordinator";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import type { BootedDevice, DeviceInfo, Platform } from "../../src/models";
+import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
+import type { IosLivenessSnapshot } from "../../src/daemon/idleDeviceReaper";
+import type { Session } from "../../src/daemon/sessionManager";
 import type { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
 
 /**
@@ -69,19 +72,92 @@ export function recoveryInternals(pool: DevicePool): DevicePoolRecoveryInternals
  * `Reflect.get` (which returns `any`), so no type assertion is needed or counted.
  */
 export interface DevicePoolInternals {
-  startedDeviceProcesses: Map<string, ChildProcess>;
+  startedDeviceProcesses: Map<string, HostChildProcess>;
   startedDeviceProcessOutput: Map<string, unknown>;
   releasedDeviceCaptures: Map<string, { deviceId: string }>;
   trackStartedDeviceProcess(
     device: BootedDevice,
-    child: ChildProcess | EventEmitter | null | undefined,
+    child: HostChildProcess | null | undefined,
   ): Promise<void>;
   evictMissingPooledDevice(
     device: PooledDevice,
     reason: string,
-    options?: { attemptDeviceLossRecovery?: boolean; incidentId?: string },
+    options?: {
+      attemptDeviceLossRecovery?: boolean;
+      incidentId?: string;
+      identityObservation?: Pick<BootedDevice, "name" | "observedAt">;
+    },
   ): Promise<void>;
   assignmentMutex: Pick<Mutex, "runExclusive">;
+  tryAssignDevice(
+    sessionId: string,
+    platform: Platform,
+  ): Promise<{ success: boolean; deviceId?: string }>;
+  getStartableDeviceImageCandidates(platform: Platform): Promise<DeviceInfo[]>;
+  foldObservationIntoPooledEntry(
+    entry: PooledDevice,
+    observation: BootedDevice,
+    source: "refresh",
+  ): Promise<boolean>;
+  idleDeviceReaper: { getIosLivenessSnapshot(): Promise<IosLivenessSnapshot> };
+  selectAssignableIdleDevice(
+    candidates: PooledDevice[],
+    snapshots: { capturedEntries: ReadonlySet<PooledDevice>; iosLiveness: IosLivenessSnapshot },
+  ): Promise<unknown>;
+  pruneStaleIdleIosDevices(candidates: PooledDevice[]): Promise<number>;
+  startAdditionalDevices(count: number, deadline: number, platform: Platform): Promise<number>;
+  startAdditionalDeviceMatchingCriteria(
+    criteria: { platform: Platform },
+    excluded: Set<string>,
+    deadline: number,
+    rediscover: () => Promise<PooledDevice | undefined>,
+  ): Promise<{ device: PooledDevice; started: boolean } | null>;
+  missingDeviceLiveness: {
+    resolveMissingDeviceIncident(
+      pooledDevice: PooledDevice,
+      recoverAndroidEmulator: boolean,
+      incidentId: string | undefined,
+      incidentCaptureComplete: boolean,
+    ): Promise<string | undefined>;
+    reconcileDiscoveredPooledDevice(
+      pooledDevice: PooledDevice,
+      bootedDevice: BootedDevice,
+      assignmentLockHeld: boolean,
+    ): Promise<boolean>;
+  };
+  runtimeIdentity: {
+    getPendingUnresolvedEvidence(deviceId: string): { observedAt?: number } | undefined;
+    reconcileObservedPooledIdentity(
+      pooled: PooledDevice,
+      device: Pick<
+        BootedDevice,
+        "deviceId" | "name" | "platform" | "observedAt" | "consoleBusyDuringProbe"
+      >,
+      options?: DiscoveryReconcileOptions,
+    ): Promise<void>;
+  };
+  readonly timer: NonNullable<DevicePoolDependencies["timer"]>;
+  readonly installedAppsRepository: NonNullable<DevicePoolDependencies["installedAppsRepository"]>;
+  readonly deviceManager: NonNullable<DevicePoolDependencies["deviceManager"]>;
+  readonly retryExecutor: NonNullable<DevicePoolDependencies["retryExecutor"]>;
+  readonly criteriaMatcher: NonNullable<DevicePoolDependencies["criteriaMatcher"]>;
+  readonly onDeviceReady: DevicePoolDependencies["onDeviceReady"];
+  addDevice(device: BootedDevice): Promise<void>;
+  setDeviceSessionTracking(deviceId: string, sessionStart: number): Promise<void>;
+  releaseSessionForDisconnectedDevice(
+    sessionId: string,
+    deviceId: string,
+    releaseReason: string,
+  ): Promise<void>;
+  retrySessionRelease(
+    sessionId: string,
+    deviceId: string,
+    attempt: () => Promise<void>,
+  ): Promise<void>;
+  getSessionPreservingRecoveryTarget(
+    deviceId: string,
+    expectedDevice: PooledDevice | undefined,
+  ): { device: PooledDevice; session: Session } | undefined;
   adbServerResetQuarantinedSessions: Set<string>;
   adbServerResetRecoveryReservations: Map<string, AdbServerResetRecoveryReservation>;
   recoveryCoordinator: DeviceRecoveryCoordinator;

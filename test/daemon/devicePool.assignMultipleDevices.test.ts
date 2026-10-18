@@ -1,5 +1,5 @@
 import { EmulatorProcessLifecycle } from "../../src/daemon/emulatorProcessLifecycle";
-import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
 
@@ -655,13 +655,7 @@ describe("DevicePool", () => {
       manager.bootedDevices = [];
       const incidentResolutionStarted = Promise.withResolvers<void>();
       const releaseIncidentResolution = Promise.withResolvers<void>();
-      const livenessInternals = (
-        devicePool as unknown as {
-          missingDeviceLiveness: {
-            resolveMissingDeviceIncident(...args: unknown[]): Promise<string | undefined>;
-          };
-        }
-      ).missingDeviceLiveness;
+      const livenessInternals = poolInternals(devicePool).missingDeviceLiveness;
       livenessInternals.resolveMissingDeviceIncident = async (...args) => {
         incidentResolutionStarted.resolve();
         await releaseIncidentResolution.promise;

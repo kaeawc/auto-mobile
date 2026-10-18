@@ -1,9 +1,10 @@
 import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { EventEmitter } from "node:events";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -55,7 +56,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       evictError,
     );
 
-    const child = new EventEmitter();
+    const child = new StreamlessChildProcess();
     // Register the exit listener under test.
     poolInternals(pool).trackStartedDeviceProcess(androidDevice, child);
 
@@ -100,22 +101,13 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       source: "local",
     };
 
-    const child = new EventEmitter() as unknown as {
-      once(
-        event: "exit",
-        listener: (code: number | null, signal: NodeJS.Signals | null) => void,
-      ): void;
-      stdout: EventEmitter;
-      stderr: EventEmitter;
-    };
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
+    const child = new FakeChildProcess();
     await poolInternals(diagnosticPool).trackStartedDeviceProcess(androidDevice, child);
     child.stdout.emit("data", Buffer.from("token="));
-    (child as unknown as EventEmitter).emit("exit", 1, null);
+    child.emit("exit", 1, null);
     child.stderr.emit("data", Buffer.from("emulator died\n"));
     child.stdout.emit("data", Buffer.from("should-not-leak\n"));
-    (child as unknown as EventEmitter).emit("close", 1, null);
+    child.emit("close", 1, null);
 
     let [incident] = await incidentStore.list();
     for (let turn = 0; turn < 30 && incident?.recovery.outcome === undefined; turn++) {
@@ -231,11 +223,10 @@ describe("device identity replacement IME quarantine", () => {
         }
       }
     } else if (route === "liveness eviction") {
-      await (
-        pool as unknown as {
-          evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void>;
-        }
-      ).evictMissingPooledDevice(captured, "missing device during liveness check");
+      await poolInternals(pool).evictMissingPooledDevice(
+        captured,
+        "missing device during liveness check",
+      );
     } else if (route === "shutdown") {
       expect(await pool.retireDeviceForShutdown(captured)).toBe(true);
     } else if (route === "same-AVD replacement") {

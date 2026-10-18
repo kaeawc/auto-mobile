@@ -1,6 +1,7 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
@@ -205,27 +206,23 @@ describe("DevicePool exhausted session release ownership", () => {
         await pool.initializeWithDevices([handset]);
         await pool.assignDeviceToSession("session", "android");
         const device = pool.getDevice(handset.deviceId)!;
-        const retry = (
-          pool as unknown as {
-            retrySessionRelease(
-              id: string,
-              deviceId: string,
-              attempt: () => Promise<void>,
-            ): Promise<void>;
-          }
-        ).retrySessionRelease("session", handset.deviceId, async () => {
-          attempts++;
-          if (attempts === 1 && scenario !== "present") {
-            await sessions.releaseSession("session", "daemon-shutdown");
-            if (scenario === "new-owner") {
-              device.sessionId = "other-session";
+        const retry = poolInternals(pool).retrySessionRelease(
+          "session",
+          handset.deviceId,
+          async () => {
+            attempts++;
+            if (attempts === 1 && scenario !== "present") {
+              await sessions.releaseSession("session", "daemon-shutdown");
+              if (scenario === "new-owner") {
+                device.sessionId = "other-session";
+              }
+              if (scenario === "new-assignment") {
+                device.assignmentCount++;
+              }
             }
-            if (scenario === "new-assignment") {
-              device.assignmentCount++;
-            }
-          }
-          throw failure;
-        });
+            throw failure;
+          },
+        );
         // Attach the rejection check before fake time advances through retries.
         const outcome = retry.then(
           () => undefined,

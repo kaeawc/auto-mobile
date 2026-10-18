@@ -1,7 +1,7 @@
 import { makePool } from "../helpers/makePool";
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BindingRegistryUpgradePendingError } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
-import type { DeviceInfo } from "../../src/models/DeviceInfo";
 import type { BindingRegistry } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -112,13 +112,7 @@ describe("DevicePool binding exclusion", () => {
       { platform: "ios", name: "Local image", deviceId: "IMAGE", isRunning: false },
       { platform: "ios", name: "amslot-leftover", deviceId: "LEGACY", isRunning: false },
     ];
-    const internals = pool as unknown as {
-      tryAssignDevice(
-        sessionId: string,
-        platform: "ios",
-      ): Promise<{ success: boolean; deviceId?: string }>;
-      getStartableDeviceImageCandidates(platform: "ios"): Promise<DeviceInfo[]>;
-    };
+    const internals = poolInternals(pool);
     expect(await internals.tryAssignDevice("local-session", "ios")).toMatchObject({
       success: true,
       deviceId: "LOCAL",

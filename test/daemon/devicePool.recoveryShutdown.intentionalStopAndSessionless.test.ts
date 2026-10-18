@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { beforeAll, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -200,12 +200,7 @@ test("coalesced passive loss inherits the resolved primary awaiting-device settl
     expect(primary).toBeDefined();
     expect(joined).toBeDefined();
     await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, primary, captured);
-    const internals = pool as unknown as {
-      joinSessionPreservingRecovery(
-        recovery: { incidentId?: string; promise: Promise<"released"> },
-        incidentId?: string,
-      ): Promise<string>;
-    };
+    const internals = poolInternals(pool);
     await internals.joinSessionPreservingRecovery(
       { incidentId: primary, promise: Promise.resolve("released") },
       joined,

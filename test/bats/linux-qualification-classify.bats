@@ -289,7 +289,12 @@ echo 'test emulator version'
 STUB
   cat > "$bin/clock" <<'STUB'
 #!/usr/bin/env bash
-n=$(cat "$TICKS"); echo "$((n+1))" > "$TICKS"; echo "$n"
+# now() runs in concurrent subshells (the cell's monitor loop); serialize the
+# read-increment-write so a torn read cannot produce "1\n8" style ticks.
+until mkdir "$TICKS.lock" 2>/dev/null; do :; done
+n=$(cat "$TICKS"); echo "$((n+1))" > "$TICKS.tmp" && mv "$TICKS.tmp" "$TICKS"
+rmdir "$TICKS.lock"
+echo "$n"
 STUB
   cat > "$bin/avdmanager" <<'STUB'
 #!/usr/bin/env bash

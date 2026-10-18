@@ -7,7 +7,7 @@ import {
   needsBackStackActivityReconciliation,
 } from "./ActiveWindowAttribution";
 export { hasUsableHierarchy } from "./ActiveWindowAttribution";
-import { recordObservationRead, wasIosHierarchyAcquiredFromDevice } from "./observationReadScope";
+import { recordObservationRead } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
 import { publishScreenshotPaths } from "./ScreenshotRetention";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
@@ -89,6 +89,10 @@ import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
 import { createObserveScreenWiring, installObserveStores } from "./ObserveScreenWiring";
 import type { HierarchyCollector } from "./collectors/HierarchyCollector";
+import {
+  platformObservationTraits,
+  type PlatformObservationTraits,
+} from "./collectors/PlatformObservationTraits";
 import {
   AndroidDisplayBindingCollector,
   IosDisplayBindingCollector,
@@ -209,6 +213,7 @@ export class RealObserveScreen implements ObserveScreen {
   private readonly deviceReadScreenshot: DeviceReadScreenshot;
   private readonly androidCollector: AndroidObservationCollector;
   private readonly displayBinding: DisplayBindingCollector;
+  private readonly platformTraits: PlatformObservationTraits;
   private readonly iosCollector: IosObservationCollector;
   private readonly windowIdentity: WindowIdentityFreshnessResolver;
   private platformValidator: HierarchyPlatformValidator;
@@ -402,6 +407,7 @@ export class RealObserveScreen implements ObserveScreen {
       viewHierarchy: () => this.viewHierarchy,
       device: () => this.device,
     });
+    this.platformTraits = platformObservationTraits(device.platform, () => this.device);
     const displayBindingDeps = { device: () => this.device, adb: () => this.adb };
     this.displayBinding =
       device.platform === "ios"
@@ -802,9 +808,7 @@ export class RealObserveScreen implements ObserveScreen {
       displayTransitions.record(
         this.device.deviceId,
         result,
-        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
-          ? "ios"
-          : "android",
+        this.platformTraits.isIosMultiPanel() ? "ios" : "android",
         recordProvenance,
       )
     );
@@ -1338,7 +1342,7 @@ export class RealObserveScreen implements ObserveScreen {
     result.screenshotCaptureAttempted = true;
     stampPrototypeHidden(result, capture);
     if (screenshotMode === "settled") {
-      result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
+      result.screenshotOrientation = this.platformTraits.settledScreenshotOrientation();
       await this.captureSettledScreenshot(
         result,
         perf,
@@ -1569,18 +1573,9 @@ export class RealObserveScreen implements ObserveScreen {
     }
     logger.debug("Observe command completed");
     logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
-    return this.grantsObservationRead(result) ? recordObservationRead(result) : result;
-  }
-
-  /**
-   * cached-ok may serve CtrlProxy's client cache without a device read.
-   * Its fresh=false verdict must not grant this action acquisition authority.
-   */
-  private grantsObservationRead(result: ObserveResult): boolean {
-    if (this.device.platform === "ios") {
-      return wasIosHierarchyAcquiredFromDevice(result.viewHierarchy);
-    }
-    return this.device.platform !== "android" || result.viewHierarchy?.fresh === true;
+    return this.platformTraits.grantsObservationRead(result)
+      ? recordObservationRead(result)
+      : result;
   }
 
   /** Build the ordinary critical fallback without mutating screenshot or display state. */
@@ -1623,8 +1618,7 @@ export class RealObserveScreen implements ObserveScreen {
         this.idGenerator,
         {
           captureId: result.observationId,
-          iosMultiPanel:
-            this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+          iosMultiPanel: this.platformTraits.isIosMultiPanel(),
         },
       );
     }
@@ -1690,7 +1684,7 @@ export class RealObserveScreen implements ObserveScreen {
       observation.screenshotCaptureAttempted = true;
       stampPrototypeHidden(observation, capture);
       if (screenshotMode === "settled") {
-        observation.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
+        observation.screenshotOrientation = this.platformTraits.settledScreenshotOrientation();
       }
     }
     if (screenshotMode === "settled") {
@@ -1748,7 +1742,7 @@ export class RealObserveScreen implements ObserveScreen {
   ): { width: number; height: number } | null {
     return this.hierarchyCollector.extractScreenSize(
       viewHierarchy,
-      this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+      this.platformTraits.isIosMultiPanel(),
     );
   }
 
@@ -1776,7 +1770,7 @@ export class RealObserveScreen implements ObserveScreen {
   private stampScreenSizeUnits(result: ObserveResult): void {
     result.screenSize = {
       ...result.screenSize,
-      units: this.device.platform === "ios" ? "points" : "physical-pixels",
+      units: this.platformTraits.screenSizeUnits(),
     };
   }
 

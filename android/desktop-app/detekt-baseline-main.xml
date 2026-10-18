@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>InjectDispatcher:AutoMobileDesktopApp.kt:IO</ID>
+    <ID>InjectDispatcher:Main.kt:IO</ID>
+    <ID>InjectDispatcher:SystemTray.kt:IO</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileDesktopApp.kt:error: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

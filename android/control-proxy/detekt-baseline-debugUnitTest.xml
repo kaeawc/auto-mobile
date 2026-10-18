@@ -1,0 +1,37 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>EmptyFunctionBlock:CtrlProxyActionsFakes.kt:NoOpCtrlProxyActions${}</ID>
+    <ID>EmptyFunctionBlock:SdkAnrBroadcastHandlerTest.kt:SdkAnrBroadcastHandlerTest.Fixture.&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:CtrlProxyEventBatchReceiverTest.&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:SdkEventBatchBroadcastHandlerExtraTest.&lt;no name provided&gt;${}</ID>
+    <ID>InjectDispatcher:CtrlProxyGestureServiceFixture.kt:CtrlProxyGestureServiceFixture$Unconfined</ID>
+    <ID>InjectDispatcher:CtrlProxyObserverGateTest.kt:CtrlProxyObserverGateTest$Unconfined</ID>
+    <ID>InjectDispatcher:GestureControllerTest.kt:GestureControllerTest$Unconfined</ID>
+    <ID>InjectDispatcher:HierarchyDebouncerErrorEmitTest.kt:HierarchyDebouncerErrorEmitTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeAnchorWindowTest.kt:PrototypeAnchorWindowTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeDetachedWindowTest.kt:PrototypeDetachedWindowTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeHideForCaptureTest.kt:PrototypeHideForCaptureTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeHostTest.kt:PrototypeHostTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeImeLiftTest.kt:PrototypeImeLiftTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$Unconfined</ID>
+    <ID>InjectDispatcher:SavedPrototypeActivityTest.kt:SavedPrototypeActivityTest$Unconfined</ID>
+    <ID>InjectDispatcher:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest$IO</ID>
+    <ID>InjectDispatcher:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$Default</ID>
+    <ID>SwallowedException:ResultBroadcasterTest.kt:ResultBroadcasterTest$e: CancellationException</ID>
+    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("boom")</ID>
+    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("original failure")</ID>
+    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("socket closed")</ID>
+    <ID>TooGenericExceptionThrown:DeliverHierarchyFrameTest.kt:DeliverHierarchyFrameTest$throw RuntimeException("Infinity")</ID>
+    <ID>TooGenericExceptionThrown:GestureDispatchLifecycleTest.kt:GestureDispatchLifecycleTest$throw RuntimeException("result failed")</ID>
+    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("original broadcast failure")</ID>
+    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("socket closed")</ID>
+    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("socket still closed")</ID>
+    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("boom")</ID>
+    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("original failure")</ID>
+    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("socket closed")</ID>
+    <ID>TooGenericExceptionThrown:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest.&lt;no name provided&gt;$throw RuntimeException("async boom")</ID>
+    <ID>TooGenericExceptionThrown:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest.&lt;no name provided&gt;$throw RuntimeException("kaboom")</ID>
+  </CurrentIssues>
+</SmellBaseline>

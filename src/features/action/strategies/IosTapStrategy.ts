@@ -25,6 +25,10 @@ import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 export class IosTapStrategy implements TapStrategy {
   readonly longPressDurationMs = 1000;
   readonly retryTapIfNoChange = false;
+  readonly warnsOnDisabledElement = false;
+  readonly settlesPostTapChange = false;
+  readonly verifiesRefreshedDisplay = false;
+  readonly promotesClickableAncestor = false;
 
   constructor(
     private readonly device: BootedDevice,

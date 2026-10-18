@@ -5,6 +5,7 @@ import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/
 import type { AdbDeviceState } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const result = (stdout = "", stderr = ""): ExecResult => ({
   stdout,
@@ -95,13 +96,7 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
     return super.getDeviceStates(options);
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     if (
       command === "shell getprop sys.boot_completed" &&
       this.readinessAtMs !== null &&
@@ -128,7 +123,7 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
         ]);
       }
     }
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, options);
   }
 }
 

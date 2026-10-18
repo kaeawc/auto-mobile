@@ -644,6 +644,20 @@ describe("ExploreValidateMode", () => {
         });
       });
 
+      test("is not validatable for a stylus tap, which an element tap would replay as a finger", () => {
+        const wide = createMockElement({ bounds: { left: 0, top: 0, right: 400, bottom: 400 } });
+        const edge = interactionEdge("tapAt", {
+          x: 50,
+          y: 30,
+          action: "tap",
+          pointer: { toolType: "stylus" },
+        });
+
+        const result = resolveEdgeTarget([wide], edge);
+        expect(result.status).toBe("not-validatable");
+        expect(result.status === "not-validatable" && result.reason).toContain("stylus");
+      });
+
       test("is not validatable when no current element contains the coordinate", () => {
         const result = resolveEdgeTarget([createMockElement()], at(900, 900));
 

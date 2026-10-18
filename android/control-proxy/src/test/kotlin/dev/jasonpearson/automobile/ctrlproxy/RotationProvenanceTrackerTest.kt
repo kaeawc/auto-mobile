@@ -210,7 +210,9 @@ class RotationProvenanceTrackerTest {
   @Test
   fun `all capture routes use rotation provenance instead of endpoint equality`() {
     val ctrlProxySource =
-      KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateCtrlProxySource("HierarchyController.kt").readText(),
+      )
     val screenshotSource =
       KotlinSourceScan.maskLiteralsAndComments(
         locateCtrlProxySource("ScreenshotController.kt").readText(),
@@ -219,7 +221,7 @@ class RotationProvenanceTrackerTest {
     for ((route, source) in
       listOf(
         "private fun extractHierarchyDirect" to ctrlProxySource,
-        "private fun extractHierarchy(" to ctrlProxySource,
+        "internal fun extractHierarchy(" to ctrlProxySource,
         "suspend fun takeScreenshotAsync" to screenshotSource,
       )) {
       val start = source.indexOf(route)

@@ -29,7 +29,7 @@ import {
 import { executionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
-import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { spyOnIosTestClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -1525,7 +1525,7 @@ describe("UnixSocketServer input/typeText", () => {
   test("routes iOS text input through existing platform input infrastructure", async () => {
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestImeAction = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestSetText,
       requestImeAction,
     });
@@ -1567,7 +1567,7 @@ describe("UnixSocketServer input/typeText", () => {
   test("accepts iOS append mode and uses the CtrlProxy append primitive", async () => {
     const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
     const requestSetText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestAppendText,
       requestSetText,
     });
@@ -1593,7 +1593,7 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("forwards an iOS frame context to the CtrlProxy append primitive", async () => {
     const requestAppendText = mock(async () => ({ success: true, totalTimeMs: 1 }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestAppendText,
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
@@ -1962,7 +1962,7 @@ describe("UnixSocketServer input/typeText", () => {
       error: "return key unavailable",
       totalTimeMs: 1,
     }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestSetText,
       requestImeAction,
     });

@@ -671,7 +671,7 @@ export class Daemon {
   private readonly strictPort: boolean;
   private debug: boolean;
   private healthCheck: SingleFlightInterval | null = null;
-  private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
+  protected heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
   private orphanWatchdog: PrivateDaemonOrphanWatchdog | null = null;
@@ -718,7 +718,7 @@ export class Daemon {
   private bindingExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the binding reconciler. */
   private readonly bindingJournalInFlight = new BindingJournalInFlight();
-  private brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
+  protected brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
   private bindingRedrive: BindingJournalRedriveLoop | undefined;
   private readonly generationStartedAt: number;
@@ -739,8 +739,8 @@ export class Daemon {
     NonNullable<ReturnType<typeof getDeviceDataStreamServer>>,
     DefaultObservationInitialFrameCoordinator
   >();
-  private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-  private readonly navigationGraphBridge = new NavigationGraphStreamBridge({
+  protected deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
+  protected readonly navigationGraphBridge = new NavigationGraphStreamBridge({
     server: () => this.deviceDataStreamServer,
     sessionIds: () => this.sessionManager.getAllSessions().map((session) => session.sessionId),
     defaultManager: () => NavigationGraphManager.getInstance(),
@@ -1310,7 +1310,7 @@ export class Daemon {
   }
 
   /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
-  private stopSessionTimers(): void {
+  protected stopSessionTimers(): void {
     // A change in the last debounce window must not notify after the daemon closed (#11413).
     this.deviceStateChangeNotifier.dispose();
     this.sessionManager.stopCleanupTimer();
@@ -1324,7 +1324,7 @@ export class Daemon {
    * end re-arms the owner-disconnect releases it deferred (#10712). Subscribed by `start()` and
    * dropped by {@link stopSessionTimers}; idempotent so a retried start cannot stack listeners.
    */
-  private subscribeToolCallEndActivity(): void {
+  protected subscribeToolCallEndActivity(): void {
     this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = subscribeToolCallEndActivity(
       executionTracker,
@@ -2164,7 +2164,7 @@ export class Daemon {
     return coordinator;
   }
 
-  private setupDeviceDataStreamCallback(): void {
+  protected setupDeviceDataStreamCallback(): void {
     const server = this.deviceDataStreamServer ?? getDeviceDataStreamServer();
     if (!server) {
       logger.warn("[Daemon] Observation stream server not available for callback setup");
@@ -2368,7 +2368,7 @@ export class Daemon {
   /**
    * Start periodic heartbeat checks to cancel stale sessions
    */
-  private startHeartbeatMonitor(): void {
+  protected startHeartbeatMonitor(): void {
     // Owners can reconnect only now that the control socket accepts connections.
     this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(

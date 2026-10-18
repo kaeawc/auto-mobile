@@ -1,20 +1,18 @@
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, expect } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
 } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import {
   getDeviceToolsDependencies,
   resetDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import {
-  executionTracker,
-  type SessionClockOffsetProvider,
-} from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/server/executionTracker";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -29,24 +27,47 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import type { LivenessScenarioOptions } from "../helpers/livenessScenarioHarness";
-import type { Mutex } from "async-mutex";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { parseJsonUnknown } from "../helpers/parseJsonUnknown";
+import { RecoverableHandoffProxy } from "./helpers/RecoverableHandoffProxy";
+import { ReservationDevicePool } from "./helpers/ReservationDevicePool";
 
 isolateEmptyToolRegistry();
 
 const DEVICE = "emulator-5554";
 const AVD = "restart-owner-phone";
-interface Reservation {
-  ownerMcpSessionIds?: ReadonlySet<string>;
-  ownerLivenessToken?: string;
-  scheduledDeadlineMs?: number;
-  idleDeadlineMs?: number;
-  recoveryWindowEndMs?: number;
+/** The scenario daemon's pool, which `startScenario` builds as a {@link ReservationDevicePool}. */
+function poolOf(s: LivenessScenario): ReservationDevicePool {
+  if (!(s.daemon.pool instanceof ReservationDevicePool)) {
+    throw new Error("the scenario daemon's pool is not a ReservationDevicePool");
+  }
+  return s.daemon.pool;
 }
 
 function reservations(s: LivenessScenario) {
-  return (s.daemon.pool as unknown as { rehydrationReservations: Map<string, Reservation> })
-    .rehydrationReservations;
+  return poolOf(s).reservations;
+}
+
+/** The scenario's primary stdio proxy, which `startScenario` builds as a RecoverableHandoffProxy. */
+function handoffProxyOf(s: LivenessScenario): RecoverableHandoffProxy {
+  if (!(s.proxy instanceof RecoverableHandoffProxy)) {
+    throw new Error("the scenario proxy is not a RecoverableHandoffProxy");
+  }
+  return s.proxy;
+}
+
+/** The text of a tool result's first content block, which carries the JSON refusal. */
+function firstContentText(result: unknown): string {
+  if (typeof result === "object" && result !== null && "content" in result) {
+    const { content } = result;
+    if (Array.isArray(content) && typeof content[0] === "object" && content[0] !== null) {
+      const { text } = content[0];
+      if (typeof text === "string") {
+        return text;
+      }
+    }
+  }
+  throw new Error("tool result has no text content block");
 }
 
 const ENV_KEYS = [
@@ -65,7 +86,6 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
   let previous:
     | {
         env: Array<string | undefined>;
-        clockOffset: SessionClockOffsetProvider;
         embeddedSdk: boolean;
         registry: ToolRegistryCollaborators;
         appearance: typeof defaultAppearanceSyncDependencies;
@@ -88,13 +108,12 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     expect(getDbWriteBarrier().inFlightCount()).toBe(0);
     expect(getDbWriteBarrier().isDraining()).toBe(false);
     expect(getDeviceToolsDependencies().deviceManagerFactory).not.toBe(managerFactory);
-    expect(Reflect.get(PlatformDeviceManagerFactory, "instance")).toBeNull();
-    expect(Reflect.get(PlatformDeviceManagerFactory, "injectedManager")).toBeNull();
+    expect(PlatformDeviceManagerFactory.slotsForTesting()).toMatchObject({
+      instance: null,
+      injectedManager: null,
+    });
     if (previous) {
-      Reflect.set(executionTracker, "sessionClockOffsetProvider", previous.clockOffset);
-      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(
-        previous.clockOffset,
-      );
+      executionTracker.setSessionClockOffsetProvider(() => 0);
       expect(ENV_KEYS.map((key) => process.env[key])).toEqual(previous.env);
       expect(ToolRegistry.getCollaboratorsForTesting()).toEqual(previous.registry);
       expect(defaultAppearanceSyncDependencies).toEqual(previous.appearance);
@@ -107,18 +126,26 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
   async function startScenario(options: LivenessScenarioOptions = {}) {
     previous = {
       env: ENV_KEYS.map((key) => process.env[key]),
-      clockOffset: Reflect.get(executionTracker, "sessionClockOffsetProvider"),
       embeddedSdk: serverConfig.isEmbeddedSdkEnabled(),
       registry: ToolRegistry.getCollaboratorsForTesting(),
       appearance: { ...defaultAppearanceSyncDependencies },
       recording: { ...defaultRecordingSessionCleanupDeps },
     };
-    scenario = await LivenessScenario.start({
-      freshConnectionIdPerDial: true,
-      realStartAdmission: true,
-      deviceNames: { [DEVICE]: AVD },
-      ...options,
-    });
+    // Inject before construction: the daemon builds its pool and the scenario its proxy there.
+    const poolFactory = spyOn(DevicePool, "create").mockImplementation(
+      (deps) => new ReservationDevicePool(deps),
+    );
+    try {
+      scenario = await LivenessScenario.start({
+        freshConnectionIdPerDial: true,
+        realStartAdmission: true,
+        deviceNames: { [DEVICE]: AVD },
+        proxyFactory: (config) => new RecoverableHandoffProxy(config),
+        ...options,
+      });
+    } finally {
+      poolFactory.mockRestore();
+    }
     managerFactory = getDeviceToolsDependencies().deviceManagerFactory;
     return scenario;
   }
@@ -222,7 +249,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     );
     expect(s.deviceBootCount()).toBe(1);
     expect(reservations(s).has(label)).toBe(false);
-    expect(s.daemon.pool.hasConnectedMcpSessionOwner(base, connection)).toBe(true);
+    expect(poolOf(s).hasConnectedOwner(base, connection)).toBe(true);
   });
 
   test("live base label handoff: presenting the released label with its token still credits it", async () => {
@@ -391,8 +418,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
   test("a base restore closed while waiting for assignmentMutex credits no label hold", async () => {
     const { s, base, label } = await labelHandoff();
     const pool = s.daemon.pool;
-    const mutex = (pool as unknown as { assignmentMutex: Mutex }).assignmentMutex;
-    const unlock = await mutex.acquire();
+    const unlock = await poolOf(s).assignmentLock.acquire();
     const before = { ...reservations(s).get(label)! };
     const restore = pool.restoreOwnedDeviceSessionsForMcpSession(
       [base],
@@ -408,7 +434,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     }
     expect(await restore).toEqual([]);
     expect(reservations(s).get(label)).toEqual(before);
-    expect(pool.hasConnectedMcpSessionOwner(base, s.proxyConnectionId())).toBe(false);
+    expect(poolOf(s).hasConnectedOwner(base, s.proxyConnectionId())).toBe(false);
     expect(s.daemon.manager.getSession(label)).toBeNull();
   });
 
@@ -437,9 +463,9 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
         await s.idle(KEEPER_INTERVAL_MS);
         await drainMicrotasks(256);
         expect(s.proxyConnectionId()).not.toBe(connection);
-        expect(Reflect.get(s.proxy, "recoverableBoundSessionHandoff")).toBeUndefined();
+        expect(handoffProxyOf(s).recoverableHandoff).toBeUndefined();
       } else {
-        expect(Reflect.get(s.proxy, "recoverableBoundSessionHandoff")).toBe(holder);
+        expect(handoffProxyOf(s).recoverableHandoff).toBe(holder);
       }
       const result = await s.proxy.callTool("getAndroid", { avdName: AVD });
       expect(JSON.stringify(result)).not.toContain("device_owned_by_other_session");
@@ -467,8 +493,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     const before = { ...hold, ownerMcpSessionIds: new Set(hold.ownerMcpSessionIds) };
     const result = await call();
     expect(result).toMatchObject({ isError: true });
-    const errorResult = result as { content: Array<{ text: string }> };
-    const refusal: unknown = JSON.parse(errorResult.content[0]!.text);
+    const refusal = parseJsonUnknown(firstContentText(result));
     expect(refusal).toMatchObject({
       code: "device_owned_by_other_session",
       retryable: true,

@@ -22,3 +22,8 @@ export function parseDaemonResponseLine(line: string): DaemonResponse {
   }
   return value;
 }
+
+/** Parse one newline-delimited wire frame of any kind (response or pushed notification). */
+export function parseWireFrameLine(line: string): unknown {
+  return JSON.parse(line);
+}

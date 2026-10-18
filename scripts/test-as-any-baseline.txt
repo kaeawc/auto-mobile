@@ -5,8 +5,6 @@
 1	test/daemon/daemonMcpProxyListChanged.test.ts
 6	test/daemon/failuresPushSocketServer.test.ts
 1	test/daemon/identityRecovery.test.ts
-2	test/daemon/manager.test.ts
-2	test/daemon/socketServerIdeStatus.integration.test.ts
 25	test/doctor/ios.test.ts
 1	test/fakes/FakeDeviceUtils.ts
 15	test/features/action/PinchOn.test.ts

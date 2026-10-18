@@ -122,3 +122,13 @@ export function createIosTestClient(
   }
   return client;
 }
+
+/** Make `IOSCtrlProxyClient.getInstance` return a {@link createIosTestClient} client until the spy is restored. */
+export function spyOnIosTestClientInstance(
+  device: BootedDevice,
+  overrides: IosClientOverrides = {},
+) {
+  return spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+    createIosTestClient(device, overrides),
+  );
+}

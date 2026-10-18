@@ -668,7 +668,7 @@ describe("Idle - Unit Tests", function () {
     // system launcher (issue #4172). These rows pin the prefix semantics; the
     // reverse-containment rows are the regression guard.
     const invoke = (packageName: string | null | undefined): boolean =>
-      (idle as any).isSystemLauncher(packageName);
+      idle.testHooks.isSystemLauncher(packageName);
 
     const cases: Array<{ pkg: string | null | undefined; expected: boolean; why: string }> = [
       // Exact known system/launcher packages.

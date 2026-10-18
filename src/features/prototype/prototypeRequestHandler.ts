@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../observe/shared/types";
 /**
  * Device-facing side of host-proxied prototype requests (#12527): decodes a `prototype_request`
  * frame, runs it through the coordinator and replies with one `prototype_response` on the same
@@ -17,7 +18,7 @@ export type PrototypeResponseSender = (response: PrototypeResponseMessage) => vo
 
 /** Writes responses to the device socket; throws when it is not open (the reply is then moot). */
 export function webSocketResponseSender(
-  getWebSocket: () => Pick<WebSocket, "readyState" | "send"> | null,
+  getWebSocket: () => Pick<CtrlSocket, "readyState" | "send"> | null,
 ): PrototypeResponseSender {
   return (response) => {
     const ws = getWebSocket();

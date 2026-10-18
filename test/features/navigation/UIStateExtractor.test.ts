@@ -156,7 +156,7 @@ describe("UIStateExtractor.createScrollPosition", () => {
   });
 
   test("returns undefined when the swipe direction is missing", () => {
-    const noDirection = { lookFor: { text: "Save" } } as unknown as SwipeOnOptions;
+    const noDirection = opts({ lookFor: { text: "Save" }, direction: undefined });
     expect(UIStateExtractor.createScrollPosition(noDirection)).toBeUndefined();
   });
 
@@ -214,11 +214,7 @@ describe("UIStateExtractor.createScrollPosition", () => {
 // Synthetic hierarchy nodes exercise the child-text contract; these are not device captures.
 describe("UIStateExtractor child-text characterization", () => {
   function textFinder(parser: FakeElementParser) {
-    return new UIStateExtractor(parser) as unknown as {
-      findTextInChildren: (
-        node: Record<string, unknown> | Record<string, unknown>[],
-      ) => string | undefined;
-    };
+    return new UIStateExtractor(parser);
   }
 
   test("searches depth first, skips empty descendants and stops before later siblings", () => {

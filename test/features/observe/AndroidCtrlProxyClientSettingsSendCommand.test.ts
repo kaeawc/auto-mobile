@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
@@ -47,13 +46,13 @@ async function harness() {
   };
   const adb = new FakeAdbExecutor();
   const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
-    webSocketFactory: () => socket as unknown as WebSocket,
+    webSocketFactory: () => socket,
     timer,
     installedAppsRepository: new FakeInstalledAppsRepository(),
     idGenerator: ids,
   });
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = socket;
   const requestIds = new CountingIdGenerator("wire");
   const manager = client["requestManager"];
   manager.generateId = (prefix) => `${prefix}_${requestIds.next()}`;

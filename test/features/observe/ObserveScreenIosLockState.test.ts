@@ -3,11 +3,12 @@ import type { BootedDevice } from "../../../src/models";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
 import { deviceLockSchema } from "../../../src/server/toolOutputSchemas";
-import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
@@ -21,11 +22,10 @@ class FakeLockProbe implements IosLockStateProbe {
   }
 }
 
-const unavailableHierarchy = {
-  collect: async () => {
-    throw new Error("Failed to retrieve view hierarchy");
-  },
-} as unknown as HierarchyCollector;
+const unavailableHierarchy = new FakeHierarchyCollector(
+  undefined,
+  new ActionableError("Failed to retrieve view hierarchy"),
+);
 
 function screenFor(device: BootedDevice, probe: FakeLockProbe): RealObserveScreen {
   const timer = new FakeTimer();

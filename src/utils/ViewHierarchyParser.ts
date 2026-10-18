@@ -33,7 +33,7 @@ export class ViewHierarchyParser {
    * @param viewHierarchy - The view hierarchy to extract from
    * @returns Array of root nodes
    */
-  extractRootNodes(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[] {
+  extractRootNodes(viewHierarchy: ViewHierarchyResult | null): ViewHierarchyNode[] {
     const searchHierarchy = resolveViewHierarchyForSearch(viewHierarchy);
     if (!searchHierarchy?.hierarchy) {
       return [];

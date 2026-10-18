@@ -84,7 +84,7 @@ async function harness(
     prototypeAssetCache: cache ? { serial: "prototype-test", cache } : undefined,
   });
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
   if (commands !== null) {

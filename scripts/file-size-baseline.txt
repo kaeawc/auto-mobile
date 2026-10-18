@@ -76,7 +76,7 @@
 2426	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts
 1269	src/server/deviceToolsShutdown.ts
-1273	src/server/deviceToolsStartDevice.ts
+1274	src/server/deviceToolsStartDevice.ts
 1186	src/server/executionTracker.ts
 1661	src/server/finalizeToolResponse.ts
 3112	src/server/interactionTools.ts

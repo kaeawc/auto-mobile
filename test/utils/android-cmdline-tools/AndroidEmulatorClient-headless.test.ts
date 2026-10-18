@@ -53,9 +53,7 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
 });
 
 /** Prevent ensureEmulatorPath from running real filesystem/shell detection */
-function skipEmulatorPathDetection(client: AndroidEmulatorClient): void {
-  (client as any).ensureEmulatorPath = async () => "emulator";
-}
+const stubEmulatorPath = async (): Promise<string> => "emulator";
 
 describe("resolveHeadlessMode", () => {
   test("AUTOMOBILE_EMULATOR_HEADLESS=true forces headless on any platform", () => {
@@ -189,8 +187,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
 
   function createFakeChildProcess(): ChildProcess & EventEmitter {
     const emitter = new EventEmitter() as ChildProcess & EventEmitter;
-    emitter.stdout = new Readable({ read() {} }) as any;
-    emitter.stderr = new Readable({ read() {} }) as any;
+    emitter.stdout = new Readable({ read() {} });
+    emitter.stderr = new Readable({ read() {} });
     emitter.killed = false;
     emitter.pid = 1234;
     emitter.kill = () => {
@@ -206,13 +204,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     let capturedArgs: string[] = [];
     const fakeChild = createFakeChildProcess();
 
-    const spawnFn = ((_cmd: string, args: string[]) => {
+    const spawnFn = (_cmd: string, args: string[]) => {
       capturedArgs = args;
       process.nextTick(() => {
         fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
       });
       return fakeChild;
-    }) as any;
+    };
 
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("-list-avds")) {
@@ -228,8 +226,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       timer: fakeTimer,
       adbFactory: fakeFactory,
       avdConfigReader: fakeAvdConfigReader,
+      locateEmulatorPath: stubEmulatorPath,
     });
-    skipEmulatorPathDetection(client);
 
     try {
       await client.startEmulator("Pixel_9_Pro");
@@ -249,13 +247,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     let capturedArgs: string[] = [];
     const fakeChild = createFakeChildProcess();
 
-    const spawnFn = ((_cmd: string, args: string[]) => {
+    const spawnFn = (_cmd: string, args: string[]) => {
       capturedArgs = args;
       process.nextTick(() => {
         fakeChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
       });
       return fakeChild;
-    }) as any;
+    };
 
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("-list-avds")) {
@@ -271,8 +269,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       timer: fakeTimer,
       adbFactory: fakeFactory,
       avdConfigReader: fakeAvdConfigReader,
+      locateEmulatorPath: stubEmulatorPath,
     });
-    skipEmulatorPathDetection(client);
 
     try {
       await client.startEmulator("Pixel_9_Pro");
@@ -286,7 +284,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     process.env.AUTOMOBILE_EMULATOR_HEADLESS = "false"; // force windowed to exercise the failure path
     const fakeChild = createFakeChildProcess();
 
-    const spawnFn = ((_cmd: string, _args: string[]) => {
+    const spawnFn = (_cmd: string, _args: string[]) => {
       process.nextTick(() => {
         fakeChild.stderr!.emit(
           "data",
@@ -303,7 +301,7 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
         fakeChild.emit("close", null);
       });
       return fakeChild;
-    }) as any;
+    };
 
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
       if (args.join(" ").includes("-list-avds")) {
@@ -319,8 +317,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       timer: fakeTimer,
       adbFactory: fakeFactory,
       avdConfigReader: fakeAvdConfigReader,
+      locateEmulatorPath: stubEmulatorPath,
     });
-    skipEmulatorPathDetection(client);
 
     try {
       // REWRITE-5: expectRejection fails loudly if startEmulator resolves,
@@ -348,8 +346,8 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       timer: fakeTimer,
       adbFactory: fakeFactory,
       avdConfigReader: fakeAvdConfigReader,
+      locateEmulatorPath: stubEmulatorPath,
     });
-    skipEmulatorPathDetection(client);
 
     await expect(client.startEmulator("Missing_Device")).rejects.toThrow(
       "AVD 'Missing_Device' not found. Available AVDs: Pixel_9_Pro, Medium_Phone_API_35",

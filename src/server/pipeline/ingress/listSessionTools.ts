@@ -13,6 +13,8 @@ import { resolveToolResultsNoStructuredContent } from "./connectionPresentation"
 
 export interface ListSessionToolsDeps {
   readonly options: McpServerOptions;
+  /** The request's session key, else the stateful transport's id (#4678). */
+  readonly bindingKey: string | undefined;
   readonly sessionToolBinding: SessionToolBinding;
   readonly toolSelectionProfileRegistry: ToolSelectionProfileRegistry;
 }
@@ -22,12 +24,9 @@ export interface ListSessionToolsDeps {
  * device acquisition, to report the session's gated and enabled tool names.
  */
 export function createListSessionTools(deps: ListSessionToolsDeps) {
-  const { options, sessionToolBinding, toolSelectionProfileRegistry } = deps;
-  return async (
-    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
-  ) => {
-    const sessionId = options.sessionContext?.sessionId;
-    const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
+  const { options, bindingKey, sessionToolBinding, toolSelectionProfileRegistry } = deps;
+  return async (routingSessionUuid = sessionToolBinding.effectiveSessionUuid(bindingKey)) => {
+    const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(bindingKey);
     const selectionSessionManager =
       options.toolSelectionSessionManager ??
       (DaemonState.getInstance().isInitialized()

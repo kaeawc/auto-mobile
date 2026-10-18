@@ -9,7 +9,7 @@ import {
   setToolTransportRecovery,
   type ToolTransportRecovery,
 } from "./toolTransportRecovery";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
@@ -26,7 +26,7 @@ import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { markInternalToolCall } from "./internalToolCall";
-import { ListChangedBroadcaster } from "./listChangedBroadcast";
+import { ListChangedBroadcaster, type ServerRegistrationOptions } from "./listChangedBroadcast";
 import { StructuredToolResponse } from "../utils/toolUtils";
 import {
   InternalToolName,
@@ -143,6 +143,9 @@ export class ToolRegistryClass {
   // last-writer-wins (issue #3223). Entries are pruned via the underlying
   // server's onclose hook when a session's transport closes.
   private servers: Set<McpServer> = new Set();
+  // Per-request servers (#4678), tracked only until they close and never sent
+  // list_changed; see ServerRegistrationOptions.
+  private ephemeralServers: Set<McpServer> = new Set();
   // Per-transport server-side session-binding teardown handlers (issue #4611 Gap
   // D). `createMcpServer` registers one per loopback transport; the plan-release
   // path fans a released session UUID out to all of them so each transport's
@@ -168,6 +171,8 @@ export class ToolRegistryClass {
   private readonly isResponseFailure = (response: unknown): boolean =>
     isToolResponseFailure(response);
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
+  private toolDefinitionSchemaBuilds = 0;
+  private removalEpoch = 0;
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
     this.deviceSessionManager = DeviceReadiness.getInstance();
@@ -298,6 +303,7 @@ export class ToolRegistryClass {
   /** Remove one test-only or dynamically registered tool without disturbing the registry. */
   unregister(name: string): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, undefined);
     }
@@ -759,12 +765,12 @@ export class ToolRegistryClass {
   // capability and schemas only: the server's one `tools/call` handler is
   // installed by `installToolCallDispatcher` (#6545) and replaces the SDK's
   // per-tool dispatch, so the callback below is never live.
-  registerWithServer(server: McpServer): void {
+  registerWithServer(server: McpServer, options: ServerRegistrationOptions = {}): void {
     // Retained so runtime changes that alter tool definitions can emit
     // notifications/tools/list_changed (issue #2963) to EVERY live session, not
     // just the most recently created one (issue #3223), mirroring how
     // ResourceRegistry retains its servers for resources/list_changed.
-    this.trackServer(server);
+    this.trackServer(server, options.ephemeral === true);
 
     this.tools.forEach((tool) => {
       if (!this.toolReachable(tool, "register")) {
@@ -789,32 +795,65 @@ export class ToolRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks — and vice versa.
-  private trackServer(server: McpServer): void {
-    if (this.servers.has(server)) {
+  private trackServer(server: McpServer, ephemeral: boolean): void {
+    if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
-    this.servers.add(server);
+    const tracked = ephemeral ? this.ephemeralServers : this.servers;
+    tracked.add(server);
     const underlying = server.server;
     const existingOnClose = underlying.onclose;
     underlying.onclose = () => {
-      this.servers.delete(server);
+      tracked.delete(server);
       existingOnClose?.();
     };
+  }
+
+  /**
+   * Stop tracking a server without waiting for its transport to close. A server
+   * closed before it ever connected has no transport, so the SDK never fires its
+   * `onclose` and the prune hook installed by `trackServer` would not run.
+   */
+  untrackServer(server: McpServer): void {
+    this.servers.delete(server);
+    this.ephemeralServers.delete(server);
   }
 
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.ephemeralServers.clear();
+  }
+
+  /** Test-only: how many live servers are tracked, so suites can prove none leak. */
+  trackedServerCountsForTesting(): { notified: number; ephemeral: number } {
+    return { notified: this.servers.size, ephemeral: this.ephemeralServers.size };
   }
 
   /** Test-only: forget every registered tool so a suite can register just the tools it exercises. */
   clearToolsForTesting(): void {
+    this.removalEpoch++;
     this.tools.clear();
   }
 
   /** Test-only: unregister one tool by name; a no-op when it was never registered. */
   removeToolForTesting(name: string): void {
+    this.removalEpoch++;
     this.tools.delete(name);
+  }
+
+  /**
+   * Counts every removal from the registry. A caller that registered a fixed tool
+   * set once (see `registerMcpTools`) re-registers only when this has moved,
+   * since a removal is the one way that set can stop being present.
+   */
+  get removalEpochForRegistration(): number {
+    return this.removalEpoch;
+  }
+
+  /** Test-only: how many per-tool schema builds `getToolDefinitions` has performed. */
+  schemaBuildCountForTesting(): number {
+    return this.toolDefinitionSchemaBuilds;
   }
 
   // Register a per-transport server-side session-binding teardown handler (issue
@@ -1025,6 +1064,7 @@ export class ToolRegistryClass {
   ): { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | undefined } {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
+      this.toolDefinitionSchemaBuilds++;
       cached = {
         inputSchema: toAdvertisedJsonSchema(tool.schema, {
           constrainAppIds: true,
@@ -1122,6 +1162,7 @@ export class ToolRegistryClass {
   // Clear all registered tools (for testing)
   clearTools(): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     this.tools.clear();
     if (this === ToolRegistry) {
       clearToolTransportRecovery();

@@ -1,7 +1,11 @@
-import type { DaemonRequest } from "./types";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { getToolTransportRecovery } from "../server/toolTransportRecovery";
 
+/**
+ * The `device_control_transport_failure` wire type (#11820). The daemon stopped producing it when
+ * control-socket forwards moved in process (there is no loopback transport left to fail), but the
+ * proxy and the daemon client still read it from a daemon of an older version, so the type, its
+ * sanitizer and the proxy's tool result stay.
+ */
 export const DEVICE_CONTROL_TRANSPORT_FAILURE_CODE = "device_control_transport_failure";
 
 export type DeviceControlTransportPhase = "connect" | "response";
@@ -31,30 +35,6 @@ export class DeviceControlTransportError extends Error {
   ) {
     super(message);
     this.name = "DeviceControlTransportError";
-  }
-}
-
-/** A rejected fetch on the daemon's loopback MCP transport. */
-export class LoopbackMcpConnectionError extends Error {
-  constructor(cause: unknown) {
-    super("Daemon loopback MCP connection closed", { cause });
-    this.name = "LoopbackMcpConnectionError";
-  }
-}
-
-/** Tag network failures where they occur, before the SDK can discard their cause. */
-export async function loopbackMcpFetch(
-  url: string | URL,
-  init?: RequestInit,
-  fetchImpl: (url: string | URL, init?: RequestInit) => Promise<Response> = fetch,
-): Promise<Response> {
-  try {
-    return await fetchImpl(url, init);
-  } catch (error) {
-    if (init?.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
-      throw error;
-    }
-    throw new LoopbackMcpConnectionError(error);
   }
 }
 
@@ -159,32 +139,10 @@ export function sanitizeDeviceControlTransportFailure(
   };
 }
 
-export function isLoopbackTransportFailure(error: unknown): boolean {
-  return !(error instanceof McpError) && error instanceof LoopbackMcpConnectionError;
-}
-
-export function isDeviceControlTransportRequest(request: DaemonRequest): boolean {
-  if (request.method !== "tools/call") {
-    return false;
-  }
-  const toolName = request.params?.name;
-  return typeof toolName === "string" && getToolTransportRecovery(toolName) !== undefined;
-}
-
 /**
  * Tools whose re-execution after an ambiguous delivery cannot change device
- * state. Shared by the daemon's response-phase recovery and the proxy's
- * reconnect replay so both layers agree on what may run twice (issue #6382).
+ * state: what the proxy's reconnect replay may run twice (issue #6382).
  */
 export function isReplaySafeToolName(toolName: unknown): boolean {
   return typeof toolName === "string" && getToolTransportRecovery(toolName) === "replay";
-}
-
-export function isReplaySafeAfterResponseClosure(request: DaemonRequest): boolean {
-  return request.method === "tools/call" && isReplaySafeToolName(request.params?.name);
-}
-
-export function deviceControlToolName(request: DaemonRequest): string {
-  const name = request.method === "tools/call" ? request.params?.name : undefined;
-  return typeof name === "string" && name.length > 0 ? name : request.method;
 }

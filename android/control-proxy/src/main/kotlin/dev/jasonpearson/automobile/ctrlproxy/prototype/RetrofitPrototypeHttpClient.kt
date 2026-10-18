@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
+import java.net.UnknownServiceException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
@@ -156,9 +157,21 @@ class RetrofitPrototypeHttpClient(
       throw error
     } catch (error: InterruptedIOException) {
       // The whole-call timeout expired; SocketTimeoutException is an InterruptedIOException too.
-      failed(PrototypeRequestErrorCode.TIMEOUT, "Request timed out after ${request.timeoutMs}ms.")
+      warn("Prototype request timed out: ${request.url}", error)
+      failed(
+        PrototypeRequestErrorCode.TIMEOUT,
+        "Request timed out after ${request.timeoutMs}ms." + localNetworkHint(url.host),
+      )
     } catch (error: ConnectException) {
       failed(PrototypeRequestErrorCode.CONNECTION_REFUSED, "Connection refused: ${request.url}")
+    } catch (error: UnknownServiceException) {
+      // OkHttp refuses a cleartext http:// call the network security policy forbids, at once.
+      warn("Prototype request refused by network policy: ${error.message}", error)
+      failed(
+        PrototypeRequestErrorCode.NETWORK,
+        "Cleartext HTTP to ${url.host} is not permitted by the app's network security policy: " +
+          (error.message ?: "refused"),
+      )
     } catch (error: IOException) {
       warn("Prototype request failed: ${error.message}", error)
       failed(
@@ -171,6 +184,17 @@ class RetrofitPrototypeHttpClient(
       failed(PrototypeRequestErrorCode.INVALID_REQUEST, error.message ?: "Invalid request")
     }
   }
+
+  /**
+   * On API 37 a connection to a local-network address is dropped, so it times out, unless CtrlProxy
+   * holds `ACCESS_LOCAL_NETWORK` (#13018). Only private or emulator-alias hosts get the hint.
+   */
+  private fun localNetworkHint(host: String): String =
+    if (isLocalNetworkHost(host)) {
+      " $host is a local-network address: on Android 17+ grant CtrlProxy " +
+        "android.permission.ACCESS_LOCAL_NETWORK (adb shell pm grant " +
+        "dev.jasonpearson.automobile.ctrlproxy android.permission.ACCESS_LOCAL_NETWORK)."
+    } else ""
 
   /** The raw call; an HTTP error status is a [Response], not an exception. */
   private suspend fun call(request: PrototypeHttpRequest, url: String): Response<*> {
@@ -272,7 +296,20 @@ class RetrofitPrototypeHttpClient(
       }
   }
 
-  private companion object {
+  internal companion object {
+    /** Literal private-range IPv4 hosts, `localhost` and `*.local`; no DNS lookup is made. */
+    fun isLocalNetworkHost(host: String): Boolean {
+      if (host == "localhost" || host.endsWith(".local")) return true
+      val octets = host.split('.').map { it.toIntOrNull() ?: return false }
+      if (octets.size != 4 || octets.any { it !in 0..255 }) return false
+      val (a, b) = octets
+      return a == 10 ||
+        a == 127 ||
+        (a == 192 && b == 168) ||
+        (a == 172 && b in 16..31) ||
+        (a == 169 && b == 254)
+    }
+
     const val TAG = "RetrofitPrototypeHttp"
     const val NANOS_PER_MILLI = 1_000_000L
 

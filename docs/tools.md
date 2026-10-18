@@ -995,8 +995,8 @@ keep their meaning. Every visible page (including partly visible peek and fixed-
 
 Use `show` for a new screen or a window, theme or root change. Use `patch` for
 content (`/data`), state (`/state`) or one node by id (`replaceNode`) of the shown prototype. Android CtrlProxy advertises
-`prototype_patch_v1` and applies patches in place; iOS does not advertise it yet
-and requires the whole spec with `show`.
+`prototype_patch_v1` and applies patches in place; the iOS prototype agent advertises it too
+(a relaunched app loads the current agent), so an older agent still needs the whole spec with `show`.
 
 `{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
 `{requestId, id, baseRevision?, ops}` only to a device advertising
@@ -1734,7 +1734,8 @@ and `clear` commands send keys and clear the focused field, respectively.
 <code>pinchOn.rotationDegrees</code> describes how far the two-finger axis rotates
 during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
-a plain pinch. Android and iOS share this convention.
+a plain pinch. Android and iOS share this convention. The value must be
+between <code>-360</code> and <code>360</code> degrees; larger magnitudes are rejected.
 
 To rotate **without zooming**, keep the finger distance constant: pass
 <code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)

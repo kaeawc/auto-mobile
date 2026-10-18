@@ -5,6 +5,17 @@ device with `getAndroid`, `getApple` or `startDevice` creates the session and
 returns its `sessionUuid`; the session holds the device until it is released
 (idle timeout, lost heartbeat, or an explicit release).
 
+## Session key on the MCP layer
+
+The daemon's MCP layer holds no transport session. A call is tied to its session by an
+explicit key, not by the connection it arrived on: the `sessionUuid` argument where a tool
+takes one, otherwise the `x-auto-mobile-mcp-session-id` header (or the in-band
+`__mcpSessionId` argument). The socket server sends the header for proxy and CLI
+connections, and the desktop app sends one generated id per app session. A client that calls
+the daemon's HTTP endpoint directly and sends neither gets no implicit binding and must name
+`sessionUuid`. Landed in #4678 (#13047, #13049, #13046); see
+[the design record](../design-docs/mcp/sdk-v2-stateless-migration.md).
+
 ## What is refused
 
 A call that acts on a held device is refused with the typed code

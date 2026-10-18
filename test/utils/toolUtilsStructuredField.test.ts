@@ -1,4 +1,4 @@
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { specTypeSchemas } from "@modelcontextprotocol/server";
 import { describe, expect, test } from "bun:test";
 import {
   createStructuredToolResponse,
@@ -6,6 +6,15 @@ import {
   getStructuredPayload,
   StructuredToolResponse,
 } from "../../src/utils/toolUtils";
+
+/** Validates a value as a spec `CallToolResult`, as the v1 SDK's `CallToolResultSchema.parse` did. */
+function parseCallToolResult(value: unknown) {
+  const result = specTypeSchemas.CallToolResult["~standard"].validate(value);
+  if (result.issues) {
+    throw new Error(`Invalid CallToolResult: ${JSON.stringify(result.issues)}`);
+  }
+  return result.value;
+}
 
 /**
  * Typed seam for the envelope-vs-`structuredContent` dead-read bug class (issues
@@ -176,7 +185,7 @@ describe("structured response symbol metadata", () => {
     };
     const response = createStructuredToolResponse(payload);
 
-    expect(CallToolResultSchema.parse(response).structuredContent).toEqual({
+    expect(parseCallToolResult(response).structuredContent).toEqual({
       success: false,
       error: "failed",
       nested: payload.nested,
@@ -196,6 +205,6 @@ describe("structured response symbol metadata", () => {
     Object.defineProperty(payload, Symbol("internal"), { value: "app" });
     const response = createStructuredToolResponse(payload);
     expect(response.structuredContent).toBe(payload);
-    expect(CallToolResultSchema.parse(response).structuredContent).toEqual(payload);
+    expect(parseCallToolResult(response).structuredContent).toEqual(payload);
   });
 });

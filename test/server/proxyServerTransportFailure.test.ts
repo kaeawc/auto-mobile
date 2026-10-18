@@ -1,7 +1,8 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport, Server } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   DeviceControlTransportError,
   type DeviceControlTransportFailure,
@@ -17,7 +18,6 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonRestartDeferredError } from "../../src/daemon/daemonMcpProxy";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ActionableError } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -80,8 +80,8 @@ describe("proxy server device-control transport errors", () => {
         autoStartDaemon: false,
       },
     });
-    const handler = registration.mock.calls.find(
-      ([schema]) => schema === ReadResourceRequestSchema,
+    const handler = registration.mock.calls.findLast(
+      ([schema]) => schema === "resources/read",
     )?.[1];
     registration.mockRestore();
     const daemonRead = spyOn(fakeClient, "readResource").mockRejectedValue(failure);
@@ -104,14 +104,7 @@ describe("proxy server device-control transport errors", () => {
       const result = Promise.resolve(
         handler(
           { method: "resources/read", params: { uri } },
-          {
-            signal: controller.signal,
-            requestId: 1,
-            sendNotification: async () => {},
-            sendRequest: async () => {
-              throw new Error("unexpected server request");
-            },
-          },
+          fakeServerContext({ signal: controller.signal, id: 1 }),
         ),
       );
       const error: unknown = await result.catch((caught: unknown) => caught);

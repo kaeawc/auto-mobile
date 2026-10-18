@@ -12,6 +12,10 @@ export interface SwipeResult extends BaseActionResult {
   path?: number;
   /** swipeAt: straight-line distance / dispatched duration in px/s (#12538). */
   velocityPxPerSecond?: number;
+  /** iOS XCUICoordinate route: the stroke duration actually run after the runner's velocity clamp (#12987). */
+  effectiveDurationMs?: number;
+  /** TalkBack semantic scroll: `duration` is nominal because the scroll has no timed stroke (#12987). */
+  durationIgnored?: boolean;
   easing?: "linear" | "decelerate" | "accelerate" | "accelerateDecelerate";
   // A11y mode timing (when scrollMode="a11y")
   a11yTotalTimeMs?: number; // Total time on device for swipe (including gesture dispatch)

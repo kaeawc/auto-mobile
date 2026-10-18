@@ -1,9 +1,9 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
@@ -80,7 +80,7 @@ interface Internals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
-  getMcpClient(): Promise<Pick<Client, "callTool">>;
+  mcpClientFactory(): Promise<Pick<Client, "callTool" | "close">>;
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -162,8 +162,9 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     );
     internals = server as unknown as Internals;
     internals.acceptingRequests = true;
-    internals.getMcpClient = async () => ({
-      callTool: (_params, _schema, options) => {
+    internals.mcpClientFactory = async () => ({
+      close: async () => {},
+      callTool: (_params, options) => {
         const call: LoopbackCall = {
           signal: options?.signal,
           swipes: 0,
@@ -235,9 +236,12 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     try {
       const controller = new AbortController();
       const call = mcpClient
-        .callTool({ name: "swipeOn", arguments: lookForArgs }, undefined, {
-          signal: controller.signal,
-        })
+        .callTool(
+          { name: "swipeOn", arguments: lookForArgs },
+          {
+            signal: controller.signal,
+          },
+        )
         .then(
           () => undefined,
           (error: unknown) => error,

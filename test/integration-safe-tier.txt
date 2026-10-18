@@ -17,6 +17,7 @@
 # it (test/scripts/integrationSafeTier.test.ts enforces this). Classify by READING
 # the file, never by running it; when in doubt, unsafe.
 # Last derived from origin/main on 2026-10-10.
+test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
@@ -24,6 +25,7 @@ test/contracts/observeCacheStore.integration.test.ts | safe | fake versus real F
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
 test/contracts/telemetryRepository.integration.test.ts | safe | fake versus real telemetry repositories over createTestDatabase in-memory L27
+test/contracts/toolSelectionProfileProvenanceStore.integration.test.ts | safe | fake versus real provenance repository over createTestDatabase in-memory L10
 test/ctrlProxy/ios/IOSHostPortAvailabilityChecker.integration.test.ts | safe | loopback 127.0.0.1 ephemeral port server L22
 test/daemon/daemonClientAvailability.integration.test.ts | safe | mkdtemp socket path L20, local net server only
 test/daemon/daemonClientHandshake.integration.test.ts | safe | tmpdir socket L59, fake capture server, DaemonClient only connects to it
@@ -39,6 +41,7 @@ test/daemon/integration/daemonProfileDiagnostics.integration.test.ts | unsafe | 
 test/daemon/integration/parallelExecution.integration.test.ts | safe | all fakes (FakeDeviceManager, FakeTimer, FakeDeviceSessionPersistence), no I/O
 test/daemon/integration/startupOptionReconciliation.integration.test.ts | safe | UnixSocketServer on tmpdir socket L45, fake manager
 test/daemon/integration/versionMismatchRestart.integration.test.ts | unsafe | real DaemonManager L56 with no fake spawner, process table or signaler
+test/daemon/mcpForwardByteParity.integration.test.ts | safe | tmpdir socket L185, loopback ephemeral port L181, hermetic fixture device boundary
 test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :memory: binding registry and createTestDatabase in-memory DB, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
@@ -55,6 +58,7 @@ test/daemon/socketServerFeatureFlags.integration.test.ts | safe | tmpdir socket 
 test/daemon/socketServerHandshake.integration.test.ts | safe | tmpdir socket L47
 test/daemon/socketServerIdeForwardRoute.integration.test.ts | safe | tmpdir socket L72, fake state
 test/daemon/socketServerIdeStatus.integration.test.ts | safe | tmpdir sockets, managers spied L866-L907, AUTOMOBILE_VERSION env only
+test/daemon/socketServerInProcessForward.integration.test.ts | safe | tmpdir socket L130, in-process dispatcher, hermetic fixture device boundary
 test/daemon/socketServerInputGesture.integration.test.ts | safe | tmpdir socket L45, fake harness
 test/daemon/socketServerInputKey.integration.test.ts | safe | tmpdir socket L83, fakes
 test/daemon/socketServerInputPressButton.integration.test.ts | safe | tmpdir socket L116, fakes

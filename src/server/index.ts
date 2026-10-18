@@ -1,6 +1,6 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
+import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
 
@@ -11,8 +11,12 @@ import { logger } from "../utils/logger";
 
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import type { SessionToolBindingStore } from "./sessionToolBindingStore";
+import {
+  createReleaseSubscribedBindingStore,
+  daemonSessionToolBindingStore,
+} from "./daemonSessionToolBindingStore";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
@@ -89,6 +93,21 @@ export interface McpServerOptions {
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
   /**
+   * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
+   * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
+   * on it (an in-band `__mcpSessionId` on a daemon `tools/call` takes precedence),
+   * so a binding survives across per-request servers that present the same key.
+   */
+  requestMcpSessionId?: string;
+  /**
+   * The server answers a single request and is closed after it (#4678). Keyed
+   * bindings then live in the daemon-scoped {@link daemonSessionToolBindingStore}
+   * instead of a store private to this server.
+   */
+  stateless?: boolean;
+  /** Overrides where keyed bindings live; tests share one store across servers. */
+  sessionToolBindingStore?: SessionToolBindingStore;
+  /**
    * Per-daemon live-acceptance capability captured at startup. Unlike tool
    * arguments, this is a server-construction boundary clients cannot set.
    */
@@ -115,6 +134,8 @@ export interface McpServerOptions {
 // here to preserve the historical import path used by existing tests.
 export { formatToolParamError };
 
+let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefined;
+
 /**
  * Populate the canonical production registry and validate exact-tool startup
  * defaults. The process entrypoint calls this before opening daemon listeners;
@@ -124,8 +145,44 @@ export { formatToolParamError };
  */
 export function registerMcpTools(daemonMode: boolean): void {
   installDefaultProvisionedDeviceTransportFence();
-  registerAllTools({ daemonMode });
+  // Re-registering rebuilds every definition and drops the tool-schema cache, which a
+  // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
+  // The registered set only changes when something is removed, so skip while the
+  // same mode's set is still present. Session-gated tools are unaffected: callability
+  // is evaluated per request against the registry, not captured at registration.
+  const removalEpoch = ToolRegistry.removalEpochForRegistration;
+  if (
+    lastToolRegistration?.daemonMode !== daemonMode ||
+    lastToolRegistration.removalEpoch !== removalEpoch
+  ) {
+    registerAllTools({ daemonMode });
+    lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
+  }
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
+}
+
+let lastResourceRegistration:
+  | { iosDependencies: IosDoctorDependencies; clearEpoch: number }
+  | undefined;
+
+/**
+ * Register every resource once per process (#13068). The registry is keyed by URI, so
+ * re-registering is redundant, and registering app resources starts a booted-device
+ * discovery (adb + simctl), which every stateless request (#4678) used to pay. Device
+ * inventory changes resync app resources through the device lifecycle instead.
+ */
+function registerAllResourcesOnce(iosDependencies: IosDoctorDependencies): void {
+  if (
+    lastResourceRegistration?.iosDependencies === iosDependencies &&
+    lastResourceRegistration.clearEpoch === ResourceRegistry.clearEpochForRegistration
+  ) {
+    return;
+  }
+  registerAllResources(iosDependencies);
+  lastResourceRegistration = {
+    iosDependencies,
+    clearEpoch: ResourceRegistry.clearEpochForRegistration,
+  };
 }
 
 function registerAllResources(iosDependencies: IosDoctorDependencies): void {
@@ -159,14 +216,38 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerEmulatorLossIncidentResources();
 }
 
+/**
+ * The key this server's request-less paths (tools/list, resources) bind under:
+ * the request's session key, else the stateful transport's own session id.
+ */
+function serverBindingKey(options: McpServerOptions): string | undefined {
+  return options.requestMcpSessionId ?? options.sessionContext?.sessionId;
+}
+
+function resolveBindingStore(options: McpServerOptions): {
+  store: SessionToolBindingStore;
+  owned: boolean;
+} {
+  if (options.sessionToolBindingStore) {
+    return { store: options.sessionToolBindingStore, owned: false };
+  }
+  if (options.daemonMode && options.stateless) {
+    return { store: daemonSessionToolBindingStore(), owned: false };
+  }
+  return { store: createReleaseSubscribedBindingStore(), owned: true };
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  const bindingStore = resolveBindingStore(options);
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
     options.sessionContext?.initialReleasedSession,
     namesLiveSessionOfBoundPlan,
+    bindingStore.store,
   );
+  const bindingKey = serverBindingKey(options);
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
@@ -191,29 +272,30 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all resources
   startupBenchmark.startPhase("resourceRegistration");
-  registerAllResources(iosDependencies);
+  registerAllResourcesOnce(iosDependencies);
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server
   startupBenchmark.startPhase("sdkInitialization");
-  const server = new McpServer(
+  const server = createSdkMcpServer(
     {
       name: "AutoMobile",
       version: getMcpServerVersion(),
     },
     {
-      capabilities: {
-        resources: { subscribe: true, listChanged: true },
-        tools: {},
-        prompts: {},
-      },
+      resources: { subscribe: true, listChanged: true },
+      tools: {},
+      prompts: {},
     },
   );
   startupBenchmark.endPhase("sdkInitialization");
 
   // Register all tools with the server
   startupBenchmark.startPhase("serverHandlerRegistration");
-  ToolRegistry.registerWithServer(server);
+  // A stateless server answers one request: track it only until it closes and never
+  // notify it (#4678).
+  const registration = { ephemeral: options.stateless === true };
+  ToolRegistry.registerWithServer(server, registration);
 
   // Emit notifications/tools/list_changed when a runtime feature-flag toggle
   // changes tool definitions (outputSchema advertisement or tool availability),
@@ -233,45 +315,44 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   });
 
   // Register all resources with the server
-  ResourceRegistry.registerWithServer(server, (signal) => ({
-    sessionUuid: sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
-    ownsSession: (sessionUuid) =>
-      sessionToolBinding.ownsSession(options.sessionContext?.sessionId, sessionUuid),
-    releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(
-      options.sessionContext?.sessionId,
-    ),
-    signal,
-  }));
-
-  // Tear down this transport's server-side SessionToolBinding when the daemon
-  // actually releases a session (issue #4611 Gap D). Two release sources funnel
-  // through the same idempotent `unbindSession`:
-  //   - the plan-release path, via ToolRegistry's injected teardown handler
-  //     (executePlan auto-release, deterministic, works in stdio mode too); and
-  //   - heartbeat/idle/explicit releases, via the process-wide
-  //     SessionReleaseBroadcaster (issue #4610), active in daemon mode.
-  // Clearing the binding stops a later sessionless tools/list or tools/call on
-  // this same MCP transport from enforcing the released session's stale profile.
-  // A list-changed notification is emitted only when a binding actually changed,
-  // so a duplicate release signal for the same session is a no-op.
-  const clearReleasedSessionBinding = (sessionUuid: string): void => {
-    if (sessionToolBinding.unbindSession(sessionUuid)) {
-      ToolRegistry.notifyToolListChanged();
-    }
-  };
-  const unregisterSessionBindingRelease = ToolRegistry.registerSessionBindingReleaseHandler({
-    onSessionReleased: clearReleasedSessionBinding,
-  });
-  const unsubscribeSessionReleaseBroadcast = SessionReleaseBroadcaster.subscribe(
-    clearReleasedSessionBinding,
+  ResourceRegistry.registerWithServer(
+    server,
+    (signal) => ({
+      sessionUuid: sessionToolBinding.effectiveSessionUuid(bindingKey),
+      ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
+      releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
+      signal,
+    }),
+    registration,
   );
-  // Chain onto the existing onclose (set by ToolRegistry.registerWithServer's
-  // server tracking) so the per-transport teardown subscriptions are dropped when
-  // the transport closes, and no other lifecycle hook is clobbered.
+
+  if (registration.ephemeral) {
+    // A server closed before it connects has no transport, so the SDK never fires
+    // onclose and the prune hooks would leave it tracked forever.
+    const closeServer = server.close.bind(server);
+    server.close = async () => {
+      try {
+        await closeServer();
+      } finally {
+        // A never-connected server never fires onclose, which is what detaches its binding.
+        sessionToolBinding.dispose();
+        ToolRegistry.untrackServer(server);
+        ResourceRegistry.untrackServer(server);
+      }
+    };
+  }
+
+  // Release teardown is subscribed by the binding store, once per store (see
+  // createReleaseSubscribedBindingStore); this server's binding is attached to it
+  // until the transport closes. Chain onto the existing onclose (set by
+  // ToolRegistry.registerWithServer's server tracking) so no other lifecycle hook
+  // is clobbered. A shared store keeps its keyed bindings and its subscription.
   const existingServerOnClose = server.server.onclose;
   server.server.onclose = () => {
-    unregisterSessionBindingRelease();
-    unsubscribeSessionReleaseBroadcast();
+    sessionToolBinding.dispose();
+    if (bindingStore.owned) {
+      bindingStore.store.dispose();
+    }
     if (!daemonMode) {
       dropToolCallRecording(options.sessionContext?.sessionId);
     }
@@ -280,23 +361,24 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   const listSessionTools = createListSessionTools({
     options,
+    bindingKey,
     sessionToolBinding,
     toolSelectionProfileRegistry,
   });
-  server.server.setRequestHandler(ListToolsRequestSchema, () => listSessionTools());
+  // The advertised definitions are built from our own JSON Schemas, which the SDK
+  // types only as `Record<string, unknown>`; the wire value is unchanged.
+  server.server.setRequestHandler(
+    "tools/list",
+    async () => (await listSessionTools()) as ListToolsResult,
+  );
 
   // Add ping handler as per MCP specification
-  // Note: Using runtime access since TypeScript import has issues
-  const PingRequestSchema = require("@modelcontextprotocol/sdk/types.js").PingRequestSchema;
-  server.server.setRequestHandler(PingRequestSchema, async () => {
+  server.server.setRequestHandler("ping", async () => {
     return {};
   });
 
   // Register prompts list handler (currently returns empty list since no prompts are implemented)
-  // Note: Using runtime access since TypeScript import has issues
-  const ListPromptsRequestSchema =
-    require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema;
-  server.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  server.server.setRequestHandler("prompts/list", async () => {
     return {
       prompts: [],
     };
@@ -339,6 +421,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const executeToolCall = createToolCallExecutor({
     options,
     daemonMode,
+    serverBindingKey: bindingKey,
     sessionToolBinding,
     planExecutionLock,
     toolSelectionProfileRegistry,

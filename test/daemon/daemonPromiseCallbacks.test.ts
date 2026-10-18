@@ -1,25 +1,58 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { EventEmitter } from "node:events";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import type { StatelessMcpHttpEndpoint } from "../../src/daemon/statelessMcpHttpEndpoint";
 import { executionTracker } from "../../src/server/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-interface CallbackInternals {
-  configureHttpTransportCallbacks(transport: StreamableHTTPServerTransport): void;
-  transports: Map<string, StreamableHTTPServerTransport>;
-  activeHttpRequests: Map<string, number>;
-  handleHttpTransportError(sessionId: string, error: Error): void;
+class FakeMcpRequest {
+  readonly method = "POST";
+  readonly headers = {};
 }
 
+class FakeResponse extends EventEmitter {
+  headersSent = false;
+  writableEnded = false;
+  destroyed = false;
+  writeHead(): this {
+    this.headersSent = true;
+    return this;
+  }
+  write(): boolean {
+    return true;
+  }
+  end(): this {
+    this.writableEnded = true;
+    return this;
+  }
+}
+
+/** One request's transport: its response stays open until the response closes. */
 class FakeTransport {
-  sessionId = "callback-session";
-  onclose?: () => void;
-  onerror?: (error: Error) => void;
+  closed = 0;
+  private markStarted!: () => void;
+  readonly started = new Promise<void>((resolve) => {
+    this.markStarted = resolve;
+  });
+
+  async handleRequest(): Promise<void> {
+    this.markStarted();
+  }
+
+  async close(): Promise<void> {
+    this.closed += 1;
+  }
 }
 
-describe("daemon transport callback rejection ownership", () => {
+interface CallbackInternals {
+  mcpHttpEndpoint: StatelessMcpHttpEndpoint<FakeMcpRequest, FakeResponse, FakeTransport>;
+  mcpHttpTransportFactory: () => FakeTransport;
+  mcpRequestServerFactory: () => { connect(): Promise<void>; close(): Promise<void> };
+}
+
+describe("daemon stateless MCP request close rejection ownership", () => {
   let timer: FakeTimer;
   let internals: CallbackInternals;
   let transport: FakeTransport;
@@ -34,14 +67,11 @@ describe("daemon transport callback rejection ownership", () => {
     // Construct only: no daemon startup, sockets, devices, or real timers.
     internals = new Daemon({}, { timer }) as unknown as CallbackInternals;
     transport = new FakeTransport();
-    internals.configureHttpTransportCallbacks(
-      transport as unknown as StreamableHTTPServerTransport,
-    );
-    internals.transports.set(
-      transport.sessionId,
-      transport as unknown as StreamableHTTPServerTransport,
-    );
-    internals.activeHttpRequests.set(transport.sessionId, 1);
+    internals.mcpHttpTransportFactory = () => transport;
+    internals.mcpRequestServerFactory = () => ({
+      connect: async () => {},
+      close: async () => {},
+    });
     warnings = spyOn(logger, "warn").mockImplementation(() => {});
     unhandled.length = 0;
     process.on("unhandledRejection", onUnhandled);
@@ -58,59 +88,55 @@ describe("daemon transport callback rejection ownership", () => {
     DaemonState.getInstance().reset();
   });
 
-  test("onclose logs cancellation rejection without an unhandled rejection", async () => {
+  async function openRequest(): Promise<FakeResponse> {
+    const res = new FakeResponse();
+    await internals.mcpHttpEndpoint.handle(new FakeMcpRequest(), res, undefined, () => {});
+    await transport.started;
+    return res;
+  }
+
+  test("a response close logs a cancellation rejection without an unhandled rejection", async () => {
     const error = new Error("cancel rejected");
     const cancel = spyOn(executionTracker, "cancelSessionExecutions").mockRejectedValue(error);
     try {
-      expect(transport.onclose!()).toBeUndefined();
-      await timer.advanceTimersByTimeAsync(0);
+      const res = await openRequest();
+      expect(res.emit("close")).toBeTrue();
+      for (let turn = 0; turn < 8; turn++) {
+        await timer.advanceTimersByTimeAsync(0);
+      }
       expect(warnings).toHaveBeenCalledWith(
-        "HTTP transport close callback failed: cancel rejected",
+        "Stateless MCP request close failed: cancel rejected",
         error,
       );
-      expect(internals.activeHttpRequests.has(transport.sessionId)).toBeFalse();
-      // Preserve the existing sequence: transport deletion follows successful cancellation.
-      expect(internals.transports.has(transport.sessionId)).toBeTrue();
+      // The request is untracked and its transport closed even though cancellation failed.
+      expect(internals.mcpHttpEndpoint.inFlightCount).toBe(0);
+      expect(transport.closed).toBe(1);
     } finally {
       cancel.mockRestore();
     }
   });
 
-  test("onclose still deletes transport only after cancellation finishes", async () => {
+  test("a request's transport closes only after its cancellation finishes", async () => {
     let complete!: (count: number) => void;
     const cancellation = new Promise<number>((resolve) => {
       complete = resolve;
     });
     const cancel = spyOn(executionTracker, "cancelSessionExecutions").mockReturnValue(cancellation);
     try {
-      transport.onclose!();
-      expect(cancel).toHaveBeenCalledWith(transport.sessionId, "streamable_http_onclose");
-      expect(internals.activeHttpRequests.has(transport.sessionId)).toBeFalse();
-      expect(internals.transports.has(transport.sessionId)).toBeTrue();
-      complete(1);
-      await timer.advanceTimersByTimeAsync(0);
-      expect(internals.transports.has(transport.sessionId)).toBeFalse();
+      const res = await openRequest();
+      res.emit("finish");
+      res.emit("close");
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(cancel.mock.calls[0]![1]).toBe("streamable_http_onclose");
+      expect(transport.closed).toBe(0);
+      complete(0);
+      for (let turn = 0; turn < 8; turn++) {
+        await timer.advanceTimersByTimeAsync(0);
+      }
+      expect(transport.closed).toBe(1);
+      expect(internals.mcpHttpEndpoint.inFlightCount).toBe(0);
     } finally {
       cancel.mockRestore();
-    }
-  });
-
-  test("onerror warns if the transport-error handler rejects and preserves synchronous dispatch", async () => {
-    const error = new Error("handler failed");
-    const handle = spyOn(internals, "handleHttpTransportError").mockImplementation(() => {
-      throw error;
-    });
-    const reported = new Error("transport error");
-    try {
-      expect(transport.onerror!(reported)).toBeUndefined();
-      expect(handle).toHaveBeenCalledWith(transport.sessionId, reported);
-      await timer.advanceTimersByTimeAsync(0);
-      expect(warnings).toHaveBeenCalledWith(
-        "HTTP transport error callback failed: handler failed",
-        error,
-      );
-    } finally {
-      handle.mockRestore();
     }
   });
 });

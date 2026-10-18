@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import {
   computeBindingResourceUsage,
+  describeBudgetExhaustion,
+  MAX_CHARGED_EVIDENCE,
   RegistryBindingResourceBudget,
   type BindingResourceRegistry,
 } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
@@ -193,9 +195,9 @@ describe("binding total-resource budget", () => {
   }
 
   test.each(["amslot-", "ambroker-"])(
-    "%s leftover image at cap one only charges broker orphans",
+    "%s running leftover at cap one only charges broker orphans",
     async (prefix) => {
-      inventory.devices = [{ platform: "android", name: `${prefix}leftover`, isRunning: false }];
+      inventory.devices = [{ platform: "android", name: `${prefix}leftover`, isRunning: true }];
       const entry = await creation("ambroker-new");
       expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
         kind: prefix === "amslot-" ? "admitted" : "exhausted",
@@ -207,6 +209,85 @@ describe("binding total-resource budget", () => {
       });
     },
   );
+
+  test.each(["amslot-", "ambroker-"])(
+    "%s powered-off unbound leftover does not consume the cap (#13017)",
+    async (prefix) => {
+      inventory.devices = [
+        { platform: "android", name: `${prefix}stale`, isRunning: false },
+        {
+          platform: "ios",
+          name: `${prefix}stale-sim`,
+          isRunning: false,
+          isRunningStateKnown: true,
+        },
+      ];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "admitted",
+        usage: { total: 1, orphaned: 0, preparing: 1 },
+      });
+    },
+  );
+
+  test.each([
+    ["Booted", true, "running"],
+    ["Booting", false, "power_unknown"],
+    ["Shutting Down", false, "power_unknown"],
+  ])(
+    "unbound iOS simulator in state %s still consumes the cap (#13060)",
+    async (state, running) => {
+      inventory.devices = [
+        {
+          platform: "ios",
+          name: "ambroker-sim",
+          deviceId: "SIM-1",
+          isRunning: running,
+          isRunningStateKnown: true,
+          state,
+        },
+      ];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { orphaned: 1 },
+      });
+    },
+  );
+
+  test("unbound iOS simulator in state Shutdown does not consume the cap (#13060)", async () => {
+    inventory.devices = [
+      {
+        platform: "ios",
+        name: "ambroker-sim",
+        deviceId: "SIM-1",
+        isRunning: false,
+        isRunningStateKnown: true,
+        state: "Shutdown",
+      },
+    ];
+    const entry = await creation("ambroker-new");
+    expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "admitted",
+      usage: { orphaned: 0 },
+    });
+  });
+
+  test("a leftover with unknown power state still counts as an orphan", async () => {
+    inventory.devices = [
+      {
+        platform: "android",
+        name: "ambroker-unsure",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    ];
+    const entry = await creation("ambroker-new");
+    expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "exhausted",
+      usage: { orphaned: 1 },
+    });
+  });
 
   test("legacy images named by registry commitments still consume the cap", async () => {
     await assignBindingDevice(registry, "android", "amslot-kept", "old");
@@ -355,8 +436,62 @@ describe("binding total-resource budget", () => {
       { platform: "android", stableDeviceId: "idle-a", kind: "assigned_idle" },
       { platform: "ios", stableDeviceId: "idle-b", kind: "assigned_idle" },
       { platform: "android", stableDeviceId: "amslot-new", kind: "preparing" },
-      { platform: "android", stableDeviceId: "ambroker-orphan", kind: "orphaned" },
+      {
+        platform: "android",
+        stableDeviceId: "ambroker-orphan",
+        kind: "orphaned",
+        name: "ambroker-orphan",
+        orphanState: "power_unknown",
+      },
     ]);
+  });
+
+  test("exhaustion distinguishes running from power-unknown orphans", async () => {
+    inventory.devices.push(
+      { platform: "android", name: "ambroker-run", deviceId: "run-id", isRunning: true },
+      {
+        platform: "android",
+        name: "ambroker-unk",
+        deviceId: "unk-id",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    );
+    const mine = await creation("amslot-new");
+    const result = await budget(1).admitCreation({ journalEntryId: mine.id });
+    expect(result.kind === "exhausted" && result.charged.map((c) => c.orphanState)).toEqual([
+      undefined,
+      "running",
+      "power_unknown",
+    ]);
+    if (result.kind !== "exhausted") {
+      throw new Error("expected exhausted");
+    }
+    const message = describeBudgetExhaustion(result);
+    expect(message).toContain("limit 1");
+    expect(message).toContain("ambroker-run (android, orphaned: running)");
+    expect(message).toContain("ambroker-unk (android, orphaned: power state unknown)");
+    expect(message).toContain("amslot-new (android, committed: being prepared)");
+  });
+
+  test("evidence and message list at most MAX_CHARGED_EVIDENCE devices and count the rest", async () => {
+    for (let i = 0; i < MAX_CHARGED_EVIDENCE + 3; i += 1) {
+      inventory.devices.push({
+        platform: "android",
+        name: `ambroker-o${String(i).padStart(2, "0")}`,
+        deviceId: `o${i}`,
+        isRunning: true,
+      });
+    }
+    const mine = await creation("amslot-new");
+    const result = await budget(1).admitCreation({ journalEntryId: mine.id });
+    if (result.kind !== "exhausted") {
+      throw new Error("expected exhausted");
+    }
+    expect(result.charged).toHaveLength(MAX_CHARGED_EVIDENCE);
+    expect(result.chargedOmitted).toBe(4);
+    expect(result.usage.total).toBe(MAX_CHARGED_EVIDENCE + 4);
+    expect(describeBudgetExhaustion(result)).toEndWith("; and 4 more.");
   });
 
   test.each(["journal", "snapshot"] as const)(

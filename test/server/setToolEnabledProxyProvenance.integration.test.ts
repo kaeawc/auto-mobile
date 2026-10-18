@@ -1,3 +1,5 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -12,8 +14,6 @@ import {
   afterAll,
 } from "bun:test";
 import { z } from "zod/v4";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";

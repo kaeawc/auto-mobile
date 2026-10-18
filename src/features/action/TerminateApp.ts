@@ -127,7 +127,7 @@ export class TerminateApp extends BaseVisualChange {
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional AdbExecutor instance for testing
    * @param options - Optional simulator, timer, physical-device terminator, and cache invalidator dependencies
    */
   constructor(

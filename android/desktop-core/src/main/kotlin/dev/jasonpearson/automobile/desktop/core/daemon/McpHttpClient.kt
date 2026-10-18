@@ -36,6 +36,12 @@ class McpHttpClient(
     StatusRequestDeadline(it)
   },
   private val requestSender: HttpRequestSender? = null,
+  /**
+   * Session key sent on every request so a stateless daemon can bind device state to this desktop
+   * app session. Defaults to the app-session-scoped key shared by every client; injectable for
+   * tests.
+   */
+  private val mcpSessionKey: String = McpSessionKeyProvider.appSession.key,
 ) : AutoMobileClient {
   override val transportName: String = "MCP HTTP"
   override val connectionDescription: String = endpoint
@@ -566,6 +572,7 @@ class McpHttpClient(
       HttpRequest.newBuilder(URI.create(endpoint))
         .header("Content-Type", "application/json")
         .header("Accept", MCP_ACCEPT_HEADER)
+        .header(MCP_SESSION_KEY_HEADER, mcpSessionKey)
 
     if (includeSession) {
       sessionId?.let { builder.header(SESSION_HEADER, it) }
@@ -690,6 +697,8 @@ class McpHttpClient(
     requestSender?.send(request) ?: httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
   companion object {
+    /** Must match `MCP_SESSION_KEY_HEADER` in src/server/mcpSessionKey.ts. */
+    internal const val MCP_SESSION_KEY_HEADER = "x-auto-mobile-mcp-session-id"
     private const val SESSION_HEADER = "mcp-session-id"
     private const val MCP_ACCEPT_HEADER = "application/json, text/event-stream"
     private const val EVENT_STREAM = "text/event-stream"

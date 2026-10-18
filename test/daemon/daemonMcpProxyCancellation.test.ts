@@ -1,7 +1,6 @@
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonRequestNotDeliveredError } from "../../src/daemon/client";
@@ -73,17 +72,13 @@ async function setup() {
 }
 
 describe("MCP proxy cancellation", () => {
-  beforeAll(() => {
-    require("@modelcontextprotocol/sdk/types.js");
-  });
-
   test("SDK cancellation forwards exactly one mapped cancel frame and no response; siblings finish", async () => {
     const { client, proxy, socket, messages, respond, close } = await setup();
     const call = spyOn(proxy, "callTool");
     const controller = new AbortController();
     try {
       const cancelled = client
-        .callTool({ name: "tapOn", arguments: {} }, undefined, { signal: controller.signal })
+        .callTool({ name: "tapOn", arguments: {} }, { signal: controller.signal })
         .then(
           () => undefined,
           (error: unknown) => error,
@@ -158,7 +153,7 @@ describe("MCP proxy cancellation", () => {
     const controller = new AbortController();
     try {
       const result = client
-        .callTool({ name: "tapOn", arguments: {} }, undefined, { signal: controller.signal })
+        .callTool({ name: "tapOn", arguments: {} }, { signal: controller.signal })
         .then(
           () => undefined,
           (error: unknown) => error,

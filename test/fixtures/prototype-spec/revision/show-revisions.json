@@ -1,0 +1,22 @@
+{
+  "description": "The device revision a show reports (#13040, #11675). Every show of a prototype id takes the next revision from a per-id counter that a re-show never rewinds, so the first show reports 1 on every platform. Android (PrototypeController) and iOS (PrototypeSession) both replay this file.",
+  "specs": {
+    "a": {
+      "id": "a",
+      "window": { "placement": { "type": "fullscreen" } },
+      "state": { "flag": false },
+      "root": { "type": "column", "children": [{ "type": "text", "text": "A" }] }
+    },
+    "b": {
+      "id": "b",
+      "window": { "placement": { "type": "fullscreen" } },
+      "root": { "type": "column", "children": [{ "type": "text", "text": "B" }] }
+    }
+  },
+  "shows": [
+    { "spec": "a", "revision": 1 },
+    { "spec": "a", "revision": 2 },
+    { "spec": "b", "revision": 1 },
+    { "spec": "a", "revision": 3 }
+  ]
+}

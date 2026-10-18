@@ -5,7 +5,7 @@
 # serial-tagged files in a dedicated serial pass (scripts/ci/run-bats.sh);
 # the tag is enforced by test/scripts/batsSerialTags.test.ts.
 
-SCRIPT="scripts/check-app-bundle-metadata-boundary.sh"
+SCRIPT="scripts/check-app-bundle-metadata-boundary.ts"
 FIXTURE="src/utils/CodesignBoundaryFixture.ts"
 
 teardown() {
@@ -13,7 +13,7 @@ teardown() {
 }
 
 @test "allows AppBundleMetadataClient to own codesign execution" {
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production codesign invocations"* ]]
@@ -22,7 +22,7 @@ teardown() {
 @test "rejects direct codesign execution outside the owner" {
   printf '%s\n' 'hostExec("codesign", ["-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
@@ -31,7 +31,7 @@ teardown() {
 @test "rejects a codesign path stored in a variable" {
   printf '%s\n' 'const tool = "codesign"; hostExec(tool, ["-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
@@ -40,14 +40,14 @@ teardown() {
 @test "rejects no-substitution template and absolute-path codesign invocations" {
   printf '%s\n' 'hostExec(`codesign`, ["-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
 
   printf '%s\n' 'execFile("/usr/bin/codesign", ["-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
@@ -56,21 +56,21 @@ teardown() {
 @test "rejects xcrun, Bun.spawn, and concatenated aliases" {
   printf '%s\n' 'execFile("xcrun", ["codesign", "-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
 
   printf '%s\n' 'Bun.spawn(["codesign", "-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]
 
   printf '%s\n' 'const tool = "code" + "sign"; hostExec(tool, ["-d", appPath]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"CodesignBoundaryFixture.ts"* ]]

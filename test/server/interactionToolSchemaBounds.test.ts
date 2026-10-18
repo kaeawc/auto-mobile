@@ -41,6 +41,8 @@ import {
   PINCH_SCALE_EXCLUSIVE_MIN,
   PINCH_DURATION_MIN_MS,
   PINCH_DURATION_MAX_MS,
+  PINCH_ROTATION_MAX_DEGREES,
+  PINCH_ROTATION_MIN_DEGREES,
 } from "../../src/features/action/PinchOn";
 
 test("schema bounds follow the implementation constants", () => {
@@ -52,6 +54,13 @@ test("schema bounds follow the implementation constants", () => {
       max: PINCH_DURATION_MAX_MS,
       exclusive: false,
       integer: true,
+    },
+    {
+      field: "rotationDegrees",
+      schema: pinchOnSchema.shape.rotationDegrees,
+      min: PINCH_ROTATION_MIN_DEGREES,
+      max: PINCH_ROTATION_MAX_DEGREES,
+      exclusive: false,
     },
     {
       field: "pressDurationMs",

@@ -69,7 +69,6 @@ function setup(dispatchBeforeCancel: boolean) {
   const client = {
     callTool: (
       params: { arguments: Record<string, unknown> },
-      _schema: unknown,
       options: { signal?: AbortSignal },
     ) => {
       toolStarted = true;

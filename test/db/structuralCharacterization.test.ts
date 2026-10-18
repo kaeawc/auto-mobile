@@ -118,7 +118,7 @@ describe("structural repository characterization", () => {
   test.each([undefined, false, true, null])(
     "execution metadata and child records with CI %j",
     async (isCi) => {
-      const repo = new TestExecutionRepository(timer, db);
+      const repo = new TestExecutionRepository(db, timer);
       const record: TestExecutionRecord = {
         testClass: "Class",
         testMethod: "method",
@@ -179,7 +179,7 @@ describe("structural repository characterization", () => {
   );
 
   test("execution defaults, empty children and timing filters", async () => {
-    const repo = new TestExecutionRepository(timer, db);
+    const repo = new TestExecutionRepository(db, timer);
     await repo.recordExecution({
       testClass: "C",
       testMethod: "m",
@@ -202,7 +202,7 @@ describe("structural repository characterization", () => {
   });
 
   test.each([false, true])("ANR optional values and unified failures %j", async (full) => {
-    const repo = new FailureEventRepository(timer, db);
+    const repo = new FailureEventRepository(db, timer);
     const id = await repo.saveAnr({
       deviceId: "device",
       packageName: "app",

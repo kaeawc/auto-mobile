@@ -36,6 +36,9 @@ struct DisplayTouch: Equatable, Sendable {
 struct DisplayFingerPath: Equatable, Sendable {
     let start: GesturePoint
     let end: GesturePoint
+    /// Waypoints between `start` and `end`, reached at evenly spaced fractions of the gesture. A
+    /// rotating pinch follows an arc through these instead of the straight chord (#12996).
+    var via: [GesturePoint] = []
 }
 
 /// Two simultaneous finger paths in display space; both move for `duration`, then lift.
@@ -47,21 +50,34 @@ struct DisplayPinch: Equatable, Sendable {
     let interfaceOrientation: Int
 }
 
-/// The observed-space pinch endpoints. Degenerate distances get the same 1pt floor the
-/// main-screen synthesis applies, and the trig is the shared `computePinchPoints` (#2979).
+/// The observed-space pinch paths. Degenerate distances get the same 1pt floor the main-screen
+/// synthesis applies, and the trig is the shared `computePinchPoints` (#2979). A rotating pinch
+/// also carries arc waypoints (`ObjCExceptionCatcher_pinchSegmentCount`) so it does not zoom (#12996).
 func observedPinchPaths(
     center: GesturePoint, distanceStart: Double, distanceEnd: Double, rotationDegrees: Double
 )
     -> (first: DisplayFingerPath, second: DisplayFingerPath)
 {
+    let flooredStart = CGFloat(max(distanceStart, 1))
+    let flooredEnd = CGFloat(max(distanceEnd, 1))
     let points = ObjCExceptionCatcher_computePinchPoints(
-        CGFloat(center.x), CGFloat(center.y), CGFloat(max(distanceStart, 1)), CGFloat(max(distanceEnd, 1)),
-        CGFloat(rotationDegrees)
+        CGFloat(center.x), CGFloat(center.y), flooredStart, flooredEnd, CGFloat(rotationDegrees)
     )
     func point(_ value: CGPoint) -> GesturePoint { GesturePoint(x: Double(value.x), y: Double(value.y)) }
+    let segments = Int(ObjCExceptionCatcher_pinchSegmentCount(CGFloat(rotationDegrees)))
+    let waypoints = (1 ..< max(segments, 1)).map { index in
+        ObjCExceptionCatcher_computePinchFingersAt(
+            CGFloat(center.x), CGFloat(center.y), flooredStart, flooredEnd, CGFloat(rotationDegrees),
+            CGFloat(index) / CGFloat(segments)
+        )
+    }
     return (
-        DisplayFingerPath(start: point(points.start1), end: point(points.end1)),
-        DisplayFingerPath(start: point(points.start2), end: point(points.end2))
+        DisplayFingerPath(
+            start: point(points.start1), end: point(points.end1), via: waypoints.map { point($0.finger1) }
+        ),
+        DisplayFingerPath(
+            start: point(points.start2), end: point(points.end2), via: waypoints.map { point($0.finger2) }
+        )
     )
 }
 
@@ -223,7 +239,9 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
             let map = { (path: DisplayFingerPath) -> DisplayFingerPath? in
                 guard let start = point(path.start, selection: selected),
                       let end = point(path.end, selection: selected) else { return nil }
-                return DisplayFingerPath(start: start, end: end)
+                let via = path.via.compactMap { point($0, selection: selected) }
+                guard via.count == path.via.count else { return nil }
+                return DisplayFingerPath(start: start, end: end, via: via)
             }
             let orientation = selected.strategy == .displayTargeted ? 1 :
                 DeviceRotation.gestureInterfaceOrientationRawValue(rotation: geometry?.rotation)

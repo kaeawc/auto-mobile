@@ -35,7 +35,7 @@ final class PrototypeModel {
         // Only show, dismissal and a device data write (#12519, which rebuilds the drawn tree)
         // change structure; state transitions must not invalidate readers of an unchanged
         // (non-Equatable) spec merely by copying the session back.
-        if replacingSpec || session.isShown != next.isShown || session.dataRevision != next.dataRevision {
+        if replacingSpec || session.isShown != next.isShown || session.structureRevision != next.structureRevision {
             spec = next.spec
         }
         session = next
@@ -220,6 +220,19 @@ final class PrototypeModel {
         // An accepted show, including a same-id replace, is activity.
         if mode.expiresWhenIdle { idleTimer.arm() }
         onVisibilityChange?(true)
+    }
+
+    /// `patch_prototype` (#11675): the session edits the shown prototype in place and its `change` event is
+    /// pushed like any state write. A patch is an agent action, not user activity, so the idle TTL is
+    /// not restarted; a refused one leaves the session as it was.
+    func patch(id: String, baseRevision: Int?, ops: JSONValue) -> PrototypePatchOutcome {
+        var outcome = PrototypePatchOutcome.rejected(message: "Unknown prototype id: \(id)", revision: nil)
+        apply(activity: false) { session in
+            let (result, events) = session.patch(id: id, baseRevision: baseRevision, ops: ops)
+            outcome = result
+            return events
+        }
+        return outcome
     }
 
     /// Uploaded assets are tracked independently of session transitions.

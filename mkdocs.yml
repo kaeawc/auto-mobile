@@ -5,6 +5,7 @@
 site_name: AutoMobile
 repo_name: AutoMobile
 repo_url: https://github.com/kaeawc/auto-mobile
+site_url: https://kaeawc.github.io/auto-mobile/
 site_description: "Mobile interaction automation"
 site_author: Jason Pearson
 remote_branch: gh-pages
@@ -28,6 +29,7 @@ plugins:
 
 theme:
   name: "material"
+  custom_dir: overrides
   favicon: img/favicon.ico
   logo: img/auto_mobile_sticker_splash.png
   palette:
@@ -109,6 +111,7 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
+  /decisions/mcp-sdk-v2-split-packages.md
   /decisions/prototype-request-retrofit.md
 
 nav:
@@ -156,6 +159,7 @@ nav:
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
+      - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
       - "Session state record": design-docs/session-state-record.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md

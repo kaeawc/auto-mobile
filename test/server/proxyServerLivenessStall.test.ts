@@ -1,14 +1,8 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Client } from "../helpers/v1ViewMcpClient";
+import { Server, type LoggingLevel, InMemoryTransport } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import {
-  CallToolRequestSchema,
-  LoggingMessageNotificationSchema,
-  McpError,
-  ReadResourceRequestSchema,
-  type LoggingLevel,
-} from "@modelcontextprotocol/sdk/types.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -36,14 +30,7 @@ const stalled: LivenessHandover = {
   lastAcknowledgedHeartbeatAt: 10,
   action: "restart_daemon_then_resume_by_session_uuid",
 };
-const extra = {
-  signal: new AbortController().signal,
-  requestId: 1,
-  sendNotification: async () => {},
-  sendRequest: async () => {
-    throw new Error("Unexpected request");
-  },
-};
+const extra = fakeServerContext({ signal: new AbortController().signal, id: 1 });
 
 /** Exercise the registered handlers without a daemon connection or host process. */
 async function stalledHandlerAnswer(
@@ -76,8 +63,8 @@ async function stalledHandlerAnswer(
     surface === "tool" ? "callTool" : "readResource",
   ).mockRejectedValue(refused);
   try {
-    const schema = surface === "tool" ? CallToolRequestSchema : ReadResourceRequestSchema;
-    const handler = registrations.find(([registered]) => registered === schema)?.[1];
+    const schema = surface === "tool" ? "tools/call" : "resources/read";
+    const handler = registrations.findLast(([registered]) => registered === schema)?.[1];
     if (!handler) {
       throw new Error("Missing handler");
     }
@@ -164,7 +151,7 @@ async function connectStallingHarness(loggingLevel?: LoggingLevel) {
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "liveness-stall-client", version: "0.0.1" });
   const notifications: unknown[] = [];
-  client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+  client.setNotificationHandler("notifications/message", (notification) => {
     notifications.push(notification.params);
   });
   await server.connect(serverTransport);

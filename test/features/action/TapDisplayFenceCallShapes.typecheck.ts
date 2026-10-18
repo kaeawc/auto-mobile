@@ -1,5 +1,6 @@
 import type { DisplayFence } from "../../../src/features/action/BaseVisualChange";
 import type { TapOnElement } from "../../../src/features/action/TapOnElement";
+import type { TapAndroidDispatchPhase } from "../../../src/features/action/tapAndroidDispatchPhase";
 import type { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import type { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import type { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
@@ -56,8 +57,8 @@ void call0(...args0, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call0(...args0, { assertCurrent: 1 });
 
-// TapOnElement.executeAndroidTapWithCoordinates
-declare const call1: TapOnElement["executeAndroidTapWithCoordinates"];
+// TapAndroidDispatchPhase.executeAndroidTapWithCoordinates
+declare const call1: TapAndroidDispatchPhase["executeAndroidTapWithCoordinates"];
 declare const args1: Parameters<typeof call1>;
 void call1(...args1);
 const options1 = call1.bind(
@@ -87,8 +88,8 @@ void call1(...args1, {});
 // @ts-expect-error Extra positional slots never carry a fence.
 void call1(...args1, { assertCurrent: 1 });
 
-// TapOnElement.dispatchCoordinateTapOrAdbFallback
-declare const call2: TapOnElement["dispatchCoordinateTapOrAdbFallback"];
+// TapAndroidDispatchPhase.dispatchCoordinateTapOrAdbFallback
+declare const call2: TapAndroidDispatchPhase["dispatchCoordinateTapOrAdbFallback"];
 declare const args2: Parameters<typeof call2>;
 void call2(...args2);
 const options2 = call2.bind(undefined, args2[0], args2[1], args2[2], args2[3]);

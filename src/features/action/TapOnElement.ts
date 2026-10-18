@@ -1,7 +1,6 @@
 import {
   TapTargetUnavailableError,
   findTapTargetNode,
-  pointInTapBounds,
   type TapFocusFailure,
 } from "./tapTargetSupport";
 import { describeFocusTarget } from "./tapFocusIdentity";
@@ -128,6 +127,8 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { boundsEqual } from "../../utils/bounds";
 import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
 import { TapPostTapEffectPhase } from "./tapPostTapEffectPhase";
+import { TapRetryPhase } from "./tapRetryPhase";
+import { TapAndroidDispatchPhase, type ResolvedAndroidTapOptions } from "./tapAndroidDispatchPhase";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { hasOwnPrototype, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
@@ -157,23 +158,16 @@ import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMe
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 import {
-  dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
   dispatchIosDoubleTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
-import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
-import { executeTouchscreenInput } from "./touchscreenInput";
 import { type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
   createDeviceHierarchyCapture,
 } from "../observe/DeviceHierarchyCapture";
-import {
-  checkAndroidTapHierarchyChange,
-  POST_TAP_REFRESH_TIMEOUT_MS,
-  PRE_RETRY_DELAY_MS,
-} from "./androidGhostTapRetry";
+import {} from "./androidGhostTapRetry";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
@@ -181,17 +175,6 @@ import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInter
 
 /** Internal action context; never part of the public tapOn schema. */
 type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
-
-type ResolvedAndroidTapOptions = DisplayFenceOption & {
-  resolvedHierarchy?: ViewHierarchyResult;
-  /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
-  onActivationWarning?: (warning: string) => void;
-  onResolvedElement?: (
-    element: Element,
-    selection?: ElementSelectionResult,
-    hierarchy?: ViewHierarchyResult,
-  ) => void;
-};
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
@@ -307,6 +290,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       this.replaceObservationHierarchy(observation, hierarchy, refreshed),
     elementAffordances: (element) => this.elementAffordances(element),
     elementIdentity: (element) => this.elementIdentity(element),
+  });
+  private readonly retry = new TapRetryPhase({
+    timer: this.timer,
+    tapVerificationRefresh: (context) => this.tapVerificationRefresh(context),
+    hashViewHierarchy: (hierarchy) => this.hashViewHierarchy(hierarchy),
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    resolveTapTargetElement: (element, hierarchy, action, targetOptions) =>
+      this.resolveTapTargetElement(element, hierarchy, action, targetOptions),
+    getScreenSizeFromHierarchy: (hierarchy, options) =>
+      this.getScreenSizeFromHierarchy(hierarchy, options),
+    visibleTapBounds: (...args) => this.visibleTapBounds(...args),
+    resolveVisibleTapPoint: (...args) => this.resolveVisibleTapPoint(...args),
+    executeAndroidTap: (...args) => this.executeAndroidTap(...args),
+  });
+  private readonly androidDispatch = new TapAndroidDispatchPhase({
+    device: this.device,
+    timer: this.timer,
+    adb: () => this.adb,
+    accessibilityService: () => this.accessibilityService,
+    talkBackStrategy: () => this.talkBackStrategy,
+    talkBackDriverFactory: () => this.talkBackDriverFactory,
+    executeAndroidLongPress: (...args) => this.executeAndroidLongPress(...args),
+    executeAndroidTapWithCoordinates: (...args) => this.executeAndroidTapWithCoordinates(...args),
+    reportTalkBackActivationWarning: (result, context, action) =>
+      this.reportTalkBackActivationWarning(result, context, action),
   });
   private readonly explicitDisplay = new TapExplicitDisplayPhase({
     device: this.device,
@@ -2358,7 +2366,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
 
     if (isStrictlyScoped(options)) {
-      await this.executeScopedAndroidTap({
+      await this.androidDispatch.executeScopedAndroidTap({
         action,
         x,
         y,
@@ -2394,356 +2402,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return undefined;
   }
 
-  private async executeScopedAndroidTap(context: {
-    action: string;
-    x: number;
-    y: number;
-    durationMs: number;
-    element: Element;
-    signal?: AbortSignal;
-    talkBackEnabled: boolean;
-    fence?: DisplayFence;
-    onActivationWarning?: (warning: string) => void;
-  }): Promise<void> {
-    const { action, x, y, durationMs, element, signal, talkBackEnabled, fence } = context;
-    // Native resource-ID activation is global. Bind new scoped/unique calls to
-    // the resolver's selected point, including accessibility and long-press fallback.
-    if (talkBackEnabled) {
-      const driver = this.talkBackDriverFactory.createDriver(this.device);
-      const result =
-        action === "tap"
-          ? await this.talkBackStrategy.executePreciseTap(x, y, driver, fence)
-          : await this.talkBackStrategy.executeCoordinateFallback(
-              x,
-              y,
-              action as "doubleTap" | "longPress",
-              durationMs,
-              driver,
-              { displayFence: fence },
-            );
-      if (result.success) {
-        this.reportTalkBackActivationWarning(result, context, action);
-        return;
-      }
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
-        displayFence: fence,
-        onActivationWarning: context.onActivationWarning,
-      });
-      this.reportTalkBackActivationWarning(result, context, action);
-      return;
-    }
-    await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
-      displayFence: fence,
-      onActivationWarning: context.onActivationWarning,
-    });
-  }
-
-  /**
-   * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
-   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
-   */
-  private async executeAndroidTapWithCoordinates(
-    action: string,
-    x: number,
-    y: number,
-    durationMs: number,
-    element: Element,
-    signal?: AbortSignal,
-    skipSemanticAction: boolean = false,
-    fenceOptions: ResolvedAndroidTapOptions = {},
+  private executeAndroidTapWithCoordinates(
+    ...args: Parameters<TapAndroidDispatchPhase["executeAndroidTapWithCoordinates"]>
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
-    if (action === "tap") {
-      if (
-        !skipSemanticAction &&
-        isAndroidDocumentsUiRow(element) &&
-        (await this.tryDocumentsUiRowActivation(element, signal))
-      ) {
-        return;
-      }
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
-    } else if (action === "longPress") {
-      await this.executeAndroidLongPress(
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        skipSemanticAction,
-        fenceOptions,
-      );
-    } else if (action === "doubleTap") {
-      await dispatchAndroidDoubleTap({
-        // DocumentsUI rows use ADB input recovery, which has no single-gesture form.
-        client: isAndroidDocumentsUiRow(element) ? undefined : this.accessibilityService,
-        point: { x, y },
-        timer: this.timer,
-        signal,
-        assertCurrent: () => fence?.assertCurrent(),
-        onWarning: fenceOptions.onActivationWarning,
-        tap: () =>
-          this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence }),
-      });
-    }
-  }
-
-  /** Activate a DocumentsUI item through its advertised accessibility delegate (#6335). */
-  private async tryDocumentsUiRowActivation(
-    element: Element,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    throwIfAborted(signal);
-    const selector = stableNodeSelectorForElement(element);
-    // item_root is repeated. Never fall back to the runner's first resource-id match.
-    if (
-      !hasAccessibilityAction(element.actions, "click") ||
-      !selector ||
-      (selector.uniqueId === undefined &&
-        (selector.collectionRow === undefined || selector.collectionColumn === undefined))
-    ) {
-      return false;
-    }
-    try {
-      if (!(await this.accessibilityService.supportsNodeActionSelectors(undefined, signal))) {
-        return false;
-      }
-      throwIfAborted(signal);
-      const result = await this.accessibilityService.requestNodeAction(
-        "click",
-        selector,
-        undefined,
-        undefined,
-        signal,
-      );
-      throwIfAborted(signal);
-      return result.success;
-    } catch (error) {
-      if (error instanceof StaleDisplayError) {
-        throw error;
-      }
-      throwIfAborted(signal);
-      logger.warn(`[TapOnElement] DocumentsUI row activation failed: ${error}`);
-      return false;
-    }
-  }
-
-  /** Use input recovery for DocumentsUI rows when semantic activation is unavailable. */
-  private async dispatchCoordinateTapOrAdbFallback(
-    x: number,
-    y: number,
-    element: Element,
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
-  ): Promise<void> {
-    const fence = fenceOptions.displayFence;
-    throwIfAborted(signal);
-    const requiresAdbInput = isAndroidDocumentsUiRow(element);
-    if (!requiresAdbInput) {
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await dispatchAndroidCoordinateTap(
-        this.accessibilityService,
-        this.adb,
-        x,
-        y,
-        10,
-        undefined,
-        signal,
-      );
-      return;
-    }
-    logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence?.assertCurrent();
-    await executeTouchscreenInput(this.adb, `tap ${x} ${y}`, undefined, signal);
-  }
-
-  /**
-   * After a tap, check if the view hierarchy changed. If unchanged, retry the tap once.
-   * Only called when retryIfNoChange is true.
-   */
-  private resolveEnsureCheckedRetryTarget(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-    action: string,
-    requireResourceId: boolean,
-  ): Element | null {
-    const refound = this.findElementInHierarchy(options, hierarchy).selection.element;
-    if (!refound || !isTruthyFlag(refound.checkable)) {
-      logger.warn(
-        "[TapOnElement][retryIfNoChange] Toggle not found in fresh hierarchy; skipping retry",
-      );
-      return null;
-    }
-    if (isTruthyFlag(refound.checked) === options.ensureChecked) {
-      logger.info("[TapOnElement][retryIfNoChange] Toggle reached requested checked state");
-      return null;
-    }
-    return this.resolveTapTargetElement(refound, hierarchy, action, {
-      requireResourceId,
-      scoped: options.container !== undefined,
-    }).element;
-  }
-
-  private withRetryScreenSize(
-    options: TapVerificationOptions,
-    screenSize: ObserveResult["screenSize"],
-  ): TapVerificationOptions {
-    return {
-      ...options,
-      screenSizeOptions: options.screenSizeOptions ?? { observationScreenSize: screenSize },
-    };
-  }
-
-  private refreshedRetrySelection(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-    tapElement: Element,
-    previous?: ElementSelectionResult,
-  ): ElementSelectionResult {
-    if (options.text || options.textAny?.length || options.elementId || options.testTag) {
-      return this.findElementInHierarchy(options, hierarchy).selection;
-    }
-    return (
-      previous ?? { element: tapElement, indexInMatches: -1, totalMatches: 1, strategy: "first" }
-    );
-  }
-
-  private resolveRefreshedRetryTarget(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-    action: string,
-    isTalkBackEnabled: boolean,
-    selection: ElementSelectionResult,
-    previousTarget: Element,
-  ): Element | null {
-    if (options.ensureChecked !== undefined) {
-      return this.resolveEnsureCheckedRetryTarget(options, hierarchy, action, isTalkBackEnabled);
-    }
-    if (selection.element) {
-      return this.resolveTapTargetElement(selection.element, hierarchy, action, {
-        requireResourceId: isTalkBackEnabled,
-        scoped: options.container !== undefined,
-      }).element;
-    }
-    if (options.text || options.textAny?.length || options.elementId || options.testTag) {
-      logger.warn(
-        "[TapOnElement][retryIfNoChange] Target not found in refreshed hierarchy; skipping retry",
-      );
-      return null;
-    }
-    return previousTarget;
+    return this.androidDispatch.executeAndroidTapWithCoordinates(...args);
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
-  async retryTapIfNoChange(
-    preTapHash: string | null,
-    tapPoint: { x: number; y: number },
-    action: string,
-    longPressDuration: number,
-    tapElement: Element,
-    options: TapVerificationOptions & DisplayFenceOption,
-    isTalkBackEnabled: boolean,
-    screenSize: ObserveResult["screenSize"],
-    signal?: AbortSignal,
-    selection?: ElementSelectionResult,
-  ): Promise<void> {
-    const probe = await checkAndroidTapHierarchyChange(
-      this.timer,
-      this.tapVerificationRefresh({ refresh: options.verification?.refresh, screenSize, signal }),
-      (hierarchy) => this.hashViewHierarchy(hierarchy),
-      preTapHash,
-      signal,
-    );
-
-    if (probe.status === "unavailable") {
-      // Hierarchy unreadable — we can't tell whether the tap registered. A retry
-      // here is more likely to land on a transitioning screen and bounce us
-      // off-path than to recover a real ghost tap. Bail and let the next
-      // step's waitFor/observe surface a real failure.
-      logger.warn(
-        `[TapOnElement][retryIfNoChange] Tap hierarchy unreadable or could not be fingerprinted ` +
-          `(post-tap refresh budget ${POST_TAP_REFRESH_TIMEOUT_MS}ms) — skipping retry`,
-      );
-      return;
-    }
-
-    if (probe.status === "changed") {
-      logger.info(`[TapOnElement][retryIfNoChange] Hierarchy changed after tap — tap registered`);
-      return;
-    }
-
-    const retryOptions = this.withRetryScreenSize(options, screenSize);
-    const refreshedSelection = this.refreshedRetrySelection(
-      retryOptions,
-      probe.hierarchy,
-      tapElement,
-      selection,
-    );
-    const retryTarget = this.resolveRefreshedRetryTarget(
-      retryOptions,
-      probe.hierarchy,
-      action,
-      isTalkBackEnabled,
-      refreshedSelection,
-      tapElement,
-    );
-    if (!retryTarget) {
-      return;
-    }
-    const retryScreenSize = this.getScreenSizeFromHierarchy(
-      probe.hierarchy,
-      retryOptions.screenSizeOptions,
-    );
-    const retryBounds = this.visibleTapBounds(
-      refreshedSelection.element
-        ? refreshedSelection
-        : (selection ?? { ...refreshedSelection, element: retryTarget }),
-      probe.hierarchy,
-      retryScreenSize,
-      retryOptions,
-      retryTarget,
-    );
-    if (!retryBounds) {
-      logger.warn(
-        "[TapOnElement][retryIfNoChange] Refreshed target has no visible tap area; skipping retry",
-      );
-      return;
-    }
-    const retryPoint = pointInTapBounds(tapPoint, retryBounds)
-      ? tapPoint
-      : this.resolveVisibleTapPoint(retryTarget, probe.hierarchy, retryBounds, {
-          options,
-          screenSize: retryScreenSize,
-        });
-    if (!retryPoint) {
-      logger.warn(
-        "[TapOnElement][retryIfNoChange] Refreshed target has no unobstructed tap point; skipping retry",
-      );
-      return;
-    }
-    logger.warn(
-      `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +
-        `(${retryPoint.x}, ${retryPoint.y}) — ghost tap detected, retrying`,
-    );
-
-    await this.timer.sleep(PRE_RETRY_DELAY_MS);
-
-    if (options.verification?.dispatch) {
-      await options.verification.dispatch(retryPoint);
-      return;
-    }
-    await this.executeAndroidTap(
-      action,
-      retryPoint.x,
-      retryPoint.y,
-      longPressDuration,
-      retryTarget,
-      signal,
-      { ...options, resolvedHierarchy: probe.hierarchy },
-      isTalkBackEnabled,
-    );
+  retryTapIfNoChange(...args: Parameters<TapRetryPhase["retryTapIfNoChange"]>): Promise<void> {
+    return this.retry.retryTapIfNoChange(...args);
   }
 
   /**

@@ -1180,10 +1180,7 @@ describe("deleteDevice handler", () => {
       deviceId: "11111111-1111-1111-1111-111111111111",
     };
     const old = IOSCtrlProxyManager.getInstance(device);
-    const stop = spyOn(
-      old as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const stop = spyOn(old, "forceStopForShutdown").mockResolvedValue();
     try {
       const response = await teardownTool().handler(
         request("ios", byName ? device.name : device.deviceId, device.name),
@@ -3107,10 +3104,7 @@ describe("deleteDevice handler", () => {
       isRunning: false,
     };
     const proxy = IOSCtrlProxyManager.getInstance(device);
-    const forceStop = spyOn(
-      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     const controller = new AbortController();
     let releaseDestroy!: () => void;
     const destroyStarted = Promise.withResolvers<void>();
@@ -3163,10 +3157,7 @@ describe("deleteDevice handler", () => {
       isRunning: false,
     };
     const proxy = IOSCtrlProxyManager.getInstance(device);
-    const forceStop = spyOn(
-      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     let releaseDestroy!: () => void;
     const destroyStarted = new Promise<void>((resolve) => {
       manager.destroyStarted = resolve;
@@ -3217,10 +3208,7 @@ describe("deleteDevice handler", () => {
       isRunning: false,
     };
     const proxy = IOSCtrlProxyManager.getInstance(device);
-    const forceStop = spyOn(
-      proxy as unknown as { forceStopForShutdown: () => Promise<void> },
-      "forceStopForShutdown",
-    ).mockResolvedValue();
+    const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     let releaseDestroy!: () => void;
     const destroyStarted = new Promise<void>((resolve) => {
       manager.destroyStarted = resolve;

@@ -29,6 +29,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { createExecResult } from "../../src/utils/execResult";
@@ -191,14 +192,14 @@ const scenarios: Scenario[] = [
       wifiAdb.setCommandResponse("getprop ro.serialno", createExecResult(usb.deviceId, ""));
       wifiAdb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
       wifiAdb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("0", ""));
-      const factory = {
+      const factory: AdbClientFactory = {
         create: (device?: BootedDevice | null) => {
           if (device?.deviceId === wifi.deviceId) {
             return wifiAdb;
           }
           throw new Error("usb transport has no identity");
         },
-      } as unknown as FakeAdbClientFactory;
+      };
       const pool = poolFor(ctx, { androidAdbFactory: factory });
       await pool.initializeWithDevices([usb]);
       const rows = [usb, wifi];
@@ -255,6 +256,11 @@ const scenarios: Scenario[] = [
     },
   },
 ];
+
+/** The resource as a client receives it: the JSON the registry serializes. */
+function wireEntries(devices: unknown): Entry[] {
+  return JSON.parse(JSON.stringify(devices));
+}
 
 function describeEntry(entries: Entry[], deviceId: string): Entry {
   const entry = entries.find((candidate) => candidate.runtime.deviceId === deviceId);
@@ -320,14 +326,14 @@ describe("listDevices tool and booted resource describe a device identically", (
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
     const fromResource = describeEntry(
-      resource.devices as unknown as Entry[],
+      wireEntries(resource.devices),
       scenario.focus ?? android.deviceId,
     );
     const fromTool = describeEntry(payload.devices as Entry[], scenario.focus ?? android.deviceId);
 
     // One status authority: every row either surface publishes carries the pool's own bucket.
     const surfaces = {
-      resource: resource.devices as unknown as Entry[],
+      resource: wireEntries(resource.devices),
       tool: payload.devices as Entry[],
     };
     for (const [surface, rows] of Object.entries(surfaces)) {
@@ -349,7 +355,7 @@ describe("listDevices tool and booted resource describe a device identically", (
     // The CLI `available-devices` counts and `getStats` are the same buckets as the rows, whenever
     // every pooled device is published with its pool context.
     const stats = pool.getStats();
-    const pooledRows = (resource.devices as unknown as Entry[]).filter(
+    const pooledRows = wireEntries(resource.devices).filter(
       (row) => row.runtime.poolStatus !== null,
     );
     if (pooledRows.length === stats.total) {
@@ -529,7 +535,7 @@ async function readSurfaces(
   );
   return {
     tool: tool.devices,
-    resource: resource.devices as unknown as Entry[],
+    resource: wireEntries(resource.devices),
     resourcePool: resource.poolStatus,
     resourceComplete: resource.observationComplete,
     toolComplete: tool.discovery?.complete,

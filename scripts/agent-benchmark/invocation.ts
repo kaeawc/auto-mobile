@@ -341,7 +341,15 @@ const PROVIDER_TIER = /^ANTHROPIC_\w*SERVICE_TIER$/;
 const PROVIDER_RESOURCE = /^ANTHROPIC_\w*RESOURCE$/;
 // Proxy routing passes through too (Claude may need it to reach the API at all), and a
 // different proxy changes latency. Upper- and lowercase forms are both honored.
-const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+const PROXY_URLS = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  // Claude-only proxy overrides, which Claude Code honors over the standard names.
+  "CLAUDE_CODE_HTTPS_PROXY",
+  "CLAUDE_CODE_HTTP_PROXY",
+];
 // The Google Cloud project Vertex bills and routes through: projects differ in quota and
 // provisioned capacity. Digested, since a project ID names an account.
 const PROVIDER_PROJECTS = ["ANTHROPIC_VERTEX_PROJECT_ID"];

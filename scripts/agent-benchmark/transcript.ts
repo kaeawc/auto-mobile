@@ -155,7 +155,7 @@ const USAGE_KEYS = [
 ];
 const REQUIRED_USAGE_KEYS = ["input_tokens", "output_tokens"];
 
-/** Usage components must be non-negative finite counts whose sums stay finite. */
+/** Usage components must be non-negative safe-integer counts. */
 function usageErrors(usage: unknown, success: boolean): string[] {
   if (usage === undefined) {
     // A successful result always reports usage; without it the token metrics go missing.
@@ -172,13 +172,11 @@ function usageErrors(usage: unknown, success: boolean): string[] {
     : [];
   const invalid = USAGE_KEYS.filter((key) => {
     const value = usage[key];
-    return value !== undefined && !(asNumber(value) !== undefined && (value as number) >= 0);
+    // Counts: a fraction is nonsense and past 2^53 the JSON value loses precision.
+    return value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0);
   }).map((key) => `result event has an invalid usage.${key}`);
-  const input = sumTokens(usage, USAGE_KEYS.slice(0, 3)) ?? 0;
-  const output = sumTokens(usage, ["output_tokens"]) ?? 0;
-  return invalid.length === 0 && !(Number.isFinite(input) && Number.isFinite(output))
-    ? [...missing, "result event usage overflows"]
-    : [...missing, ...invalid];
+  // Safe-integer components keep every sum finite, so no separate overflow check is needed.
+  return [...missing, ...invalid];
 }
 
 function sumTokens(usage: unknown, keys: string[]): number | undefined {
@@ -241,6 +239,10 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
     if (!id) {
       // A missing or blank id would let a result with a blank tool_use_id complete it.
       state.audit.parseErrors.push(`line ${line}: tool_use without an id`);
+    }
+    if (!isRecord(block.input)) {
+      // Tool input is always an object; a missing or scalar one marks a damaged stream.
+      state.audit.parseErrors.push(`line ${line}: tool_use without an object input`);
     }
     const record: ToolCallRecord = {
       id: id || `line-${line}`,

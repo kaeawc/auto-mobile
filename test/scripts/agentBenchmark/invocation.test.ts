@@ -283,6 +283,10 @@ describe("agent benchmark provider identity", () => {
       ["HTTPS_PROXY=http://proxy.corp:3128", "no_proxy=localhost,127.0.0.1"].join("\n"),
     );
     expect(proxied).not.toContain("pass");
+    // Claude-only proxy overrides route the API too.
+    expect(
+      providerIdentity({ CLAUDE_CODE_HTTPS_PROXY: "http://user:pass@claude-proxy.corp:8080" }),
+    ).toBe("CLAUDE_CODE_HTTPS_PROXY=http://claude-proxy.corp:8080");
     expect(providerIdentity({ ANTHROPIC_BASE_URL: "not a url" })).toBe(
       "ANTHROPIC_BASE_URL=(unparseable)",
     );

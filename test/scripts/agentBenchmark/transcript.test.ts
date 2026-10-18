@@ -155,7 +155,7 @@ describe("agent benchmark transcript audit", () => {
   test("a tool_use without a name fails the transcript", () => {
     const use = JSON.stringify({
       type: "assistant",
-      message: { content: [{ type: "tool_use", id: "toolu_nameless", name: " " }] },
+      message: { content: [{ type: "tool_use", id: "toolu_nameless", name: " ", input: {} }] },
     });
     const audit = auditTranscript(`${INIT}${use}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual(["line 4: tool_use without a name"]);
@@ -279,7 +279,9 @@ describe("agent benchmark transcript audit", () => {
   test("a tool_use without an id fails the transcript and a blank result cannot complete it", () => {
     const use = JSON.stringify({
       type: "assistant",
-      message: { content: [{ type: "tool_use", id: "", name: "mcp__auto-mobile__observe" }] },
+      message: {
+        content: [{ type: "tool_use", id: "", name: "mcp__auto-mobile__observe", input: {} }],
+      },
     });
     const result = JSON.stringify({
       type: "user",
@@ -291,6 +293,24 @@ describe("agent benchmark transcript audit", () => {
       "tool_result for unknown tool_use_id (missing)",
     ]);
     expect(audit.toolCalls[0].hasResult).toBe(false);
+  });
+
+  test("a tool_use without an object input fails the transcript", () => {
+    const uses = [undefined, "tap", [1]].map((input, index) =>
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: `toolu_${index}`, name: "mcp__auto-mobile__tapOn", input },
+          ],
+        },
+      }),
+    );
+    expect(auditTranscript(`${INIT}${uses.join("\n")}\n`, NO_PATTERNS).parseErrors).toEqual([
+      "line 4: tool_use without an object input",
+      "line 5: tool_use without an object input",
+      "line 6: tool_use without an object input",
+    ]);
   });
 
   test("a reused tool_use id fails the transcript", () => {
@@ -414,20 +434,19 @@ describe("agent benchmark transcript audit", () => {
     ]);
   });
 
-  test("token usage must be non-negative finite counts that sum finitely", () => {
+  test("token usage must be non-negative safe-integer counts", () => {
     const result = (usage: unknown) =>
       `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, permission_denials: [], is_error: false, result: "done", usage })}\n`;
+    // A fraction is not a count, and past 2^53 the value would lose precision in result.json.
     expect(
       auditTranscript(
-        result({
-          input_tokens: 1e308,
-          cache_creation_input_tokens: 1e308,
-          cache_read_input_tokens: 1e308,
-          output_tokens: 0,
-        }),
+        result({ input_tokens: 1.5, cache_read_input_tokens: 2 ** 53, output_tokens: 0 }),
         NO_PATTERNS,
       ).parseErrors,
-    ).toEqual(["result event usage overflows"]);
+    ).toEqual([
+      "result event has an invalid usage.input_tokens",
+      "result event has an invalid usage.cache_read_input_tokens",
+    ]);
     expect(
       auditTranscript(result({ input_tokens: 0, output_tokens: -1 }), NO_PATTERNS).parseErrors,
     ).toEqual(["result event has an invalid usage.output_tokens"]);

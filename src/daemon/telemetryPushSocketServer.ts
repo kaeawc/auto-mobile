@@ -23,11 +23,8 @@ import {
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
-import {
-  type DeviceSessionResolver,
-  nullDeviceSessionResolver,
-  SuspendedDeviceRoutingLog,
-} from "./deviceSessionResolver";
+import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
+import { SuspendedDeviceRoutingLog } from "./SuspendedDeviceRoutingLog";
 
 /**
  * Opaque plain-text fields that the backfill fans out (limit=100) and that can

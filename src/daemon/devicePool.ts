@@ -78,10 +78,10 @@ import {
 } from "./foreignDeviceOwnership";
 import {
   InMemoryDeviceHealthMarkers,
-  NotifyingDeviceHealthMarkers,
   type DeviceHealthMarkers,
   type DeviceHealthMarker,
 } from "./deviceHealthMarkers";
+import { NotifyingDeviceHealthMarkers } from "./notifyingDeviceHealthMarkers";
 import { type BackoffPolicy } from "../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import type { ChildProcess } from "child_process";
@@ -221,8 +221,8 @@ import {
 import {
   EmulatorProcessLifecycle,
   type EmulatorProcessLifecyclePoolPort,
-  type EmulatorProcessOutputTail,
 } from "./emulatorProcessLifecycle";
+import { type EmulatorProcessOutputTail } from "./EmulatorProcessOutputTail";
 import {
   MissingDeviceLiveness,
   type MissingDeviceEvictionOptions,
@@ -244,13 +244,13 @@ import {
   type CurrentDisconnectStatus,
 } from "./deviceDisconnectHandler";
 export type { CurrentDisconnectStatus } from "./deviceDisconnectHandler";
-export { McpSessionRecoveryInProgressError } from "./deviceAutolockManager";
+export { McpSessionRecoveryInProgressError } from "./McpSessionRecoveryInProgressError";
 import {
   AndroidRebootCoordinator,
-  UnconfirmedRecoveryShutdownError,
   type AndroidEmulatorRecoveryOptions,
   type AndroidRebootCoordinatorPoolPort,
 } from "./androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
 import {
   AndroidRecoveryRecordLedger,
   type AndroidRecoveryRecord,

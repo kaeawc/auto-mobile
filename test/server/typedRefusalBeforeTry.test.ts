@@ -17,7 +17,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { ExecutionTrackerPlanExecutionLock } from "../../src/server/PlanExecutionLock";
+import { ExecutionTrackerPlanExecutionLock } from "../../src/server/ExecutionTrackerPlanExecutionLock";
 import { executionTracker } from "../../src/server/executionTracker";
 import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
 import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";

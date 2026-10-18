@@ -9,7 +9,7 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "./deviceLossOutcome";
-import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../daemon/daemonRestartPending";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 
 const SESSIONLESS_DEVICE_ACQUIRED_REMEDY =

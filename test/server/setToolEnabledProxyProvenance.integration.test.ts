@@ -20,9 +20,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import {
   PersistentToolSelectionProfileRegistry,
-  InMemoryToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
 } from "../../src/server/toolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/server/InMemoryToolSelectionProfileRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";

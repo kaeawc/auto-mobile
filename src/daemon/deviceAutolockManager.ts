@@ -1,3 +1,4 @@
+import { McpSessionRecoveryInProgressError } from "./McpSessionRecoveryInProgressError";
 import { bindDevice, holderOf } from "./deviceBinding";
 import { launchProcessLiveness } from "./transitionalAdbBindWait";
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
@@ -38,14 +39,6 @@ export type AutolockClient = {
   /** A one-shot `--cli` caller: anonymous, so it may act only on anonymous sessions (#11096). */
   oneShotCli?: boolean;
 };
-
-export class McpSessionRecoveryInProgressError extends ActionableError {
-  constructor(mcpSessionId: string) {
-    super(
-      `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
-    );
-  }
-}
 
 type ExpectedIdentity = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
 

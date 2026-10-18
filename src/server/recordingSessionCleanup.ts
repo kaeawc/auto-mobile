@@ -1,3 +1,4 @@
+import { RecordingTeardownRetryBudgetExceeded } from "./RecordingTeardownRetryBudgetExceeded";
 import { ActionableError } from "../models/ActionableError";
 import type { SessionManager } from "../daemon/sessionManager";
 import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
@@ -505,8 +506,6 @@ interface RecordingTeardownRetryState {
   deviceGestureRecordingId: string | undefined;
   attempts: number;
 }
-
-class RecordingTeardownRetryBudgetExceeded extends Error {}
 
 /** The retry sleep has a cancellation handle so reaching the budget leaves no loop timer. */
 async function waitForTeardownRetry(

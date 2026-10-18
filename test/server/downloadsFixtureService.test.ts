@@ -1,9 +1,7 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
-import {
-  createDownloadsFixtureService,
-  StageSessionDownloadsRefusal,
-} from "../../src/server/downloadsFixtureService";
+import { createDownloadsFixtureService } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import {
   createSharedStorageServiceForTesting,
   type StageSharedStorageResult,

@@ -9,7 +9,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { ActionableError } from "../models/ActionableError";
 import type { MigrationLock } from "./migrationLock";
-import { NoOpMigrationLock } from "./migrationLock";
+import { NoOpMigrationLock } from "./NoOpMigrationLock";
 import { asMigratorDb, type MigratorSchema } from "./migratorSchema";
 import { staticMigrationProvider } from "./staticMigrations";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";

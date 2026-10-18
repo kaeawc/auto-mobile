@@ -4,9 +4,9 @@ import type { BootedDevice } from "../../src/models";
 import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
 import {
   AndroidRebootCoordinator,
-  UnconfirmedRecoveryShutdownError,
   type AndroidRebootCoordinatorPoolPort,
 } from "../../src/daemon/androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
 import type { IdentityEvidence } from "../../src/devices/deviceIdentityEvidence";
 import type { DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";

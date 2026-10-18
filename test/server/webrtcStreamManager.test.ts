@@ -22,7 +22,6 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type {
-  AndroidH264Source,
   H264CaptureSourceMetrics,
   WebRtcPublisherLifecycleEvent,
   WebRtcStreamDescriptor,
@@ -164,7 +163,7 @@ function installFakes() {
     createSource: () => {
       const source = new FakeSource();
       sources.push(source);
-      return source as unknown as AndroidH264Source;
+      return source;
     },
     // Hermetic: never resolve the real jar (which could attempt a GitHub
     // download once the registry carries a videoJarSha256).
@@ -317,7 +316,7 @@ describe("webrtcStreamManager", () => {
           await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason: "device_removed" });
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
     });
     const stream = await startWebRtcStream({
@@ -698,7 +697,7 @@ describe("webrtcStreamManager", () => {
     setWebRtcStreamManagerDependencies({
       idGenerator: new CountingIdGenerator("id"),
       createPublisher: (config, deps) => new FakePublisher(config, deps),
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: () =>
         new Promise((resolve) => {
           releaseJar = resolve;
@@ -727,7 +726,7 @@ describe("webrtcStreamManager", () => {
         publishersCreated++;
         return new FakePublisher(config, deps);
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: () =>
         new Promise((resolve) => {
           releaseJar = resolve;
@@ -844,7 +843,7 @@ describe("webrtcStreamManager", () => {
         };
         return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
     });
@@ -877,7 +876,7 @@ describe("webrtcStreamManager", () => {
           await stopWebRtcStream("race");
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -915,7 +914,7 @@ describe("webrtcStreamManager", () => {
           options.onError?.(new Error("helper exited after first frame"));
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -949,7 +948,7 @@ describe("webrtcStreamManager", () => {
       createSource: (options) => {
         emit = options.onData;
         endPacket = options.onEncodedAccessUnit;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -986,7 +985,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (_options, jarPath) => {
         jarPaths.push(jarPath);
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => {
         resolveCalls++;
@@ -1008,7 +1007,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (_options, jarPath) => {
         jarPaths.push(jarPath);
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1030,7 +1029,7 @@ describe("webrtcStreamManager", () => {
         publisherCreated++;
         return new FakePublisher(config, deps);
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => {
         throw new ActionableError("video-server jar checksum verification failed");
       },
@@ -1067,7 +1066,7 @@ describe("webrtcStreamManager", () => {
       createSource: (options, jarPath) => {
         capturedSourceOptions = options;
         capturedJarPath = jarPath;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1120,7 +1119,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-24T00:00:00.000Z"),
@@ -1147,7 +1146,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         capturedSourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-23T00:00:00.000Z"),
@@ -1173,7 +1172,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         capturedSourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-23T00:00:00.000Z"),
@@ -1204,7 +1203,7 @@ describe("webrtcStreamManager", () => {
           throw new Error("REMOTE_SUBMIX failed");
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1247,7 +1246,7 @@ describe("webrtcStreamManager", () => {
           };
         }
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1296,7 +1295,7 @@ describe("webrtcStreamManager", () => {
             });
           };
         }
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       timer,
@@ -1353,7 +1352,7 @@ describe("webrtcStreamManager", () => {
           source.started = true;
           throw new Error("REMOTE_SUBMIX failed");
         };
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       timer,
@@ -1381,7 +1380,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: () => {
         createSourceCalls++;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: () =>
         new Promise((resolve) => {
@@ -1411,7 +1410,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
     });
@@ -1468,7 +1467,7 @@ describe("webrtcStreamManager", () => {
           };
         }
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1520,7 +1519,7 @@ describe("webrtcStreamManager", () => {
           source.started = true;
         };
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-11T00:00:00.000Z"),
@@ -1641,7 +1640,7 @@ describe("webrtcStreamManager", () => {
       },
       createSource: (options) => {
         sourceOptions.push(options);
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
     });
@@ -1675,7 +1674,7 @@ describe("webrtcStreamManager", () => {
       },
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => "/verified/automobile-video.jar",
       now: () => new Date("2026-07-24T00:00:00.000Z"),
@@ -1712,7 +1711,7 @@ describe("webrtcStreamManager", () => {
         };
         return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       timer,
       now: () => new Date("2026-07-24T00:00:00.000Z"),
@@ -1749,7 +1748,7 @@ describe("webrtcStreamManager", () => {
         };
         return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       timer,
     });
@@ -1817,7 +1816,7 @@ describe("webrtcStreamManager", () => {
         };
         return publisher;
       },
-      createSource: () => new FakeSource() as unknown as AndroidH264Source,
+      createSource: () => new FakeSource(),
       resolveVideoJar: async () => null,
       timer,
     });
@@ -1860,7 +1859,7 @@ describe("webrtcStreamManager", () => {
       createPublisher: (config, deps) => new FakePublisher(config, deps),
       createSource: (options) => {
         sourceOptions = options;
-        return new FakeSource() as unknown as AndroidH264Source;
+        return new FakeSource();
       },
       resolveVideoJar: async () => null,
     });

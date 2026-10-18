@@ -1,5 +1,6 @@
 import { DeviceUnreachableError } from "../../models/DeviceUnreachableError";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { unsupportedVideoPlatformError } from "./unsupportedVideoPlatformError";
 import { ActionableError, toActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
@@ -267,10 +268,9 @@ export function clampBitrateKbps(config: VideoCaptureConfig): number {
  * every iOS device to `FfmpegVideoProcessingBackend`, whose `startIos` drives
  * `simctl … recordVideo` with the SIGINT + moov-atom flush + materialization wait
  * that a robust iOS capture needs. The former platform-native `simctl recordVideo`
- * branch here spawned the recorder with all stdio ignored, so a failed recording
- * surfaced only an exit code with no stderr to diagnose it — and it was unreachable
- * in production. It was removed rather than hardened (issue #4773); iOS callers are
- * rejected explicitly so a future mis-wire fails loudly instead of silently.
+ * branch here ignored all stdio, so a failed capture surfaced only an exit code, and it
+ * was unreachable in production; it was removed (issue #4773). iOS callers are rejected
+ * explicitly so a future mis-wire fails loudly instead of silently.
  */
 export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   constructor(
@@ -298,7 +298,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     }
 
-    throw new ActionableError(`Unsupported platform for video recording: ${device.platform}`);
+    throw unsupportedVideoPlatformError(device.platform);
   }
 
   describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
@@ -525,7 +525,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    * be our `screenrecord` (same unique output file) right before the kill so a reused
    * pid is never signalled; a pid that is gone or no longer ours reports "not-ours".
    */
-  private async signalDeviceRecorder(
+  async signalDeviceRecorder(
     adb: AdbExecutor,
     backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
@@ -1050,7 +1050,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     await this.cleanupDeviceRecording(adb, { deviceTempPath }, false);
   }
 
-  private resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
+  resolveAndroidTimeLimit(maxDurationSeconds?: number): number {
     if (maxDurationSeconds && maxDurationSeconds > 0) {
       return Math.min(maxDurationSeconds, ANDROID_SCREENRECORD_MAX_SECONDS);
     }

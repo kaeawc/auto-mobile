@@ -3,6 +3,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { pollObserveUntil } from "../../../src/features/observe/ObservePoll";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { rootNodeField } from "./observeRootNodeProbe";
 
 /**
  * Unit tests for `pollObserveUntil`'s `minTimestamp` floor (issue #6284).
@@ -18,16 +19,18 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 function obs(updatedAt: number, marker: string): ObserveResult {
   return {
+    observationId: `obs-${marker}`,
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     activeWindow: { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 1 },
     viewHierarchy: {
       packageName: "com.example",
-      hierarchy: { node: { marker } as any },
+      hierarchy: { node: { $: { marker } } },
       updatedAt,
     },
-  } as ObserveResult;
+  };
 }
 
 describe("pollObserveUntil minTimestamp floor (#6284)", () => {
@@ -272,7 +275,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     fake.setObserveSequence([obs(10, "a"), obs(30, "b"), obs(20, "stale"), obs(40, "c")]);
 
     await pollObserveUntil(fake, timer, { timeoutMs: 5000, pollMs: 150 }, (observation) => {
-      return (observation.viewHierarchy!.hierarchy.node as any).marker === "c";
+      return rootNodeField(observation, "marker") === "c";
     });
 
     // minTimestamp: 0 (unseeded baseline) -> 11 (forced strictly past the
@@ -300,7 +303,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     );
 
     expect(outcome.stopped).toBe(false);
-    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("newest");
+    expect(rootNodeField(outcome.observation, "marker")).toBe("newest");
     expect(outcome.observation.updatedAt).toBe(30);
     expect(fake.getCollectDeferredBackStackObservations()).toEqual([outcome.observation]);
     expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
@@ -316,20 +319,20 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
       freshness: { isFresh: false, verified: false, category: "window_identity" },
     } as ObserveResult;
     fake.setObserveSequence([obs(10, "baseline"), obs(30, "B"), stale, obs(40, "A")]);
-    const seen: string[] = [];
+    const seen: unknown[] = [];
 
     const outcome = await pollObserveUntil(
       fake,
       timer,
       { timeoutMs: 451, pollMs: 150 },
       (value) => {
-        seen.push((value.viewHierarchy!.hierarchy.node as any).marker);
+        seen.push(rootNodeField(value, "marker"));
         return false;
       },
     );
 
     expect(seen).toEqual(["baseline", "B", "A"]);
-    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("A");
+    expect(rootNodeField(outcome.observation, "marker")).toBe("A");
   });
 
   test("does not use a host-created observation timestamp as a device floor", async () => {
@@ -341,7 +344,10 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
       // A base observation's top-level timestamp is host metadata. No
       // hierarchy timestamp means this capture cannot establish device
       // freshness or be accepted as terminal evidence.
-      viewHierarchy: { packageName: "com.example", hierarchy: { node: { marker: "partial" } } },
+      viewHierarchy: {
+        packageName: "com.example",
+        hierarchy: { node: { $: { marker: "partial" } } },
+      },
     } as ObserveResult;
     fake.setObserveSequence([hostStampedPartial, obs(20, "device-baseline"), obs(30, "device")]);
 
@@ -370,13 +376,13 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     // be false; only the strictly-newer capture may terminate.
     fake.setObserveSequence([obs(10, "entering"), obs(20, "destination")]);
 
-    const matchedMarkers: string[] = [];
+    const matchedMarkers: unknown[] = [];
     const outcome = await pollObserveUntil(
       fake,
       timer,
       { timeoutMs: 5000, pollMs: 150, initialMinTimestampMs: 10 },
       (observation) => {
-        matchedMarkers.push((observation.viewHierarchy!.hierarchy.node as any).marker as string);
+        matchedMarkers.push(rootNodeField(observation, "marker"));
         return true; // would match on every poll, including the re-served entering one
       },
     );
@@ -385,7 +391,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     // Both polls were evaluated, but only the strictly-newer "destination"
     // terminated — the re-served "entering" capture was ignored as non-terminal.
     expect(matchedMarkers).toEqual(["entering", "destination"]);
-    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("destination");
+    expect(rootNodeField(outcome.observation, "marker")).toBe("destination");
     expect(outcome.observation.updatedAt).toBe(20);
   });
 
@@ -450,7 +456,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
 
     expect(outcome.stopped).toBe(true);
     expect(outcome.polls).toBe(2);
-    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("verified");
+    expect(rootNodeField(outcome.observation, "marker")).toBe("verified");
   });
 
   test("does not fast-fail on a stale Asleep cache entry", async () => {
@@ -809,8 +815,7 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
         timer,
         options,
         (current, previous) =>
-          current.viewHierarchy?.hierarchy.node?.marker ===
-          previous?.viewHierarchy?.hierarchy.node?.marker,
+          rootNodeField(current, "marker") === rootNodeField(previous, "marker"),
       );
       const expected = marker === "A" ? finishing : terminal;
       expect(outcome).toMatchObject({
@@ -849,8 +854,7 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
         timer,
         options,
         (current, previous) =>
-          current.viewHierarchy?.hierarchy.node?.marker ===
-          previous?.viewHierarchy?.hierarchy.node?.marker,
+          rootNodeField(current, "marker") === rootNodeField(previous, "marker"),
       );
       expect(outcome).toMatchObject({ stopped: false, terminalReason: "timeout", waitMs: 100 });
       expect(timer.now()).toBe(100);
@@ -887,10 +891,7 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
       };
       const outcome = await pollObserveUntil(fake, timer, options, (current, previous) => {
         calls.push([current, previous]);
-        return (
-          current.viewHierarchy?.hierarchy.node?.marker ===
-          previous?.viewHierarchy?.hierarchy.node?.marker
-        );
+        return rootNodeField(current, "marker") === rootNodeField(previous, "marker");
       });
       expect(outcome).toMatchObject({ stopped: true, polls: 6, waitMs: 30 });
       expect(outcome.observation).toBe(terminal);
@@ -931,9 +932,7 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
       fake,
       timer,
       options,
-      (current, previous) =>
-        current.viewHierarchy?.hierarchy.node?.marker ===
-        previous?.viewHierarchy?.hierarchy.node?.marker,
+      (current, previous) => rootNodeField(current, "marker") === rootNodeField(previous, "marker"),
     );
     expect(outcome).toMatchObject({
       stopped: false,

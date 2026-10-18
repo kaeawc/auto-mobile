@@ -1416,7 +1416,7 @@ export class ContrastChecker {
     return null;
   }
 
-  private findUnderlyingColor(image: RawImage, x: number, y: number): RGB | null {
+  findUnderlyingColor(image: RawImage, x: number, y: number): RGB | null {
     // The first radius whose square holds an opaque pixel is the one the widening scan stops
     // at; find it from the summed-area table, then scan only that square in the original
     // order so the same pixel wins. A pixel with none within 12 never scans at all.

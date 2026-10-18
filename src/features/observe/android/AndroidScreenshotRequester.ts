@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../shared/types";
 /**
  * The one-shot `request_screenshot` round trip (connect, register, dispatch, await, cancel),
  * extracted from `AndroidCtrlProxyClient` (#11846). Behaviour is unchanged; the client exposes the
@@ -29,7 +30,7 @@ export interface AndroidScreenshotRequesterContext {
   readonly screenshotObservationStreamSuppressions: Set<string>;
   readonly screenshotCaptureBindings: Map<string, ScreenGeometryBinding>;
   readonly lateCancelledScreenshotRequestIds: Set<string>;
-  readonly socket: Pick<WebSocket, "readyState" | "send"> | null;
+  readonly socket: Pick<CtrlSocket, "readyState" | "send"> | null;
   readonly supportedCommands: ReadonlySet<string> | null;
   /** Opens (or reuses) the WebSocket; false when it could not be established. */
   connectWebSocket(perf: PerformanceTracker): Promise<boolean>;

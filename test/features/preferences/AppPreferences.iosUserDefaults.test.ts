@@ -1,5 +1,4 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -660,7 +659,7 @@ describe("iOS app UserDefaults resolution", () => {
     // Model the open connection this test advertises before resolving its replies.
     const socket = createSuccessWebSocketFactory(timer)("ws://fake");
     await Promise.resolve();
-    client["ws"] = socket as unknown as WebSocket;
+    client["ws"] = socket;
     const connect = spyOn(client, "ensureConnected").mockImplementation(() => {
       throw new Error("Auto-start forbidden");
     });

@@ -10,23 +10,26 @@ import { InMemoryScreenshotStateStore } from "../../../../src/features/observe/s
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
+import { createObserveResultForTest, type ObserveResultOverrides } from "../flatHierarchyBuilders";
 import type { AccessibilityAuditConfig } from "../../../../src/models/AccessibilityAudit";
 
-function makeResult(overrides: Partial<ObserveResult> = {}): ObserveResult {
-  return {
+function makeResult(overrides: ObserveResultOverrides = {}): ObserveResult {
+  return createObserveResultForTest({
     updatedAt: "2026-01-01T00:00:00.000Z",
     screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     ...overrides,
-  } as ObserveResult;
+  });
 }
 
+const mainActivityWindow = { appId: "com.example", activityName: "Main", layoutSeqSum: 0 };
+const emptyHierarchy = { hierarchy: { node: {} } };
+
 /** Minimal typed fields the auditor needs: an app, an (empty) hierarchy, an observation id. */
-function auditableObservation(observationId: string): Partial<ObserveResult> {
+function auditableObservation(observationId: string): ObserveResultOverrides {
   return {
     observationId,
-    activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
-    viewHierarchy: { hierarchy: { node: {} } },
+    activeWindow: mainActivityWindow,
+    viewHierarchy: emptyHierarchy,
   };
 }
 
@@ -35,7 +38,9 @@ const iosDevice: BootedDevice = { deviceId: "ios-1", name: "ios", platform: "ios
 
 const enabledConfig: AccessibilityAuditConfig = {
   level: "AA",
-} as AccessibilityAuditConfig;
+  failureMode: "report",
+  useBaseline: false,
+};
 
 describe("AccessibilityAuditor", () => {
   test("does nothing when getConfig returns null", async () => {
@@ -44,8 +49,8 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => null,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      activeWindow: mainActivityWindow,
+      viewHierarchy: emptyHierarchy,
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -58,8 +63,8 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => enabledConfig,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      activeWindow: mainActivityWindow,
+      viewHierarchy: emptyHierarchy,
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -72,7 +77,7 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => enabledConfig,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: mainActivityWindow,
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -85,7 +90,7 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => enabledConfig,
     });
     const result = makeResult({
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      viewHierarchy: emptyHierarchy,
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -102,8 +107,8 @@ describe("AccessibilityAuditor", () => {
       },
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      activeWindow: mainActivityWindow,
+      viewHierarchy: emptyHierarchy,
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();

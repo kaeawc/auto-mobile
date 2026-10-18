@@ -112,7 +112,10 @@ describe("EdgeMatchIndex", () => {
           toolName: "swipeOn",
           args: {},
           timestamp: 1,
-          uiState: { scrollPosition: { container: { text: "List" } } } as any,
+          uiState: {
+            selectedElements: [],
+            scrollPosition: { container: { text: "List" }, targetElement: {}, direction: "down" },
+          },
         },
       };
       const index = new EdgeMatchIndex([edge]);

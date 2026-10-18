@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { createFlatHierarchyForTest, createObserveResultForTest } from "./flatHierarchyBuilders";
 import {
   discardHierarchyDerivedData,
   enforceHierarchyPlatform,
@@ -29,22 +30,22 @@ describe("RealHierarchyPlatformValidator", () => {
     });
 
     test("recognizes flat Android class without platform metadata", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy = createFlatHierarchyForTest({
         hierarchy: { node: { class: "android.widget.FrameLayout" } },
-      };
+      });
 
       expect(validator.validate("ios", viewHierarchy).valid).toBe(false);
     });
 
     test("rejects raw iOS hierarchy (XCUIElementTypeApplication)", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           type: "XCUIElementTypeApplication",
           bundleId: "com.example.app",
           bounds: { left: 0, top: 0, right: 390, bottom: 844 },
         },
         screenScale: 3.0,
-      } as unknown as ViewHierarchyResult;
+      };
 
       const result = validator.validate("android", viewHierarchy);
       expect(result.valid).toBe(false);
@@ -71,25 +72,25 @@ describe("RealHierarchyPlatformValidator", () => {
     });
 
     test("rejects raw iOS hierarchy via elementType field", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           elementType: "application",
           bundleId: "com.example.app",
         },
         screenScale: 2.0,
-      } as unknown as ViewHierarchyResult;
+      };
 
       const result = validator.validate("android", viewHierarchy);
       expect(result.valid).toBe(false);
     });
 
     test("rejects raw iOS hierarchy via bundleId without node", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           bundleId: "com.example.app",
         },
         screenScale: 2.0,
-      } as unknown as ViewHierarchyResult;
+      };
 
       const result = validator.validate("android", viewHierarchy);
       expect(result.valid).toBe(false);
@@ -120,14 +121,14 @@ describe("RealHierarchyPlatformValidator", () => {
     });
 
     test("accepts raw iOS hierarchy (XCUIElementTypeApplication)", () => {
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           type: "XCUIElementTypeApplication",
           bundleId: "com.example.app",
           bounds: { left: 0, top: 0, right: 390, bottom: 844 },
         },
         screenScale: 3.0,
-      } as unknown as ViewHierarchyResult;
+      };
 
       expect(validator.validate("ios", viewHierarchy)).toEqual({ valid: true });
     });
@@ -217,14 +218,14 @@ describe("RealHierarchyPlatformValidator", () => {
       // ambiguous, so it is accepted for both platforms rather than rejected
       // (issue #4172 item 11). This pins that bypass so any future tightening of
       // the guard is a deliberate, visible change.
-      const both = {
+      const both: ViewHierarchyResult = {
         hierarchy: {
           node: { $: { class: "android.widget.FrameLayout" } },
         },
         screenScale: 3.0,
         density: 440,
         sdkInt: 34,
-      } as unknown as ViewHierarchyResult;
+      };
 
       expect(validator.validate("android", both)).toEqual({ valid: true });
       expect(validator.validate("ios", both)).toEqual({ valid: true });
@@ -234,39 +235,46 @@ describe("RealHierarchyPlatformValidator", () => {
 
 describe("discardHierarchyDerivedData", () => {
   // Build a result populated with every hierarchy-derived field.
+  const staleBounds = { left: 0, top: 0, right: 10, bottom: 10 };
+  const staleScreenIdentity: NonNullable<ObserveResult["screenIdentity"]> = {
+    platform: "ios",
+    source: "heuristic",
+    confidence: "medium",
+    key: JSON.stringify([
+      ["bundle", "com.other.platform"],
+      ["focus", "stale-id"],
+    ]),
+    components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
+  };
+  const staleElement = (fields: Partial<Element> = {}): Element => ({
+    bounds: staleBounds,
+    text: "Stale",
+    ...fields,
+  });
   const contaminatedResult = (): ObserveResult =>
-    ({
+    createObserveResultForTest({
       updatedAt: 0,
       screenSize: { width: 390, height: 844 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
         hierarchy: { node: { $: { class: "UIWindow" } } },
         screenScale: 3.0,
-      } as unknown as ViewHierarchyResult,
+      },
       elements: {
-        clickable: [{ "resource-id": "id/x", text: "Stale" } as unknown as Element],
+        clickable: [staleElement({ "resource-id": "id/x" })],
         scrollable: [],
-        text: [{ text: "Stale" } as unknown as Element],
+        text: [staleElement()],
         media: [],
       },
-      selectedElements: [{} as never],
-      focusedElement: { text: "Stale" } as unknown as Element,
-      accessibilityFocusedElement: { text: "Stale" } as unknown as Element,
+      selectedElements: [{ text: "Stale" }],
+      focusedElement: staleElement(),
+      accessibilityFocusedElement: staleElement(),
       intentChooserDetected: true,
       notificationPermissionDetected: true,
       activeWindow: { appId: "com.other.platform", activityName: "", layoutSeqSum: 0 },
-      screenIdentity: {
-        platform: "ios",
-        source: "heuristic",
-        confidence: "medium",
-        key: JSON.stringify([
-          ["bundle", "com.other.platform"],
-          ["focus", "stale-id"],
-        ]),
-        components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
-      },
-      predictions: {} as never,
-    }) as unknown as ObserveResult;
+      screenIdentity: staleScreenIdentity,
+      predictions: { likelyActions: [], interactableElements: [] },
+    });
 
   test("clears every hierarchy-derived field", () => {
     const result = contaminatedResult();
@@ -311,7 +319,7 @@ describe("discardHierarchyDerivedData", () => {
 
   test("leaves genuinely device-derived fields untouched", () => {
     const result = contaminatedResult();
-    result.backStack = {} as never;
+    result.backStack = { depth: 0, activities: [], tasks: [] };
 
     discardHierarchyDerivedData(result);
 
@@ -324,12 +332,12 @@ describe("enforceHierarchyPlatform", () => {
   const validator = new RealHierarchyPlatformValidator();
 
   const baseResult = (viewHierarchy?: ViewHierarchyResult): ObserveResult =>
-    ({
+    createObserveResultForTest({
       updatedAt: 0,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy,
-      focusedElement: { text: "Stale" } as unknown as Element,
+      focusedElement: { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Stale" },
       intentChooserDetected: true,
       elements: { clickable: [], scrollable: [], text: [], media: [] },
       screenIdentity: {
@@ -342,7 +350,7 @@ describe("enforceHierarchyPlatform", () => {
         ]),
         components: { bundleId: "com.other.platform", focusedElementId: "stale-id" },
       },
-    }) as unknown as ObserveResult;
+    });
 
   test("rejects an opposite-platform hierarchy and scrubs all derived fields", () => {
     const result = baseResult({
@@ -352,7 +360,7 @@ describe("enforceHierarchyPlatform", () => {
         bounds: { left: 0, top: 0, right: 390, bottom: 844 },
       },
       screenScale: 3.0,
-    } as unknown as ViewHierarchyResult);
+    });
 
     const valid = enforceHierarchyPlatform(result, "android", "device-1", validator);
 

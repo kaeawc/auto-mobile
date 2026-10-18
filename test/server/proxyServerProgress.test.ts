@@ -65,7 +65,7 @@ describe("Proxy tools/call relays progress tagged with the client's own token (i
         { name: "someTool", arguments: {} },
         {
           onprogress: (notification) => {
-            received.push(notification as unknown as { progress: number; total?: number });
+            received.push(notification);
           },
         },
       );

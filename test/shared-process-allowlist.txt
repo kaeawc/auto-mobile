@@ -758,7 +758,6 @@ test/features/observe/audits/AccessibilityAuditorContrastCap.test.ts
 test/features/observe/audits/AccessibilityAuditorOutput.test.ts
 test/features/observe/audits/AccessibilityStateDetector.test.ts
 test/features/observe/audits/ContrastPixelReviewAudit.test.ts
-test/features/observe/audits/SafeAreaAuditor.test.ts
 test/features/observe/cache/observeCacheRecentEntryParity.test.ts
 test/features/observe/collectors/HierarchyCollector.test.ts
 test/features/observe/collectors/PlatformObservationTraits.test.ts

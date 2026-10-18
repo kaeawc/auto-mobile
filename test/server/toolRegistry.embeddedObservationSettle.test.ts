@@ -49,7 +49,7 @@ function obs(text: string, updatedAt: number): ObserveResult {
           class: "android.widget.TextView",
           "resource-id": "android:id/title",
           text,
-        } as any,
+        },
       },
       updatedAt,
     },

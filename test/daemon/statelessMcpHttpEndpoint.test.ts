@@ -432,6 +432,39 @@ describe("StatelessMcpHttpEndpoint (#4678)", () => {
     await Promise.all([first, second].map(async (response) => (await response).text()));
   });
 
+  test("a header-less notifications/cancelled whose id two keyless requests share cancels neither", async () => {
+    const h = await harness();
+    const first = postBlock(h.url, 9);
+    const second = postBlock(h.url, 9);
+    await waitFor(() => h.executions.runningCount === 2, "both calls to start");
+
+    await postHeaderlessCancel(h.url, 9);
+
+    expect(h.executions.cancelled).toEqual([]);
+    expect(h.executions.runningCount).toBe(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((request) => request.close()));
+    await Promise.all([first, second].map(async (response) => (await response).text()));
+  });
+
+  test("a keyless request finishing leaves the other keyless request cancellable by id", async () => {
+    const h = await harness();
+    const first = postBlock(h.url, 9);
+    const second = postBlock(h.url, 9);
+    await waitFor(() => h.executions.runningCount === 2, "both calls to start");
+    const [done, remaining] = h.endpoint.inFlightRequests();
+    await done.close();
+    expect(h.endpoint.inFlightRequests()).toHaveLength(1);
+
+    await postHeaderlessCancel(h.url, 9);
+
+    await waitFor(() => h.executions.cancelled.length > 1, "the cancellation");
+    expect(h.executions.cancelled.map((entry) => entry.scope)).toEqual([
+      done.requestScopeId,
+      remaining.requestScopeId,
+    ]);
+    await Promise.all([first, second].map(async (response) => (await response).text()));
+  });
+
   test("a cancellation that resumes after shutdown stopped accepting is refused, not served (#13049)", async () => {
     const transport = new BlockingTransport();
     const cancelGate = Promise.withResolvers<number>();

@@ -48,7 +48,7 @@
 1568	src/features/observe/DeviceServiceClient.ts
 1032	src/features/observe/TakeScreenshot.ts
 1012	src/features/observe/ViewHierarchy.ts
-2943	src/features/observe/android/AndroidCtrlProxyClient.ts
+2938	src/features/observe/android/AndroidCtrlProxyClient.ts
 1857	src/features/observe/android/CtrlProxyHierarchy.ts
 1875	src/features/observe/android/ctrlProxyProtocol.ts
 1121	src/features/observe/android/ctrlProxyWireManifest.ts
@@ -82,7 +82,7 @@
 1331	src/server/planExecutionOrchestrator.ts
 2851	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
-1135	src/server/toolRegistry.ts
+1143	src/server/toolRegistry.ts
 1028	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1434	src/server/videoRecordingTools.ts

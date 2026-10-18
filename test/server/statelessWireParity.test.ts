@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { join } from "node:path";
@@ -267,8 +267,19 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     };
   }
 
-  test("answers match the checked-in fixture", async () => {
-    const captured = await captureHandshake();
+  // One real loopback handshake serves both tests; its setup is outside the per-test budget.
+  let captured: HandshakeFixture;
+  beforeAll(async () => {
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
+    try {
+      captured = await captureHandshake();
+    } finally {
+      PlatformDeviceManagerFactory.reset();
+      DaemonState.getInstance().reset();
+    }
+  });
+
+  test("answers match the checked-in fixture", () => {
     if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify(captured, null, 2)}\n`);
     }
@@ -280,8 +291,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     expect(captured).toEqual(JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as HandshakeFixture);
   });
 
-  test("the legacy initialize is answered with a negotiated protocol version", async () => {
-    const captured = await captureHandshake();
+  test("the legacy initialize is answered with a negotiated protocol version", () => {
     const init = captured.exchanges[0].response;
     expect(init.status).toBe(200);
     const result = (init.message as { result: { protocolVersion: string } }).result;

@@ -2247,6 +2247,12 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
   }
 
+  const autoAdvanceTimer = () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    return timer;
+  };
+
   test("eventAll splits a literal %s across two input text calls", async () => {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(31);
@@ -2254,7 +2260,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation()),
-      { textClient: createTextClient().client },
+      { textClient: createTextClient().client, timer: autoAdvanceTimer() },
     );
 
     const result = await executor.type({ action: "type", text: "50%s 1", mode: "eventAll" });
@@ -2581,7 +2587,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation()),
-      { textClient: textClient.client },
+      { textClient: textClient.client, timer: autoAdvanceTimer() },
     );
 
     const result = await executor.type({ action: "type", text: "abc" });

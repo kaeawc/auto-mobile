@@ -29,10 +29,12 @@ describe("SwipeOn durationMs (#12538)", () => {
       executeGesture: gesture,
       observeScreen: observe,
       accessibilityDetector: new FakeAccessibilityDetector(),
+      // Constructor injection: the TalkBack/VoiceOver executors capture the timer at construction.
+      timer,
     });
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
-    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window, timer });
+    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window });
     return swipeOn;
   };
 

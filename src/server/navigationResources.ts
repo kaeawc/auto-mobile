@@ -27,7 +27,7 @@ import {
 import { logger } from "../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
 import { defaultTimer } from "../utils/SystemTimer";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 export const NAVIGATION_RESOURCE_URIS = {
@@ -100,9 +100,8 @@ type NavigationGraphResourceProvider = NavigationGraphSummaryProvider &
 
 let navigationGraphProvider: NavigationGraphResourceProvider | null = null;
 
-function getActiveNavigationSessions() {
-  const daemonState = DaemonState.getInstance();
-  return daemonState.isInitialized() ? daemonState.getSessionManager().getAllSessions() : [];
+function getActiveNavigationSessions(daemon: DaemonContext = defaultDaemonContext) {
+  return daemon.sessionManager()?.getAllSessions() ?? [];
 }
 
 function resolveUnscopedNavigationGraphManager(

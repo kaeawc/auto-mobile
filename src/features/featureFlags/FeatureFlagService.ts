@@ -7,8 +7,8 @@ import {
   FEATURE_FLAG_DEFINITIONS,
   TOOL_DEFINITION_AFFECTING_FLAGS,
 } from "./FeatureFlagDefinitions";
-import type { FeatureFlagRepository } from "./FeatureFlagRepository";
-import { SqliteFeatureFlagRepository } from "./FeatureFlagRepository";
+import type { FeatureFlagRepository } from "../../db/featureFlagRepository";
+import { SqliteFeatureFlagRepository } from "../../db/featureFlagRepository";
 import type { FeatureFlagApplier } from "./FeatureFlagApplier";
 import { DefaultFeatureFlagApplier } from "./FeatureFlagApplier";
 import type { ToolListChangedNotifier } from "./ToolListChangedNotifier";
@@ -24,6 +24,9 @@ interface FeatureFlagState {
 
 /** Read-only view of the flag service; most consumers only ask `isEnabled`. */
 export type FeatureFlagReader = Pick<FeatureFlagService, "isEnabled">;
+
+/** List/set view used by the IDE flag routes; they never read single flags. */
+export type FeatureFlagAdmin = Pick<FeatureFlagService, "listFlags" | "setFlag">;
 
 export class FeatureFlagService {
   private static instance: FeatureFlagService | null = null;

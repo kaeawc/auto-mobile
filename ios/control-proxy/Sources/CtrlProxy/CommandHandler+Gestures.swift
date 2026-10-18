@@ -149,6 +149,7 @@ extension CommandHandler {
         try requireFinite(request.y2, field: "y2")
         let duration = request.duration ?? 300
         let dispatch = swipeDispatchMode(lockScreen: request.lockScreen)
+        let report = SwipeReportBox()
         try await performContextCheckedGesture(expected: request.frameContext, beforeOperation: checkDeadline) {
             GesturePhaseDiagnostics.current?.annotateSwipe(
                 dispatch: dispatch, trackedApp: self.elementLocator.foregroundBundleId
@@ -156,13 +157,13 @@ extension CommandHandler {
             try checkDeadline()
             switch dispatch {
             case .xcuitest:
-                try self.gesturePerformer.swipe(
+                report.value = try self.gesturePerformer.swipeReportingRoute(
                     startX: request.x1, startY: request.y1,
                     endX: request.x2, endY: request.y2,
                     duration: TimeInterval(duration) / 1000.0
                 )
             case .synthesizedLockScreen:
-                try self.gesturePerformer.lockScreenSwipe(
+                report.value = try self.gesturePerformer.lockScreenSwipeReportingRoute(
                     startX: request.x1, startY: request.y1,
                     endX: request.x2, endY: request.y2,
                     duration: TimeInterval(duration) / 1000.0
@@ -178,7 +179,9 @@ extension CommandHandler {
         return WebSocketResponse.success(
             type: ResponseType.swipeResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            swipeRoute: report.value?.route.rawValue,
+            effectiveDurationMs: report.value?.effectiveDurationMs
         )
     }
 
@@ -281,4 +284,10 @@ extension CommandHandler {
             pinchPath: path.rawValue
         )
     }
+}
+
+/// Carries the swipe's dispatch report out of the `@Sendable` gesture closure; written once
+/// inside the serialized gesture and read after it completes.
+private final class SwipeReportBox: @unchecked Sendable {
+    var value: SwipeDispatchReport?
 }

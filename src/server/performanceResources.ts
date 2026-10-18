@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import {
   buildPerformanceAuditResponse,
   PERFORMANCE_RESULTS_LIMIT_MAX,
-  type PerformanceAuditQueryArgs,
+  type PerformanceAuditQueryParams,
 } from "./performanceData";
 
 const PERFORMANCE_RESOURCE_URIS = {
@@ -66,7 +66,7 @@ function parseTimestampParam(
 
 function parsePerformanceParams(
   params: Record<string, string>,
-): Pick<PerformanceAuditQueryArgs, "startTime" | "endTime" | "limit" | "offset" | "deviceId"> {
+): Pick<PerformanceAuditQueryParams, "startTime" | "endTime" | "limit" | "offset" | "deviceId"> {
   const unknownKeys = Object.keys(params).filter((key) => !PERFORMANCE_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
@@ -87,7 +87,7 @@ function parsePerformanceParams(
   };
 }
 
-function buildPerformanceUri(options: PerformanceAuditQueryArgs): string {
+function buildPerformanceUri(options: PerformanceAuditQueryParams): string {
   const query = new URLSearchParams();
   if (options.startTime !== undefined) {
     query.set("startTime", String(options.startTime));
@@ -112,7 +112,7 @@ function buildPerformanceUri(options: PerformanceAuditQueryArgs): string {
 }
 
 async function getPerformanceResource(
-  args: PerformanceAuditQueryArgs,
+  args: PerformanceAuditQueryParams,
   uri: string,
 ): Promise<ResourceContent> {
   try {

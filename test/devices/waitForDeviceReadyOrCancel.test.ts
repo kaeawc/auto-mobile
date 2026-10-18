@@ -90,7 +90,7 @@ describe("waitForDeviceReadyOrCancel", () => {
     adb.getBootedAndroidDevices = async () => {
       throw new Error("adb server unavailable");
     };
-    const client = new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb));
+    const client = new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) });
     const deviceManager = {
       waitForDeviceReady: (
         device: DeviceInfo,

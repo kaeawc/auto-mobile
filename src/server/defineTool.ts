@@ -1,4 +1,4 @@
-import type { z } from "zod/v4";
+import type { z, ZodType } from "zod/v4";
 import type { BootedDevice } from "../models";
 import {
   ToolRegistry,
@@ -6,6 +6,7 @@ import {
   type PlainToolOptions,
   type ProgressCallback,
 } from "./toolRegistry";
+import { erased } from "./toolRegistryErasure";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 
 /**
@@ -95,10 +96,10 @@ export function defineDeviceTool<I extends ObjectSchema>(
     name: definition.name,
     schema,
     register: (registry = ToolRegistry, handler = definition.handler) => {
-      registry.registerDeviceAware(
+      registry.registerDeviceAware<ZodType<z.output<DeviceToolSchema<I>>>>(
         definition.name,
         definition.description,
-        schema,
+        erased<ZodType<z.output<DeviceToolSchema<I>>>>(schema),
         requireHandler(definition.name, handler),
         definition.options,
       );
@@ -115,10 +116,10 @@ export function definePlainTool<I extends ObjectSchema>(
     name: definition.name,
     schema,
     register: (registry = ToolRegistry, handler = definition.handler) => {
-      registry.register(
+      registry.register<ZodType<z.output<StrictInput<I>>>>(
         definition.name,
         definition.description,
-        schema,
+        erased<ZodType<z.output<StrictInput<I>>>>(schema),
         requireHandler(definition.name, handler),
         definition.options,
       );

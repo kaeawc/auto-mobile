@@ -14,6 +14,7 @@ import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { logger, type Logger } from "../../utils/logger";
 import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import {
   defaultDeviceObservationAccess,
   sessionlessDeviceReadFor,
@@ -85,9 +86,9 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private readonly defaultDeviceRead: SessionlessDeviceRead;
 
   private refuseEndedPlanBase(sessionUuid: string, executionId?: string): void {
-    const ended = DaemonState.getInstance()
-      .getSessionManager()
-      .terminalAnswerForEndedSession(sessionUuid, executionId);
+    const ended = defaultDaemonContext
+      .sessionManager()
+      ?.terminalAnswerForEndedSession(sessionUuid, executionId);
     if (ended) {
       throw ended;
     }
@@ -184,7 +185,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
 
     if (deviceLabel && shouldResolveDevice) {
-      if (!DaemonState.getInstance().isInitialized()) {
+      if (!defaultDaemonContext.sessionManager()) {
         throw new ActionableError("Device labels require an active daemon session.");
       }
       if (!baseSessionUuid) {
@@ -482,12 +483,14 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           return resolvedDevice;
         }
       };
-      if (sessionUuid && DaemonState.getInstance().isInitialized() && providedDeviceId) {
+      const sessionPool =
+        sessionUuid && providedDeviceId ? defaultDaemonContext.devicePool() : undefined;
+      if (sessionPool && providedDeviceId) {
         // Daemon session path: device already resolved via createToolExecutionContext.
         // Construct BootedDevice directly to avoid mutating global DeviceReadiness state.
         const resolvedPlatform =
           platform === "android" || platform === "ios" ? platform : "android";
-        const pooledDevice = DaemonState.getInstance().getDevicePool().getDevice(providedDeviceId);
+        const pooledDevice = sessionPool.getDevice(providedDeviceId);
         device = {
           deviceId: providedDeviceId,
           name: pooledDevice?.name ?? providedDeviceId,
@@ -767,19 +770,18 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (sessionUuid) {
       return undefined;
     }
-    if (!autolockEnabled || !DaemonState.getInstance().isInitialized()) {
+    const devicePool = autolockEnabled ? defaultDaemonContext.devicePool() : undefined;
+    if (!devicePool) {
       return undefined;
     }
 
     const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
-    const sessionId = DaemonState.getInstance()
-      .getDevicePool()
-      .resolveAutolockSessionForMcpSession(
-        mcpSessionId,
-        platformFilter,
-        execution,
-        providedDeviceId,
-      );
+    const sessionId = devicePool.resolveAutolockSessionForMcpSession(
+      mcpSessionId,
+      platformFilter,
+      execution,
+      providedDeviceId,
+    );
     if (!sessionId) {
       return undefined;
     }
@@ -788,7 +790,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return sessionId;
     }
 
-    const session = DaemonState.getInstance().getSessionManager().findSession(sessionId);
+    const session = defaultDaemonContext.sessionManager()?.findSession(sessionId);
     return session?.assignedDevice === providedDeviceId ? sessionId : undefined;
   }
 

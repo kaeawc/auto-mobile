@@ -633,10 +633,12 @@ export function fileSha256(path: string): string {
 }
 
 /**
- * The adb client the measured server will run, resolved the way AdbClient.getAdbPath does: the
- * SDK's platform-tools/adb (ANDROID_HOME / ANDROID_SDK_ROOT) when it answers `adb version`, else
- * the adb on PATH. Platform-tools releases differ in command behavior and latency, and the
- * version output names both the release and the install path.
+ * Every adb client the measured server might run, in AdbClient.getAdbPath's order: the SDK's
+ * platform-tools/adb (ANDROID_HOME / ANDROID_SDK_ROOT), the adb on PATH, and the SDK the
+ * command-line tools detection finds. Which one wins depends on host details the harness
+ * cannot mirror exactly (on Windows, AdbClient's literal `which adb` usually fails, so the
+ * detected SDK can outrank PATH), so each candidate's `adb version` is recorded and a change
+ * to any of them changes the fingerprint. The version output names the release and install path.
  */
 export async function adbClientIdentity(
   env: Record<string, string | undefined>,
@@ -644,31 +646,18 @@ export async function adbClientIdentity(
   onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
   detected: () => Promise<string | null> = detectedAdbPath,
 ): Promise<string> {
-  // AdbClient's order: the SDK named by the environment, then PATH, then the
-  // command-line tools detection that finds typical and Homebrew SDK installs.
   const sdk = resolveAndroidSdkRoot(env);
-  const candidates = [...(sdk ? [`${sdk}/platform-tools/adb`] : [])];
-  const fromPath = onPath("adb");
-  if (fromPath) {
-    candidates.push(fromPath);
-  }
-  const tried = (adb: string) => version(adb)?.trim();
-  for (const adb of candidates) {
-    const output = tried(adb);
-    if (output) {
-      return output;
-    }
-  }
-  const discovered = await detected();
-  if (discovered && !candidates.includes(discovered)) {
-    candidates.push(discovered);
-    const output = tried(discovered);
-    if (output) {
-      return output;
-    }
-  }
-  candidates.push("adb");
-  return `unavailable:${candidates.join(",")}`;
+  const candidates: Array<[string, string | null]> = [
+    ["sdk", sdk ? `${sdk}/platform-tools/adb` : null],
+    ["path", onPath("adb")],
+    ["detected", await detected()],
+  ];
+  return candidates
+    .map(([label, adb]) => {
+      const output = adb ? version(adb)?.trim() : undefined;
+      return `${label}=${output || `unavailable:${adb ?? "none"}`}`;
+    })
+    .join("\n");
 }
 
 /**

@@ -101,41 +101,32 @@ describe("agent benchmark harness adb identity", () => {
 });
 
 describe("agent benchmark adb client identity", () => {
-  test("uses the SDK platform-tools adb the server prefers, and its version output", async () => {
-    const seen: string[] = [];
-    const version = (adb: string) => {
-      seen.push(adb);
-      return "Android Debug Bridge version 1.0.41\nVersion 35.0.2\n";
+  test("records every client the server might pick, so a change to any one counts", async () => {
+    const versions: Record<string, string> = {
+      "/sdk/platform-tools/adb": "Version 35.0.2\n",
+      "/usr/bin/adb": "Version 36.0.0\n",
+      "/home/u/Android/Sdk/platform-tools/adb": "Version 34.0.5\n",
     };
-    const none = async () => null;
-    expect(await adbClientIdentity({ ANDROID_HOME: "/sdk" }, version, () => null, none)).toBe(
-      "Android Debug Bridge version 1.0.41\nVersion 35.0.2",
-    );
-    expect(seen[0]).toEndWith("/platform-tools/adb");
-    // An unusable SDK adb falls back to the adb on PATH, as AdbClient does.
-    const fallback = await adbClientIdentity(
-      { ANDROID_HOME: "/stale" },
-      (adb) => (adb === "/usr/bin/adb" ? "Version 36.0.0" : undefined),
+    const identity = await adbClientIdentity(
+      { ANDROID_HOME: "/sdk" },
+      (adb) => versions[adb.replaceAll("\\", "/")],
       () => "/usr/bin/adb",
-      none,
-    );
-    expect(fallback).toBe("Version 36.0.0");
-    // With neither, AdbClient's command-line tools detection finds a typical SDK install.
-    const discovered = await adbClientIdentity(
-      {},
-      (adb) => (adb === "/home/u/Android/Sdk/platform-tools/adb" ? "Version 34.0.5" : undefined),
-      () => null,
       async () => "/home/u/Android/Sdk/platform-tools/adb",
     );
-    expect(discovered).toBe("Version 34.0.5");
+    expect(identity).toBe(
+      ["sdk=Version 35.0.2", "path=Version 36.0.0", "detected=Version 34.0.5"].join("\n"),
+    );
+    // Missing or silent candidates are named, so appearing later still changes the identity.
     expect(
       await adbClientIdentity(
-        {},
+        { ANDROID_HOME: "/stale" },
         () => undefined,
         () => null,
-        none,
+        async () => null,
       ),
-    ).toBe("unavailable:adb");
+    ).toMatch(
+      /^sdk=unavailable:.*platform-tools\/adb\npath=unavailable:none\ndetected=unavailable:none$/,
+    );
   });
 });
 

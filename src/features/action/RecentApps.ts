@@ -186,15 +186,11 @@ export class RecentApps extends BaseVisualChange {
     if (overview?.visibleToUser !== true) {
       return false;
     }
-    return isForegroundLauncher(
-      packageName,
-      this.adb,
-      this.device.deviceId,
-      this.timer,
-      deviceIncarnationToken(this.device.deviceId),
+    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, this.timer, {
+      incarnationToken: deviceIncarnationToken(this.device.deviceId),
       signal,
-      3000,
-    );
+      timeoutMs: 3000,
+    });
   }
 
   /**

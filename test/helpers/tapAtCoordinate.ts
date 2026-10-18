@@ -78,8 +78,8 @@ export function createTapAt(
     lastRenderedObservation,
     androidClient: unusedClient,
     iosClient: unusedClient,
-    dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, frameContext) => {
-      androidDispatches.push({ x, y, duration, frameContext });
+    dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, options) => {
+      androidDispatches.push({ x, y, duration, frameContext: options?.frameContext });
     },
     dispatchIosDoubleTap: async (_client, x, y, _duration, frameContext) => {
       iosDispatches.push({ kind: "double", x, y, duration: 50, frameContext });

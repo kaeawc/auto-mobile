@@ -48,7 +48,11 @@ describe("Idle - Unit Tests", function () {
       new FakeAdbClientFactory(adb),
       new FakeTimer(),
     );
-    const result = await subject.getUiStability("com.example.app", null, null, null, null, false);
+    const result = await subject.getUiStability(
+      "com.example.app",
+      { missedVsync: null, slowUiThread: null, frameDeadlineMissed: null, totalFrames: null },
+      false,
+    );
     expect(result).toHaveProperty("frameStatsUnavailable", true);
     expect(result).not.toHaveProperty("noFrameData");
   });

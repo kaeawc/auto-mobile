@@ -13,11 +13,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
-import type {
-  AndroidH264Source,
-  WebRtcPublisher,
-  WebRtcStreamDescriptor,
-} from "../../src/features/webrtc";
+import type { AndroidH264Source, WebRtcStreamDescriptor } from "../../src/features/webrtc";
 
 // Initial WHIP publish failure teardown (#10149). The capture-start twin of this
 // path (#7555) is covered in webrtcStreamManager.test.ts; both go through the
@@ -58,6 +54,7 @@ class ScriptedPublisher {
     }
   }
   writeH264Chunk(): void {}
+  endOfH264Packet(): void {}
   primeH264ParameterSets(): void {}
   writePcmAudioChunk(): void {}
   notifySourceFailed(): void {}
@@ -122,7 +119,7 @@ function installFakes(firstMode: "reject-now" | "gated") {
         publishers.length === 0 ? firstMode : "gated",
       );
       publishers.push(publisher);
-      return publisher as unknown as WebRtcPublisher;
+      return publisher;
     },
     createSource: () => {
       const source = new CountingSource();

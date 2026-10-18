@@ -24,7 +24,7 @@ export class TestCoverageRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
 
-  constructor(timer: Timer = defaultTimer, db?: Kysely<Database>) {
+  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
     this.timer = timer;
     this.db = db ?? null;
   }
@@ -59,7 +59,7 @@ export class TestCoverageRepository {
    * bun:sqlite connection deadlocks the daemon (see `NavigationRepository.withExecutor`).
    */
   withExecutor(executor: Kysely<Database>): TestCoverageRepository {
-    return new TestCoverageRepository(this.timer, executor);
+    return new TestCoverageRepository(executor, this.timer);
   }
 
   /**

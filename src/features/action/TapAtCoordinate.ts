@@ -68,6 +68,8 @@ import {
 
 import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./tapAtGesture";
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
+import { collectWarnings, partialDoubleTapNote, tapDeliveryReporter } from "./tapSharedHelpers";
+import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
 
 class TapAtGeometryError extends ActionableError {}
 
@@ -88,22 +90,6 @@ type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
 /** Outcome of the first Android tap: whether a single-gesture double tap already finished. */
 type AndroidFirstTap = { doubleTapDelivered: boolean; startedAt: number };
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
-
-function partialDoubleTapNote(action: TapAtResult["action"], tapsDelivered: number): string {
-  return action === "doubleTap" && tapsDelivered === 1
-    ? " Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically."
-    : "";
-}
-
-function tapDeliveryReporter(onTapDelivered: () => void): () => void {
-  let delivered = false;
-  return () => {
-    if (!delivered) {
-      delivered = true;
-      onTapDelivered();
-    }
-  };
-}
 
 function tapDurationMs(options: TapAtOptions, platform: BootedDevice["platform"]): number {
   if (options.action === "longPress") {
@@ -529,6 +515,10 @@ export class TapAtCoordinate extends BaseVisualChange {
       signalArg,
       planContextArg,
     );
+    const error = stylusTapRefusal(this.device.platform, options);
+    if (error) {
+      return refusedTap(error, inputPoint(options), options.action);
+    }
     return this.executeTap(options, progress, signal, planContext);
   }
 
@@ -546,22 +536,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     let iosDispatchTimestamp: number | undefined;
     const delivery = { tapsDelivered: 0, talkBack: false, displayCompleted: false };
     const warnings = new Set<string>();
-    const onActivationWarnings = (messages: string[] = []) => {
-      for (const warning of messages) {
-        warnings.add(warning);
-      }
-    };
+    const onActivationWarnings = collectWarnings(warnings);
     const onTapDelivered = (talkBack = false) => {
       delivery.talkBack ||= talkBack;
       delivery.tapsDelivered++;
     };
-    const transitionRevision = {
-      revision: this.currentActionRevision(),
-      // With no caller stamp, in-flight fences report the action-start identity generation.
-      observedGeneration:
-        this.renderedDisplayGeneration(this.device.deviceId) ??
-        this.displayTransitionReader.identityRevision(this.device.deviceId),
-    };
+    const transitionRevision = this.captureTransitionRevision();
 
     try {
       throwIfAborted(signal);
@@ -630,6 +610,15 @@ export class TapAtCoordinate extends BaseVisualChange {
           throwIfAborted(signal);
           switch (this.device.platform) {
             case "android": {
+              if (options.pointer) {
+                // Stylus goes straight through `input stylus`: no TalkBack routing and no finger fallback.
+                await dispatchStylusTap(this.adb, resolved, options, {
+                  signal,
+                  assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+                });
+                onTapDelivered();
+                break;
+              }
               const talkBackEnabled = await this.resolveTalkBackState(signal, onActivationWarnings);
               delivery.talkBack = talkBackEnabled;
               await this.dispatchAndroidTaps(
@@ -690,6 +679,16 @@ export class TapAtCoordinate extends BaseVisualChange {
     } finally {
       perf.end();
     }
+  }
+
+  private captureTransitionRevision(): { revision: number; observedGeneration: number } {
+    return {
+      revision: this.currentActionRevision(),
+      // With no caller stamp, in-flight fences report the action-start identity generation.
+      observedGeneration:
+        this.renderedDisplayGeneration(this.device.deviceId) ??
+        this.displayTransitionReader.identityRevision(this.device.deviceId),
+    };
   }
 
   private createDispatchFailure(

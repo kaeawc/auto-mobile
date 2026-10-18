@@ -16,6 +16,8 @@ import {
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { dragPathHandler, dragPathSchema } from "./dragPathTool";
+import { pointerSchema } from "./pointerSchema";
+import { validateCoordinateRange } from "./coordinateRangeValidation";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import { TapAnyElement } from "../features/action/TapAnyElement";
@@ -588,37 +590,6 @@ const coordinatePointInputSchema = () =>
       .strict(),
   );
 
-type CoordinatePointInput = z.infer<ReturnType<typeof coordinatePointInputSchema>>;
-
-function validateCoordinateRange(
-  value: { x?: number; y?: number; coordinateSpace?: CoordinatePointInput["coordinateSpace"] },
-  context: z.RefinementCtx,
-): void {
-  const max =
-    value.coordinateSpace === "normalized"
-      ? 1
-      : value.coordinateSpace === "percent"
-        ? 100
-        : undefined;
-  if (max === undefined) {
-    return;
-  }
-  for (const axis of ["x", "y"] as const) {
-    if (
-      value[axis] === undefined ||
-      !Number.isFinite(value[axis]) ||
-      value[axis] < 0 ||
-      value[axis] > max
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: `${axis} must be between 0 and ${max}`,
-        path: [axis],
-      });
-    }
-  }
-}
-
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
@@ -643,6 +614,7 @@ export const tapAtSchema = withJsonSchemaOverride(
         .describe(
           `Long-press duration in milliseconds (${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS}; default ${LONG_PRESS_DEFAULT_MS}); only with longPress`,
         ),
+      pointer: pointerSchema.optional(),
     })
     .superRefine((value, context) => {
       if (value.durationMs !== undefined && value.action !== "longPress") {
@@ -2337,6 +2309,7 @@ export async function tapAtHandler(
       action: args.action,
       durationMs: args.durationMs,
       layer: args.layer,
+      pointer: args.pointer,
     },
     { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
   );

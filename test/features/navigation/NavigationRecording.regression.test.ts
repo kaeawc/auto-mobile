@@ -46,7 +46,7 @@ describe("navigation recording source state and routing", () => {
     timer.setCurrentTime(100_000);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
     NavigationGraphManager.setInstanceForTesting(manager);
@@ -108,7 +108,7 @@ describe("navigation recording source state and routing", () => {
     test(`unknown start screen preserves selections on dispatch, known app=${knownApp}`, async () => {
       manager = NavigationGraphManager.createForTesting(
         repository,
-        new TestCoverageRepository(undefined, harness.db),
+        new TestCoverageRepository(harness.db),
         timer,
       );
       if (knownApp) {

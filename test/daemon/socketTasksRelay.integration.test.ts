@@ -228,7 +228,6 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
     });
     socketServer = new UnixSocketServer(
       socketPath,
-      "http://127.0.0.1:1/unused",
       fakeDaemonState(),
       defaultTimer,
       null,

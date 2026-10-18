@@ -37,7 +37,7 @@ describe("NavigationGraphManager provenance write path", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     const navRepo = new NavigationRepository(db);
-    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const coverageRepo = new TestCoverageRepository(db);
     manager = NavigationGraphManager.createForTesting(navRepo, coverageRepo, undefined, SESSION);
     NavigationGraphManager.setInstanceForTesting(manager);
     TelemetryRecorder.resetInstance();
@@ -219,7 +219,7 @@ describe("NavigationGraphManager provenance write path", () => {
       }
     }
     const switchingRepo = new SwitchingRepo(db);
-    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const coverageRepo = new TestCoverageRepository(db);
     const m = NavigationGraphManager.createForTesting(
       switchingRepo,
       coverageRepo,
@@ -281,7 +281,7 @@ describe("NavigationGraphManager provenance write path", () => {
       }
     }
     const switchingRepo = new SwitchingRepo(db);
-    const coverageRepo = new TestCoverageRepository(undefined, db);
+    const coverageRepo = new TestCoverageRepository(db);
     const m = NavigationGraphManager.createForTesting(
       switchingRepo,
       coverageRepo,

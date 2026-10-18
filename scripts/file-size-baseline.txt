@@ -63,7 +63,7 @@
 2886	src/features/systemTray/systemTrayHelpers.ts
 1689	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
-1712	src/features/video/FfmpegVideoProcessingBackend.ts
+1733	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
 2322	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts
@@ -83,7 +83,7 @@
 2851	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 1135	src/server/toolRegistry.ts
-1032	src/server/utilityTools.ts
+1028	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1434	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts

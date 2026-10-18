@@ -87,7 +87,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 import { logger } from "../../utils/logger";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
@@ -1193,7 +1193,7 @@ export class TapAnyElement extends BaseVisualChange {
    * healthy CtrlProxy round trip already had (issue #6306 review, P1).
    */
   private async executeIosTapWithCoordinates(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     action: string,
     x: number,
     y: number,
@@ -1288,7 +1288,7 @@ export class TapAnyElement extends BaseVisualChange {
    * identifier-based node-action path rather than a coordinate press.
    */
   private async activateIosByResourceId(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     resourceId: string,
     voiceOverAction: "activate" | "long_press",
     timeoutMs: number | undefined,
@@ -1296,7 +1296,7 @@ export class TapAnyElement extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<void> {
     let dispatched = false;
-    let result: Awaited<ReturnType<IOSCtrlProxyClient["requestAction"]>>;
+    let result: Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
     try {
       result = await xcTestClient.requestAction(
         voiceOverAction,
@@ -1339,7 +1339,7 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private async executeIosTapWithVoiceOver(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     action: string,
     element: Element,
     x: number,

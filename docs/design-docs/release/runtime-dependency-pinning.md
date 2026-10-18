@@ -61,11 +61,12 @@ small `bundledDependencies` set for the conflicting Jimp paths:
 The selected bundle adds about 17 MiB to the package. Source maps no longer embed
 sources by default; opt out for local debugging with
 `AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`.
-The unpacked-size guard assumes trimming is enabled: 22.5 MiB (23,592,960 bytes).
+The historical unpacked-size guard assumed trimming was enabled: 22.5 MiB (23,592,960 bytes).
 On 2026-10-05, staged `npm pack --dry-run --json` measured 18,345,761 trimmed
 bytes; adding 3 MiB and rounding up to a whole MiB set a 21 MiB cap (#9571). #12457
 raised it to 22.5 MiB after the static migration bundle (#12449) added about
 0.2 MB; the trimmed pack now measures 22,369,648 bytes.
+Since 2026-10-18 the external source maps are excluded from the tarball (unused at runtime), so the pack measures 14,073,766 bytes under a 15 MiB (15,728,640 byte) cap.
 The same staging copy measured 23,838,787 bytes untrimmed for reference. It used
 the worktree's existing `dist/`, schemas, package metadata, README, pack hooks,
 and complete bundled dependency closure; the worktree's `node_modules` was untouched.

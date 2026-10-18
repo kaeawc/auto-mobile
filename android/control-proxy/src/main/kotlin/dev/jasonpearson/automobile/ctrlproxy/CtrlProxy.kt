@@ -84,7 +84,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
@@ -118,13 +117,8 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
-import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
-import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
-import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
-import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDrag
 import dev.jasonpearson.automobile.protocol.RequestGestureStart
@@ -138,9 +132,6 @@ import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
-import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
-import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
-import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -1161,156 +1152,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private val prototypeResultSink =
-    object : PrototypeResultSink {
-      override suspend fun send(requestId: String?, success: Boolean, error: String?) =
-        sendWithMissingAssets(requestId, success, error, emptyList())
+    PrototypeResultBroadcaster(
+      object : PrototypeResultTransport {
+        override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
-      override suspend fun sendWithMissingAssets(
-        requestId: String?,
-        success: Boolean,
-        error: String?,
-        missingAssets: List<String>,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(requestId, success, error, missingAssets)
-            }
+        override suspend fun broadcastFrame(buildFrame: () -> String) =
+          webSocketServer.broadcastWithPerf { _ ->
+            buildFrame()
           }
-        }
-      }
-
-      override suspend fun sendPinned(
-        requestId: String?,
-        pin: dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ -> prototypePinnedFrame(requestId, pin) }
-          }
-        }
-      }
-
-      override suspend fun sendSaved(requestId: String?, saved: SavedPrototypeInfo) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ -> prototypeSavedFrame(requestId, saved) }
-          }
-        }
-      }
-
-      override suspend fun sendSavedList(requestId: String?, entries: List<SavedPrototypeEntry>) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ -> prototypeSavedListFrame(requestId, entries) }
-          }
-        }
-      }
-
-      override suspend fun sendRefusal(
-        requestId: String?,
-        code: SavedPrototypeErrorCode,
-        error: String,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ -> prototypeRefusalFrame(requestId, code, error) }
-          }
-        }
-      }
-
-      override suspend fun sendPatched(
-        requestId: String?,
-        success: Boolean,
-        error: String?,
-        revision: Long?,
-        conflict: PrototypePatchConflict?,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(
-                requestId,
-                success,
-                error,
-                revision = revision,
-                conflict = conflict,
-              )
-            }
-          }
-        }
-      }
-
-      override suspend fun sendShown(
-        requestId: String?,
-        missingAssets: List<String>,
-        appearance: PrototypeAppearance,
-        hiddenReason: PrototypeHiddenReason?,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(
-                requestId,
-                true,
-                null,
-                missingAssets,
-                appearance,
-                hiddenReason = hiddenReason,
-              )
-            }
-          }
-        }
-      }
-
-      override suspend fun sendShownNavigation(
-        requestId: String?,
-        missingAssets: List<String>,
-        appearance: PrototypeAppearance,
-        pages: Map<String, Int>,
-        stacks: Map<String, PrototypeStackSnapshot>,
-        hiddenReason: PrototypeHiddenReason?,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(
-                requestId,
-                true,
-                null,
-                missingAssets,
-                appearance,
-                pages = pages,
-                stacks = stacks,
-                hiddenReason = hiddenReason,
-              )
-            }
-          }
-        }
-      }
-
-      override suspend fun sendCleared(requestId: String?, cleared: Int) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ -> prototypeClearedFrame(requestId, cleared) }
-          }
-        }
-      }
-
-      override suspend fun sendPrototypeStatus(
-        requestId: String?,
-        prototypes: List<PrototypeStatusEntry>,
-        droppedEvents: Long,
-      ) {
-        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-          resultBroadcaster.guard(requestId, "prototype_result") {
-            webSocketServer.broadcastWithPerf { _ ->
-              prototypeStatusFrame(requestId, prototypes, droppedEvents)
-            }
-          }
-        }
-      }
-    }
+      },
+      resultBroadcaster,
+    )
   // Asset bytes live in the cache directory, never in the heap; cleared with the prototype session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
   // main-thread clear or lookup never touches the disk.

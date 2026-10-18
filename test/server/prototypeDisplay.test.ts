@@ -47,7 +47,7 @@ describe("prototype display targeting", () => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    client.setSupportedCommands(["prototype_display_id_v1", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
+    client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
     unsubscribe = registerPrototypeTools({
@@ -338,11 +338,11 @@ describe("prototype display targeting", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("a device without prototype_display_id_v1 is refused instead of defaulting silently", async () => {
+  test("a device without prototype_display_id_v2 is refused instead of defaulting silently", async () => {
     client.setSupportedCommands(["gesture_display_id_v1", "show_prototype"]);
     const payload = await call({ action: "show", spec, display: "inner" });
     expect(payload.success).toBe(false);
-    expect(payload.error).toContain("prototype_display_id_v1");
+    expect(payload.error).toContain("prototype_display_id_v2");
     expect(payload.error).toContain("display 2");
     expect(client.getPrototypeHistory()).toEqual([]);
   });

@@ -69,6 +69,15 @@ export function runNativeHelperRecordStoreContract(
         expect(store.list()[0]?.startIdentity).toBe("start-900");
       }));
 
+    test("a listed record does not alias the store's copy", () =>
+      withStore((store) => {
+        store.write(record(900));
+        const listed = store.list();
+        listed[0].startIdentity = "mutated";
+        listed.pop();
+        expect(store.list()).toEqual([record(900)]);
+      }));
+
     test("list is ordered by the record file name, not insertion order", () =>
       withStore((store) => {
         // File names sort as code units: "1000.json" < "901.json" < "95.json".

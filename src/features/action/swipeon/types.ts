@@ -1,4 +1,7 @@
+import type { AndroidCtrlProxyClient } from "../../observe/android";
+import type { TalkBackSwipeCtrlProxy } from "./TalkBackSwipeExecutor";
 import type { FencedGestureOptions } from "../ExecuteGesture";
+import type { ActionCall } from "../ActionCall";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
   Element,
@@ -97,8 +100,7 @@ export interface GestureExecutor {
     x2: number,
     y2: number,
     options?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    call?: ActionCall,
   ): Promise<SwipeResult>;
 }
 
@@ -115,6 +117,19 @@ export interface ScrollAccessibilityService {
     request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null>;
 }
+
+/** The CtrlProxy surface SwipeOn itself and its swipe/scroll/drag collaborators call. */
+export type SwipeOnCtrlProxy = TalkBackSwipeCtrlProxy &
+  ScrollAccessibilityService &
+  Pick<
+    AndroidCtrlProxyClient,
+    | "requestSwipe"
+    | "requestDrag"
+    | "requestDeviceInfo"
+    | "supportsCommand"
+    | "getSdkScreenIdentityReceivedAtMs"
+    | "awaitSdkScreenIdentityAfter"
+  >;
 
 export interface SwipeOnDependencies extends DisplayFenceDependencies {
   timer?: Timer;

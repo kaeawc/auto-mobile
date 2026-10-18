@@ -2,6 +2,7 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 let createdSocket: FakeSocket | undefined;
 let failNextConnect = false;
@@ -35,7 +36,15 @@ import {
 } from "../../src/daemon/client";
 
 function createClient() {
-  return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {}, null, undefined, "win32");
+  return new DaemonClient(
+    "/fake/socket",
+    1_000,
+    new FakeTimer(),
+    ISOLATED_DAEMON_RECOVERY,
+    null,
+    undefined,
+    "win32",
+  );
 }
 
 // Issue #6382: the proxy may replay a mutating tools/call only when the client
@@ -74,7 +83,15 @@ describe("DaemonClient request delivery phase", () => {
 describe("DaemonClient request that fails before the frame is written", () => {
   function createTimedClient() {
     const timer = new FakeTimer();
-    const client = new DaemonClient("/fake/socket", 1_000, timer, {}, null, undefined, "win32");
+    const client = new DaemonClient(
+      "/fake/socket",
+      1_000,
+      timer,
+      ISOLATED_DAEMON_RECOVERY,
+      null,
+      undefined,
+      "win32",
+    );
     return { client, timer };
   }
 

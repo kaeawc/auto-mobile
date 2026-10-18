@@ -5,6 +5,10 @@ import {
 } from "../utils/android-cmdline-tools/AdbClient";
 import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
 import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
+import type {
+  DeviceDiscoveryError,
+  DeviceDiscoveryErrorCode,
+} from "../models/DeviceDiscoveryError";
 import type { BootAdmission } from "../models/BootAdmission";
 import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
 import type { SimulatorWorkloadProfile } from "../models/DeviceResourceReconciliation";
@@ -70,14 +74,7 @@ export function assertAndroidImageRunningStateKnown(image: DeviceInfo): void {
   }
 }
 
-export type DeviceDiscoveryErrorCode = "unavailable" | "failed" | "timeout";
-
-export interface DeviceDiscoveryError {
-  code: DeviceDiscoveryErrorCode;
-  message: string;
-  retryable?: boolean;
-  retryAfterMs?: number;
-}
+export type { DeviceDiscoveryError, DeviceDiscoveryErrorCode };
 
 /**
  * Result of a discovery sweep that distinguishes per-platform success.

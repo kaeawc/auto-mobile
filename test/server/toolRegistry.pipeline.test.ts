@@ -594,9 +594,8 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
   test("all does not replace the session's last hierarchy", async () => {
     const daemon = DaemonState.getInstance();
-    const originalManager = Reflect.get(daemon, "sessionManager");
     const writes: string[] = [];
-    Reflect.set(daemon, "sessionManager", {
+    const originalManager = daemon.setSessionManagerForTesting({
       setLastHierarchy: () => writes.push("hierarchy"),
     });
     const initialized = spyOn(daemon, "isInitialized").mockReturnValue(true);
@@ -616,7 +615,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(writes).toEqual([]);
     } finally {
       initialized.mockRestore();
-      Reflect.set(daemon, "sessionManager", originalManager);
+      daemon.setSessionManagerForTesting(originalManager);
     }
   });
 

@@ -1,7 +1,8 @@
 import { z } from "zod/v4";
 import { Telephony } from "../features/action/Telephony";
 import { ActionableError, BootedDevice } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { phoneCallResultSchema, sendSmsResultSchema } from "./telephonyToolOutputSchemas";
 import { defineDeviceTool } from "./defineTool";
 
 // #6712: the advertised `additionalProperties: false` was not enforced at
@@ -41,7 +42,7 @@ export const createPhoneCallHandler =
     if (!result.success) {
       throw new ActionableError(result.error || `Failed to execute phoneCall ${args.action}`);
     }
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.message || `Phone call ${args.action} executed`,
       ...result,
     });
@@ -60,7 +61,7 @@ export const createSendSmsHandler =
     if (!result.success) {
       throw new ActionableError(result.error || "Failed to send simulated SMS");
     }
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.message || "Simulated SMS delivered",
       ...result,
     });
@@ -74,7 +75,7 @@ const phoneCallTool = defineDeviceTool({
     "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
   input: phoneCallInput,
   handler: phoneCallHandler,
-  options: { defaultEnabled: false },
+  options: { defaultEnabled: false, outputSchema: phoneCallResultSchema },
 });
 
 const sendSmsTool = defineDeviceTool({
@@ -83,7 +84,7 @@ const sendSmsTool = defineDeviceTool({
     "Send simulated incoming SMS: Android emulator, or a notification via the app's AutoMobile iOS SDK.",
   input: sendSmsInput,
   handler: sendSmsHandler,
-  options: { defaultEnabled: false },
+  options: { defaultEnabled: false, outputSchema: sendSmsResultSchema },
 });
 
 export const phoneCallSchema = phoneCallTool.schema;

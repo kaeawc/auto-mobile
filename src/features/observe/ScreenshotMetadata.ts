@@ -1,6 +1,6 @@
-export type ScreenshotFormat = "jpeg" | "png" | "webp";
+import type { ScreenshotFormat, ScreenshotMimeType } from "../../models/ScreenshotFormat";
 
-export type ScreenshotMimeType = "image/jpeg" | "image/png" | "image/webp";
+export type { ScreenshotFormat, ScreenshotMimeType };
 
 export type ScreenshotCaptureSource =
   | "android_ctrlproxy_a11y"

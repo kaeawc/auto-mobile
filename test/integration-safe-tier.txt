@@ -76,6 +76,7 @@ test/daemon/socketServerPermissions.integration.test.ts | safe | mkdtemp socket 
 test/daemon/socketServerReaffirmedProfileAcquisition.integration.test.ts | safe | tmpdir socket L50, fake daemon state L30, FakeDaemonManager L61
 test/daemon/socketServerScopeKey.integration.test.ts | safe | tmpdir socket L72
 test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir socket L62
+test/daemon/socketTasksRelay.integration.test.ts | safe | tmpdir socket L281, in-process dispatcher, DaemonClient.isAvailable spied, hermetic fixture device boundary
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer
 test/db/DatabaseHealthProbe.integration.test.ts | safe | temp sqlite file, fake worker; /tmp path L164 is a string only

@@ -3226,8 +3226,14 @@ every `tasks/*` request, in the per-request capabilities:
   was running when the daemon stopped reports `failed` with an "interrupted" error.
 - `tasks/*` requests without the per-request declaration answer `-32021` (Missing Required
   Client Capability). Progress ticks of a task become its `statusMessage`; no
-  `notifications/progress` is sent for a task. Calls through the stdio proxy do not create tasks
-  yet.
+  `notifications/progress` is sent for a task.
+- The stdio proxy relays the extension: it advertises it to a client whose `initialize` declared
+  it, forwards each request's declaration and the `tasks/*` requests to the daemon, and answers
+  with the daemon's results and errors unchanged. Its tasks belong to the proxy process rather
+  than to one daemon connection, so polling keeps working after the proxy reconnects. A
+  device-binding call (`startDevice`, `getAndroid`, `getApple`, `provisionDevice`,
+  `setActiveDevice`) stays synchronous through the proxy for now: the proxy binds the device
+  session from that call's result.
 
 ## Checks
 

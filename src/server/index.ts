@@ -136,6 +136,12 @@ export interface McpServerOptions {
    * direct stdio does not. Tests inject a manager, the eligible tools and the keepalive.
    */
   taskManager?: TaskManager;
+  /**
+   * Who owns the tasks this server creates and serves, when not the request's session key: a
+   * control-socket forward from the stdio proxy names the proxy, so its tasks survive the proxy's
+   * reconnects (a socket session id does not).
+   */
+  taskOwnerKey?: string;
   taskEligibleTools?: ReadonlySet<string>;
   taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
@@ -242,6 +248,9 @@ function serverBindingKey(options: McpServerOptions): string | undefined {
  * transport's session id. Keyless stateless requests own no tasks and run synchronously.
  */
 function taskOwnerKey(options: McpServerOptions): string | undefined {
+  if (options.taskOwnerKey?.trim()) {
+    return options.taskOwnerKey;
+  }
   const key = options.stateless ? options.requestMcpSessionId : serverBindingKey(options);
   return key?.trim() ? key : undefined;
 }

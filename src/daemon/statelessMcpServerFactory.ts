@@ -97,6 +97,7 @@ export function createStatelessMcpServer(
 ): ReturnType<typeof createMcpServer> {
   return createMcpServer({
     ...base,
+    ...(scope.taskOwnerKey !== undefined && { taskOwnerKey: scope.taskOwnerKey }),
     sessionContext: { ...context, sessionId: scope.requestScopeId },
     daemonMode: true,
     requestMcpSessionId: scope.requestMcpSessionId,

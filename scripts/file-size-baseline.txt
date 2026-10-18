@@ -18,7 +18,7 @@
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
 2339	src/daemon/sessionDeviceStateRestore.ts
-10394	src/daemon/sessionManager.ts
+10195	src/daemon/sessionManager.ts
 7113	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
@@ -43,7 +43,7 @@
 1835	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5887	src/features/deviceLifecycle/deviceLifecycleCore.ts
-1385	src/features/navigation/Explore.ts
+1429	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
 1032	src/features/observe/TakeScreenshot.ts

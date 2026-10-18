@@ -64,7 +64,6 @@ async function boundRecoveryHarness() {
   );
   const server = createTestUnixSocketServer(
     "/fake/recovery.sock",
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => manager,
@@ -564,7 +563,6 @@ test("a failed token declaration is logged and does not stop owned-session resto
   };
   const server = createTestUnixSocketServer(
     "/tmp/never-listened.sock",
-    "http://localhost:0/mcp",
     { isInitialized: () => true, getDevicePool: () => pool },
     new FakeTimer(),
   );

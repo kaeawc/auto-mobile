@@ -179,7 +179,6 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createDaemonState(),
       new FakeTimer(),
       null,

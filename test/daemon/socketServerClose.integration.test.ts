@@ -33,12 +33,7 @@ describe("UnixSocketServer close", () => {
     socketDir = await mkdtemp(join(tmpdir(), "socket-close-"));
     socketPath = join(socketDir, "daemon.sock");
     timer = new FakeTimer();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      timer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), timer);
     await server.start();
   });
 
@@ -136,7 +131,6 @@ describe("UnixSocketServer close", () => {
       timer = new FakeTimer();
       server = new UnixSocketServer(
         socketPath,
-        "http://localhost:0/mcp",
         createFakeDaemonState(async () => {
           signalRefreshStarted();
           return refreshComplete;
@@ -202,7 +196,6 @@ describe("UnixSocketServer close", () => {
       timer = new FakeTimer();
       server = new UnixSocketServer(
         socketPath,
-        "http://localhost:0/mcp",
         createFakeDaemonState(async () => {
           refreshStarts += 1;
           signalRefreshStarted();

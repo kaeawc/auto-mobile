@@ -1,12 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
 async function createContext(cancelDeviceExecutions?: () => Promise<number>) {
@@ -22,17 +21,15 @@ async function createContext(cancelDeviceExecutions?: () => Promise<number>) {
   }));
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", devices);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "binding-daemon", {
-      timer,
-      deviceManager: utils,
-      idGenerator: new FakeIdGenerator(["owner"]),
-      deviceSessionRepository: { markAutolockSession: async () => {} },
-      cancelDeviceSessionExecutions: Object.assign(async () => 0, {
-        cancelDeviceExecutions,
-      }),
+  const pool = makePool(manager, "binding-daemon", {
+    timer,
+    deviceManager: utils,
+    idGenerator: new FakeIdGenerator(["owner"]),
+    deviceSessionRepository: { markAutolockSession: async () => {} },
+    cancelDeviceSessionExecutions: Object.assign(async () => 0, {
+      cancelDeviceExecutions,
     }),
-  );
+  });
   await pool.initializeWithDevices(devices);
   return { pool, manager, persistence, utils };
 }

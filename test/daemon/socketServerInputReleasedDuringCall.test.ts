@@ -82,7 +82,6 @@ describe("input/* cut by a session release (#11381)", () => {
     }));
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       createFakeDaemonState(
         new Map([[OWNER, createFakeSession(OWNER, androidDevice.deviceId, "android")]]),
       ),

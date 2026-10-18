@@ -9,6 +9,7 @@ import {
   type ServerCapabilities,
 } from "@modelcontextprotocol/server";
 import { ErrorCode, McpError } from "./mcpError";
+import { isCreateTaskResult } from "./tasks/mcpTasksExtension";
 
 type WrapHandler = Server["_wrapHandler"];
 type RequestHandler = Parameters<WrapHandler>[1];
@@ -39,7 +40,12 @@ const INVALID_TOOLS_CALL_RESULT = "Invalid tools/call result: ";
  *   `notifications/cancelled` reason is forwarded unchanged, as under v1. v1 aborted
  *   before running `onclose`; the normalized signal fires after it (the v2 order).
  *
- * Both adjustments hook `Server._wrapHandler`, which `setRequestHandler` applies to every
+ * - Tasks extension (#4668): a `tools/call` handler that answers with a `CreateTaskResult`
+ *   (`resultType: "task"`) skips the SDK's `CallToolResult` validation, which would
+ *   otherwise add `content: []` to the task handle. Only a request that declared the
+ *   extension ever gets such a result (see `src/server/tasks/runAsTask.ts`).
+ *
+ * The adjustments hook `Server._wrapHandler`, which `setRequestHandler` applies to every
  * handler registered after construction. All of our handlers are registered after this
  * returns, and they replace the SDK handlers the constructor installed.
  */
@@ -55,17 +61,36 @@ export function createSdkMcpServer(
   return server;
 }
 
+type HandlerResult = Awaited<ReturnType<RequestHandler>>;
+
+/**
+ * Carries a Tasks-extension `CreateTaskResult` (#4668) past the SDK's `tools/call` result
+ * validation, which only knows `CallToolResult` and would stamp `content: []` onto it.
+ */
+class CreateTaskResultBypass {
+  constructor(readonly result: HandlerResult) {}
+}
+
 function installV1HandlerWrapper(inner: Server): void {
   const wrap: WrapHandler = inner["_wrapHandler"].bind(inner);
   inner["_wrapHandler"] = (method, handler) => {
-    const wrapped = wrap(method, (request, ctx) => handler(request, withV1AbortSignal(ctx)));
     if (method !== "tools/call") {
-      return wrapped;
+      return wrap(method, (request, ctx) => handler(request, withV1AbortSignal(ctx)));
     }
+    const wrapped = wrap(method, async (request, ctx) => {
+      const result = await handler(request, withV1AbortSignal(ctx));
+      if (isCreateTaskResult(result)) {
+        throw new CreateTaskResultBypass(result);
+      }
+      return result;
+    });
     return async (request, ctx) => {
       try {
         return await wrapped(request, ctx);
       } catch (error) {
+        if (error instanceof CreateTaskResultBypass) {
+          return error.result;
+        }
         throw v1ToolsCallError(error);
       }
     };

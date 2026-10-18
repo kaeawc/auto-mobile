@@ -2,7 +2,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import {
@@ -28,6 +27,7 @@ import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { ScreenshotJobTracker } from "../../../src/utils/ScreenshotJobTracker";
 import { getScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const deviceStateFixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
@@ -828,9 +828,9 @@ describe("display read routing", () => {
       pixelHeight: 100,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstance = spyOnIosClientInstance({
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const iosDevice: BootedDevice = { ...device, platform: "ios", deviceId: "ios-panel-test" };
     try {
       const screen = new RealObserveScreen(
@@ -897,9 +897,9 @@ describe("display read routing", () => {
       pixelHeight: 2853,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 2007, bottom: 2853 } },
     };
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstance = spyOnIosClientInstance({
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     try {
       const screen = new RealObserveScreen(
         iosDevice,

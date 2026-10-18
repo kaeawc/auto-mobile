@@ -60,7 +60,6 @@ function useServer(localSessionHoldsDevice = false): void {
   };
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     state,
     new FakeTimer(),
     null,

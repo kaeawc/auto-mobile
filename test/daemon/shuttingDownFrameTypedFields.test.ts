@@ -76,7 +76,7 @@ test("a tools/call refused at shutdown carries the typed code and retryable at t
     }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
-  const server = createTestUnixSocketServer("unused", "http://localhost:0/mcp", state, timer);
+  const server = createTestUnixSocketServer("unused", state, timer);
   const internals = server as unknown as {
     acceptingRequests: boolean;
     handleConnection(socket: Socket): void;

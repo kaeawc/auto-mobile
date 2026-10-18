@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
@@ -6,7 +7,6 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRecorderService";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -21,7 +21,6 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const other = { ...device, deviceId: "emulator-5556", name: "Pixel B" };
@@ -78,15 +77,13 @@ async function harness(
   const devices = count === 1 ? [device] : [device, other];
   utils.setBootedDevices("android", devices);
   PlatformDeviceManagerFactory.setInstance(utils);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "health-test", {
-      timer,
-      deviceManager: utils,
-      deviceHealthMarkers: markers,
-      onDeviceIncarnationAssigned: (id, incarnation) =>
-        assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
-    }),
-  );
+  const pool = makePool(manager, "health-test", {
+    timer,
+    deviceManager: utils,
+    deviceHealthMarkers: markers,
+    onDeviceIncarnationAssigned: (id, incarnation) =>
+      assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
+  });
   pool.setDeviceProcessStartedListener(started);
   await pool.initializeWithDevices(devices);
   return {

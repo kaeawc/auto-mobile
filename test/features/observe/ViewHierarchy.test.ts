@@ -9,10 +9,10 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { logger, LogLevel } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { recoverRootlessAccessibilityService } from "../../../src/features/observe/android/ObserveAccessibilityRecovery";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -444,9 +444,7 @@ describe("ViewHierarchy", function () {
           reconnectMessage: "CtrlProxy reconnecting, retry in 2s",
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -479,14 +477,14 @@ describe("ViewHierarchy", function () {
         name: "Test iPhone",
         platform: "ios",
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const getInstanceSpy = spyOnIosClientInstance({
         getLatestHierarchy: async () => ({
           hierarchy: null,
           fresh: false,
           unavailableReason: reason,
           unavailableDetail: detail,
         }),
-      } as any);
+      });
       try {
         const subject = new ViewHierarchy(
           iosDevice,
@@ -532,7 +530,7 @@ describe("ViewHierarchy", function () {
           return "recovered";
         },
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const spy = spyOnIosClientInstance(fakeIosClient);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -571,7 +569,7 @@ describe("ViewHierarchy", function () {
           return "recovered";
         },
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      const spy = spyOnIosClientInstance(client);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -616,7 +614,7 @@ describe("ViewHierarchy", function () {
           return "recovered";
         },
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      const spy = spyOnIosClientInstance(client);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -659,7 +657,7 @@ describe("ViewHierarchy", function () {
         ensureRecoveryStarted: () => {},
         awaitRecovery: async () => "timed_out",
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      const spy = spyOnIosClientInstance(client);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -703,9 +701,7 @@ describe("ViewHierarchy", function () {
           reconnectMessage: "CtrlProxy reconnecting, retry in 2s",
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -744,9 +740,7 @@ describe("ViewHierarchy", function () {
           updatedAt: 1750934585218,
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -788,9 +782,7 @@ describe("ViewHierarchy", function () {
           updatedAt: 1750934585218,
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -834,9 +826,7 @@ describe("ViewHierarchy", function () {
           });
         },
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(

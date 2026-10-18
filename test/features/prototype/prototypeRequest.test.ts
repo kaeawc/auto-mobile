@@ -441,6 +441,29 @@ describe("resolvePrototypeRequest", () => {
     expect(resolved).toMatchObject({ request: { url: "http://a.test/p?a=2&z=1" } });
   });
 
+  test("header and query numbers spell as JavaScript String(Number), the shared vectors (#12843)", async () => {
+    const vectors = (await Bun.file(
+      new URL("../../fixtures/prototype/request-number-text.json", import.meta.url),
+    ).json()) as { json: string; text: string }[];
+    expect(vectors.length).toBeGreaterThanOrEqual(12);
+    for (const { json, text } of vectors) {
+      const value = JSON.parse(json);
+      expect(String(value)).toBe(text);
+      const resolved = resolvePrototypeRequest(
+        request({ headers: { "X-N": { value } }, query: { n: { value } } }),
+        "http://h.test/p",
+        inputs,
+      );
+      expect(resolved).toMatchObject({
+        success: true,
+        request: {
+          headers: { "X-N": text },
+          url: `http://h.test/p?n=${text.replace("+", "%2B")}`,
+        },
+      });
+    }
+  });
+
   test("case-insensitive duplicate header names are invalid_request", () => {
     const resolved = resolvePrototypeRequest(
       request({ headers: { "X-Test": "1", "x-test": "2" } }),

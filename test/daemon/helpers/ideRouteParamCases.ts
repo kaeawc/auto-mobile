@@ -185,7 +185,6 @@ export function ideRouteParamCases(): IdeParamCase[] {
 export async function runIdeParamCase(testCase: IdeParamCase): Promise<string> {
   const server = createTestUnixSocketServer(
     "/fake/ide-params.sock",
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
   );

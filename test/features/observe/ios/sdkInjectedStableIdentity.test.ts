@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { assignStableViewIds } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
@@ -8,7 +8,6 @@ import type {
 } from "../../../../src/features/observe/ios/types";
 import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
-import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
 import {
@@ -22,6 +21,7 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { spyOnIosClientInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 interface CaptureNode extends Record<string, unknown> {
   className?: string;
@@ -159,9 +159,7 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
   test("getiOSViewHierarchy publishes one id using the fake client's raw captures", async () => {
     const timer = new FakeTimer();
     const client = new FakeIOSCtrlProxy(timer);
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstance = spyOnIosClientInstance(client);
     try {
       const reader = new ViewHierarchy(
         { deviceId: "sdk-identity-ios-test", platform: "ios", name: "Test iPhone" },

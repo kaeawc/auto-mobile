@@ -107,7 +107,6 @@ describe("UnixSocketServer device read lane (#10969)", () => {
     started = [];
     server = createTestUnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       fakeDaemonState(sessionDevices),
       new FakeTimer(),
       null,

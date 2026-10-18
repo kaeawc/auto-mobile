@@ -104,11 +104,11 @@ import { AndroidClientRequests } from "./AndroidClientRequests";
 import { AndroidBuildContextResolver } from "./AndroidBuildContextResolver";
 import { AndroidSdkScreenIdentityStore } from "./AndroidSdkScreenIdentityStore";
 import { AndroidInteractionTracker, MAX_CACHED_INTERACTIONS } from "./AndroidNavigationEvents";
+import { AndroidServiceReadinessVerifier } from "./AndroidServiceReadinessVerifier";
 import { AndroidScreenshotRequester } from "./AndroidScreenshotRequester";
 import { AndroidNavigationWriteQueue } from "./AndroidNavigationWriteQueue";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { type SendCommandOptions } from "../DeviceServiceUtils";
-import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import {
   TrackedScreenGeometry,
   screenshotBindingPushOptions,
@@ -588,16 +588,6 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestLaunchIntent(packageName: string, timeoutMs?: number): Promise<A11yLaunchIntentResult>;
 }
-
-/**
- * verifyServiceReady stops retrying once the SAME correlated runner error text has been observed
- * on this many CONSECUTIVE verification attempts (issue #3097). A runner handler failure that
- * reproduces byte-identically after a retry delay is deterministic in practice — retrying to
- * exhaustion just burns the remaining `maxAttempts * (timeout + delay)` budget. Kept at 2 (not 1)
- * so a single handler error during service bring-up — where transient failures are expected —
- * always gets one retry before the loop concludes the failure is deterministic.
- */
-const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 
 /** Isolation markers kept for hierarchy requests whose waiter already gave up. */
 const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
@@ -2500,96 +2490,36 @@ export class AndroidCtrlProxyClient
     return this.requestScreenshot(timeoutMs, perf, true);
   }
 
+  private serviceReadinessVerifierInstance: AndroidServiceReadinessVerifier | undefined;
+  private getServiceReadinessVerifier(): AndroidServiceReadinessVerifier {
+    if (!this.serviceReadinessVerifierInstance) {
+      const client = this;
+      this.serviceReadinessVerifierInstance = new AndroidServiceReadinessVerifier({
+        get retryExecutor() {
+          return client.retryExecutor;
+        },
+        get logger() {
+          return client.loggerInstance;
+        },
+        requestHierarchySync: (signal, timeoutMs, diagnostics) =>
+          client.requestHierarchySync(
+            new NoOpPerformanceTracker(),
+            false,
+            signal,
+            timeoutMs,
+            diagnostics,
+          ),
+      });
+    }
+    return this.serviceReadinessVerifierInstance;
+  }
+
   async verifyServiceReady(
     maxAttempts: number = 5,
     delayMs: number = 500,
     timeoutMs: number = 3000,
   ): Promise<boolean> {
-    const signal = combineWithAmbientAbort();
-    signal?.throwIfAborted();
-    // Remember the most recent runner error text across attempts (issue #3062) so the terminal
-    // warn — the one visible at the default log level — attributes the deterministic handler
-    // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
-    // error and a plain timeout previously both surfaced identically here).
-    let lastRunnerError: string | undefined;
-    // Consecutive attempts that failed with byte-identical correlated runner error text
-    // (issue #3097). A handler failure that reproduces verbatim after a retry delay is treated
-    // as deterministic — the service will not become ready by retrying — so the loop stops
-    // instead of burning the remaining attempts. Two safety valves protect the startup path
-    // this method exists to verify (where a handler error CAN be transient during bring-up):
-    // the first runner error always gets one retry, and a plain timeout in between resets the
-    // streak (mixed signals are not evidence of determinism). Classifying specific runner
-    // messages (allow/deny lists, structured codes) is deliberately avoided here: codes belong
-    // in the runner's wire contract, and TS string-matching individual messages would be
-    // fragile against runner text changes.
-    let identicalRunnerErrorStreak = 0;
-    let shortCircuited = false;
-    const result = await this.retryExecutor.execute(
-      async (attempt) => {
-        logger.debug(`[CTRL_PROXY] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
-
-        const diagnostics: HierarchySyncDiagnostics = {};
-        const hierarchyResult = await this.requestHierarchySync(
-          new NoOpPerformanceTracker(),
-          false,
-          signal,
-          timeoutMs,
-          diagnostics,
-        );
-
-        if (hierarchyResult && hierarchyResult.hierarchy) {
-          logger.debug(`[CTRL_PROXY] Service verified ready after ${attempt} attempt(s)`);
-          return true;
-        }
-
-        if (diagnostics.runnerError) {
-          identicalRunnerErrorStreak =
-            diagnostics.runnerError === lastRunnerError ? identicalRunnerErrorStreak + 1 : 1;
-          lastRunnerError = diagnostics.runnerError;
-        } else {
-          // A plain timeout breaks the deterministic-failure streak but keeps lastRunnerError,
-          // so the terminal warn still attributes the most recent runner error.
-          identicalRunnerErrorStreak = 0;
-        }
-        const runnerErrorSuffix = diagnostics.runnerError
-          ? `: runner error: ${diagnostics.runnerError}`
-          : "";
-        throw new Error(
-          `Verification attempt ${attempt} returned no hierarchy${runnerErrorSuffix}`,
-        );
-      },
-      {
-        maxAttempts,
-        delays: delayMs,
-        signal,
-        shouldRetry: () => {
-          if (identicalRunnerErrorStreak >= VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT) {
-            shortCircuited = true;
-            return false;
-          }
-          return true;
-        },
-        onRetry: (error, attempt) => {
-          logger.debug(`[CTRL_PROXY] Verification attempt ${attempt} failed: ${error.message}`);
-          logger.debug(`[CTRL_PROXY] Waiting ${delayMs}ms before next verification attempt`);
-        },
-      },
-    );
-
-    signal?.throwIfAborted();
-
-    if (!result.success) {
-      const runnerErrorSuffix = lastRunnerError ? ` (last runner error: ${lastRunnerError})` : "";
-      const attemptsSummary = shortCircuited
-        ? `${result.attempts}/${maxAttempts} verification attempts (short-circuited: identical runner error on ${VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT} consecutive attempts)`
-        : `${maxAttempts} verification attempts`;
-      this.loggerInstance.warn(
-        `[CTRL_PROXY] Service not ready after ${attemptsSummary}${runnerErrorSuffix}`,
-      );
-      return false;
-    }
-
-    return result.value ?? false;
+    return this.getServiceReadinessVerifier().verifyServiceReady(maxAttempts, delayMs, timeoutMs);
   }
 
   // ===========================================================================

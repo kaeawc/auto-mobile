@@ -4,6 +4,7 @@ import type { ElementBounds, PinchOnOptions, ViewHierarchyResult } from "../../.
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -49,9 +50,9 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
   });
   const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
   const iosSpy = spyOnIosClientInstance(ios);
-  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-    isAvailable: async () => true,
-  } as unknown as AndroidCtrlProxyManager);
+  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+    FakeCtrlProxyManager.withAvailability(true),
+  );
   restores.push(
     () => androidSpy.mockRestore(),
     () => iosSpy.mockRestore(),

@@ -2898,14 +2898,18 @@ export class AndroidCtrlProxyClient
     this.getHierarchyUpdateHandler().handle(data, perfTiming, frameContext, requestId);
   }
 
+  /** Converts wire to domain at the push; provenance stays keyed by the wire object. */
   private pushHierarchyToObservationStream(
-    hierarchy: ViewHierarchyResult,
+    wireHierarchy: AccessibilityHierarchy,
     frameContext?: string,
   ): void {
+    const hierarchy = this.hierarchy.convertToViewHierarchyResult(wireHierarchy);
+    hierarchy.updatedAt = wireHierarchy.updatedAt || undefined; // stream timestamp source
     this.forwardHierarchyToObservationStream(hierarchy, frameContext, {
       logTag: "CTRL_PROXY",
       recordForwarded: (captureSequence) => {
-        this.streamedCaptureSequences.set(hierarchy, captureSequence);
+        wireHierarchy.captureSequence = captureSequence;
+        this.streamedCaptureSequences.set(wireHierarchy, captureSequence);
         this.screenGeometry.markForwarded(captureSequence);
       },
     });

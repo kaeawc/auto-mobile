@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../../helpers/scratchRoot";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,14 +58,11 @@ describe("FileCtrlProxyForwardLease stale-owner reclaim (#10497)", () => {
   let dir: string;
   let timer: FakeTimer;
 
+  const scratch = useScratchRoot("ctrlproxy-lease-");
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "ctrlproxy-lease-"));
+    dir = scratch.next();
     timer = new FakeTimer();
     timer.setCurrentTime(100_000);
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
   });
 
   function lease(

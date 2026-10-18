@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   SEGMENT_MANIFEST_FILE,
@@ -11,18 +11,15 @@ import {
 describe("writeSegmentManifest", () => {
   let archive: string;
   let segment: StoppedSegment;
+  const scratch = useScratchRoot("segment-manifest-");
 
   beforeEach(async () => {
-    archive = await fs.mkdtemp(path.join(os.tmpdir(), "segment-manifest-"));
+    archive = scratch.next();
     segment = {
       recordingId: "rec-1",
       filePath: path.join(archive, "video.mp4"),
       segmentIndex: 0,
     };
-  });
-
-  afterEach(async () => {
-    await fs.rm(archive, { recursive: true, force: true });
   });
 
   test("warnings-free segments retain exactly the legacy manifest shape", async () => {

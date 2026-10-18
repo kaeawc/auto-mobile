@@ -44,10 +44,10 @@ const observe = (
     timestamp: 0,
     screenSize,
     systemInsets: insets,
-    viewHierarchy: { hierarchy: {} } as unknown as ViewHierarchyResult,
+    viewHierarchy: { hierarchy: {} },
   }) as ObserveResult;
 
-const emptyHierarchy = { hierarchy: {} } as unknown as ViewHierarchyResult;
+const emptyHierarchy: ViewHierarchyResult = { hierarchy: {} };
 
 const options = (direction: SwipeOnResolvedOptions["direction"]): SwipeOnResolvedOptions =>
   ({ direction }) as SwipeOnResolvedOptions;

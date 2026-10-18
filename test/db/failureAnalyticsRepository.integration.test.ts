@@ -23,7 +23,7 @@ describe("FailureAnalyticsRepository", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1000000);
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -82,8 +82,8 @@ describe("FailureAnalyticsRepository", () => {
     test("uses injected IdGenerator for persisted IDs", async () => {
       const idGenerator = new FakeIdGenerator(["occurrence-id", "group-id", "capture-id"]);
       const deterministicRepo = new FailureAnalyticsRepository(
-        timer,
         db,
+        timer,
         () => new FakeDbWriteBarrier(),
         idGenerator,
       );
@@ -363,8 +363,8 @@ describe("FailureAnalyticsRepository", () => {
     test("fetches aggregated group details with a bounded query count and preserves per-group top-N", async () => {
       const instrumented = await createInstrumentedTestDatabase();
       const instrumentedRepo = new FailureAnalyticsRepository(
-        timer,
         instrumented.db,
+        timer,
         () => new FakeDbWriteBarrier(),
       );
       try {
@@ -446,8 +446,8 @@ describe("FailureAnalyticsRepository", () => {
     test("chunks more than SQLite's conservative bound-parameter limit without dropping groups", async () => {
       const instrumented = await createInstrumentedTestDatabase();
       const instrumentedRepo = new FailureAnalyticsRepository(
-        timer,
         instrumented.db,
+        timer,
         () => new FakeDbWriteBarrier(),
       );
       try {
@@ -723,7 +723,7 @@ describe("FailureAnalyticsRepository", () => {
   describe("shutdown draining (issue #2792)", () => {
     test("routes background retention cleanup through the barrier", async () => {
       const barrier = new FakeDbWriteBarrier();
-      const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
+      const barrierRepo = new FailureAnalyticsRepository(db, timer, () => barrier);
 
       await barrierRepo.recordFailure(makeFailureInput());
 
@@ -735,7 +735,7 @@ describe("FailureAnalyticsRepository", () => {
     test("skips background retention cleanup while draining, still records the failure", async () => {
       const barrier = new FakeDbWriteBarrier();
       barrier.beginDrain();
-      const barrierRepo = new FailureAnalyticsRepository(timer, db, () => barrier);
+      const barrierRepo = new FailureAnalyticsRepository(db, timer, () => barrier);
 
       const occurrenceId = await barrierRepo.recordFailure(makeFailureInput());
 
@@ -1030,7 +1030,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1000);
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -1114,7 +1114,7 @@ describe("FailureAnalyticsRepository.getTimelineData (#3439)", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {

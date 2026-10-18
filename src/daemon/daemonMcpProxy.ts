@@ -172,10 +172,12 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { isCreateTaskResult } from "../server/tasks/mcpTasksExtension";
 import type { TaskRelayFrame, TaskRelayMethod } from "../server/tasks/taskRelay";
-import { TaskSessionBindings } from "./proxy/TaskSessionBindings";
+import {
+  ForwardedResultApplier,
+  type ForwardedResultApplierPort,
+} from "./proxy/ForwardedResultApplier";
 import {
   ToolCallForwarder,
-  type ForwardedResultContext,
   type ForwardedToolCall,
   type ToolCallForwardMode,
   type ToolCallForwarderPort,
@@ -745,6 +747,7 @@ export class DaemonMcpProxy {
   private readonly stallProbe: StallProbe;
   private readonly handoverResolution: HandoverResolution;
   private readonly toolCallForwarder: ToolCallForwarder;
+  private readonly forwardedResultApplier: ForwardedResultApplier;
   private get pendingSessionLosses(): Map<string, LivenessHandover> {
     return this.sessionState.pendingSessionLosses;
   }
@@ -766,7 +769,6 @@ export class DaemonMcpProxy {
   /** Owns this proxy's MCP tasks on the daemon across reconnects (#4668); minted on first use. */
   private mintedTaskOwnerKey: string | undefined;
   /** Device-binding calls relayed as MCP tasks, bound once from their completed result (#4668). */
-  private deviceBindingTasks: TaskSessionBindings<ForwardedResultContext> | undefined;
   /** A device-binding task outlasted the close's drain: its late bind must publish nothing (#13155). */
   private deviceBindingTasksAbandoned = false;
   private readonly buildIdentity: BuildIdentity;
@@ -1074,6 +1076,7 @@ export class DaemonMcpProxy {
       stallProbe: this.stallProbe,
       port: this.createHandoverResolutionPort(),
     });
+    this.forwardedResultApplier = this.createForwardedResultApplier();
     this.toolCallForwarder = this.createToolCallForwarder();
     this.stallResumeProbe = new SingleFlightInterval(
       this.timer,
@@ -3007,56 +3010,10 @@ export class DaemonMcpProxy {
   /**
    * The Tasks relay for a `tools/call` whose client declared the extension (#4668). A
    * device-binding call is relayed too: when the daemon answers it with a task, the session it
-   * binds is bound from the completed task's result ({@link taskBindings}).
+   * binds is bound from the completed task's result (`ForwardedResultApplier.taskBindings`).
    */
   private taskRelayForToolCall(name: string, declared: boolean): TaskRelayFrame | undefined {
     return declared ? { ownerKey: this.taskOwnerKey(), declared: true } : undefined;
-  }
-
-  /**
-   * The device-binding calls the daemon answered with a task (#4668). The first `tasks/get` that
-   * reports one `completed` applies the binding the synchronous call would have applied from that
-   * result, through the same {@link applyForwardedResult}, exactly once; a failed or cancelled task
-   * binds nothing. Each waiting task keeps its call's acquisition release epoch, so a session the
-   * daemon released before the poll is not resurrected.
-   */
-  private taskBindings(): TaskSessionBindings<ForwardedResultContext> {
-    this.deviceBindingTasks ??= new TaskSessionBindings<ForwardedResultContext>({
-      timer: this.timer,
-      bind: async (context, result) => {
-        try {
-          await this.applyForwardedResult(context, result);
-        } catch (error) {
-          this.noteReleaseSurfacedBy(error);
-          throw error;
-        }
-      },
-      abandon: () => {
-        this.deviceBindingTasksAbandoned = true;
-      },
-      retain: ({ learnsResultSession, callReleaseEpoch }) =>
-        this.releaseLedger.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch),
-      release: ({ learnsResultSession, callReleaseEpoch }) =>
-        this.releaseLedger.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch),
-    });
-    return this.deviceBindingTasks;
-  }
-
-  /**
-   * Defer a device-binding call's result handling when the daemon ran it as a task (#4668): the
-   * handle carries no session, so nothing is bound until a `tasks/get` reports the result. A
-   * task's result cannot be forwarded again, so no suspect refusal in it is retried.
-   */
-  private deferredToTask(
-    tasks: TaskRelayFrame | undefined,
-    result: unknown,
-    context: ForwardedResultContext,
-  ): boolean {
-    const deferred = tasks && isCreateTaskResult(result) && isDeviceBindingTool(context.name);
-    if (deferred) {
-      this.taskBindings().defer(result.taskId, { ...context, allowSuspectRetry: false });
-    }
-    return deferred === true;
   }
 
   /**
@@ -3095,8 +3052,8 @@ export class DaemonMcpProxy {
       signal,
       label: `Daemon ${method}`,
     });
-    return this.deviceBindingTasks
-      ? this.deviceBindingTasks.relayed(method, params, answer)
+    return this.forwardedResultApplier.deviceBindingTasks
+      ? this.forwardedResultApplier.deviceBindingTasks.relayed(method, params, answer)
       : answer;
   }
 
@@ -3275,69 +3232,6 @@ export class DaemonMcpProxy {
       signal,
       mode,
     );
-  }
-
-  /**
-   * Apply a forwarded call's result to this proxy's session state: credit the routed session, bind
-   * a session the result minted or selected, and remember the forwarded one. The one binding
-   * implementation, whether the result is the call's answer or a device-binding task's completed
-   * result (#4668).
-   */
-  private applyForwardedResult(
-    context: ForwardedResultContext,
-    result: any,
-  ): ForwardedToolCall | Promise<ForwardedToolCall> {
-    const { name, callerArgs, forwardedArgs, forwardedSessionUuid, callReleaseEpoch } = context;
-    this.creditRoutedSession(result, forwardedSessionUuid);
-    if (result?.isError) {
-      // Provisioning retains its usable device session when optional resource
-      // configuration fails. Own that result-minted session before returning
-      // the evidence-bearing error, so the caller can inspect or retry it.
-      return name === "provisionDevice"
-        ? this.sessionBinding
-            .bindResultMintedDeviceSession(name, result, callReleaseEpoch)
-            .then(() => this.applyForwardedErrorResult(context, result))
-        : this.applyForwardedErrorResult(context, result);
-    }
-    this.rememberToolSelectionProfile(name, callerArgs, result);
-    if (context.isSessionAcquisition) {
-      return this.sessionBinding
-        .bindResultMintedDeviceSession(name, result, callReleaseEpoch)
-        .then(() => ({ result, forwardedSessionUuid }));
-    }
-    // Remember what was actually forwarded, not the caller's raw args. An
-    // implicit sessionless call injects the bound UUID into forwardedArgs and
-    // extends the live daemon session in getOrCreateSession(); refreshing the
-    // replay lease off forwardedArgs keeps continuous implicit activity from
-    // being mistaken for idleness, so a later reconnect re-seeds the still-live
-    // session instead of creating an unseeded transport (issue #4610).
-    if (!this.sessionBinding.namesForeignOwnedSession(forwardedArgs, result)) {
-      this.sessionBinding.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch, false);
-    }
-    this.rememberActiveDeviceSession(name, callerArgs, result, callReleaseEpoch);
-    return { result, forwardedSessionUuid };
-  }
-
-  private applyForwardedErrorResult(
-    context: ForwardedResultContext,
-    result: any,
-  ): ForwardedToolCall {
-    const { name, forwardedArgs, forwardedSessionUuid, callReleaseEpoch } = context;
-    const retryableSuspectRefusal = this.noteSuspectSessionResult(
-      name,
-      result,
-      forwardedArgs,
-      context.allowSuspectRetry,
-    );
-    this.sessionBinding.bindForwardedSessionOnErrorResult(
-      name,
-      forwardedArgs,
-      result,
-      callReleaseEpoch,
-    );
-    // The daemon's own terminal refusal (a cut call's answer included) told this caller.
-    this.noteReleaseSurfacedBy(result);
-    return { result, forwardedSessionUuid, retryableSuspectRefusal };
   }
 
   private rememberFinalizedRecordings(
@@ -4864,6 +4758,25 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createForwardedResultApplier(): ForwardedResultApplier {
+    return new ForwardedResultApplier({
+      timer: this.timer,
+      releaseLedger: this.releaseLedger,
+      sessionBinding: this.sessionBinding,
+      port: this.createForwardedResultApplierPort(),
+    });
+  }
+
+  private createForwardedResultApplierPort(): ForwardedResultApplierPort {
+    return {
+      creditRoutedSession: (...args) => this.creditRoutedSession(...args),
+      rememberToolSelectionProfile: (...args) => this.rememberToolSelectionProfile(...args),
+      rememberActiveDeviceSession: (...args) => this.rememberActiveDeviceSession(...args),
+      noteSuspectSessionResult: (...args) => this.noteSuspectSessionResult(...args),
+      noteReleaseSurfacedBy: (...args) => this.noteReleaseSurfacedBy(...args),
+    };
+  }
+
   private createToolCallForwarder(): ToolCallForwarder {
     return new ToolCallForwarder({
       timer: this.timer,
@@ -4900,8 +4813,8 @@ export class DaemonMcpProxy {
       trackToolCallInFlight: (...args) => this.trackToolCallInFlight(...args),
       withRecoverableReconnect: (...args) =>
         this.connectionRecovery.withRecoverableReconnect(...args),
-      deferredToTask: (...args) => this.deferredToTask(...args),
-      applyForwardedResult: (...args) => this.applyForwardedResult(...args),
+      deferredToTask: (...args) => this.forwardedResultApplier.deferredToTask(...args),
+      applyForwardedResult: (...args) => this.forwardedResultApplier.applyForwardedResult(...args),
       noteReleaseSurfacedBy: (...args) => this.noteReleaseSurfacedBy(...args),
       removeProgressListener: (...args) => this.removeProgressListener(...args),
       toolUnavailableError: (...args) => this.toolUnavailableError(...args),
@@ -5013,7 +4926,7 @@ export class DaemonMcpProxy {
       fenceReleasedForwardedSession: (...args) => this.fenceReleasedForwardedSession(...args),
       throwIfSessionReleasedSince: (...args) => this.throwIfSessionReleasedSince(...args),
       sessionReleaseReasonSince: (sessionUuid, forwardEpoch) =>
-        this.deviceBindingTasksAbandoned
+        this.forwardedResultApplier.deviceBindingTasksAbandoned
           ? "proxy_closing"
           : this.releaseLedger.sessionReleaseReasonSince(sessionUuid, forwardEpoch),
       invalidateListCache: (...args) => this.invalidateListCache(...args),
@@ -5992,7 +5905,9 @@ export class DaemonMcpProxy {
     this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     // A completed device-binding task must not bind a session after the release below (#13144).
-    await this.deviceBindingTasks?.drain(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
+    await this.forwardedResultApplier.deviceBindingTasks?.drain(
+      BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
+    );
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),

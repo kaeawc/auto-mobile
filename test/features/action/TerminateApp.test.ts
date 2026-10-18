@@ -853,7 +853,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -895,7 +895,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.android.settings'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.android.settings", { skipObservation: true });
 
     expect(result.wasRunning).toBe(true);
@@ -923,7 +923,7 @@ describe("TerminateApp (Android)", () => {
       retireAppProcess: () => {},
     };
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: cacheInvalidator,
     });
@@ -955,7 +955,7 @@ describe("TerminateApp (Android)", () => {
       retireAppProcess: () => {},
     };
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: cacheInvalidator,
     });
@@ -980,7 +980,7 @@ describe("TerminateApp (Android)", () => {
       retireAppProcess: () => {},
     };
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: cacheInvalidator,
     });
@@ -995,7 +995,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app2");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -1021,7 +1021,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result).toEqual({
@@ -1044,7 +1044,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandError("shell dumpsys activity processes", new Error("dumpsys unavailable"));
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
 
     await expect(
       terminateApp.execute("com.example.app", { skipObservation: true }),
@@ -1060,7 +1060,7 @@ describe("TerminateApp (Android)", () => {
       new Error("Command failed with exit code 1"),
     );
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, { timer: fakeTimer });
     await expect(
       terminateApp.execute("com.example.app", { skipObservation: true }),
     ).rejects.toThrow("Command failed with exit code 1");
@@ -1266,7 +1266,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     ]);
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
         fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });

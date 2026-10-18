@@ -35,12 +35,24 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
   ): Promise<A11yTapCoordinatesResult>;
 }
 
+type TalkBackDriverClient = Pick<
+  AndroidCtrlProxyClient,
+  | "getAccessibilityHierarchy"
+  | "requestTraversalOrder"
+  | "requestCurrentFocus"
+  | "requestTapCoordinates"
+  | "requestDoubleTapCoordinates"
+  | "requestAction"
+  | "requestNodeAction"
+  | "supportsNodeActionSelectors"
+>;
+
 /**
  * Default implementation of TalkBackNavigationDriver using AndroidCtrlProxyClient.
  */
 class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
-  private accessibilityService: AndroidCtrlProxyClient;
-  constructor(accessibilityService: AndroidCtrlProxyClient) {
+  private accessibilityService: TalkBackDriverClient;
+  constructor(accessibilityService: TalkBackDriverClient) {
     this.accessibilityService = accessibilityService;
   }
 

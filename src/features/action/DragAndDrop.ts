@@ -132,6 +132,26 @@ interface DragAndDropDeps extends DisplayFenceDependencies {
   visionAnalyzer?: VisionAnalyzer;
 }
 
+/** One resolved drag dispatch handed to the platform client. */
+export interface DragDispatchRequest {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  pressDurationMs: number;
+  dragDurationMs: number;
+  holdDurationMs: number;
+  signal?: AbortSignal;
+}
+
+/** Result of a drag dispatch. */
+export interface DragDispatchOutcome {
+  success: boolean;
+  error?: string;
+  a11yTotalTimeMs?: number;
+  a11yGestureTimeMs?: number;
+}
+
 export class DragAndDrop extends BaseVisualChange {
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private selector: ElementSelector;
@@ -379,16 +399,16 @@ export class DragAndDrop extends BaseVisualChange {
 
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
-          const dragResult = await this.executeDrag(
-            sourcePoint.x,
-            sourcePoint.y,
-            targetPoint.x,
-            targetPoint.y,
+          const dragResult = await this.dispatchDrag({
+            startX: sourcePoint.x,
+            startY: sourcePoint.y,
+            endX: targetPoint.x,
+            endY: targetPoint.y,
             pressDurationMs,
             dragDurationMs,
             holdDurationMs,
             signal,
-          );
+          });
 
           if (this.device.platform === "ios" && dragResult.success) {
             iosDispatchTimestamp = this.timer.now();
@@ -684,21 +704,27 @@ export class DragAndDrop extends BaseVisualChange {
     return value >= min && value <= max;
   }
 
-  private async executeDrag(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    signal?: AbortSignal,
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    a11yTotalTimeMs?: number;
-    a11yGestureTimeMs?: number;
-  }> {
+  private dispatchDrag: (request: DragDispatchRequest) => Promise<DragDispatchOutcome> = (
+    request,
+  ) => this.executeDrag(request);
+
+  /** Replaces the platform dispatch so tests can observe the resolved drag request. */
+  setDragDispatchForTesting(
+    dispatch: (request: DragDispatchRequest) => Promise<DragDispatchOutcome>,
+  ): void {
+    this.dispatchDrag = dispatch;
+  }
+
+  private async executeDrag({
+    startX,
+    startY,
+    endX,
+    endY,
+    pressDurationMs,
+    dragDurationMs,
+    holdDurationMs,
+    signal,
+  }: DragDispatchRequest): Promise<DragDispatchOutcome> {
     throwIfAborted(signal);
 
     const timeoutMs = getIosDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);

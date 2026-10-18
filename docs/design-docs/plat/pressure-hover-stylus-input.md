@@ -218,17 +218,22 @@ pressure series, and the exported `tapAt`, `swipeAt` or `dragPath` step to carry
 `pointer`:
 
 - `GetEventReader`/`TouchFrameReconstructor` must read `ABS_MT_TOOL_TYPE`,
-  `BTN_TOOL_PEN`, `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and
+  `BTN_TOOL_PEN`, the single-touch `ABS_PRESSURE` that a separate pen node reports
+  (the reconstructor handles only `ABS_MT_PRESSURE` today), `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and
   keep per-contact pressure over time, not just the last value.
 - Event-node discovery must find and read the pen's node as well as the multitouch
   one, and handle non-multitouch contact coordinates (`ABS_X`/`ABS_Y`).
 - Recorded pressure is a raw integer in the device's own range, but the contract is
-  0–1. `TouchNodeDiscovery` must therefore parse the pressure axis minimum and maximum
-  from `getevent -p`, and export normalizes against it. A missing or degenerate range
+  0–1. `TouchNodeDiscovery` must therefore parse the minimum and maximum of whichever
+  pressure axis the node reports (`ABS_MT_PRESSURE` or `ABS_PRESSURE`) from
+  `getevent -p`, and export normalizes against it. A missing or degenerate range
   (no axis, or `max <= min`) exports no `pressure` and warns, rather than writing a
   contract-invalid sample.
-- `GestureClassifier` must keep the tool type through classification, and
-  hover-only sequences (pen in range, no `BTN_TOUCH`) must not be dropped as noise.
+- `GestureClassifier` must keep the tool type through classification. Hover-only
+  sequences (pen in range, no `BTN_TOUCH`) have no event type and no plan step today,
+  and `hoverAt` is deferred, so hover is not exported yet: the recorder reports it in
+  an export warning instead of silently dropping it as noise, and exporting it waits
+  for `hoverAt`.
 - A drawn stroke needs path sampling and a drag classification (a new
   `GestureEventType`) exported as `dragPath`, with the sampled pressure written to the
   per-point `pressure`; attaching `pointer` to a `swipeAt` keeps only the endpoints. A

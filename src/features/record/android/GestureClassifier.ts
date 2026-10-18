@@ -36,6 +36,8 @@ interface LastTap {
   screenX: number;
   screenY: number;
   arrivedAt: number;
+  /** Pen tool of the tap; undefined for a finger. Taps by different tools never pair. */
+  toolType: PointerToolType | undefined;
 }
 
 interface PinchState {
@@ -208,7 +210,13 @@ export class GestureClassifier {
 
     const gesture =
       displacement < slopPx
-        ? this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt)
+        ? this.evaluateTapOrLongPress(
+            downX,
+            downY,
+            durationMs,
+            frame.arrivedAt,
+            contact.pen.toolType,
+          )
         : this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
     return { ...gesture, ...this.downStamp(contact), ...this.penFields(contact) };
   }
@@ -291,13 +299,14 @@ export class GestureClassifier {
     screenY: number,
     durationMs: number,
     arrivedAt: number,
+    toolType: PointerToolType | undefined,
   ): GestureEvent {
     if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
       return { type: "longPress", arrivedAt, screenX, screenY, durationMs };
     }
 
     // Check for double-tap
-    if (this.lastTap) {
+    if (this.lastTap && this.lastTap.toolType === toolType) {
       const timeSinceLast = arrivedAt - this.lastTap.arrivedAt;
       const separation = dist(screenX, screenY, this.lastTap.screenX, this.lastTap.screenY);
       const slopPx = GESTURE_THRESHOLDS.DOUBLE_TAP_SLOP_DP * this.densityDp;
@@ -309,7 +318,7 @@ export class GestureClassifier {
       }
     }
 
-    this.lastTap = { screenX, screenY, arrivedAt };
+    this.lastTap = { screenX, screenY, arrivedAt, toolType };
     return { type: "tap", arrivedAt, screenX, screenY };
   }
 

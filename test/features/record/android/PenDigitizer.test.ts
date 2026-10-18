@@ -382,6 +382,35 @@ describe("parser parity and real layouts", () => {
 });
 
 describe("a slot reused by a pen then a finger", () => {
+  const tapLines = (trackingId: string, toolType: string): string[] => [
+    `[  1.0] EV_ABS    ABS_MT_TRACKING_ID   ${trackingId}`,
+    `[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     ${toolType}`,
+    "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+    "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+    "[  1.0] EV_SYN    SYN_REPORT           00000000",
+    "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+    "[  1.0] EV_SYN    SYN_REPORT           00000000",
+  ];
+
+  test("a pen tap and a quick finger tap in the same place stay two taps", () => {
+    const { gestures } = run([
+      ...tapLines("00000001", "00000001"),
+      ...tapLines("00000002", "00000000"),
+    ]);
+    expect(gestures.map((gesture) => [gesture.type, gesture.toolType])).toEqual([
+      ["tap", "stylus"],
+      ["tap", undefined],
+    ]);
+  });
+
+  test("two quick pen taps in the same place still make a double tap", () => {
+    const { gestures } = run([
+      ...tapLines("00000001", "00000001"),
+      ...tapLines("00000002", "00000001"),
+    ]);
+    expect(gestures.map((gesture) => gesture.type)).toEqual(["tap", "doubleTap"]);
+  });
+
   test("pen state does not leak into the finger contact", () => {
     const lines = [
       "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",

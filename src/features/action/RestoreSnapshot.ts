@@ -681,7 +681,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     }
   }
 
-  private async getIosDeviceOsVersion(): Promise<string | undefined> {
+  async getIosDeviceOsVersion(): Promise<string | undefined> {
     try {
       const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {

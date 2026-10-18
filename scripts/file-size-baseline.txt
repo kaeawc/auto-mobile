@@ -90,5 +90,5 @@
 1822	src/utils/android-cmdline-tools/AdbClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
-3180	src/utils/ios-cmdline-tools/SimCtlClient.ts
+3161	src/utils/ios-cmdline-tools/SimCtlClient.ts
 1263	src/utils/logger.ts

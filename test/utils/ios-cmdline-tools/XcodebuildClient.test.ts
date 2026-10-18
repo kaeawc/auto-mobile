@@ -432,8 +432,9 @@ describe("XcodebuildClient streaming runner", () => {
 
     const requestController = new AbortController();
     let killed = false;
-    (child as unknown as { kill: () => void }).kill = () => {
+    child.kill = () => {
       killed = true;
+      return true;
     };
 
     await runWithAbortSignal(requestController.signal, () =>

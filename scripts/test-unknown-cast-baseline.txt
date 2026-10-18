@@ -404,8 +404,4 @@
 1	test/utils/image/ImageTransformer.test.ts
 1	test/utils/image/backend/SharpBackend.integration.test.ts
 1	test/utils/image/webp/WebpBinaryResolver.test.ts
-2	test/utils/ios-cmdline-tools/IosSnapshotBackend.test.ts
-1	test/utils/ios-cmdline-tools/XcodebuildClient.test.ts
-2	test/utils/ios-cmdline-tools/simctl-client.bootVerification.test.ts
-2	test/utils/ios-cmdline-tools/simctl.test.ts
 1	test/utils/iosRunnerRestartIsolation.test.ts

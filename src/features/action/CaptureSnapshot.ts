@@ -635,7 +635,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     }
   }
 
-  private async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
+  async getIosDeviceMetadata(): Promise<{ deviceType?: string; osVersion?: string }> {
     try {
       const deviceInfo = await this.simulatorSnapshotBackend.getDeviceInfo();
       if (!deviceInfo) {

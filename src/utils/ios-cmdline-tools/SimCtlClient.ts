@@ -1,3 +1,4 @@
+import { splitCommandArgs } from "./splitCommandArgs";
 import { buildSimctlArgs } from "./simctlArgs";
 import { parseSimctlDeviceList } from "./simctlDeviceList";
 import { parseSimctlRuntimes } from "./simctlRuntimes";
@@ -540,67 +541,6 @@ function defaultSpawnProcess(
   return hostProcessExecutor.spawn(command, args, options);
 }
 
-function splitCommandArgs(command: string): string[] {
-  const trimmed = command.trim();
-  if (!trimmed) {
-    throw new Error("Command cannot be empty");
-  }
-
-  const args: string[] = [];
-  let current = "";
-  // A token that was opened with a quote is real even when it is empty — `""`
-  // must survive as an empty argv entry. Dropping it shifts every later
-  // positional argument, which silently rewrites the command (issue #4196).
-  let started = false;
-  let quote: '"' | "'" | null = null;
-
-  const flush = (): void => {
-    if (started) {
-      args.push(current);
-      current = "";
-      started = false;
-    }
-  };
-
-  for (let i = 0; i < trimmed.length; i++) {
-    const char = trimmed[i];
-
-    if (char === "\\" && i + 1 < trimmed.length) {
-      current += trimmed[i + 1];
-      started = true;
-      i++;
-      continue;
-    }
-
-    if (quote) {
-      if (char === quote) {
-        quote = null;
-      } else {
-        current += char;
-      }
-      continue;
-    }
-
-    if (char === "'" || char === '"') {
-      quote = char;
-      started = true;
-      continue;
-    }
-
-    if (/\s/.test(char)) {
-      flush();
-      continue;
-    }
-
-    current += char;
-    started = true;
-  }
-
-  flush();
-
-  return args;
-}
-
 function normalizeIosVersion(
   runtimeId: string | undefined,
   osVersion: string | undefined,
@@ -736,6 +676,15 @@ function simulatorModel(
   profile: SimulatorDeviceTypeProfile | null,
 ): string | undefined {
   return model ?? profile?.modelIdentifier ?? undefined;
+}
+
+export interface SimCtlClientStaticTestHooks {
+  /** Clears the device-list cache, last-good snapshot, in-flight listing and boot bookkeeping. */
+  resetSharedState(): void;
+  /** Plants a fresh (within-TTL) device-list cache entry as an earlier caller would have. */
+  seedDeviceListCache(devices: DeviceInfo[], timestamp: number): void;
+  hasDeviceListCache(): boolean;
+  hasLastGoodDeviceList(): boolean;
 }
 
 export class SimCtlClient implements SimCtl {
@@ -2801,6 +2750,29 @@ export class SimCtlClient implements SimCtl {
    * running when this invalidation fires cannot repopulate the cache with the
    * obsolete snapshot it captured before the mutation (issue #6576).
    */
+  /**
+   * Typed view of the process-wide static state for tests, replacing casts into private
+   * statics. Production code must not use it.
+   */
+  static get testHooks(): SimCtlClientStaticTestHooks {
+    return {
+      resetSharedState: () => {
+        SimCtlClient.deviceListCache = null;
+        SimCtlClient.lastGoodDeviceList = null;
+        SimCtlClient.inFlightDeviceList = null;
+        SimCtlClient.inFlightDeviceListRequestSequence = null;
+        SimCtlClient.simulatorBoots.clear();
+        SimCtlClient.bootPresentationGenerations.clear();
+        SimCtlClient.simulatorAppPresentations.clear();
+      },
+      seedDeviceListCache: (devices, timestamp) => {
+        SimCtlClient.deviceListCache = { devices, timestamp, observedAt: timestamp };
+      },
+      hasDeviceListCache: () => SimCtlClient.deviceListCache !== null,
+      hasLastGoodDeviceList: () => SimCtlClient.lastGoodDeviceList !== null,
+    };
+  }
+
   static invalidateDeviceListCache(): void {
     SimCtlClient.deviceListCache = null;
     SimCtlClient.lastGoodDeviceList = null;

@@ -27,10 +27,10 @@ interface DaemonHealthInternals {
   httpIngress: { httpServer: { listening: boolean } | null };
   socketServer: FakeSocketServer | null;
   observationStreamHealth: FakeObservationStreamHealth;
-  healthCheckTimer: NodeJS.Timeout | null;
+  healthCheck: { stop(): Promise<boolean> } | null;
   lastDatabaseHealthFailure?: string;
   startHealthCheckTimer(): void;
-  stopHealthCheckTimer(): void;
+  stopHealthCheckTimer(): Promise<void>;
   attemptRecovery(failureKind?: string): Promise<void>;
 }
 
@@ -81,16 +81,24 @@ function buildDaemon(
 }
 
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  // A tick now ends only after its in-flight promise settles, so drain enough
+  // microtask turns for the whole async chain, not just the first await.
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+}
+
+async function advanceOneInterval(timer: FakeTimer): Promise<void> {
+  await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+  await flushMicrotasks();
 }
 
 describe("Daemon database health check", () => {
   let cleanup: { internals: DaemonHealthInternals; timer: FakeTimer } | null = null;
 
   afterEach(() => {
-    if (cleanup?.internals.healthCheckTimer) {
-      cleanup.timer.clearInterval(cleanup.internals.healthCheckTimer);
+    if (cleanup?.internals.healthCheck) {
+      void cleanup.internals.healthCheck.stop();
       cleanup = null;
     }
     if (DaemonState.getInstance().isInitialized()) {
@@ -250,7 +258,7 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
@@ -278,7 +286,7 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(exitCodes).toEqual([1]);
@@ -300,7 +308,7 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(recoveryCalls).toEqual([
@@ -324,15 +332,15 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     databaseHealthProbe.succeed();
-    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    await advanceOneInterval(timer);
 
     databaseHealthProbe.failWith(new Error("second failure"));
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(6);
@@ -385,17 +393,17 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     internals.httpIngress.httpServer = { listening: true };
-    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    await advanceOneInterval(timer);
 
     expect(databaseHealthProbe.checkCalls).toBe(1);
     expect(exitCodes).toEqual([]);
 
     for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
@@ -417,20 +425,20 @@ describe("Daemon database health check", () => {
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
 
-    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    await advanceOneInterval(timer);
 
     internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => false };
-    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    await advanceOneInterval(timer);
 
     internals.socketServer = { isListening: () => true };
-    await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+    await advanceOneInterval(timer);
 
     expect(databaseHealthProbe.checkCalls).toBe(1);
     expect(exitCodes).toEqual([]);
 
     for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
@@ -462,7 +470,7 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(observationHealthChecks).toBe(0);
@@ -500,7 +508,7 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(observationHealthChecks).toBe(0);
@@ -534,7 +542,7 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
-      await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
+      await advanceOneInterval(timer);
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(0);
@@ -566,7 +574,7 @@ describe("Daemon database health check", () => {
     expect(recoverCalls).toEqual([0]);
   });
 
-  test("clears the health interval through the injected timer", () => {
+  test("clears the health interval through the injected timer", async () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const daemon = buildDaemon(timer, databaseHealthProbe);
@@ -577,10 +585,10 @@ describe("Daemon database health check", () => {
     internals.startHealthCheckTimer();
     expect(timer.getPendingIntervalCount()).toBe(intervalCountBeforeHealthCheck + 1);
 
-    internals.stopHealthCheckTimer();
+    await internals.stopHealthCheckTimer();
 
     expect(timer.getPendingIntervalCount()).toBe(intervalCountBeforeHealthCheck);
-    expect(internals.healthCheckTimer).toBe(null);
+    expect(internals.healthCheck).toBe(null);
     cleanup = null;
   });
 });

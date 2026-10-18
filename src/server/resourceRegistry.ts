@@ -6,7 +6,11 @@ import {
 } from "@modelcontextprotocol/server";
 import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
-import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "./listChangedBroadcast";
+import {
+  ListChangedBroadcaster,
+  ResourceUpdatedBroadcaster,
+  type ServerRegistrationOptions,
+} from "./listChangedBroadcast";
 import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
 
 export interface ResourceReadContext {
@@ -251,6 +255,9 @@ class ResourceRegistryClass {
   // retained server would be last-writer-wins (issue #3223). Entries and their
   // subscriptions are pruned when a session's transport closes.
   private servers: Set<McpServer> = new Set();
+  // Per-request servers (#4678), tracked only until they close and never sent
+  // notifications; see ServerRegistrationOptions.
+  private ephemeralServers: Set<McpServer> = new Set();
   // Tail of each session's pending notification chain (per-session ordering).
   private deliveryTails: Map<McpServer, Promise<void>> = new Map();
   private subscriptions: Map<McpServer, Set<string>> = new Map();
@@ -374,15 +381,16 @@ class ResourceRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks (e.g. ToolRegistry's identical prune hook).
-  private trackServer(server: McpServer): void {
-    if (this.servers.has(server)) {
+  private trackServer(server: McpServer, ephemeral: boolean): void {
+    if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
-    this.servers.add(server);
+    const tracked = ephemeral ? this.ephemeralServers : this.servers;
+    tracked.add(server);
     const underlying = server.server;
     const existingOnClose = underlying.onclose;
     underlying.onclose = () => {
-      this.servers.delete(server);
+      tracked.delete(server);
       this.subscriptions.delete(server);
       this.readContexts.delete(server);
       existingOnClose?.();
@@ -393,9 +401,14 @@ class ResourceRegistryClass {
   registerWithServer(
     server: McpServer,
     getReadContext: (signal: AbortSignal) => ResourceReadContext = () => ({}),
+    options: ServerRegistrationOptions = {},
   ): void {
-    this.trackServer(server);
-    this.readContexts.set(server, getReadContext);
+    const ephemeral = options.ephemeral === true;
+    this.trackServer(server, ephemeral);
+    // Only notified servers need a context to resolve resource-update ownership.
+    if (!ephemeral) {
+      this.readContexts.set(server, getReadContext);
+    }
 
     // Set handler for listing resources
     server.server.setRequestHandler("resources/list", async () => {
@@ -675,9 +688,15 @@ class ResourceRegistryClass {
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.ephemeralServers.clear();
     this.deliveryTails.clear();
     this.readContexts.clear();
     this.subscriptions.clear();
+  }
+
+  /** Test-only: how many live servers are tracked, so suites can prove none leak. */
+  trackedServerCountsForTesting(): { notified: number; ephemeral: number } {
+    return { notified: this.servers.size, ephemeral: this.ephemeralServers.size };
   }
 
   // Clear all registered resources, templates, and subscriptions (for testing)

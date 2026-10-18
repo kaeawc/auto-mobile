@@ -10,6 +10,7 @@ import {
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import type { FeatureFlagKey } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
@@ -202,7 +203,12 @@ export function createDirectFrameRig(
         client.onRead?.();
         return [];
       },
-      setFlag: async (key: string, enabled: boolean) => ({ key, enabled }),
+      setFlag: async (key: FeatureFlagKey, enabled: boolean) => ({
+        key,
+        label: key,
+        description: key,
+        enabled,
+      }),
     } satisfies FeatureFlagAdmin,
     // The storage tools are enabled, so an `ide/*` storage frame reaches its ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },

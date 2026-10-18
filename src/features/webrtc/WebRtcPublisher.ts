@@ -16,6 +16,7 @@ import {
   type H264Profile,
 } from "./h264Level";
 import { parseTrickleIceMediaContexts, TrickleIceForwarder } from "./trickleIce";
+import type { PublisherPeerConnection, TrickleCandidate } from "./PublisherPeerConnection";
 import { WhipClient, type WhipClientOptions, type WhipSignalingClient } from "./WhipClient";
 import type { H264CaptureSourceMetrics } from "./H264CaptureSource";
 
@@ -75,7 +76,7 @@ export interface WebRtcPublisherConfig {
 
 export interface WebRtcPublisherDeps {
   /** Factory for peer connections (injectable for tests). */
-  createPeerConnection?: (iceServers: RTCIceServer[]) => RTCPeerConnection;
+  createPeerConnection?: (iceServers: RTCIceServer[]) => PublisherPeerConnection;
   /** Factory for the WHIP client (injectable for tests). */
   createWhipClient?: (options: WhipClientOptions) => WhipSignalingClient;
   timer?: Timer;
@@ -223,7 +224,7 @@ export type WebRtcStreamPublisher = Pick<
  */
 export class WebRtcPublisher {
   private readonly config: WebRtcPublisherConfig;
-  private readonly createPeerConnection: (iceServers: RTCIceServer[]) => RTCPeerConnection;
+  private readonly createPeerConnection: (iceServers: RTCIceServer[]) => PublisherPeerConnection;
   private readonly whip: WhipSignalingClient;
   private readonly timer: Timer;
   private readonly onBeforeEstablish?: () => Promise<void> | void;
@@ -237,7 +238,7 @@ export class WebRtcPublisher {
   private readonly audioEnabled: boolean;
   private readonly h264Profile: H264Profile;
 
-  private pc: RTCPeerConnection | null = null;
+  private pc: PublisherPeerConnection | null = null;
   private writer: RtpH264TrackWriter | null = null;
   private audioWriter: RtpPcmuTrackWriter | null = null;
   private resourceUrl: string | null = null;
@@ -395,7 +396,7 @@ export class WebRtcPublisher {
    * the peer connection identity so a PLI arriving for a superseded session (or
    * after close) is ignored.
    */
-  private handleKeyFrameRequest(pc: RTCPeerConnection): void {
+  private handleKeyFrameRequest(pc: PublisherPeerConnection): void {
     if (this.closed || this.pc !== pc || !this.onKeyFrameRequest) {
       return;
     }
@@ -606,7 +607,7 @@ export class WebRtcPublisher {
     }
   }
 
-  private watchConnectionState(pc: RTCPeerConnection): void {
+  private watchConnectionState(pc: PublisherPeerConnection): void {
     pc.connectionStateChange.subscribe((state) => {
       if (this.closed || this.pc !== pc) {
         return;
@@ -631,7 +632,7 @@ export class WebRtcPublisher {
   }
 
   /** Start capture (once per session) now that media can actually flow. */
-  private fireConnected(pc: RTCPeerConnection): void {
+  private fireConnected(pc: PublisherPeerConnection): void {
     if (this.connectedFired || this.pc !== pc || this.closed) {
       return;
     }
@@ -664,7 +665,7 @@ export class WebRtcPublisher {
    * also caught after capture startup completes. On a stall, route through
    * reconnect and manager-directed capture recovery.
    */
-  private startFrameWatchdog(pc: RTCPeerConnection): void {
+  private startFrameWatchdog(pc: PublisherPeerConnection): void {
     const timeout = this.config.frameStallTimeoutMs;
     if (!timeout || timeout <= 0) {
       return;
@@ -680,7 +681,7 @@ export class WebRtcPublisher {
   }
 
   /** Give an accepted keyframe recovery one bounded frame-stall interval to produce its IDR. */
-  private resetFrameWatchdogDeadline(pc: RTCPeerConnection): void {
+  private resetFrameWatchdogDeadline(pc: PublisherPeerConnection): void {
     if (
       !this.frameWatchdogHandle ||
       this.closed ||
@@ -693,7 +694,7 @@ export class WebRtcPublisher {
     this.frameWatchdogLastAdvanceMs = this.timer.now();
   }
 
-  private checkFrameProgress(pc: RTCPeerConnection, timeoutMs: number): void {
+  private checkFrameProgress(pc: PublisherPeerConnection, timeoutMs: number): void {
     if (this.closed || this.establishing || this.pc !== pc || pc.connectionState !== "connected") {
       return;
     }
@@ -775,27 +776,10 @@ export class WebRtcPublisher {
    * buffered by the forwarder until the WHIP resource URL is known (set right
    * after publish), then PATCHed as `application/trickle-ice-sdpfrag`.
    */
-  private subscribeTrickle(pc: RTCPeerConnection): () => void {
-    const pendingCandidates: Array<
-      | {
-          candidate: string;
-          sdpMid?: string;
-          sdpMLineIndex?: number;
-        }
-      | null
-      | undefined
-    > = [];
+  private subscribeTrickle(pc: PublisherPeerConnection): () => void {
+    const pendingCandidates: TrickleCandidate[] = [];
     let forwarder: TrickleIceForwarder | null = null;
-    const addCandidate = (
-      candidate:
-        | {
-            candidate: string;
-            sdpMid?: string;
-            sdpMLineIndex?: number;
-          }
-        | null
-        | undefined,
-    ): void => {
+    const addCandidate = (candidate: TrickleCandidate): void => {
       if (!forwarder) {
         pendingCandidates.push(candidate);
         return;
@@ -838,7 +822,7 @@ export class WebRtcPublisher {
     };
   }
 
-  private async waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
+  private async waitForIceGathering(pc: PublisherPeerConnection): Promise<void> {
     if (pc.iceGatheringState === "complete") {
       this.onLifecycleEvent?.("ice_gathering_complete");
       return;

@@ -67,7 +67,6 @@
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
 2322	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts
-1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
 1508	src/server/appTools.ts

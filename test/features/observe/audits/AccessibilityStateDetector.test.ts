@@ -3,6 +3,7 @@ import { AccessibilityStateDetector } from "../../../../src/features/observe/aud
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../../src/utils/constants";
+import { createUnknownPlatformDeviceForTest } from "../observeScreenTestBuilders";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -154,7 +155,7 @@ describe("AccessibilityStateDetector", () => {
 
   test("detection failure does not pollute result.errors", async () => {
     const detector = new AccessibilityStateDetector({
-      device: { ...androidDevice, platform: "unknown" as any },
+      device: createUnknownPlatformDeviceForTest(androidDevice),
       adb: new FakeAdbExecutor(),
     });
     const result = makeResult();

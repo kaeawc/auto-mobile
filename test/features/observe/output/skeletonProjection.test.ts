@@ -12,6 +12,7 @@ import {
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { createHierarchyForTest } from "../observeScreenTestBuilders";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
@@ -1031,7 +1032,7 @@ describe("toSkeleton — acceptance criteria", () => {
       // sits at disjoint bounds. The text is NOT a tree descendant of the
       // clickable, and geometry does not contain it either — so it must not be
       // hoisted onto the clickable.
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: { left: 0, top: 0, right: 1080, bottom: 1080 },
@@ -1044,15 +1045,17 @@ describe("toSkeleton — acceptance criteria", () => {
               {
                 // Bounds-less wrapper (skipped by parseNodeBounds) — its child
                 // must reparent to the root, not to `clickable-a`.
-                node: {
-                  text: "Faraway",
-                  bounds: { left: 200, top: 200, right: 250, bottom: 250 },
-                },
+                node: [
+                  {
+                    text: "Faraway",
+                    bounds: { left: 200, top: 200, right: 250, bottom: 250 },
+                  },
+                ],
               },
             ],
           },
         },
-      } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+      });
 
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
       const { skeleton, context } = projectSkeleton(elements!);
@@ -1459,7 +1462,7 @@ describe("toSkeleton — acceptance criteria", () => {
       // Three rows sharing a resource-id, built through the REAL collector so
       // provenance.enter is the real DFS counter — the same document order
       // tapOn's index resolution walks for an explicit index.
-      const viewHierarchy = {
+      const viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
@@ -1482,7 +1485,7 @@ describe("toSkeleton — acceptance criteria", () => {
             ],
           },
         },
-      } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+      });
 
       const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
       const skeleton = toSkeleton(elements!);
@@ -1494,11 +1497,9 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const selector = new ResolverElementSelector();
       for (const entry of dupEntries) {
-        const result = selector.selectByResourceId(
-          viewHierarchy as unknown as ViewHierarchyResult,
-          "com.example:id/onoff",
-          { index: entry.index },
-        );
+        const result = selector.selectByResourceId(viewHierarchy, "com.example:id/onoff", {
+          index: entry.index,
+        });
         expect(result.element).not.toBeNull();
         const chosenBounds = result.element?.bounds;
         expect([

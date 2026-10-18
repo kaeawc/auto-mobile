@@ -44,8 +44,8 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => null,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -58,8 +58,8 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => enabledConfig,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -72,7 +72,7 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => enabledConfig,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -85,7 +85,7 @@ describe("AccessibilityAuditor", () => {
       getConfig: () => enabledConfig,
     });
     const result = makeResult({
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      viewHierarchy: { hierarchy: { node: {} } },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityAudit).toBeUndefined();
@@ -102,8 +102,8 @@ describe("AccessibilityAuditor", () => {
       },
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: { node: {} } } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();

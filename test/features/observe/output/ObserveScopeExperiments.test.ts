@@ -26,6 +26,12 @@ interface Node {
   clickable?: boolean | string;
   bounds?: { left: number; top: number; right: number; bottom: number } | number[];
   node?: Node[];
+  omittedDescendants?: number;
+}
+
+/** Fixtures also use the compact bounds tuple, which the model type does not list. */
+function asHierarchyNode(node: Node): ViewHierarchyNode {
+  return node as ViewHierarchyNode;
 }
 
 const SYSUI = "com.android.systemui";
@@ -92,7 +98,7 @@ function androidFixture(): ObserveResult {
     activeWindow: { appId: APP } as ObserveResult["activeWindow"],
     viewHierarchy: {
       packageName: APP,
-      hierarchy: { node: root as unknown as ViewHierarchyNode },
+      hierarchy: { node: asHierarchyNode(root) },
     },
     elements: {
       clickable: [
@@ -324,7 +330,7 @@ describe("scopeToFocus", () => {
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
         packageName: "com.example.iosapp",
-        hierarchy: { node: iosRoot as unknown as ViewHierarchyNode },
+        hierarchy: { node: asHierarchyNode(iosRoot) },
       },
     } as ObserveResult;
     const before = countNodes(roots(obs));
@@ -453,7 +459,7 @@ describe("toOverview", () => {
     expect(ids).toContain(HEADER);
     const list = findById(result, LIST)!;
     expect(list.node).toBeUndefined(); // both leaf items collapsed
-    expect((list as unknown as { omittedDescendants?: number }).omittedDescendants).toBe(2);
+    expect(list.omittedDescendants).toBe(2);
     // the anonymous `View` leaf under the app root has no id/children -> dropped.
     expect(result.elements).toBeUndefined();
   });

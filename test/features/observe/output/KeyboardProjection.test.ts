@@ -545,9 +545,8 @@ describe("IME window membership (#6871)", () => {
     const source = sharedPackageObservation();
     // Drop every key: the capture still vouches for the IME, but no collected
     // node can place its window, so nothing may be folded by package alone.
-    (
-      source.viewHierarchy as unknown as { windows: { hierarchy: { node: ViewHierarchyNode } }[] }
-    ).windows[0].hierarchy.node.node = [];
+    // The fixture's IME window root is a single node object (the model types roots as arrays).
+    Object.assign(source.viewHierarchy!.windows![0].hierarchy!.node!, { node: [] });
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",

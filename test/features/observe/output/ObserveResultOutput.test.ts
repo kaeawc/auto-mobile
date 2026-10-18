@@ -9,12 +9,12 @@ import {
 import {
   loadAndroidHomeObserve,
   loadAndroidRawTrimCandidatesObserve,
+  loadDiffFixture,
   loadIosFractionalObserve,
   loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
-import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 import { partialFixture, partialFixtureArray } from "../../../helpers/partialFixture";
 import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
 
@@ -61,6 +61,22 @@ function collectNodes(node: ViewHierarchyNode | undefined): ViewHierarchyNode[] 
 /** All hierarchy nodes reachable from an observe result's viewHierarchy. */
 function allHierarchyNodes(obs: ObserveResult): ViewHierarchyNode[] {
   return toNodeArray(obs.viewHierarchy?.hierarchy?.node).flatMap(collectNodes);
+}
+
+/** The sanitized tree's nodes as open attribute bags (a ViewHierarchyNode is a plain object type). */
+function attributesOf(node: ViewHierarchyNode | undefined): Record<string, unknown> {
+  if (!node) {
+    throw new Error("expected a hierarchy node");
+  }
+  return node;
+}
+
+/** Roots the sanitizer leaves as an array (multi-window captures). */
+function rootNodeList(node: ViewHierarchyNode | undefined): Array<Record<string, unknown>> {
+  if (!Array.isArray(node)) {
+    throw new Error("expected an array of root nodes");
+  }
+  return node;
 }
 
 const DROP_NONE = { dropElements: false } as const;
@@ -443,8 +459,7 @@ describe("sanitizeObserveResult", () => {
           },
         },
       };
-      (obs.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>)["resource-id"] =
-        "android:id/content";
+      attributesOf(obs.viewHierarchy!.hierarchy!.node)["resource-id"] = "android:id/content";
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
       expect(out.viewHierarchy!.hierarchy!.node!["view-id"]).toBe("distinct-uuid");
@@ -483,8 +498,7 @@ describe("sanitizeObserveResult", () => {
       };
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
-      const [covered, overlay, unreferenced] = out.viewHierarchy!.hierarchy!
-        .node as unknown as Array<Record<string, unknown>>;
+      const [covered, overlay, unreferenced] = rootNodeList(out.viewHierarchy!.hierarchy!.node);
 
       expect(covered.occludedByViewId).toBe("id/overlay");
       expect(covered["view-id"]).toBeUndefined();
@@ -514,7 +528,7 @@ describe("sanitizeObserveResult", () => {
       };
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
-      const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const node = attributesOf(out.viewHierarchy!.hierarchy!.node);
 
       // Default-false booleans (string or boolean form) are dropped.
       expect(node).not.toHaveProperty("clickable");
@@ -546,14 +560,8 @@ describe("sanitizeObserveResult", () => {
 
       const enabledTrue = sanitizeObserveResult(makeObs("true"), DROP_NONE);
       const enabledFalse = sanitizeObserveResult(makeObs("false"), DROP_NONE);
-      const trueNode = enabledTrue.viewHierarchy!.hierarchy!.node as unknown as Record<
-        string,
-        unknown
-      >;
-      const falseNode = enabledFalse.viewHierarchy!.hierarchy!.node as unknown as Record<
-        string,
-        unknown
-      >;
+      const trueNode = attributesOf(enabledTrue.viewHierarchy!.hierarchy!.node);
+      const falseNode = attributesOf(enabledFalse.viewHierarchy!.hierarchy!.node);
 
       // enabled defaults to true → absence is lossless; a disabled control is high-signal.
       expect(trueNode).not.toHaveProperty("enabled");
@@ -572,7 +580,7 @@ describe("sanitizeObserveResult", () => {
     test("measurably shrinks false booleans over a real raw hierarchy capture", () => {
       const obs = loadAndroidRawTrimCandidatesObserve();
       for (const node of allHierarchyNodes(obs)) {
-        const attrs = node as unknown as Record<string, unknown>;
+        const attrs = attributesOf(node);
         delete attrs.enabled;
         for (const [key, value] of Object.entries(attrs)) {
           if (value === "") {
@@ -581,7 +589,7 @@ describe("sanitizeObserveResult", () => {
         }
       }
       const falseBooleanCandidates = allHierarchyNodes(obs).filter((node) => {
-        const attrs = node as unknown as Record<string, unknown>;
+        const attrs = attributesOf(node);
         return DEFAULT_FALSE_BOOLEAN_KEYS.some((key) => attrs[key] === "false");
       });
       expect(falseBooleanCandidates.length).toBeGreaterThan(0);
@@ -595,14 +603,14 @@ describe("sanitizeObserveResult", () => {
     test("measurably shrinks empty-string fields over a real raw hierarchy capture", () => {
       const obs = loadAndroidRawTrimCandidatesObserve();
       for (const node of allHierarchyNodes(obs)) {
-        const attrs = node as unknown as Record<string, unknown>;
+        const attrs = attributesOf(node);
         delete attrs.enabled;
         for (const key of DEFAULT_FALSE_BOOLEAN_KEYS) {
           delete attrs[key];
         }
       }
       const emptyStringCandidates = allHierarchyNodes(obs).filter((node) =>
-        Object.values(node as unknown as Record<string, unknown>).some((value) => value === ""),
+        Object.values(attributesOf(node)).some((value) => value === ""),
       );
       expect(emptyStringCandidates.length).toBeGreaterThan(0);
 
@@ -615,7 +623,7 @@ describe("sanitizeObserveResult", () => {
     test("measurably shrinks enabled=true over a real raw hierarchy capture", () => {
       const obs = loadAndroidRawTrimCandidatesObserve();
       for (const node of allHierarchyNodes(obs)) {
-        const attrs = node as unknown as Record<string, unknown>;
+        const attrs = attributesOf(node);
         for (const key of DEFAULT_FALSE_BOOLEAN_KEYS) {
           delete attrs[key];
         }
@@ -626,7 +634,7 @@ describe("sanitizeObserveResult", () => {
         }
       }
       const enabledTrueCandidates = allHierarchyNodes(obs).filter(
-        (node) => (node as unknown as Record<string, unknown>).enabled === "true",
+        (node) => attributesOf(node).enabled === "true",
       );
       expect(enabledTrueCandidates.length).toBeGreaterThan(0);
 
@@ -782,7 +790,7 @@ describe("sanitizeObserveResult", () => {
         },
       };
       const out = sanitizeObserveResult(obs, COMPACT);
-      const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const node = attributesOf(out.viewHierarchy!.hierarchy!.node);
       expect(node.bounds).toBeUndefined();
     });
 
@@ -807,7 +815,7 @@ describe("sanitizeObserveResult", () => {
         },
       };
       const out = sanitizeObserveResult(obs, COMPACT);
-      const roots = out.viewHierarchy!.hierarchy!.node as unknown as Array<Record<string, unknown>>;
+      const roots = rootNodeList(out.viewHierarchy!.hierarchy!.node);
       expect(roots[0].bounds).toEqual([1, 2, 3, 4]);
       expect((roots[0].node as Array<Record<string, unknown>>)[0].bounds).toEqual([5, 6, 7, 8]);
       expect(roots[1].bounds).toEqual([9, 10, 11, 12]);
@@ -838,7 +846,7 @@ describe("sanitizeObserveResult", () => {
         trimNodes: true,
         compact: true,
       });
-      const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const node = attributesOf(out.viewHierarchy!.hierarchy!.node);
       expect(node.bounds).toEqual([0, 0, 100, 200]);
       expect(node["view-id"]).toBeUndefined();
       expect(node.clickable).toBeUndefined();
@@ -1176,10 +1184,11 @@ describe("sanitizeObserveResult", () => {
       // `long_press_card` fixture (an exact-fill content-desc descendant) through
       // the full sanitize path: if provenance is lost, the exact-fill child is
       // dropped and the card comes back label:"Long press me" (geometry fallback).
+      const scrollBeforeFixture = loadDiffFixture("scroll-before");
       const observe: ObserveResult = {
-        ...(scrollBeforeFixture as unknown as ObserveResult),
+        ...scrollBeforeFixture,
         elements: new DefaultObserveElementCollector().collect(
-          scrollBeforeFixture.viewHierarchy as NonNullable<ObserveResult["viewHierarchy"]>,
+          scrollBeforeFixture.viewHierarchy!,
           "android",
         ),
       };
@@ -1258,8 +1267,7 @@ describe("sanitizeObserveResult", () => {
           },
         },
       };
-      return sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!
-        .node as unknown as Record<string, unknown>;
+      return attributesOf(sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!.node);
     }
 
     test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", (key) => {
@@ -1428,12 +1436,12 @@ describe("sanitizeObserveResult", () => {
       "a 0-valued audit %s still drops redundant gfxMetrics.%s",
       (auditKey, gfxKey) => {
         const { observe } = loadAndroidHomeObserve();
-        const m = observe.performanceAudit!.metrics as unknown as Record<string, unknown>;
+        const metrics = observe.performanceAudit!.metrics;
         // Null every frame replacement so ONLY the tested field's 0 can drive a drop.
         for (const [ak] of GFX_AUDIT_PAIRS) {
-          m[ak] = null;
+          Object.assign(metrics, { [ak]: null });
         }
-        m[auditKey] = 0; // a genuine measurement of zero, not "no data"
+        Object.assign(metrics, { [auditKey]: 0 }); // a genuine measurement of zero, not "no data"
         observe.gfxMetrics = fullGfxMetrics();
 
         const out = sanitizeObserveResult(observe, DROP_NONE);
@@ -1499,8 +1507,7 @@ describe("sanitizeObserveResult", () => {
           hierarchy: { node: partialFixture({ "resource-id": "r", ...attrs, node: [], $: {} }) },
         },
       };
-      return sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!
-        .node as unknown as Record<string, unknown>;
+      return attributesOf(sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node);
     }
 
     const UNICODE_TEXTS: ReadonlyArray<readonly [string, string]> = [

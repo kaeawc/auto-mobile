@@ -25,10 +25,10 @@ function makeDevice(): BootedDevice {
 
 class FakeBackStack implements BackStack {
   configured: BackStackInfo = {
+    depth: 0,
     activities: [],
     tasks: [],
-    currentActivity: null,
-  } as unknown as BackStackInfo;
+  };
   shouldFail: Error | null = null;
   async execute(): Promise<BackStackInfo> {
     if (this.shouldFail) {
@@ -129,7 +129,7 @@ describe("DeviceStateCollector", () => {
 
     test("does not append error on failure (logs only)", async () => {
       // Swap getWakefulness to throw
-      (fakeAdb as any).getWakefulness = async () => {
+      fakeAdb.getWakefulness = async () => {
         throw new Error("wake fail");
       };
       const result = makeResult();
@@ -162,7 +162,7 @@ describe("DeviceStateCollector", () => {
     });
 
     test("does not append error on failure (logs only)", async () => {
-      (fakeAdb as any).getDeviceLock = async () => {
+      fakeAdb.getDeviceLock = async () => {
         throw new Error("lock fail");
       };
       const result = makeResult();

@@ -1083,7 +1083,7 @@ key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
 non-default display is sent as the panel's logical `displayId` and needs a
-CtrlProxy advertising `prototype_display_id_v1`; an older APK is refused with an
+CtrlProxy advertising `prototype_display_id_v2`; an older APK is refused with an
 error rather than showing the prototype on the default display. An unknown or
 disconnected panel is refused with the usual disconnected-panel guidance. If the
 panel disappears while the prototype is up (fold), the device dismisses it with

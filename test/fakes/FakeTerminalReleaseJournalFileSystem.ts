@@ -20,7 +20,8 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
   listNames(dirPath: string): string[] {
     return Array.from(this.files.keys())
       .filter((filePath) => path.dirname(filePath) === dirPath)
-      .map((filePath) => path.basename(filePath));
+      .map((filePath) => path.basename(filePath))
+      .sort();
   }
 
   readText(filePath: string): string | undefined {

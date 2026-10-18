@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../src/models";
-import type { ObserveScreen } from "../../src/features/observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../../src/features/observe/interfaces/ObserveScreen";
 
 export interface ObserveScreenHandle {
   screen: ObserveScreen;
@@ -27,9 +30,19 @@ export function runObserveScreenContract(name: string, make: () => ObserveScreen
         handle.dispose?.();
       }
     };
-    const observe = (handle: ObserveScreenHandle, marker: number, skipCache = false) => {
+    const observe = (
+      handle: ObserveScreenHandle,
+      marker: number,
+      skipCache = false,
+      extra: ObserveScreenExecuteOptions = {},
+    ) => {
       handle.present(marker);
-      return handle.screen.execute({ skipScreenshot: true, skipBackStack: true, skipCache });
+      return handle.screen.execute({
+        skipScreenshot: true,
+        skipBackStack: true,
+        skipCache,
+        ...extra,
+      });
     };
 
     test("execute reports the screen it observed", async function () {
@@ -83,6 +96,36 @@ export function runObserveScreenContract(name: string, make: () => ObserveScreen
 
         expect(intermediate.updatedAt).toBe(1500);
         expect(cached.updatedAt).toBe(1000);
+      });
+    });
+
+    const nonCachingModes: Array<[string, ObserveScreenExecuteOptions]> = [
+      ["observerMode", { observerMode: true }],
+      ["skipRecompositionTracking", { skipRecompositionTracking: true }],
+      ["hierarchyOnly", { hierarchyOnly: true }],
+    ];
+    for (const [label, extra] of nonCachingModes) {
+      test(`${label} leaves the previous cached observation in place`, async function () {
+        await withScreen(async (handle) => {
+          await observe(handle, 1000);
+          await observe(handle, 1500, false, extra);
+
+          const cached = await handle.screen.getMostRecentCachedObserveResult();
+
+          expect(cached.updatedAt).toBe(1000);
+        });
+      });
+    }
+
+    test("cacheObserveResult replaces what a cache read returns", async function () {
+      await withScreen(async (handle) => {
+        await observe(handle, 1000);
+        const selected = await observe(handle, 1500, true);
+
+        await handle.screen.cacheObserveResult(selected);
+        const cached = await handle.screen.getMostRecentCachedObserveResult();
+
+        expect(cached.updatedAt).toBe(1500);
       });
     });
 

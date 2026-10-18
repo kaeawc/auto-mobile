@@ -126,21 +126,10 @@ export interface PutAppFileInput {
   contentBase64?: string;
 }
 
-export interface PutAppFileArgs {
-  target: PutAppFileTarget;
-  files: PutAppFileInput[];
-  userId?: number;
-  /** Internal compatibility marker populated by the legacy-shape preprocessor. */
-  legacySingleFile?: boolean;
-  platform?: Platform;
-  deviceId?: string;
-  device?: string;
-  sessionUuid?: string;
-  keepScreenAwake?: boolean;
-}
+export type PutAppFileArgs = z.output<typeof putAppFileSchema>;
 
 /** The single-file app-container request accepted while callers migrate to {@link PutAppFileArgs}. */
-export interface LegacyPutAppFileArgs {
+export interface LegacyPutAppFileInput {
   appId: string;
   container: AppFileContainer;
   userId?: number;

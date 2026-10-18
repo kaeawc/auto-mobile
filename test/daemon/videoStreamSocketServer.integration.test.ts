@@ -28,7 +28,7 @@ import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IosScree
 import {
   permissiveDeviceAdmissionGate,
   type DeviceAdmissionGate,
-} from "../../src/daemon/deviceAdmissionGate";
+} from "../../src/utils/deviceAdmissionGate";
 import { ActionableError } from "../../src/models";
 import {
   WEBRTC_ANDROID_FPS_DEFAULT,

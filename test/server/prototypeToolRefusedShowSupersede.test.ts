@@ -42,7 +42,7 @@ describe("a refused show must not supersede a valid in-flight show of the same i
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
     // No prototype_appearance_v1: a pinned appearance is refused.
-    client.setSupportedCommands(["prototype_display_id_v1", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
+    client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
     unsubscribe = registerPrototypeTools({

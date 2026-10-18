@@ -5,6 +5,8 @@ import {
   type SessionDeviceStateRestoreOptions,
 } from "../../src/daemon/sessionDeviceStateRestore";
 import type { IosAppNetworkRuleRestorer } from "../../src/daemon/iosAppNetworkLease";
+import type { RestoreSignalOptions } from "../../src/daemon/deviceStateRestoreQueue";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
@@ -54,6 +56,8 @@ class FakeHost implements SessionDeviceStateRestoreHost {
   expiries: Array<{ session: Session; clearIfOwned: () => void }> = [];
   tracked: string[] = [];
   constructor(readonly timer: FakeTimer) {}
+  /** What each dispatch was handed: the teardown step and the explicit scope signal. */
+  dispatches: Array<{ teardownStep?: number; scope?: AbortSignal }> = [];
   dispatchDeviceRestore(
     _deviceId: string,
     restore: (
@@ -61,9 +65,17 @@ class FakeHost implements SessionDeviceStateRestoreHost {
       identitySignal: AbortSignal,
       acknowledge: () => void,
     ) => Promise<void>,
+    _generation?: number,
+    teardownStep?: number,
+    options?: RestoreSignalOptions,
   ): Promise<void> {
+    this.dispatches.push({ teardownStep, scope: options?.signal });
     const controller = new AbortController();
-    return restore(controller.signal, controller.signal, () => {});
+    // Like the real dispatch: the explicit scope, never the ambient signal, bounds the restore.
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    return restore(signal, controller.signal, () => {});
   }
   restoreGeneration(): number {
     return 0;
@@ -192,7 +204,7 @@ async function create(restoreResult: (call: number) => Promise<void>) {
 
 test("a successful screen-reader restore clears the slot and leaves no pending work", async () => {
   const h = await create(async () => {});
-  const { pending } = await h.restore.getPendingScreenReaderRestoration(h.session, null);
+  const { pending } = await h.restore.getPendingScreenReaderRestoration(h.session, null, {});
   expect(pending).toBeNull();
   expect(h.calls).toEqual([{ deviceId: "emulator-5554", previousEnabled: false }]);
   expect(h.session.cacheData.screenReader).toBeUndefined();
@@ -202,8 +214,8 @@ test("a successful screen-reader restore clears the slot and leaves no pending w
 test("a concurrent ask for the same baseline joins the one restore", async () => {
   const gate = Promise.withResolvers<void>();
   const h = await create(() => gate.promise);
-  const first = h.restore.getPendingScreenReaderRestoration(h.session, null);
-  const second = h.restore.getPendingScreenReaderRestoration(h.session, null);
+  const first = h.restore.getPendingScreenReaderRestoration(h.session, null, {});
+  const second = h.restore.getPendingScreenReaderRestoration(h.session, null, {});
   await flush();
   expect(h.calls).toHaveLength(1);
   gate.resolve();
@@ -215,7 +227,7 @@ test("a failing screen-reader restore retries twice, then abandons and remembers
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     const h = await create(() => Promise.reject(new Error("toggle failed")));
-    const { pending } = await h.restore.getPendingScreenReaderRestoration(h.session, null);
+    const { pending } = await h.restore.getPendingScreenReaderRestoration(h.session, null, {});
     expect(pending).not.toBeNull();
     for (let i = 0; i < 2; i++) {
       await flush();
@@ -484,7 +496,7 @@ describe("rotation family", () => {
 
   test("a successful rotation restore clears the slot", async () => {
     const h = await createRotation(async () => {});
-    const { pending } = await h.restore.getPendingRotationRestoration(h.session, null);
+    const { pending } = await h.restore.getPendingRotationRestoration(h.session, null, {});
     expect(pending).toBeNull();
     expect(h.calls()).toBe(1);
     expect(h.session.cacheData.rotation).toBeUndefined();
@@ -496,7 +508,7 @@ describe("rotation family", () => {
       const managed = Object.assign(new Error("managed"), { details: { retryable: false } });
       const h = await createRotation(() => Promise.reject(managed));
       const baseline = h.session.cacheData.rotation;
-      const { pending } = await h.restore.getPendingRotationRestoration(h.session, null);
+      const { pending } = await h.restore.getPendingRotationRestoration(h.session, null, {});
       await pending;
       expect(h.calls()).toBe(1);
       expect(h.restore.abandonedRotations.get("emulator-5556")).toBe(baseline);
@@ -535,7 +547,7 @@ describe("clock family", () => {
 
   test("a successful clock restore runs through the injected registry and clears the slot", async () => {
     const h = await createClock(async () => {});
-    const { pending } = await h.restore.getPendingClockRestoration(h.session, null);
+    const { pending } = await h.restore.getPendingClockRestoration(h.session, null, {});
     expect(pending).toBeNull();
     expect(h.calls()).toBe(1);
     expect(h.session.cacheData.clock).toBeUndefined();
@@ -548,7 +560,7 @@ describe("clock family", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await createClock(() => Promise.reject(new Error("adb offline")));
-      const { pending } = await h.restore.getPendingClockRestoration(h.session, null);
+      const { pending } = await h.restore.getPendingClockRestoration(h.session, null, {});
       expect(pending).not.toBeNull();
       expect(h.host.healthEvents).toContain("mark:emulator-5558:clock");
       for (let i = 0; i < 6; i++) {
@@ -599,13 +611,17 @@ describe("keep-awake family", () => {
     const h = await createKeepAwake(async () => ({ status: "restored" }));
     delete h.session.cacheData.keepScreenAwake;
     expect(h.restore.keepScreenAwakeRestoreTarget(h.session)).toBeNull();
-    expect((await h.restore.restoreKeepScreenAwakeBestEffort(h.session)).pending).toBeNull();
+    expect(
+      (await h.restore.restoreKeepScreenAwakeBestEffort(h.session, () => false, {})).pending,
+    ).toBeNull();
     expect(h.calls()).toBe(0);
   });
 
   test("a restored keep-awake state clears its health marker and records no report", async () => {
     const h = await createKeepAwake(async () => ({ status: "restored" }));
-    expect((await h.restore.restoreKeepScreenAwakeBestEffort(h.session)).pending).toBeNull();
+    expect(
+      (await h.restore.restoreKeepScreenAwakeBestEffort(h.session, () => false, {})).pending,
+    ).toBeNull();
     expect(h.calls()).toBe(1);
     expect(h.host.healthEvents).toEqual(["clear:emulator-5554:keep-screen-awake"]);
     expect(h.restore.getKeepAwakeRestoreReport("s1")).toBeUndefined();
@@ -618,7 +634,7 @@ describe("keep-awake family", () => {
         status: "restored_to_baseline",
         settings: [{ setting: "screen_off_timeout", value: "60000" }],
       }));
-      await h.restore.restoreKeepScreenAwakeBestEffort(h.session);
+      await h.restore.restoreKeepScreenAwakeBestEffort(h.session, () => false, {});
       expect(h.restore.getKeepAwakeRestoreReport("s1")?.status).toBe("restored_to_baseline");
       h.restore.forgetKeepAwakeRestoreReport("s1");
       expect(h.restore.getKeepAwakeRestoreReport("s1")).toBeUndefined();
@@ -634,7 +650,11 @@ describe("keep-awake family", () => {
         status: "failed",
         failures: [{ setting: "svc_stayon", error: "adb offline" }],
       }));
-      const { pending } = await h.restore.restoreKeepScreenAwakeBestEffort(h.session);
+      const { pending } = await h.restore.restoreKeepScreenAwakeBestEffort(
+        h.session,
+        () => false,
+        {},
+      );
       expect(pending).not.toBeNull();
       for (let i = 0; i < 2; i++) {
         await flush();
@@ -656,7 +676,11 @@ describe("keep-awake family", () => {
         status: "failed",
         failures: [{ setting: "svc_stayon", error: "adb offline" }],
       }));
-      const { pending } = await h.restore.restoreKeepScreenAwakeBestEffort(h.session, () => true);
+      const { pending } = await h.restore.restoreKeepScreenAwakeBestEffort(
+        h.session,
+        () => true,
+        {},
+      );
       await pending;
       expect(h.calls()).toBe(1);
       expect(h.host.abandoned).not.toContain("emulator-5554:keep-screen-awake");
@@ -694,7 +718,9 @@ describe("biometric family", () => {
     const h = await createBiometric(async () => {});
     delete h.session.cacheData.biometricEnrollment;
     expect(h.restore.biometricRestoreTarget(h.session)).toBeNull();
-    expect((await h.restore.restoreBiometricEnrollmentBestEffort(h.session)).pending).toBeNull();
+    expect(
+      (await h.restore.restoreBiometricEnrollmentBestEffort(h.session, {})).pending,
+    ).toBeNull();
     expect(h.restored).toEqual([]);
   });
 
@@ -710,7 +736,9 @@ describe("biometric family", () => {
 
   test("a successful restore clears the health marker and leaves nothing pending", async () => {
     const h = await createBiometric(async () => {});
-    expect((await h.restore.restoreBiometricEnrollmentBestEffort(h.session)).pending).toBeNull();
+    expect(
+      (await h.restore.restoreBiometricEnrollmentBestEffort(h.session, {})).pending,
+    ).toBeNull();
     expect(h.restored).toEqual(["not_enrolled"]);
     expect(h.host.healthEvents).toContain("clear:ios-sim-1:biometric-enrollment");
   });
@@ -719,7 +747,7 @@ describe("biometric family", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await createBiometric(() => Promise.reject(new Error("simctl failed")));
-      const { pending } = await h.restore.restoreBiometricEnrollmentBestEffort(h.session);
+      const { pending } = await h.restore.restoreBiometricEnrollmentBestEffort(h.session, {});
       expect(pending).not.toBeNull();
       for (let i = 0; i < 2; i++) {
         await flush();
@@ -736,7 +764,7 @@ describe("biometric family", () => {
   test("a restore sequenced after draining setups waits for them", async () => {
     const h = await createBiometric(async () => {});
     const gate = Promise.withResolvers<void>();
-    const { pending } = await h.restore.getPendingBiometricRestoration(h.session, gate.promise);
+    const { pending } = await h.restore.getPendingBiometricRestoration(h.session, gate.promise, {});
     await flush();
     expect(h.restored).toEqual([]);
     gate.resolve();
@@ -776,13 +804,13 @@ describe("network-condition family", () => {
     const h = await createNetwork(async () => {});
     delete h.session.cacheData.networkCondition;
     expect(h.restore.networkConditionRestoreTarget(h.session)).toBeNull();
-    expect((await h.restore.restoreNetworkConditionBestEffort(h.session)).pending).toBeNull();
+    expect((await h.restore.restoreNetworkConditionBestEffort(h.session, {})).pending).toBeNull();
     expect(h.calls()).toBe(0);
   });
 
   test("a successful restore clears the health marker", async () => {
     const h = await createNetwork(async () => {});
-    expect((await h.restore.restoreNetworkConditionBestEffort(h.session)).pending).toBeNull();
+    expect((await h.restore.restoreNetworkConditionBestEffort(h.session, {})).pending).toBeNull();
     expect(h.calls()).toBe(1);
     expect(h.host.healthEvents).toContain("clear:emulator-5560:network-condition");
   });
@@ -791,7 +819,7 @@ describe("network-condition family", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const h = await createNetwork(() => Promise.reject(new Error("console refused")));
-      const { pending } = await h.restore.restoreNetworkConditionBestEffort(h.session);
+      const { pending } = await h.restore.restoreNetworkConditionBestEffort(h.session, {});
       expect(pending).not.toBeNull();
       for (let i = 0; i < 2; i++) {
         await flush();
@@ -819,7 +847,7 @@ describe("network-condition family", () => {
       initialProfile: "none",
       iosAppRule: { udid: "UDID-1", bundleId: "com.example", ownerGeneration: 1, lastRevision: 4 },
     };
-    expect((await h.restore.restoreNetworkConditionBestEffort(h.session)).pending).toBeNull();
+    expect((await h.restore.restoreNetworkConditionBestEffort(h.session, {})).pending).toBeNull();
     expect(h.calls()).toBe(0);
     expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
     expect(h.session.cacheData.networkCondition.iosAppRule?.lastRevision).toBe(5);
@@ -845,9 +873,14 @@ describe("network-condition family", () => {
         call === 1 ? Promise.reject(new Error("blip")) : Promise.resolve(),
       );
       const target = h.restore.networkConditionRestoreTarget(h.session)!;
-      const done = h.restore.restoreNetworkConditionOnExpiry(h.session, target, () => {
-        cleared++;
-      });
+      const done = h.restore.restoreNetworkConditionOnExpiry(
+        h.session,
+        target,
+        () => {
+          cleared++;
+        },
+        {},
+      );
       await flush();
       h.timer.advanceTime(250);
       await done;
@@ -928,5 +961,108 @@ describe("release teardown orchestration", () => {
     const cleanups = await draining;
     expect(cleanups).toEqual([]);
     expect(h.host.healthEvents).toEqual([]);
+  });
+});
+
+describe("explicit restore scope (#11817)", () => {
+  async function setup(received: AbortSignal[], hangKeepAwake = false) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    const restore = makeRestore(
+      host,
+      undefined,
+      () => ({
+        restore: async (_state, signal) => {
+          received.push(signal!);
+        },
+      }),
+      undefined,
+      () => ({
+        restore: async (_state, signal) => {
+          received.push(signal!);
+          if (hangKeepAwake) {
+            await new Promise(() => {});
+          }
+          return { status: "restored" as const };
+        },
+      }),
+    );
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s7", "emulator-5564", "android");
+    return { timer, host, restore, factory, session };
+  }
+
+  test("a rotation restore runs under the scope it was started with and is cancelled by it", async () => {
+    const received: AbortSignal[] = [];
+    const h = await setup(received);
+    h.factory.setRotation(h.session, { accelerometerRotation: 1, userRotation: 0 });
+    const scope = new AbortController();
+    await h.restore.getPendingRotationRestoration(h.session, null, { signal: scope.signal });
+    expect(h.host.dispatches).toEqual([{ teardownStep: 5, scope: scope.signal }]);
+    expect(received).toHaveLength(1);
+    expect(received[0]!.aborted).toBe(false);
+    scope.abort();
+    expect(received[0]!.aborted).toBe(true);
+  });
+
+  test("an unscoped restore ignores the caller's aborted ambient signal", async () => {
+    const received: AbortSignal[] = [];
+    const h = await setup(received);
+    h.factory.setRotation(h.session, { accelerometerRotation: 1, userRotation: 0 });
+    const caller = new AbortController();
+    caller.abort();
+    await runWithAbortSignal(caller.signal, () =>
+      h.restore.getPendingRotationRestoration(h.session, null, {}),
+    );
+    expect(h.host.dispatches).toEqual([{ teardownStep: 5, scope: undefined }]);
+    expect(received[0]!.aborted).toBe(false);
+  });
+
+  test("release teardown shields keep-awake from the caller's abort until the cap aborts the shield", async () => {
+    const received: AbortSignal[] = [];
+    const h = await setup(received, true);
+    h.factory.setKeepScreenAwake("s7", { applied: true, method: "settings" });
+    const caller = new AbortController();
+    caller.abort();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const draining = runWithAbortSignal(caller.signal, () =>
+      h.restore.drainReleaseTeardown("s7", h.session),
+    );
+    await flush();
+    h.timer.advanceTime(1_000);
+    await draining;
+    expect(h.host.dispatches).toHaveLength(1);
+    const shield = h.host.dispatches[0]!.scope!;
+    expect(h.host.dispatches[0]!.teardownStep).toBe(1);
+    expect(shield).not.toBe(caller.signal);
+    expect(shield.aborted).toBe(false);
+    expect(received[0]!.aborted).toBe(false);
+    h.timer.advanceTime(SESSION_RELEASE_TEARDOWN_CAP_MS);
+    expect(shield.aborted).toBe(true);
+    expect(received[0]!.aborted).toBe(true);
+    warn.mockRestore();
+  });
+
+  test("the self-budgeted rotation restore in a release is not bound to the teardown shield", async () => {
+    const received: AbortSignal[] = [];
+    const h = await setup(received, true);
+    h.factory.setKeepScreenAwake("s7", { applied: true, method: "settings" });
+    h.factory.setRotation(h.session, { accelerometerRotation: 1, userRotation: 0 });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const draining = h.restore.drainReleaseTeardown("s7", h.session);
+    await flush();
+    h.timer.advanceTime(1_000);
+    await draining;
+    const keepAwake = h.host.dispatches.find((d) => d.teardownStep === 1)!;
+    const rotation = h.host.dispatches.find((d) => d.teardownStep === 5)!;
+    expect(keepAwake.scope).toBeDefined();
+    expect(rotation.scope).toBeUndefined();
+    h.timer.advanceTime(SESSION_RELEASE_TEARDOWN_CAP_MS);
+    expect(received.map((signal) => signal.aborted)).toEqual([true, false]);
+    warn.mockRestore();
   });
 });

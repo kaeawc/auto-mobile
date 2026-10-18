@@ -28,6 +28,7 @@ import {
   type RestoreKindSpec,
   type RestoreQueuePolicy,
   type RestoreRun,
+  type RestoreSignalOptions,
 } from "./deviceStateRestoreQueue";
 import {
   IosAppNetworkLeases,
@@ -202,6 +203,7 @@ export interface SessionDeviceStateRestoreHost {
     ) => Promise<void>,
     generation?: number,
     teardownStep?: number,
+    options?: RestoreSignalOptions,
   ): Promise<void>;
   /** The device's replaced-restore generation; a changed value supersedes a captured restore. */
   restoreGeneration(deviceId: string): number;
@@ -407,7 +409,8 @@ export class SessionDeviceStateRestore {
     name: "Screen reader",
     timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
     mapStartError: (error) => toActionableError(error, "Screen reader restoration failed"),
-    prepare: (deviceId, target) => this.prepareScreenReaderRestore(deviceId, target),
+    prepare: (deviceId, target, options) =>
+      this.prepareScreenReaderRestore(deviceId, target, options),
   };
   private readonly screenReaderRetry: BoundedRetrySpec<ScreenReaderSessionState> = {
     attempts: SCREEN_READER_RESTORE_RETRY_ATTEMPTS,
@@ -449,7 +452,7 @@ export class SessionDeviceStateRestore {
     name: "Rotation",
     timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
     mapStartError: (error) => toActionableError(error, "Rotation restoration failed"),
-    prepare: (deviceId, target) => this.prepareRotationRestore(deviceId, target),
+    prepare: (deviceId, target, options) => this.prepareRotationRestore(deviceId, target, options),
   };
   private readonly rotationRetry: BoundedRetrySpec<RotationSessionState> = {
     attempts: ROTATION_RESTORE_RETRY_ATTEMPTS,
@@ -499,7 +502,7 @@ export class SessionDeviceStateRestore {
     name: "Clock",
     timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
     mapStartError: (error) => error,
-    prepare: (deviceId, target) => this.prepareClockRestore(deviceId, target),
+    prepare: (deviceId, target, options) => this.prepareClockRestore(deviceId, target, options),
   };
   runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
@@ -590,8 +593,9 @@ export class SessionDeviceStateRestore {
     spec: RestoreKindSpec<S>,
     deviceId: string,
     target: PendingRestore<S>,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
-    const run = spec.prepare(deviceId, target);
+    const run = spec.prepare(deviceId, target, options);
     const restoration = run.restore().then(
       () => ({ outcome: "restored" as const }),
       (error: unknown) => ({ outcome: "failed" as const, error }),
@@ -692,6 +696,7 @@ export class SessionDeviceStateRestore {
   retryAbandonedRestore<S extends object>(
     spec: AbandonedRestoreSpec<S>,
     deviceId: string,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     const state = spec.memory.get(deviceId);
     if (!state) {
@@ -710,6 +715,8 @@ export class SessionDeviceStateRestore {
             deviceId,
             (signal) => spec.restore(deviceId, state, AbortSignal.any([signal, controller.signal])),
             generation,
+            undefined,
+            options,
           ),
           { timer: this.host.timer, timeoutMs: spec.timeoutMs, label: spec.label },
         );
@@ -776,27 +783,30 @@ export class SessionDeviceStateRestore {
   async getPendingScreenReaderRestoration(
     session: Session,
     pendingSetups: Promise<void> | null,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     return this.getPendingRestoration(
       this.screenReaderRestores,
       "screenReader",
       session,
       pendingSetups,
-      (deviceId, target) => this.startScreenReaderRestoration(deviceId, target),
-      (next, setups) => this.getPendingScreenReaderRestoration(next, setups),
+      (deviceId, target) => this.startScreenReaderRestoration(deviceId, target, options),
+      (next, setups) => this.getPendingScreenReaderRestoration(next, setups, options),
     );
   }
 
   private startScreenReaderRestoration(
     deviceId: string,
     target: PendingRestore<ScreenReaderSessionState>,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
-    return this.startRestoration(this.screenReaderKind, deviceId, target);
+    return this.startRestoration(this.screenReaderKind, deviceId, target, options);
   }
 
   private prepareScreenReaderRestore(
     deviceId: string,
     target: PendingRestore<ScreenReaderSessionState>,
+    options: RestoreSignalOptions,
   ): RestoreRun {
     const device: BootedDevice = { name: deviceId, deviceId, platform: target.state.platform };
     const generation = this.host.restoreGeneration(deviceId);
@@ -815,6 +825,7 @@ export class SessionDeviceStateRestore {
         },
         generation,
         6,
+        options,
       );
     return {
       restore,
@@ -850,13 +861,22 @@ export class SessionDeviceStateRestore {
     this.forgetFencedRestore(this.screenReaderRestores.targets, deviceId, target);
   }
 
-  retryAbandonedScreenReaderAfter(deviceId: string, own: Promise<void> | null): Promise<void> {
-    return this.retryAbandonedAfter(own, () => this.retryAbandonedScreenReaderRestore(deviceId));
+  retryAbandonedScreenReaderAfter(
+    deviceId: string,
+    own: Promise<void> | null,
+    options: RestoreSignalOptions,
+  ): Promise<void> {
+    return this.retryAbandonedAfter(own, () =>
+      this.retryAbandonedScreenReaderRestore(deviceId, options),
+    );
   }
 
   /** One bounded attempt at a state an earlier release gave up on; never on a timer. */
-  retryAbandonedScreenReaderRestore(deviceId: string): Promise<void> {
-    return this.retryAbandonedRestore(this.abandonedScreenReaderRestore, deviceId);
+  retryAbandonedScreenReaderRestore(
+    deviceId: string,
+    options: RestoreSignalOptions,
+  ): Promise<void> {
+    return this.retryAbandonedRestore(this.abandonedScreenReaderRestore, deviceId, options);
   }
 
   /** Tracked setup retains this exact session even after a bounded release times out (#10146). */
@@ -869,7 +889,7 @@ export class SessionDeviceStateRestore {
       "screenReader",
       session,
       createSetup,
-      () => this.getPendingScreenReaderRestoration(session, null),
+      () => this.getPendingScreenReaderRestoration(session, null, {}),
     );
   }
 
@@ -1301,27 +1321,30 @@ export class SessionDeviceStateRestore {
   async getPendingRotationRestoration(
     session: Session,
     pendingSetups: Promise<void> | null,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     return this.getPendingRestoration(
       this.rotationRestores,
       "rotation",
       session,
       pendingSetups,
-      (deviceId, target) => this.startRotationRestoration(deviceId, target),
-      (next, setups) => this.getPendingRotationRestoration(next, setups),
+      (deviceId, target) => this.startRotationRestoration(deviceId, target, options),
+      (next, setups) => this.getPendingRotationRestoration(next, setups, options),
     );
   }
 
   private startRotationRestoration(
     deviceId: string,
     target: PendingRestore<RotationSessionState>,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
-    return this.startRestoration(this.rotationKind, deviceId, target);
+    return this.startRestoration(this.rotationKind, deviceId, target, options);
   }
 
   private prepareRotationRestore(
     deviceId: string,
     target: PendingRestore<RotationSessionState>,
+    options: RestoreSignalOptions,
   ): RestoreRun {
     const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
     const generation = this.host.restoreGeneration(deviceId);
@@ -1340,6 +1363,7 @@ export class SessionDeviceStateRestore {
         },
         generation,
         5,
+        options,
       );
     return {
       restore,
@@ -1382,16 +1406,22 @@ export class SessionDeviceStateRestore {
     this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
   }
 
-  retryAbandonedRotationAfter(deviceId: string, own: Promise<void> | null): Promise<void> {
-    return this.retryAbandonedAfter(own, () => this.retryAbandonedRotationRestore(deviceId));
+  retryAbandonedRotationAfter(
+    deviceId: string,
+    own: Promise<void> | null,
+    options: RestoreSignalOptions,
+  ): Promise<void> {
+    return this.retryAbandonedAfter(own, () =>
+      this.retryAbandonedRotationRestore(deviceId, options),
+    );
   }
 
   /**
    * A transient failure keeps the record for the next start or release. A window-manager-managed
    * outcome is definitively unrecoverable, so the record is dropped.
    */
-  retryAbandonedRotationRestore(deviceId: string): Promise<void> {
-    return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
+  retryAbandonedRotationRestore(deviceId: string, options: RestoreSignalOptions): Promise<void> {
+    return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId, options);
   }
 
   trackRotationSessionSetup(
@@ -1399,7 +1429,7 @@ export class SessionDeviceStateRestore {
     createSetup: (assertCurrentDevice: () => void) => Promise<void>,
   ): Promise<void> {
     return this.trackRestoreSetup(this.rotationRestores, "rotation", session, createSetup, () =>
-      this.getPendingRotationRestoration(session, null),
+      this.getPendingRotationRestoration(session, null, {}),
     );
   }
 
@@ -1407,27 +1437,30 @@ export class SessionDeviceStateRestore {
   async getPendingClockRestoration(
     session: Session,
     pendingSetups: Promise<void> | null,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     return this.getPendingRestoration(
       this.clockRestores,
       "clock",
       session,
       pendingSetups,
-      (deviceId, target) => this.startClockRestoration(deviceId, target),
-      (next, setups) => this.getPendingClockRestoration(next, setups),
+      (deviceId, target) => this.startClockRestoration(deviceId, target, options),
+      (next, setups) => this.getPendingClockRestoration(next, setups, options),
     );
   }
 
   private startClockRestoration(
     deviceId: string,
     target: PendingRestore<ClockSessionState>,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
-    return this.startRestoration(this.clockKind, deviceId, target);
+    return this.startRestoration(this.clockKind, deviceId, target, options);
   }
 
   private prepareClockRestore(
     deviceId: string,
     target: PendingRestore<ClockSessionState>,
+    options: RestoreSignalOptions,
   ): RestoreRun {
     const healthTarget = { deviceId, incarnation: this.host.healthIncarnation(deviceId) };
     const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
@@ -1461,6 +1494,7 @@ export class SessionDeviceStateRestore {
           ),
         generation,
         4,
+        options,
       );
     return {
       restore,
@@ -1519,19 +1553,20 @@ export class SessionDeviceStateRestore {
       "clock",
       session,
       () => createSetup(),
-      () => this.getPendingClockRestoration(session, null),
+      () => this.getPendingClockRestoration(session, null, {}),
     );
   }
 
   async restoreKeepScreenAwakeBestEffort(
     session: Session,
-    forced: () => boolean = () => false,
+    forced: () => boolean,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     const target = this.keepScreenAwakeRestoreTarget(session);
     if (!target) {
       return { pending: null };
     }
-    const restoration = this.restoreKeepScreenAwakeTarget(target).then(
+    const restoration = this.restoreKeepScreenAwakeTarget(target, options).then(
       () => ({ outcome: "restored" as const }),
       (error: unknown) => ({ outcome: "failed" as const, error }),
     );
@@ -1555,7 +1590,7 @@ export class SessionDeviceStateRestore {
         `Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`,
       );
       // Quarantine the device until the retries settle, as the network restore does (#11145).
-      return { pending: this.retryKeepScreenAwakeRestore(target, result.error, forced) };
+      return { pending: this.retryKeepScreenAwakeRestore(target, result.error, forced, options) };
     }
     if (result.outcome === "timed-out") {
       logger.warn(
@@ -1564,7 +1599,7 @@ export class SessionDeviceStateRestore {
       return {
         pending: restoration.then((settled) =>
           settled.outcome === "failed"
-            ? this.retryKeepScreenAwakeRestore(target, settled.error, forced)
+            ? this.retryKeepScreenAwakeRestore(target, settled.error, forced, options)
             : undefined,
         ),
       };
@@ -1606,7 +1641,10 @@ export class SessionDeviceStateRestore {
     }
   }
 
-  async restoreKeepScreenAwakeTarget(target: KeepScreenAwakeRestoreTarget): Promise<void> {
+  async restoreKeepScreenAwakeTarget(
+    target: KeepScreenAwakeRestoreTarget,
+    options: RestoreSignalOptions,
+  ): Promise<void> {
     if (!this.host.restoreIncarnationIsCurrent(target)) {
       return;
     }
@@ -1617,9 +1655,9 @@ export class SessionDeviceStateRestore {
     };
     await this.host.dispatchDeviceRestore(
       target.deviceId,
-      (_signal, _identitySignal, acknowledge) =>
+      (signal, _identitySignal, acknowledge) =>
         this.keepScreenAwakeRestorer(device)
-          .restore(target.state)
+          .restore(target.state, signal)
           .then((outcome) => {
             acknowledge();
             if (outcome.status === "failed") {
@@ -1649,6 +1687,7 @@ export class SessionDeviceStateRestore {
           }),
       target.restoreGeneration,
       1,
+      options,
     );
     this.host.clearRestoreHealth(target, "keep-screen-awake");
   }
@@ -1658,6 +1697,7 @@ export class SessionDeviceStateRestore {
     target: KeepScreenAwakeRestoreTarget,
     initialError: unknown,
     forced: () => boolean,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     let lastError = initialError;
     for (let attempt = 1; attempt <= KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS; attempt++) {
@@ -1689,7 +1729,7 @@ export class SessionDeviceStateRestore {
         return;
       }
       try {
-        await this.restoreKeepScreenAwakeTarget(target);
+        await this.restoreKeepScreenAwakeTarget(target, options);
         return;
       } catch (error) {
         // Bounded: keep retrying, then hand the last failure to health recovery.
@@ -1705,7 +1745,7 @@ export class SessionDeviceStateRestore {
         `may stay awake: ${lastError}`,
     );
     this.host.abandonRestore(target, "keep-screen-awake", () =>
-      this.restoreKeepScreenAwakeTarget(target),
+      this.restoreKeepScreenAwakeTarget(target, options),
     );
   }
 
@@ -1734,7 +1774,10 @@ export class SessionDeviceStateRestore {
     };
   }
 
-  async restoreBiometricEnrollment(target: BiometricRestoreTarget): Promise<void> {
+  async restoreBiometricEnrollment(
+    target: BiometricRestoreTarget,
+    options: RestoreSignalOptions,
+  ): Promise<void> {
     const device: BootedDevice = {
       name: target.deviceId,
       platform: "ios",
@@ -1745,22 +1788,26 @@ export class SessionDeviceStateRestore {
     }
     await this.host.dispatchDeviceRestore(
       target.deviceId,
-      (_signal, _identitySignal, acknowledge) =>
-        this.biometricEnrollmentRestorer(device).restore(target.enrollment).then(acknowledge),
+      (signal, _identitySignal, acknowledge) =>
+        this.biometricEnrollmentRestorer(device)
+          .restore(target.enrollment, signal)
+          .then(acknowledge),
       target.restoreGeneration,
       2,
+      options,
     );
     this.host.clearRestoreHealth(target, "biometric-enrollment");
   }
 
   async restoreBiometricEnrollmentBestEffort(
     session: Session,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     const target = this.biometricRestoreTarget(session);
     if (!target) {
       return { pending: null };
     }
-    const restoration = this.restoreBiometricEnrollment(target).then(
+    const restoration = this.restoreBiometricEnrollment(target, options).then(
       () => ({ outcome: "restored" as const }),
       (error) => ({ outcome: "failed" as const, error }),
     );
@@ -1785,13 +1832,13 @@ export class SessionDeviceStateRestore {
       );
       // Quarantine the device until the retries below settle; a prompt
       // rejection otherwise returns a dirty simulator straight to the pool.
-      return { pending: this.retryBiometricEnrollmentRestore(target, result.error) };
+      return { pending: this.retryBiometricEnrollmentRestore(target, result.error, options) };
     }
     if (result.outcome === "timed-out") {
       logger.warn(
         `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
       );
-      return { pending: this.settleBiometricEnrollmentRestore(target, restoration) };
+      return { pending: this.settleBiometricEnrollmentRestore(target, restoration, options) };
     }
     return { pending: null };
   }
@@ -1800,6 +1847,7 @@ export class SessionDeviceStateRestore {
   private async settleBiometricEnrollmentRestore(
     target: BiometricRestoreTarget,
     restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     const result = await restoration;
     if (result.outcome === "restored") {
@@ -1808,12 +1856,13 @@ export class SessionDeviceStateRestore {
     logger.warn(
       `Failed to restore biometric enrollment for session ${target.sessionId}: ${result.error}`,
     );
-    await this.retryBiometricEnrollmentRestore(target, result.error);
+    await this.retryBiometricEnrollmentRestore(target, result.error, options);
   }
 
   private async retryBiometricEnrollmentRestore(
     target: BiometricRestoreTarget,
     initialError: unknown,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     let lastError = initialError;
     for (let attempt = 1; attempt <= BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS; attempt++) {
@@ -1822,7 +1871,7 @@ export class SessionDeviceStateRestore {
         return;
       }
       try {
-        await this.restoreBiometricEnrollment(target);
+        await this.restoreBiometricEnrollment(target, options);
         logger.info(
           `Restored biometric enrollment for session ${target.sessionId} on retry ${attempt}`,
         );
@@ -1841,7 +1890,7 @@ export class SessionDeviceStateRestore {
         `may hold session-modified enrollment: ${lastError}`,
     );
     this.host.abandonRestore(target, "biometric-enrollment", () =>
-      this.restoreBiometricEnrollment(target),
+      this.restoreBiometricEnrollment(target, options),
     );
   }
 
@@ -1852,9 +1901,11 @@ export class SessionDeviceStateRestore {
   private restoreBiometricEnrollmentAfterSetups(
     session: Session,
     pendingSetups: Promise<void>,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     return pendingSetups.then(async () => {
-      const pendingRestoration = (await this.restoreBiometricEnrollmentBestEffort(session)).pending;
+      const pendingRestoration = (await this.restoreBiometricEnrollmentBestEffort(session, options))
+        .pending;
       await pendingRestoration;
     });
   }
@@ -1867,11 +1918,14 @@ export class SessionDeviceStateRestore {
   async getPendingBiometricRestoration(
     session: Session,
     pendingSetups: Promise<void> | null,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     if (pendingSetups && session.cacheData.biometricEnrollment) {
-      return { pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups) };
+      return {
+        pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups, options),
+      };
     }
-    return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
+    return { pending: (await this.restoreBiometricEnrollmentBestEffort(session, options)).pending };
   }
 
   /**
@@ -1883,9 +1937,11 @@ export class SessionDeviceStateRestore {
   private restoreNetworkConditionAfterSetups(
     session: Session,
     pendingSetups: Promise<void>,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     return pendingSetups.then(async () => {
-      const pendingRestoration = (await this.restoreNetworkConditionBestEffort(session)).pending;
+      const pendingRestoration = (await this.restoreNetworkConditionBestEffort(session, options))
+        .pending;
       await pendingRestoration;
     });
   }
@@ -1898,11 +1954,12 @@ export class SessionDeviceStateRestore {
   async getPendingNetworkRestoration(
     session: Session,
     pendingSetups: Promise<void> | null,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     if (pendingSetups && session.cacheData.networkCondition) {
-      return { pending: this.restoreNetworkConditionAfterSetups(session, pendingSetups) };
+      return { pending: this.restoreNetworkConditionAfterSetups(session, pendingSetups, options) };
     }
-    return { pending: (await this.restoreNetworkConditionBestEffort(session)).pending };
+    return { pending: (await this.restoreNetworkConditionBestEffort(session, options)).pending };
   }
 
   /**
@@ -1942,7 +1999,10 @@ export class SessionDeviceStateRestore {
     };
   }
 
-  async restoreNetworkCondition(target: NetworkConditionRestoreTarget): Promise<void> {
+  async restoreNetworkCondition(
+    target: NetworkConditionRestoreTarget,
+    options: RestoreSignalOptions,
+  ): Promise<void> {
     if (target.iosAppRule) {
       if (!this.host.restoreIncarnationIsCurrent(target)) {
         return;
@@ -1961,10 +2021,11 @@ export class SessionDeviceStateRestore {
     }
     await this.host.dispatchDeviceRestore(
       target.deviceId,
-      (_signal, _identitySignal, acknowledge) =>
-        this.networkConditionRestorer(device).restore(target.profile).then(acknowledge),
+      (signal, _identitySignal, acknowledge) =>
+        this.networkConditionRestorer(device).restore(target.profile, signal).then(acknowledge),
       target.restoreGeneration,
       3,
+      options,
     );
     this.host.clearRestoreHealth(target, "network-condition");
   }
@@ -1977,12 +2038,13 @@ export class SessionDeviceStateRestore {
    */
   async restoreNetworkConditionBestEffort(
     session: Session,
+    options: RestoreSignalOptions,
   ): Promise<{ pending: Promise<void> | null }> {
     const target = this.networkConditionRestoreTarget(session);
     if (!target) {
       return { pending: null };
     }
-    const restoration = this.restoreNetworkCondition(target).then(
+    const restoration = this.restoreNetworkCondition(target, options).then(
       () => ({ outcome: "restored" as const }),
       (error) => ({ outcome: "failed" as const, error }),
     );
@@ -2008,14 +2070,14 @@ export class SessionDeviceStateRestore {
       );
       // Quarantine the device until the retries below settle; a prompt
       // rejection otherwise returns a shaped emulator straight to the pool.
-      return { pending: this.retryNetworkConditionRestore(target, result.error) };
+      return { pending: this.retryNetworkConditionRestore(target, result.error, options) };
     }
     if (result.outcome === "timed-out") {
       logger.warn(
         `Timed out after ${NETWORK_CONDITION_RESTORE_TIMEOUT_MS}ms restoring network condition ` +
           `for session ${session.sessionId}`,
       );
-      return { pending: this.settleNetworkConditionRestore(target, restoration) };
+      return { pending: this.settleNetworkConditionRestore(target, restoration, options) };
     }
     return { pending: null };
   }
@@ -2024,6 +2086,7 @@ export class SessionDeviceStateRestore {
   private async settleNetworkConditionRestore(
     target: NetworkConditionRestoreTarget,
     restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     const result = await restoration;
     if (result.outcome === "restored") {
@@ -2032,14 +2095,15 @@ export class SessionDeviceStateRestore {
     logger.warn(
       `Failed to restore network condition for session ${target.sessionId}: ${result.error}`,
     );
-    await this.retryNetworkConditionRestore(target, result.error);
+    await this.retryNetworkConditionRestore(target, result.error, options);
   }
 
   private async retryNetworkConditionRestore(
     target: NetworkConditionRestoreTarget,
     initialError: unknown,
+    options: RestoreSignalOptions,
   ): Promise<void> {
-    await this.retryNetworkConditionRestoreUntilSuccess(target, initialError);
+    await this.retryNetworkConditionRestoreUntilSuccess(target, initialError, options);
   }
 
   /**
@@ -2051,6 +2115,7 @@ export class SessionDeviceStateRestore {
   private async retryNetworkConditionRestoreUntilSuccess(
     target: NetworkConditionRestoreTarget,
     initialError: unknown,
+    options: RestoreSignalOptions,
   ): Promise<boolean> {
     let lastError = initialError;
     for (let attempt = 1; attempt <= NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS; attempt++) {
@@ -2059,7 +2124,7 @@ export class SessionDeviceStateRestore {
         return false;
       }
       try {
-        await this.restoreNetworkCondition(target);
+        await this.restoreNetworkCondition(target, options);
         logger.info(
           `Restored network condition for session ${target.sessionId} on retry ${attempt}`,
         );
@@ -2078,7 +2143,7 @@ export class SessionDeviceStateRestore {
         `may hold session-modified shaping: ${lastError}`,
     );
     this.host.abandonRestore(target, "network-condition", () =>
-      this.restoreNetworkCondition(target),
+      this.restoreNetworkCondition(target, options),
     );
     return false;
   }
@@ -2111,9 +2176,11 @@ export class SessionDeviceStateRestore {
     );
     this.host.registerPendingDeviceCleanup(
       target.deviceId,
-      this.runUnderTeardownShield(async () => [
+      this.runUnderTeardownShield(async (shield) => [
         {
-          pending: this.restoreNetworkConditionOnExpiry(session, target, clearIfOwned),
+          pending: this.restoreNetworkConditionOnExpiry(session, target, clearIfOwned, {
+            signal: shield,
+          }),
           abandon: () => this.abandonCappedRestore(target, "network-condition"),
         },
       ]).then(async (cleanups) => {
@@ -2127,9 +2194,10 @@ export class SessionDeviceStateRestore {
     session: Session,
     target: NetworkConditionRestoreTarget,
     clearIfOwned: () => void,
+    options: RestoreSignalOptions,
   ): Promise<void> {
     try {
-      await this.restoreNetworkCondition(target);
+      await this.restoreNetworkCondition(target, options);
       clearIfOwned();
       return;
     } catch (error) {
@@ -2137,7 +2205,7 @@ export class SessionDeviceStateRestore {
         `Failed to reset network condition on TTL expiry for session ${session.sessionId}; ` +
           `device ${target.deviceId} may hold session-modified shaping, retrying: ${error}`,
       );
-      const succeeded = await this.retryNetworkConditionRestoreUntilSuccess(target, error);
+      const succeeded = await this.retryNetworkConditionRestoreUntilSuccess(target, error, options);
       if (succeeded) {
         clearIfOwned();
       }
@@ -2153,7 +2221,7 @@ export class SessionDeviceStateRestore {
    * Teardown is cleanup that must run to completion whether or not the request
    * that triggered the release was cancelled or hit its deadline, so it never runs
    * under the caller's signal: that signal is already aborted for a cancelled plan,
-   * and every adb/simctl call that resolves `signal ?? getAbortSignal()` would fail
+   * and every adb/simctl call that resolves the ambient signal would fail
    * before dispatch, leaving the device shaped and marked unhealthy (#10198). The
    * restores that go through the ambient signal run under a teardown-owned shield
    * bounded by {@link SESSION_RELEASE_TEARDOWN_CAP_MS}; at the cap the shield aborts
@@ -2170,8 +2238,14 @@ export class SessionDeviceStateRestore {
       return [];
     }
     const forcedSignal = operation?.forcedAbort?.signal;
-    return this.runUnderTeardownShield(async () => {
-      const stages = await this.startReleaseTeardown(sessionId, session, operation, options);
+    return this.runUnderTeardownShield(async (shield) => {
+      const stages = await this.startReleaseTeardown(
+        sessionId,
+        session,
+        operation,
+        options,
+        shield,
+      );
       // Setup remains in flight; skipped/aborted restores must arm neither quarantine nor retries.
       return options.deviceIdentityReplaced ? stages.filter((stage) => stage.setup) : stages;
     }, forcedSignal);
@@ -2179,7 +2253,7 @@ export class SessionDeviceStateRestore {
 
   /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
   async runUnderTeardownShield(
-    start: () => Promise<readonly ReleaseTeardownStage[]>,
+    start: (shield: AbortSignal) => Promise<readonly ReleaseTeardownStage[]>,
     /** Aborts the shield early: the release was forced and no longer holds the device (#11058). */
     forcedSignal?: AbortSignal,
   ): Promise<readonly Promise<void>[]> {
@@ -2198,7 +2272,7 @@ export class SessionDeviceStateRestore {
       shield.abort(new ActionableError("Session release teardown exceeded its budget"));
     }, SESSION_RELEASE_TEARDOWN_CAP_MS);
     try {
-      const stages = await runWithAbortSignal(shield.signal, start);
+      const stages = await runWithAbortSignal(shield.signal, () => start(shield.signal));
       const cleanups = stages.flatMap((stage) => {
         const bounded = this.boundTeardownStage(stage, startedAtMs);
         return bounded ? [bounded] : [];
@@ -2274,8 +2348,9 @@ export class SessionDeviceStateRestore {
   private async startReleaseTeardown(
     sessionId: string,
     session: Session,
-    operation?: SessionReleaseOperation,
-    options: SessionReleaseOptions = {},
+    operation: SessionReleaseOperation | undefined,
+    options: SessionReleaseOptions,
+    shield: AbortSignal,
   ): Promise<readonly ReleaseTeardownStage[]> {
     // Captured before any await: a rebind reassigns `session.assignedDevice`.
     const deviceId = session.assignedDevice;
@@ -2295,6 +2370,8 @@ export class SessionDeviceStateRestore {
     // under the release's forced signal, which only a forced release aborts (#11058).
     const forcedSignal = operation?.forcedAbort?.signal;
     const ownBudget = <T>(start: () => Promise<T>) => runWithAbortSignal(forcedSignal, start);
+    const shielded: RestoreSignalOptions = { signal: shield };
+    const ownBudgeted: RestoreSignalOptions = { signal: forcedSignal };
     let pendingSetups: Promise<void> | null = null;
     const steps: Array<() => Promise<ReleaseTeardownStage>> = [
       async () => {
@@ -2311,7 +2388,7 @@ export class SessionDeviceStateRestore {
         return { pending: pendingSetups, setup: true };
       },
       async () => ({
-        pending: (await this.restoreKeepScreenAwakeBestEffort(session, forced)).pending,
+        pending: (await this.restoreKeepScreenAwakeBestEffort(session, forced, shielded)).pending,
         // A forced release (#11058) may already have handed the device to its next owner.
         abandon: () =>
           forced()
@@ -2323,19 +2400,23 @@ export class SessionDeviceStateRestore {
       }),
       async () => ({
         pending: session.cacheData.biometricEnrollment
-          ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
+          ? (await this.getPendingBiometricRestoration(session, pendingSetups, shielded)).pending
           : null,
         abandon: () => this.abandonCappedRestore(biometricTarget, "biometric-enrollment"),
       }),
       async () => ({
         pending: session.cacheData.networkCondition
-          ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
+          ? (await this.getPendingNetworkRestoration(session, pendingSetups, shielded)).pending
           : null,
         abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
       }),
       async () => ({
         pending: session.cacheData.clock
-          ? (await ownBudget(() => this.getPendingClockRestoration(session, pendingSetups))).pending
+          ? (
+              await ownBudget(() =>
+                this.getPendingClockRestoration(session, pendingSetups, ownBudgeted),
+              )
+            ).pending
           : null,
       }),
       async () => {
@@ -2343,25 +2424,35 @@ export class SessionDeviceStateRestore {
         // waits for the next start or release instead of an immediate repeat attempt.
         const hadAbandonedRotation = this.abandonedRotations.has(session.assignedDevice);
         const own = session.cacheData.rotation
-          ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups)))
-              .pending
+          ? (
+              await ownBudget(() =>
+                this.getPendingRotationRestoration(session, pendingSetups, ownBudgeted),
+              )
+            ).pending
           : null;
         return {
           pending:
             hadAbandonedRotation && !forced()
-              ? ownBudget(() => this.retryAbandonedRotationAfter(session.assignedDevice, own))
+              ? ownBudget(() =>
+                  this.retryAbandonedRotationAfter(session.assignedDevice, own, ownBudgeted),
+                )
               : own,
         };
       },
       async () => {
         const own = session.cacheData.screenReader
-          ? (await ownBudget(() => this.getPendingScreenReaderRestoration(session, pendingSetups)))
-              .pending
+          ? (
+              await ownBudget(() =>
+                this.getPendingScreenReaderRestoration(session, pendingSetups, ownBudgeted),
+              )
+            ).pending
           : null;
         return {
           pending:
             this.abandonedScreenReaders.has(session.assignedDevice) && !forced()
-              ? ownBudget(() => this.retryAbandonedScreenReaderAfter(session.assignedDevice, own))
+              ? ownBudget(() =>
+                  this.retryAbandonedScreenReaderAfter(session.assignedDevice, own, ownBudgeted),
+                )
               : own,
         };
       },
@@ -2433,10 +2524,10 @@ export class SessionDeviceStateRestore {
     );
     this.host.abandonRestore(target, reason, () =>
       "state" in target
-        ? this.restoreKeepScreenAwakeTarget(target)
+        ? this.restoreKeepScreenAwakeTarget(target, {})
         : "enrollment" in target
-          ? this.restoreBiometricEnrollment(target)
-          : this.restoreNetworkCondition(target),
+          ? this.restoreBiometricEnrollment(target, {})
+          : this.restoreNetworkCondition(target, {}),
     );
   }
 }

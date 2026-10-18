@@ -8,6 +8,7 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import { KeepScreenAwakeManager } from "../utils/KeepScreenAwakeManager";
 import { DeviceState } from "../features/utility/DeviceState";
 import type { Timer } from "../utils/SystemTimer";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import type {
   BiometricEnrollmentRestorer,
   ClockRestorer,
@@ -22,9 +23,15 @@ import type {
  * Tests inject fakes through SessionManagerOptions instead; these are the defaults (#11796).
  */
 export function defaultKeepScreenAwakeRestorer(device: BootedDevice): KeepScreenAwakeRestorer {
-  return new KeepScreenAwakeManager(device, defaultAdbClientFactory, (target) =>
+  const manager = new KeepScreenAwakeManager(device, defaultAdbClientFactory, (target) =>
     AndroidCtrlProxyClient.getInstance(target),
   );
+  return { restore: (state, signal) => underScope(signal, () => manager.restore(state)) };
+}
+
+/** Run under the restore's explicit signal; with none, leave whatever scope the caller is in. */
+function underScope<T>(signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
+  return signal ? runWithAbortSignal(signal, work) : work();
 }
 
 /** Simulator enrollment is session-scoped state, so lifecycle tests never invoke simctl. */
@@ -32,26 +39,28 @@ export function defaultBiometricEnrollmentRestorer(
   device: BootedDevice,
 ): BiometricEnrollmentRestorer {
   return {
-    restore: async (enrollment) => {
-      const result = await new DeviceState(device).setBiometricEnrollmentState(enrollment);
-      if (!result.supported || result.error || result.verified === false) {
-        throw new Error(result.error ?? "Failed to restore iOS Simulator biometric enrollment");
-      }
-    },
+    restore: (enrollment, signal) =>
+      underScope(signal, async () => {
+        const result = await new DeviceState(device).setBiometricEnrollmentState(enrollment);
+        if (!result.supported || result.error || result.verified === false) {
+          throw new Error(result.error ?? "Failed to restore iOS Simulator biometric enrollment");
+        }
+      }),
   };
 }
 
 /** Device-wide network conditioning is session-scoped state (#6012); restores normal connectivity. */
 export function defaultNetworkConditionRestorer(device: BootedDevice): NetworkConditionRestorer {
   return {
-    restore: async (profile) => {
-      const result = await new DeviceState(device).setState({ networkCondition: { profile } });
-      if (!result.success) {
-        throw new Error(
-          result.networkCondition?.error ?? result.error ?? "Failed to restore network condition",
-        );
-      }
-    },
+    restore: (profile, signal) =>
+      underScope(signal, async () => {
+        const result = await new DeviceState(device).setState({ networkCondition: { profile } });
+        if (!result.success) {
+          throw new Error(
+            result.networkCondition?.error ?? result.error ?? "Failed to restore network condition",
+          );
+        }
+      }),
   };
 }
 

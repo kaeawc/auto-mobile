@@ -10,6 +10,7 @@ const ROOT = path.resolve(import.meta.dir, "../..");
 const SOCKET_SERVER = "src/daemon/socketServer.ts";
 const DEVICE_ALLOCATION = "src/daemon/deviceAllocation.ts";
 const SESSION_MANAGER = "src/daemon/sessionManager.ts";
+const SESSION_DEVICE_STATE_RESTORE = "src/daemon/sessionDeviceStateRestore.ts";
 const AMBIENT_READ = /\bgetAbortSignal\s*\(/;
 
 describe("control-socket server reads no ambient abort signal (#11817)", () => {
@@ -32,14 +33,13 @@ describe("control-socket server reads no ambient abort signal (#11817)", () => {
     expect(AMBIENT_READ.test(readFileSync(path.join(ROOT, DEVICE_ALLOCATION), "utf8"))).toBe(false);
   });
 
-  // Slice c: session creation, rebind and acquisition take the caller's signal in their
-  // options. The one remaining read is dispatchDeviceRestore's relay of the teardown-shielded
-  // ambient signal into the device restorers, which resolve it themselves; tracked separately.
-  test("sessionManager.ts reads the ambient signal only in dispatchDeviceRestore", () => {
-    const source = readFileSync(path.join(ROOT, SESSION_MANAGER), "utf8");
-    const reads = source.match(new RegExp(AMBIENT_READ.source, "g")) ?? [];
-    expect(reads).toHaveLength(1);
-    const dispatch = source.slice(source.indexOf("private async dispatchDeviceRestore("));
-    expect(AMBIENT_READ.test(dispatch.slice(0, dispatch.indexOf("\n  }\n")))).toBe(true);
-  });
+  // Slice c + d: session creation, rebind and acquisition take the caller's signal in their
+  // options, and dispatchDeviceRestore / the device-state restorers take the restore's scope
+  // (RestoreSignalOptions: the teardown shield, the forced signal, the caller's signal) explicitly.
+  test.each([SESSION_MANAGER, SESSION_DEVICE_STATE_RESTORE])(
+    "%s never calls getAbortSignal()",
+    (file) => {
+      expect(AMBIENT_READ.test(readFileSync(path.join(ROOT, file), "utf8"))).toBe(false);
+    },
+  );
 });

@@ -1,3 +1,12 @@
+/**
+ * The cancellation scope a restore runs under, passed explicitly by whoever starts it (#11817): the
+ * teardown shield for release cleanup, the release's forced signal for the self-budgeted restorers,
+ * the caller's request signal for creation and inline rebinds, none for detached cleanup.
+ */
+export interface RestoreSignalOptions {
+  readonly signal?: AbortSignal;
+}
+
 /** One unsettled restore of a recorded device-state baseline, joined by every caller that asks. */
 export interface PendingRestore<S> {
   state: S;
@@ -122,7 +131,7 @@ export interface RestoreKindSpec<S extends object> {
   timeoutMs: number;
   /** Maps an unexpected failure of the first attempt's own wait; the clock rethrows it as is. */
   mapStartError(error: unknown): unknown;
-  prepare(deviceId: string, target: PendingRestore<S>): RestoreRun;
+  prepare(deviceId: string, target: PendingRestore<S>, options: RestoreSignalOptions): RestoreRun;
 }
 
 /** Bounded retries with backoff, then abandonment with the state remembered (rotation, screen reader). */

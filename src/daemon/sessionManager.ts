@@ -27,7 +27,7 @@ import {
   SessionDeviceStateRestore,
   type IosAppNetworkRuleSessionState,
 } from "./sessionDeviceStateRestore";
-import {} from "./deviceStateRestoreQueue";
+import type { RestoreSignalOptions } from "./deviceStateRestoreQueue";
 import {
   DeviceCleanupQuarantine,
   type AbandonablePendingDeviceCleanup,
@@ -67,11 +67,7 @@ import { type DeviceClockRestoreState } from "../features/utility/DeviceClock";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { refusedClaimHoldSource, type LivenessOwnerView } from "./livenessClaimDecision";
-import {
-  getAbortSignal,
-  runOutsideRequestContext,
-  runWithAbortSignal,
-} from "../utils/AbortContext";
+import { runOutsideRequestContext, runWithAbortSignal } from "../utils/AbortContext";
 import { requestAcquisitionReceipt } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -213,7 +209,10 @@ export class SessionActivityPersistenceError extends ActionableError {
  * payload to `restore` — the behavioral half of the #2973 typed-slot round trip.
  */
 export interface KeepScreenAwakeRestorer {
-  restore(state: KeepScreenAwakeState): Promise<KeepScreenAwakeRestoreOutcome>;
+  restore(
+    state: KeepScreenAwakeState,
+    signal?: AbortSignal,
+  ): Promise<KeepScreenAwakeRestoreOutcome>;
 }
 
 /** Original simulator enrollment restored when a session releases its device. */
@@ -232,7 +231,7 @@ export interface ReleaseTeardownStage {
 
 /** Narrow seam for restoring iOS Simulator biometric enrollment on release. */
 export interface BiometricEnrollmentRestorer {
-  restore(enrollment: BiometricEnrollment): Promise<void>;
+  restore(enrollment: BiometricEnrollment, signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -320,7 +319,7 @@ function resolveDeviceStateRestorers(
 
 /** Narrow seam for restoring the device-wide network condition on release. */
 export interface NetworkConditionRestorer {
-  restore(profile: NetworkConditionProfile): Promise<void>;
+  restore(profile: NetworkConditionProfile, signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -1999,6 +1998,7 @@ export class SessionManager {
     ) => Promise<void>,
     generation = this.replacedRestoreGenerations.get(deviceId) ?? 0,
     teardownStep?: number,
+    options: RestoreSignalOptions = {},
   ): Promise<void> {
     if (this.identityReplacementFences.has(deviceId)) {
       if (!(await this.waitForIdentityReplacement(deviceId, generation))) {
@@ -2024,10 +2024,11 @@ export class SessionManager {
       )
       .map((release) => ({ release, step: release.teardownStep }));
     try {
-      // Clients still receive the ambient abort, but a successful late acknowledgement only
-      // becomes a failed restore for identity replacement, as ordinary teardown did on main.
-      const ambient = getAbortSignal();
-      const signal = ambient ? AbortSignal.any([ambient, controller.signal]) : controller.signal;
+      // The restore runs under the scope its starter handed in (the teardown shield for release
+      // cleanup), never the caller's own signal; a successful late acknowledgement only becomes a
+      // failed restore for identity replacement, as ordinary teardown did on main.
+      const scope = options.signal;
+      const signal = scope ? AbortSignal.any([scope, controller.signal]) : controller.signal;
       await runWithAbortSignal(signal, () =>
         restore(signal, controller.signal, () => {
           // An acknowledged write already restored A, even if its handoff mark is later revoked.
@@ -2498,8 +2499,8 @@ export class SessionManager {
     this.stateRestore = new SessionDeviceStateRestore(
       {
         timer,
-        dispatchDeviceRestore: (deviceId, restore, generation, teardownStep) =>
-          this.dispatchDeviceRestore(deviceId, restore, generation, teardownStep),
+        dispatchDeviceRestore: (deviceId, restore, generation, teardownStep, options) =>
+          this.dispatchDeviceRestore(deviceId, restore, generation, teardownStep, options),
         restoreGeneration: (deviceId) => this.replacedRestoreGenerations.get(deviceId) ?? 0,
         hasIdentityReplacementFence: (deviceId) => this.identityReplacementFences.has(deviceId),
         trackSessionSetup: (session, createSetup) => this.trackSessionSetup(session, createSetup),
@@ -3218,8 +3219,8 @@ export class SessionManager {
         },
       );
       // Natural point to retry a rotation or screen reader an earlier release could not restore.
-      await this.stateRestore.retryAbandonedRotationRestore(created.assignedDevice);
-      await this.stateRestore.retryAbandonedScreenReaderRestore(created.assignedDevice);
+      await this.stateRestore.retryAbandonedRotationRestore(created.assignedDevice, { signal });
+      await this.stateRestore.retryAbandonedScreenReaderRestore(created.assignedDevice, { signal });
       return created;
     } finally {
       if (this.sessionSlots.getCreation(sessionId) === creation) {
@@ -5522,6 +5523,7 @@ export class SessionManager {
       platform,
       options.stableDeviceId ?? existing.stableDeviceId,
       options.deferCleanup,
+      { signal: options.signal },
     );
     const rebind = { session: existing, promise };
     this.sessionSlots.setRebind(sessionId, rebind);
@@ -5587,7 +5589,8 @@ export class SessionManager {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
-    deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
+    deferCleanup: ((cleanup: DeferredRebindCleanup) => void) | undefined,
+    scope: RestoreSignalOptions,
   ): Promise<Session> {
     const activeSetups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,
@@ -5679,6 +5682,7 @@ export class SessionManager {
       const pending = await this.restoreRebindOverrides(
         existing,
         () => !this.identityReplacementFences.has(previousDevice),
+        scope,
       );
       if (pending.length > 0) {
         this.trackPendingTeardownCleanup(previousDevice, pending);
@@ -5864,27 +5868,30 @@ export class SessionManager {
   private async restoreRebindOverrides(
     existing: Session,
     mayRestore: () => boolean = () => true,
+    scope: RestoreSignalOptions = {},
   ): Promise<Promise<void>[]> {
     const restores: Array<() => Promise<{ pending: Promise<void> | null }>> = [
-      () => this.stateRestore.restoreKeepScreenAwakeBestEffort(existing),
-      () => this.stateRestore.restoreBiometricEnrollmentBestEffort(existing),
+      () => this.stateRestore.restoreKeepScreenAwakeBestEffort(existing, () => false, scope),
+      () => this.stateRestore.restoreBiometricEnrollmentBestEffort(existing, scope),
       async () => {
         const networkTarget = this.stateRestore.networkConditionRestoreTarget(existing);
         if (!networkTarget) {
           return { pending: null };
         }
-        const pending = await this.stateRestore.runUnderTeardownShield(async () => [
+        const pending = await this.stateRestore.runUnderTeardownShield(async (shield) => [
           {
-            ...(await this.stateRestore.restoreNetworkConditionBestEffort(existing)),
+            ...(await this.stateRestore.restoreNetworkConditionBestEffort(existing, {
+              signal: shield,
+            })),
             abandon: () =>
               this.stateRestore.abandonCappedRestore(networkTarget, "network-condition"),
           },
         ]);
         return { pending: pending[0] ?? null };
       },
-      () => this.stateRestore.getPendingClockRestoration(existing, null),
-      () => this.stateRestore.getPendingRotationRestoration(existing, null),
-      () => this.stateRestore.getPendingScreenReaderRestoration(existing, null),
+      () => this.stateRestore.getPendingClockRestoration(existing, null, scope),
+      () => this.stateRestore.getPendingRotationRestoration(existing, null, scope),
+      () => this.stateRestore.getPendingScreenReaderRestoration(existing, null, scope),
     ];
     const pending: Promise<void>[] = [];
     for (const restore of restores) {

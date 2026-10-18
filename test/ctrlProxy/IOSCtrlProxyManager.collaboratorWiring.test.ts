@@ -165,8 +165,8 @@ describe("IOSCtrlProxyManager collaborator wiring", () => {
         listConnectedDevices: async () => ({ devices: [PHYSICAL], complete: true }),
       });
       // Detection is owned by a private collaborator; this is the one reach into the wiring.
-      expect(await absent["deviceDetector"].isDeviceDetected()).toBe(false);
-      expect(await present["deviceDetector"].isDeviceDetected()).toBe(true);
+      expect(await absent.diagnostics.deviceDetector.isDeviceDetected()).toBe(false);
+      expect(await present.diagnostics.deviceDetector.isDeviceDetected()).toBe(true);
     });
   });
 

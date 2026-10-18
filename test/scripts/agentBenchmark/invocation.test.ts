@@ -259,6 +259,22 @@ describe("agent benchmark launch paths", () => {
       AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "claims",
     };
     const launch = claudeLaunchEnv(inherited, PATHS, "linux", "/work");
+    // Claude's config directory and mTLS files resolve from the invocation directory too.
+    const claudePaths = claudeLaunchEnv(
+      {
+        CLAUDE_CONFIG_DIR: "cfg",
+        CLAUDE_CODE_CLIENT_CERT: "tls/c.pem",
+        CLAUDE_CODE_CLIENT_KEY: "tls/k.pem",
+      },
+      PATHS,
+      "linux",
+      "/work",
+    );
+    expect([
+      claudePaths.CLAUDE_CONFIG_DIR,
+      claudePaths.CLAUDE_CODE_CLIENT_CERT,
+      claudePaths.CLAUDE_CODE_CLIENT_KEY,
+    ]).toEqual(["/work/cfg", "/work/tls/c.pem", "/work/tls/k.pem"]);
     const server = mcpServerEnv(inherited, PATHS, "linux", "/work");
     for (const env of [launch, server]) {
       expect(env.ANDROID_HOME).toBe("/work/sdk");
@@ -392,6 +408,18 @@ describe("agent benchmark provider identity", () => {
     expect(providerIdentity({ AWS_ROLE_ARN: "arn:aws:iam::123:role/r" })).toBe(
       `AWS_ROLE_ARN=sha256:${pathDigest("arn:aws:iam::123:role/r")}`,
     );
+    // The AWS SDK's endpoint overrides route Bedrock too, and a toggle turns them off.
+    expect(
+      providerIdentity({
+        AWS_ENDPOINT_URL_BEDROCK_RUNTIME: "https://vpce-1.bedrock.example",
+        AWS_IGNORE_CONFIGURED_ENDPOINT_URLS: "true",
+      }),
+    ).toBe(
+      [
+        "AWS_ENDPOINT_URL_BEDROCK_RUNTIME=https://vpce-1.bedrock.example",
+        "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS=true",
+      ].join("\n"),
+    );
     // Custom request headers can carry tenant or routing values: digested, never echoed.
     expect(providerIdentity({ ANTHROPIC_CUSTOM_HEADERS: "X-Tenant: a" })).toBe(
       `ANTHROPIC_CUSTOM_HEADERS=sha256:${pathDigest("X-Tenant: a")}`,
@@ -439,6 +467,9 @@ describe("agent benchmark provider identity", () => {
       "CLAUDE_ENABLE_BYTE_WATCHDOG",
       "CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK",
       "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
+      // The AWS SDK's retry policy.
+      "AWS_RETRY_MODE",
+      "AWS_MAX_ATTEMPTS",
     ]) {
       expect({ key, scrubbed: isRunShapingClaudeVariable(key) }).toEqual({ key, scrubbed: true });
     }

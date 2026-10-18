@@ -147,6 +147,9 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "CLAUDE_CODE_RETRY_WATCHDOG",
   // Mid-stream failures go to the retry layer instead of the non-streaming fallback
   "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
+  // The AWS SDK's retry policy for Bedrock (AWS_MAX_ATTEMPTS=1 disables retries)
+  "AWS_RETRY_MODE",
+  "AWS_MAX_ATTEMPTS",
   // System prompt and tool set (the attribution toggle changes the system prompt's opening)
   "CLAUDE_CODE_ATTRIBUTION_HEADER",
   "CLAUDE_CODE_SIMPLE",
@@ -225,6 +228,10 @@ const PATH_VARIABLES = new Set([
   "AWS_CONFIG_FILE",
   "AWS_SHARED_CREDENTIALS_FILE",
   "AWS_WEB_IDENTITY_TOKEN_FILE",
+  // Claude's own config directory and mTLS client certificate and key.
+  "CLAUDE_CONFIG_DIR",
+  "CLAUDE_CODE_CLIENT_CERT",
+  "CLAUDE_CODE_CLIENT_KEY",
   "ANDROID_HOME",
   "ANDROID_SDK_ROOT",
   ...SHARED_AUTOMOBILE_VARIABLES,
@@ -420,9 +427,15 @@ const PROVIDER_FLAGS = [
   "CLAUDE_CODE_USE_MANTLE",
 ];
 // Every provider's endpoint override (ANTHROPIC_BASE_URL, ANTHROPIC_BEDROCK_BASE_URL,
-// ANTHROPIC_FOUNDRY_BASE_URL, ANTHROPIC_AWS_BASE_URL, ANTHROPIC_BEDROCK_MANTLE_BASE_URL, ...).
-const PROVIDER_URL = /^ANTHROPIC_(?:\w+_)?BASE_URL$/;
-const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
+// ANTHROPIC_FOUNDRY_BASE_URL, ANTHROPIC_AWS_BASE_URL, ANTHROPIC_BEDROCK_MANTLE_BASE_URL, ...),
+// and the AWS SDK's own (AWS_ENDPOINT_URL, AWS_ENDPOINT_URL_BEDROCK_RUNTIME, ...).
+const PROVIDER_URL = /^ANTHROPIC_(?:\w+_)?BASE_URL$|^AWS_ENDPOINT_URL(?:_\w+)?$/;
+const PROVIDER_REGIONS = [
+  "AWS_REGION",
+  "CLOUD_ML_REGION",
+  // Turns the AWS endpoint overrides above (and config-file ones) off.
+  "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS",
+];
 // Provider-specific region routing (ANTHROPIC_BEDROCK_REGION_PREFIX,
 // ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION, VERTEX_REGION_CLAUDE_*, ...).
 const PROVIDER_REGION = /^(?:ANTHROPIC_\w*REGION\w*|VERTEX_REGION_\w+)$/;

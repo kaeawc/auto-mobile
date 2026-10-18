@@ -1,5 +1,5 @@
 import type { FeatureFlagKey } from "../../features/featureFlags/FeatureFlagDefinitions";
-import type { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
+import type { FeatureFlagAdmin } from "../../features/featureFlags/FeatureFlagService";
 import type { SessionToolSelectionService } from "../../features/toolSelection/SessionToolSelectionService";
 import { IDE_ROUTE_PARSERS } from "../ideRoutes";
 import type { DaemonRequest } from "../types";
@@ -17,7 +17,7 @@ export type IdeRouteHandler = (
 
 export interface IdeFeatureRouteDeps {
   /** The feature-flag service; throws when the daemon runs without one. */
-  requireFeatureFlagService: () => Pick<FeatureFlagService, "listFlags" | "setFlag">;
+  requireFeatureFlagService: () => FeatureFlagAdmin;
   sessionToolSelection: () => Pick<SessionToolSelectionService, "setEnabled">;
   /** A broker-bound connection may not change host-wide state. */
   assertBrokerHostMutation: (socketSessionId: string | undefined, action: string) => void;

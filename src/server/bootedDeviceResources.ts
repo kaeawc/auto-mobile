@@ -83,9 +83,9 @@ import {
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import {
   AndroidOrientationReader,
-  IosOrientationReader,
   type OrientationReader,
 } from "../features/action/OrientationReader";
+import { IosOrientationReader } from "../features/action/IosOrientationReader";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { TTLCache } from "../utils/cache/Cache";

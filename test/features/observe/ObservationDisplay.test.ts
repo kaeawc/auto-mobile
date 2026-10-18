@@ -1,8 +1,8 @@
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
 import {
-  AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
   observedAndroidDisplay,
   observedIosDisplay,

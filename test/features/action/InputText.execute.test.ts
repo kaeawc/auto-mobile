@@ -105,7 +105,7 @@ describe("InputText.execute", () => {
   test("returns a no-text failure without invoking any transport when text is undefined", async () => {
     const inputText = createInputText(androidDevice, fakeAdb);
 
-    const result = await inputText.execute(undefined as any);
+    const result = await Reflect.apply(inputText.execute, inputText, [undefined]);
 
     expect(result).toMatchObject({
       success: false,
@@ -207,12 +207,8 @@ describe("InputText.execute", () => {
           host,
         );
         // Exercise real cancellation/settlement without SDK lookup or a real process.
-        const internals = adb as unknown as {
-          isTestMode: boolean;
-          getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-        };
-        internals.isTestMode = false;
-        internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+        Reflect.set(adb, "isTestMode", false);
+        Reflect.set(adb, "getBaseCommandParts", async () => ({ adbPath: "adb", baseArgs: [] }));
         spyOn(adb, "getDeviceTimestampMs").mockImplementation(async () => fakeTimer.now());
         const input = createInputText(androidDevice, adb);
         const controller = new AbortController();

@@ -129,9 +129,8 @@ describe("FieldTypeDetector", () => {
       });
 
       test("detects checkable=true as string", () => {
-        const element = createElement({
-          class: "com.custom.View",
-          checkable: "true" as any,
+        const element = Object.assign(createElement({ class: "com.custom.View" }), {
+          checkable: "true",
         });
         expect(detector.detect(element)).toBe("checkbox");
       });
@@ -261,7 +260,7 @@ describe("FieldTypeDetector", () => {
     });
 
     test("returns true for checked='true' string", () => {
-      const element = createElement({ checked: "true" as any });
+      const element = Object.assign(createElement(), { checked: "true" });
       expect(detector.isChecked(element)).toBe(true);
     });
 
@@ -288,7 +287,7 @@ describe("FieldTypeDetector", () => {
     });
 
     test("returns empty string when text is not a string", () => {
-      const element = createElement({ text: 123 as any });
+      const element = Object.assign(createElement(), { text: 123 });
       expect(detector.getTextValue(element)).toBe("");
     });
 

@@ -4,6 +4,7 @@ import { toActionableError, unsupportedPlatformError } from "../../models/Action
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -309,7 +310,7 @@ export class ClearText extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
+    adb: AdbExecutor | AdbClientFactory | null = null,
     parser: ElementParser = new DefaultElementParser(),
     timer: Timer = defaultTimer,
   ) {

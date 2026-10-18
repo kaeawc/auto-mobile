@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ClearText } from "../../../src/features/action/ClearText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 
 describe("ClearText accessibility-service path", () => {
@@ -22,16 +23,16 @@ describe("ClearText accessibility-service path", () => {
     const fakeFactory = new FakeAdbClientFactory();
     const capturedArgs: unknown[] = [];
 
-    AndroidCtrlProxyClient.getInstance = ((dev: BootedDevice, adbFactory: unknown) => {
+    AndroidCtrlProxyClient.getInstance = (dev: BootedDevice, adbFactory?: AdbClientFactory) => {
       capturedArgs.push(adbFactory);
-      return {
-        requestClearText: async () => ({ success: true, totalTimeMs: 50 }),
-      } as any;
-    }) as any;
+      const client = originalGetInstance(dev, adbFactory);
+      spyOn(client, "requestClearText").mockResolvedValue({ success: true, totalTimeMs: 50 });
+      return client;
+    };
 
-    const clearText = new ClearText(device, fakeFactory as any);
+    const clearText = new ClearText(device, fakeFactory);
     capturedArgs.length = 0; // ignore construction-time calls; only assert about the a11y path
-    const result = await (clearText as any).executeAndroidClearText({} as ObserveResult);
+    const result = await clearText["executeAndroidClearText"]({} as ObserveResult);
 
     expect(result.success).toBe(true);
     expect(capturedArgs.length).toBe(1);

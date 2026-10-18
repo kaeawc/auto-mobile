@@ -83,10 +83,8 @@ describe("DragAndDrop", () => {
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
-    } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as any,
-    );
+    });
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     dragAndDrop = new DragAndDrop(device, fakeAdb, fakeTimer, {
       observeScreen: fakeObserveScreen,
@@ -148,14 +146,20 @@ describe("DragAndDrop", () => {
         ],
       },
     };
+    expect(dragAndDrop["resolveTarget"](hierarchy, { text: "Source" }, "source").bounds).toEqual({
+      left: 20,
+      top: 40,
+      right: 40,
+      bottom: 60,
+    });
+    expect(dragAndDrop["resolveTarget"](hierarchy, { text: "Target" }, "target").bounds).toEqual({
+      left: 220,
+      top: 240,
+      right: 240,
+      bottom: 260,
+    });
     expect(
-      (dragAndDrop as any).resolveTarget(hierarchy, { text: "Source" }, "source").bounds,
-    ).toEqual({ left: 20, top: 40, right: 40, bottom: 60 });
-    expect(
-      (dragAndDrop as any).resolveTarget(hierarchy, { text: "Target" }, "target").bounds,
-    ).toEqual({ left: 220, top: 240, right: 240, bottom: 260 });
-    expect(
-      (dragAndDrop as any).resolveTarget(hierarchy, { elementId: "source-row" }, "source").bounds,
+      dragAndDrop["resolveTarget"](hierarchy, { elementId: "source-row" }, "source").bounds,
     ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
   });
 

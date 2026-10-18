@@ -138,7 +138,7 @@ describe("ExecuteGesture Android swipe", () => {
     const gesture = createGesture();
     // The constructor validates the platform in BaseVisualChange, so mutate the
     // resolved device after construction to reach the swipe() default branch.
-    (gesture as any).device.platform = "web";
+    Reflect.set(gesture["device"], "platform", "web");
 
     const error = await gesture.swipe(0, 0, 1, 1).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ActionableError);

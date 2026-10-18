@@ -12,7 +12,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import {
   spyOnIosClientFactory,
   spyOnIosClientInstance,
@@ -220,7 +220,7 @@ describe("ClearText Android ADB fallback", () => {
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {
       hierarchy: { error: "Accessibility hierarchy unavailable" },
-    } as any,
+    } as ViewHierarchyResult,
   });
 
   const runClearText = (
@@ -228,13 +228,10 @@ describe("ClearText Android ADB fallback", () => {
     configure?: (clearText: ClearText) => void,
     signal?: AbortSignal,
   ) => {
-    const clearText = new ClearText(device, fakeAdb as any, undefined, new FakeTimer());
-    observedSpy = spyOn(
-      clearText as unknown as {
-        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
+    const clearText = new ClearText(device, fakeAdb, undefined, new FakeTimer());
+    observedSpy = spyOn(clearText, "observedInteraction").mockImplementation(async (fn) =>
+      fn(observeResult),
+    );
     refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
       focusedFieldObserve(""),
     );
@@ -682,14 +679,11 @@ describe("ClearText Android ADB fallback", () => {
     ]);
   });
   test("unsupported platform result includes the platform name", async () => {
-    const unsupportedDevice = { ...device, platform: "tvos" } as unknown as BootedDevice;
-    const clearText = new ClearText(unsupportedDevice, fakeAdb as any);
-    observedSpy = spyOn(
-      clearText as unknown as {
-        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) =>
+    const unsupportedDevice: BootedDevice = { ...device };
+    // Platform is a closed union; set an out-of-union value reflectively.
+    Reflect.set(unsupportedDevice, "platform", "tvos");
+    const clearText = new ClearText(unsupportedDevice, fakeAdb);
+    observedSpy = spyOn(clearText, "observedInteraction").mockImplementation(async (fn) =>
       fn(noHierarchyObserve()),
     );
 

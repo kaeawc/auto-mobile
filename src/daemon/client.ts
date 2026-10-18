@@ -7,6 +7,11 @@ import { z } from "zod";
 import { logger } from "../utils/logger";
 import { encodeNonFinite } from "../utils/nonFiniteJson";
 import { ActionableError } from "../models";
+import {
+  isRelayedJsonRpcError,
+  type TaskRelayFrame,
+  type TaskRelayMethod,
+} from "../server/tasks/taskRelay";
 import type { LivenessOwnerHold } from "./livenessOwnerLease";
 import {
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
@@ -310,6 +315,18 @@ function typedRefusalResponseFields(
   };
 }
 
+/** A request frame's Tasks relay (#4668): present only when the proxy relays the extension. */
+function taskRelayField(tasks: TaskRelayFrame | undefined): Pick<DaemonRequest, "tasks"> {
+  return tasks === undefined ? {} : { tasks };
+}
+
+/** A relayed `tasks/*` request's JSON-RPC error (#4668), when the frame carried a well-formed one. */
+function relayedJsonRpcErrorField(response: DaemonResponse): Pick<DaemonResponse, "jsonRpcError"> {
+  return isRelayedJsonRpcError(response.jsonRpcError)
+    ? { jsonRpcError: response.jsonRpcError }
+    : {};
+}
+
 /** The error a failed daemon response rejects with, carrying its structured code and details. */
 export function daemonResponseError(response: DaemonResponse): Error {
   const error =
@@ -338,6 +355,7 @@ export function daemonResponseError(response: DaemonResponse): Error {
       : undefined;
   return Object.assign(error, {
     code,
+    ...relayedJsonRpcErrorField(response),
     ...typedRefusalResponseFields(response),
     ...(livenessOwnerHold ? { livenessOwnerHold } : {}),
     ...releaseReasonField(response),
@@ -1271,6 +1289,7 @@ export class DaemonClient {
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
     signal?: AbortSignal,
+    options: DaemonToolCallOptions = {},
   ): Promise<any> {
     return this.sendRequest(
       "tools/call",
@@ -1281,7 +1300,21 @@ export class DaemonClient {
       progressToken,
       onRequestId,
       signal,
+      options.tasks,
     );
+  }
+
+  /**
+   * Relay an MCP Tasks extension request (#4668) to the daemon. A JSON-RPC error the daemon's MCP
+   * server answered with rejects carrying it unchanged as `jsonRpcError`.
+   */
+  async relayTaskMethod(
+    method: TaskRelayMethod,
+    params: Record<string, unknown>,
+    tasks: TaskRelayFrame,
+    { signal }: { signal?: AbortSignal } = {},
+  ): Promise<any> {
+    return this.sendRequest(method, params, undefined, undefined, signal, tasks);
   }
 
   /**
@@ -1301,6 +1334,7 @@ export class DaemonClient {
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
     signal?: AbortSignal,
+    tasks?: TaskRelayFrame,
   ): Promise<any> {
     signal?.throwIfAborted();
     // Ensure we're connected
@@ -1329,6 +1363,7 @@ export class DaemonClient {
       method,
       params,
       ...(progressToken !== undefined ? { progressToken } : {}),
+      ...taskRelayField(tasks),
       ...this.handshakeFields(),
     };
 
@@ -1594,6 +1629,12 @@ export class DaemonClient {
   }
 }
 
+/** Per-call options of {@link DaemonClientLike.callTool}. */
+export interface DaemonToolCallOptions {
+  /** The MCP Tasks extension relay for this call (#4668); absent when the client did not declare it. */
+  readonly tasks?: TaskRelayFrame;
+}
+
 export interface DaemonClientLike {
   connect(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
@@ -1603,6 +1644,17 @@ export interface DaemonClientLike {
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
     signal?: AbortSignal,
+    options?: DaemonToolCallOptions,
+  ): Promise<any>;
+  /**
+   * Relay an MCP Tasks extension request to the daemon (#4668). Optional: a client without it
+   * cannot reach the daemon's tasks, and the proxy answers those requests with an error.
+   */
+  relayTaskMethod?(
+    method: TaskRelayMethod,
+    params: Record<string, unknown>,
+    tasks: TaskRelayFrame,
+    options?: { signal?: AbortSignal },
   ): Promise<any>;
   readResource(
     uri: string,

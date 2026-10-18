@@ -251,8 +251,24 @@ result, and only to a client whose `initialize` declared it; every other client 
 
 **Scope.** Tasks are served by the daemon's per-request servers (HTTP endpoint and in-process
 forwards); a task's owner is the explicit session key, because a keyless request's scope id is
-one-off. Direct stdio serves no tasks. The stdio proxy does not yet relay the declaration or
-the `tasks/*` methods to the daemon, so proxy clients keep synchronous calls.
+one-off. Direct stdio serves no tasks.
+
+**Stdio proxy relay.** The proxy (`src/server/proxyServer.ts`, `DaemonMcpProxy`) is a transparent
+participant. It advertises the extension on `initialize` only to a declaring client, forwards a
+`tools/call`'s declaration as a `tasks` field on the control-socket frame (`{ownerKey,
+declared}`), and relays `tasks/get`, `tasks/update` (with the input responses the SDK lifts to
+`ctx.mcpReq.inputResponses`) and `tasks/cancel`; an undeclared `tasks/*` request is refused with
+the same `-32021` the daemon sends. The owner key is minted once per proxy process
+(`proxy-tasks:<id>`), so a task stays reachable after the proxy reconnects to a restarted daemon;
+the socket's own session id would not be. The daemon's in-process forward passes it to the
+request server as `taskOwnerKey` and replays the declaration. The SDK client on that hop lifts
+`resultType` off every result, so the forward restores it (`resultType: "task"` on a task handle,
+`"complete"` on `tasks/*` results), and a `tasks/*` JSON-RPC error travels on the frame as
+`jsonRpcError` so the proxy answers with the daemon's code, message and data. `tasks/*` frames
+skip the socket's admission queue: a poll never waits behind a long call on the same socket. A
+lost daemon connection is reconnected and the request asked once more; a daemon that stays
+unreachable is an error, never an invented status. Device-binding tools are not relayed as
+declared until the proxy binds the session from a completed task's result.
 `notifications/tasks` push and `subscriptions/listen` are out of scope (polling only).
 
 ## Open questions and resolutions

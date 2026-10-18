@@ -6,16 +6,34 @@ import type { Client } from "@modelcontextprotocol/client";
  * factory keeps the seam's signature (the bound, profile and released sessions), so the session
  * key that names the forward's caller travels with the async call chain instead.
  */
-const forwardSessionKey = new AsyncLocalStorage<string>();
+const forwardSessionKey = new AsyncLocalStorage<{
+  readonly sessionKey: string;
+  readonly taskOwnerKey?: string;
+}>();
 
-/** Run `fn` so the forward client it opens is keyed on `sessionKey`. */
-export function runWithForwardSessionKey<T>(sessionKey: string, fn: () => Promise<T>): Promise<T> {
-  return forwardSessionKey.run(sessionKey, fn);
+/**
+ * Run `fn` so the forward client it opens is keyed on `sessionKey`. `taskOwnerKey` names the
+ * stdio proxy that owns the forward's MCP tasks (#4668), when the frame relayed the extension.
+ */
+export function runWithForwardSessionKey<T>(
+  sessionKey: string,
+  fn: () => Promise<T>,
+  taskOwnerKey?: string,
+): Promise<T> {
+  return forwardSessionKey.run(
+    { sessionKey, ...(taskOwnerKey !== undefined && { taskOwnerKey }) },
+    fn,
+  );
 }
 
 /** The session key of the forward being opened on this async call chain, if any. */
 export function currentForwardSessionKey(): string | undefined {
-  return forwardSessionKey.getStore();
+  return forwardSessionKey.getStore()?.sessionKey;
+}
+
+/** The task owner key of the forward being opened on this async call chain, if any. */
+export function currentForwardTaskOwnerKey(): string | undefined {
+  return forwardSessionKey.getStore()?.taskOwnerKey;
 }
 
 /** Opens the MCP client one control-socket forward runs through; closed when the forward ends. */

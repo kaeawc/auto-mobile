@@ -169,7 +169,9 @@ import {
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../features/toolSelection/toolSelectionControl";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import type { IdGenerator } from "../utils/IdGenerator";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { isCreateTaskResult } from "../server/tasks/mcpTasksExtension";
+import type { TaskRelayFrame, TaskRelayMethod } from "../server/tasks/taskRelay";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
@@ -282,11 +284,49 @@ function isSuspectRefusalRetryable(
   );
 }
 
+/** How one forward of a tool call behaves. */
+interface ToolCallForwardMode {
+  /** Whether a suspect-session refusal may be retried once after recovery. */
+  readonly allowSuspectRetry: boolean;
+  /** The Tasks relay (#4668), only for a call whose client declared the extension. */
+  readonly tasks?: TaskRelayFrame;
+}
+
+/** Per-call options of {@link DaemonMcpProxy.callTool}. */
+export interface DaemonProxyToolCallOptions {
+  /**
+   * Whether the client's own `tools/call` declared the MCP Tasks extension (#4668). Only then may
+   * the daemon answer with a task handle.
+   */
+  readonly declaresTasks?: boolean;
+}
+
 /** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
 interface ForwardedToolCall {
   result: any;
   forwardedSessionUuid?: string;
   retryableSuspectRefusal?: DeviceSessionSuspectRefusal;
+}
+
+/**
+ * Forward one tool call. The Tasks relay (#4668) is passed only when the client declared the
+ * extension, so every other call reaches the client exactly as before.
+ */
+function callDaemonTool(
+  client: DaemonClientLike,
+  call: {
+    name: string;
+    args: Record<string, unknown>;
+    progressToken: string | number | undefined;
+    onRequestId: (requestId: string) => void;
+    signal: AbortSignal | undefined;
+    tasks: TaskRelayFrame | undefined;
+  },
+): Promise<any> {
+  const { name, args, progressToken, onRequestId, signal, tasks } = call;
+  return tasks
+    ? client.callTool(name, args, progressToken, onRequestId, signal, { tasks })
+    : client.callTool(name, args, progressToken, onRequestId, signal);
 }
 
 /** The tool name when replaying it could repeat a device action, else undefined. */
@@ -755,6 +795,8 @@ export class DaemonMcpProxy {
   private readonly deadSocketClients = new WeakSet<DaemonClientLike>();
   /** Stable for this proxy instance, including all transport reconnects. */
   private readonly livenessOwnerToken: string;
+  /** Owns this proxy's MCP tasks on the daemon across reconnects (#4668); minted on first use. */
+  private mintedTaskOwnerKey: string | undefined;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -3311,10 +3353,15 @@ export class DaemonMcpProxy {
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
     callerSignal?: AbortSignal,
+    options: DaemonProxyToolCallOptions = {},
   ): Promise<any> {
     this.refuseBrokerGenericAcquisition(name);
     const signal = this.untilClosed(callerSignal);
-    let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
+    const tasks = this.taskRelayForToolCall(name, options.declaresTasks === true);
+    let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+      allowSuspectRetry: true,
+      tasks,
+    });
     if (isDeviceBindingTool(name)) {
       first = await this.waitOutDeviceCleanup(first, name, args, progressToken, onProgress, signal);
     }
@@ -3325,15 +3372,66 @@ export class DaemonMcpProxy {
     // Exactly one retry: the refused call never reached its handler (isSuspectRefusalRetryable).
     // The retry's own pre-forward checks surface a handover or loss recovery recorded.
     logger.info(`[DaemonMcpProxy] Session ${refusal.sessionUuid} restored; retrying ${name} once`);
-    const retried = await this.forwardToolCall(
-      name,
-      args,
-      progressToken,
-      onProgress,
-      signal,
-      false,
-    );
+    const retried = await this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+      allowSuspectRetry: false,
+      tasks,
+    });
     return this.withPendingResumedNotice(retried.forwardedSessionUuid, retried.result);
+  }
+
+  /** The task owner key this proxy's MCP tasks are created and looked up under (#4668). */
+  private taskOwnerKey(): string {
+    this.mintedTaskOwnerKey ??= `proxy-tasks:${(this.config.idGenerator ?? defaultIdGenerator).next()}`;
+    return this.mintedTaskOwnerKey;
+  }
+
+  /**
+   * The Tasks relay for a `tools/call` whose client declared the extension (#4668). A
+   * device-binding call is never relayed as declared: this proxy learns the session it binds from
+   * the call's result, which a task would only deliver later through `tasks/get`.
+   */
+  private taskRelayForToolCall(name: string, declared: boolean): TaskRelayFrame | undefined {
+    return declared && !isDeviceBindingTool(name)
+      ? { ownerKey: this.taskOwnerKey(), declared: true }
+      : undefined;
+  }
+
+  /**
+   * Relay `tasks/get`, `tasks/update` or `tasks/cancel` (#4668) to the daemon under this proxy's
+   * task owner key. The daemon answers from its task store, so a task survives a daemon restart
+   * (a restarted daemon reports one it was running as failed); a lost connection is reconnected
+   * and the request asked once more. A task touches no session of this proxy, so neither a
+   * liveness recovery nor a fenced binding holds the request back. The daemon's JSON-RPC error
+   * rejects carrying it as `jsonRpcError`.
+   */
+  async relayTaskMethod(
+    method: TaskRelayMethod,
+    params: Record<string, unknown>,
+    declared: boolean,
+    callerSignal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    const signal = this.untilClosed(callerSignal);
+    signal.throwIfAborted();
+    const tasks: TaskRelayFrame = { ownerKey: this.taskOwnerKey(), declared };
+    const forwarding = this.withRecoverableReconnect(
+      () => {
+        const client = this.requireClient();
+        if (!client.relayTaskMethod) {
+          throw new ActionableError(`The daemon client cannot relay ${method}`);
+        }
+        return client.relayTaskMethod(method, params, tasks, { signal });
+      },
+      undefined,
+      true,
+      true,
+      undefined,
+      signal,
+    );
+    return await raceWithDeadline(forwarding, {
+      timer: this.timer,
+      signal,
+      label: `Daemon ${method}`,
+    });
   }
 
   private refuseBrokerGenericAcquisition(name: string): void {
@@ -3393,7 +3491,9 @@ export class DaemonMcpProxy {
         `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; re-checking in ${delayMs}ms`,
       );
       await this.waitForCleanupPoll(delayMs, signal);
-      current = await this.forwardToolCall(name, args, progressToken, onProgress, signal, false);
+      current = await this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+        allowSuspectRetry: false,
+      });
     }
     return current;
   }
@@ -3425,7 +3525,8 @@ export class DaemonMcpProxy {
    */
   private withPendingResumedNotice(sessionUuid: string | undefined, result: unknown): unknown {
     const pending = sessionUuid ? this.resumedStallNotices.get(sessionUuid) : undefined;
-    if (!sessionUuid || !pending) {
+    // A task handle carries no content to warn in; the next ordinary result does (#4668).
+    if (!sessionUuid || !pending || isCreateTaskResult(result)) {
       return result;
     }
     this.resumedStallNotices.delete(sessionUuid);
@@ -3469,7 +3570,7 @@ export class DaemonMcpProxy {
     progressToken: string | number | undefined,
     onProgress: DaemonProxyProgressCallback | undefined,
     signal: AbortSignal | undefined,
-    allowSuspectRetry: boolean,
+    mode: ToolCallForwardMode,
   ): Promise<ForwardedToolCall> {
     signal?.throwIfAborted();
     // From the first tool call on, a refused claim of the initial binding is leashed as usual.
@@ -3500,14 +3601,7 @@ export class DaemonMcpProxy {
         signal,
       );
     }
-    return this.forwardRoutedToolCall(
-      name,
-      callerArgs,
-      progressToken,
-      onProgress,
-      signal,
-      allowSuspectRetry,
-    );
+    return this.forwardRoutedToolCall(name, callerArgs, progressToken, onProgress, signal, mode);
   }
 
   private async forwardRoutedToolCall(
@@ -3516,7 +3610,7 @@ export class DaemonMcpProxy {
     progressToken: string | number | undefined,
     onProgress: DaemonProxyProgressCallback | undefined,
     signal: AbortSignal | undefined,
-    allowSuspectRetry: boolean,
+    { allowSuspectRetry, tasks }: ToolCallForwardMode,
   ): Promise<ForwardedToolCall> {
     if (this.hasLivenessLifecycleFence()) {
       await this.waitForLivenessRecovery(signal);
@@ -3574,11 +3668,11 @@ export class DaemonMcpProxy {
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
           const client = this.requireClient();
           return this.trackToolCallInFlight(client, () =>
-            client.callTool(
+            callDaemonTool(client, {
               name,
-              this.withToolSelectionProfile(forwardedArgs),
+              args: this.withToolSelectionProfile(forwardedArgs),
               progressToken,
-              (requestId) => {
+              onRequestId: (requestId) => {
                 this.removeProgressListener(registeredClient, registeredRequestId);
                 registeredClient = client;
                 registeredRequestId = requestId;
@@ -3592,7 +3686,8 @@ export class DaemonMcpProxy {
                 }
               },
               signal,
-            ),
+              tasks,
+            }),
           );
         },
         forwardedSessionUuid,

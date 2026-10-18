@@ -1,4 +1,5 @@
 import { describe, it, test, expect, beforeEach, afterEach } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import {
   CaptureSnapshot,
   VM_SNAPSHOT_SAVE_DISPATCHED,
@@ -11,7 +12,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
-import * as os from "os";
+
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
 import {
   noOpSnapshotDirectorySync,
@@ -25,6 +26,7 @@ describe("CaptureSnapshot", () => {
   let fakeTimer: FakeTimer;
   let captureSnapshot: CaptureSnapshot;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -43,7 +45,7 @@ describe("CaptureSnapshot", () => {
     fakeTimer.enableAutoAdvance();
 
     // Create secure temporary directory for tests
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create CaptureSnapshot instance with fakes
@@ -56,12 +58,6 @@ describe("CaptureSnapshot", () => {
   });
 
   afterEach(async () => {
-    // Clean up test directory
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch (error) {
-      // Ignore cleanup errors
-    }
     fakeTimer.reset();
   });
 
@@ -595,6 +591,7 @@ describe("CaptureSnapshot (iOS)", () => {
   let device: BootedDevice;
   let simctl: FakeSimctl;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -605,16 +602,8 @@ describe("CaptureSnapshot (iOS)", () => {
     };
 
     simctl = new FakeSimctl();
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-capture-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
-  });
-
-  afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
   });
 
   function makeCapture(): CaptureSnapshot {
@@ -1064,6 +1053,7 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
   let fakeAdbFactory: AdbClientFactory;
   let fakeTimer: FakeTimer;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -1077,16 +1067,11 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
     fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-traversal-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
   afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch {
-      // ignore cleanup errors
-    }
     fakeTimer.reset();
   });
 

@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import * as fs from "fs";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
+
 import { basename, join } from "path";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
@@ -19,16 +20,13 @@ import { logger } from "../../src/utils/logger";
 import { nodeLockFileSystem } from "../../src/utils/lockFileSystem";
 
 describe("fileLock primitive", () => {
+  const scratch = useScratchRoot("file-lock-");
   let dir: string;
   let lockPath: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "file-lock-"));
+    dir = scratch.next();
     lockPath = join(dir, "thing.lock");
-  });
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
   });
 
   test("the node lock filesystem exclusively creates private publication files", () => {

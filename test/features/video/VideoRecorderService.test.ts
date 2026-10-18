@@ -1,4 +1,5 @@
-import { beforeEach, afterEach, describe, expect, test, mock } from "bun:test";
+import { beforeEach, describe, expect, test, mock } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -156,15 +157,13 @@ describe("parseVideoRecordingConfig", () => {
 describe("VideoRecorderService", () => {
   let backend: ServiceTestBackend;
   let service: VideoRecorderService;
+  const scratch = useScratchRoot("video-test-");
   let archiveRoot: string;
   let securePermissions: FakeSecurePermissions;
 
   beforeEach(async () => {
     backend = new ServiceTestBackend();
-    archiveRoot = path.join(
-      os.tmpdir(),
-      `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    archiveRoot = path.join(scratch.next(), "archive");
     securePermissions = new FakeSecurePermissions();
 
     service = new VideoRecorderService({
@@ -644,10 +643,6 @@ describe("VideoRecorderService", () => {
     resolveStop?.();
 
     await expect(Promise.all([userStop, shutdownStop])).resolves.toHaveLength(2);
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 
   describe("startRecording", () => {

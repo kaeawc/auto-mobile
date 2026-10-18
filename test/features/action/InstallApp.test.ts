@@ -7,6 +7,7 @@ import { PlistClient } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
 import { DefaultAndroidBuildToolsLocator } from "../../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import {
   InstallApp as ProductionInstallApp,
   type DeviceAppInstaller,
@@ -32,8 +33,8 @@ import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortCont
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import path from "path";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
+
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -223,12 +224,11 @@ describe("InstallApp", () => {
   let fakeHost: FakeHostCommandExecutor;
   let fakeLocator: FakeAndroidBuildToolsLocator;
   let fakeTimer: FakeTimer;
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("automobile-install-");
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   function ipaWithBundleId(): string {
-    const dir = mkdtempSync(path.join(tmpdir(), "automobile-install-ipa-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const ipaPath = path.join(dir, "MyApp.ipa");
     const zip = new AdmZip();
     zip.addFile("Payload/MyApp.app/Info.plist", Buffer.from("plist fixture"));
@@ -252,10 +252,6 @@ describe("InstallApp", () => {
     } else {
       process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
     }
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
   });
 
   test("preserves default dependency implementations with omitted options", () => {
@@ -1002,8 +998,7 @@ describe("InstallApp", () => {
 
   test("resolves relative artifact path from daemon launch cwd when daemon cwd is stable", async () => {
     const perf = createPerformanceTracker(true, fakeTimer);
-    const launchCwd = mkdtempSync(path.join(tmpdir(), "install-app-launch-cwd-"));
-    tempDirs.push(launchCwd);
+    const launchCwd = scratch.next();
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
 
     fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });

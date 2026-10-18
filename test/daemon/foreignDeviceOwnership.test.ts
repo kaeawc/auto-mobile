@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir, userInfo } from "node:os";
+import { describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   adbServerScope,
@@ -646,12 +647,7 @@ describe("deviceAllocationClaimPath", () => {
 });
 
 describe("daemons in different coordination directories on one adb server (#10708)", () => {
-  const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+  const scratch = useScratchRoot("foreign-ownership-");
 
   /** Real lock files: each daemon's lease lives in its own coordination dir, claims are shared. */
   function daemon(home: string, coordinationDir: string, alive: Set<number>) {
@@ -675,8 +671,7 @@ describe("daemons in different coordination directories on one adb server (#1070
   }
 
   test("a second daemon sees and loses to the first daemon's claim", async () => {
-    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10708-"));
-    roots.push(root);
+    const root = scratch.next();
     const home = join(root, "home");
     const alive = new Set<number>([SELF_PID, FOREIGN_PID]);
     const probe = new FakeOwnerProbe();
@@ -712,8 +707,7 @@ describe("daemons in different coordination directories on one adb server (#1070
   });
 
   test("a session claim is written and withdrawn at the ADB-server location, never the legacy one (#10708, #10709)", async () => {
-    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10709-"));
-    roots.push(root);
+    const root = scratch.next();
     const home = join(root, "home");
     const coordinationDir = join(root, "coord");
     const ownership = new ForwardLeaseForeignDeviceOwnership(

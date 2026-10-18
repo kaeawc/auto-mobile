@@ -1,7 +1,7 @@
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { BiometricAuth, BiometricAuthOptions } from "../features/action/BiometricAuth";
+import { BiometricAuth } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import {
@@ -16,10 +16,7 @@ import type { SessionManager } from "../daemon/sessionManager";
 import { runSessionBiometricMutation } from "./sessionBiometricEnrollment";
 
 // Type definitions for better TypeScript support
-export interface BiometricAuthArgs extends BiometricAuthOptions {
-  // Device targeting fields are added by addDeviceTargetingToSchema.
-  sessionUuid?: string;
-}
+export type BiometricAuthArgs = z.output<typeof biometricAuthSchema>;
 
 // Schema definition
 //

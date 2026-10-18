@@ -24,23 +24,47 @@ final class PrototypeSessionPatchTests: XCTestCase {
 
     // MARK: Applied
 
+    /// #13040: the first show is revision 1 and each re-show moves it on, as on Android's controller.
+    func testShowRevisionsMatchTheSharedFixtureAndroidReplays() throws {
+        struct Show: Decodable { let spec: String; let revision: Int }
+        struct Fixture: Decodable { let specs: [String: JSONValue]; let shows: [Show] }
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("revision/show-revisions.json")
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
+        var session = PrototypeSession()
+        for show in fixture.shows {
+            let spec = try XCTUnwrap(fixture.specs[show.spec])
+            try session.show(JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(spec)))
+            XCTAssertEqual(session.dataRevision, show.revision, "show of \(show.spec)")
+        }
+    }
+
+    func testEveryShowTakesARevisionStartingAtOne() throws {
+        var session = PrototypeSession()
+        XCTAssertEqual(session.dataRevision, 0, "nothing shown yet")
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(Self.source.utf8))
+        session.show(spec)
+        XCTAssertEqual(session.dataRevision, 1)
+        session.show(spec)
+        XCTAssertEqual(session.dataRevision, 2)
+    }
+
     func testDataPatchAppliesWithoutBaseRevisionAndReportsTheNewRevision() throws {
         var session = try session()
         let (outcome, events) = try session.patch(
             id: "p", baseRevision: nil, ops: ops(#"[{"op":"replace","path":"/data/title","value":"B"}]"#)
         )
-        XCTAssertEqual(outcome, .applied(revision: 1))
+        XCTAssertEqual(outcome, .applied(revision: 2))
         XCTAssertEqual(session.data?["title"], .string("B"))
-        XCTAssertEqual(session.dataRevision, 1)
+        XCTAssertEqual(session.dataRevision, 2)
         XCTAssertTrue(events.isEmpty, "a data patch moves no state key")
     }
 
     func testStatePatchEmitsOneChangeEventAndKeepsPagesAndTheRest() throws {
         var session = try session()
         let (outcome, events) = try session.patch(
-            id: "p", baseRevision: 0, ops: ops(#"[{"op":"replace","path":"/state/count","value":5}]"#)
+            id: "p", baseRevision: 1, ops: ops(#"[{"op":"replace","path":"/state/count","value":5}]"#)
         )
-        XCTAssertEqual(outcome, .applied(revision: 1))
+        XCTAssertEqual(outcome, .applied(revision: 2))
         XCTAssertEqual(session.state["count"], .number(5))
         XCTAssertEqual(session.state["flag"], .bool(false))
         XCTAssertEqual(events.count, 1)
@@ -55,7 +79,7 @@ final class PrototypeSessionPatchTests: XCTestCase {
             id: "p", baseRevision: nil,
             ops: ops(#"[{"op":"replaceNode","id":"t","node":{"type":"text","id":"t","text":"Bye"}}]"#)
         )
-        XCTAssertEqual(outcome, .applied(revision: 1))
+        XCTAssertEqual(outcome, .applied(revision: 2))
         XCTAssertEqual(session.spec?.root.children?.first?.text, "Bye")
         XCTAssertEqual(session.structureRevision, 1)
     }
@@ -63,11 +87,11 @@ final class PrototypeSessionPatchTests: XCTestCase {
     func testRevisionIsOneCounterAcrossDeviceStateWritesAndPatches() throws {
         var session = try session()
         _ = session.change(key: "count", value: .number(2))
-        XCTAssertEqual(session.dataRevision, 1)
+        XCTAssertEqual(session.dataRevision, 2)
         let (outcome, _) = try session.patch(
-            id: "p", baseRevision: 1, ops: ops(#"[{"op":"replace","path":"/data/title","value":"B"}]"#)
+            id: "p", baseRevision: 2, ops: ops(#"[{"op":"replace","path":"/data/title","value":"B"}]"#)
         )
-        XCTAssertEqual(outcome, .applied(revision: 2))
+        XCTAssertEqual(outcome, .applied(revision: 3))
     }
 
     // MARK: Refused
@@ -77,7 +101,7 @@ final class PrototypeSessionPatchTests: XCTestCase {
         let (outcome, events) = try session.patch(
             id: "p", baseRevision: nil, ops: ops(#"[{"op":"test","path":"/state/count","value":1}]"#)
         )
-        XCTAssertEqual(outcome, .rejected(message: "baseRevision is required when a patch has /state ops", revision: 0))
+        XCTAssertEqual(outcome, .rejected(message: "baseRevision is required when a patch has /state ops", revision: 1))
         XCTAssertTrue(events.isEmpty)
     }
 
@@ -87,7 +111,7 @@ final class PrototypeSessionPatchTests: XCTestCase {
             id: "p", baseRevision: 3, ops: ops(#"[{"op":"replace","path":"/state/count","value":9}]"#)
         )
         XCTAssertEqual(
-            outcome, .rejected(message: "baseRevision 3 is newer than the device revision 0", revision: 0)
+            outcome, .rejected(message: "baseRevision 3 is newer than the device revision 1", revision: 1)
         )
         XCTAssertEqual(session.state["count"], .number(1))
     }
@@ -96,12 +120,12 @@ final class PrototypeSessionPatchTests: XCTestCase {
         var session = try session()
         _ = session.change(key: "count", value: .number(7))
         let (outcome, events) = try session.patch(
-            id: "p", baseRevision: 0,
+            id: "p", baseRevision: 1,
             ops: ops(
                 #"[{"op":"replace","path":"/data/title","value":"B"},{"op":"replace","path":"/state/count","value":9}]"#
             )
         )
-        XCTAssertEqual(outcome, .conflict(revision: 1, state: ["count": .number(7)], baseRevision: 0))
+        XCTAssertEqual(outcome, .conflict(revision: 2, state: ["count": .number(7)], baseRevision: 1))
         XCTAssertTrue(events.isEmpty)
         XCTAssertEqual(session.data?["title"], .string("A"), "the data op of a conflicting patch is not applied")
         XCTAssertEqual(session.state["count"], .number(7))
@@ -111,9 +135,9 @@ final class PrototypeSessionPatchTests: XCTestCase {
         var session = try session()
         _ = session.change(key: "count", value: .number(7))
         let (outcome, _) = try session.patch(
-            id: "p", baseRevision: 0, ops: ops(#"[{"op":"replace","path":"/state/flag","value":true}]"#)
+            id: "p", baseRevision: 1, ops: ops(#"[{"op":"replace","path":"/state/flag","value":true}]"#)
         )
-        XCTAssertEqual(outcome, .applied(revision: 2))
+        XCTAssertEqual(outcome, .applied(revision: 3))
     }
 
     func testAFailedOpIsAtomicAndNamesItsPath() throws {
@@ -122,10 +146,10 @@ final class PrototypeSessionPatchTests: XCTestCase {
             id: "p", baseRevision: nil,
             ops: ops(#"[{"op":"replace","path":"/data/title","value":"B"},{"op":"remove","path":"/data/missing"}]"#)
         )
-        XCTAssertEqual(outcome, .rejected(message: "ops[1].path: Path does not exist", revision: 0))
+        XCTAssertEqual(outcome, .rejected(message: "ops[1].path: Path does not exist", revision: 1))
         XCTAssertTrue(events.isEmpty)
         XCTAssertEqual(session.data?["title"], .string("A"))
-        XCTAssertEqual(session.dataRevision, 0)
+        XCTAssertEqual(session.dataRevision, 1)
     }
 
     func testUnknownIdIsRefusedWithoutARevision() throws {
@@ -139,11 +163,11 @@ final class PrototypeSessionPatchTests: XCTestCase {
     func testAStateValueThatBreaksABoundControlIsRefused() throws {
         var session = try session()
         let (outcome, _) = try session.patch(
-            id: "p", baseRevision: 0, ops: ops(#"[{"op":"replace","path":"/state/flag","value":"nope"}]"#)
+            id: "p", baseRevision: 1, ops: ops(#"[{"op":"replace","path":"/state/flag","value":"nope"}]"#)
         )
         guard case let .rejected(message, revision) = outcome else { return XCTFail("\(outcome)") }
         XCTAssertFalse(message.isEmpty)
-        XCTAssertEqual(revision, 0)
+        XCTAssertEqual(revision, 1)
         XCTAssertEqual(session.state["flag"], .bool(false))
     }
 

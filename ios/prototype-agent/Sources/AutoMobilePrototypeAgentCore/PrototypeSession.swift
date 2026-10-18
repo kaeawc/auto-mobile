@@ -115,9 +115,10 @@ struct PrototypeSession {
         spec != nil
     }
 
-    /// The shown prototype's device revision: 0 until a device data or state write or an accepted patch,
-    /// then one more per write. The same counter is reported as `revision` in a data write's `change`
-    /// event and in a patch result (#11675).
+    /// The shown prototype's device revision: 1 after its first show (each later show and each device
+    /// data or state write or accepted patch adds one; Android counts the same way, #13040).
+    /// The same counter is reported as `revision` in a data write's `change` event and in a patch
+    /// result (#11675).
     var dataRevision: Int {
         spec.flatMap { revisions[$0.id] } ?? 0
     }
@@ -160,7 +161,12 @@ struct PrototypeSession {
         tracksStateRevisions = false
         state = restoredState ?? spec.state ?? [:]
         tracksStateRevisions = true
-        stateRevisions = [:]
+        // Every show is one device revision, as on Android's `PrototypeController.nextRevision` (#13040,
+        // #11675): the first show reports 1, a re-show moves it on and none rewinds it. The spec's own
+        // state keys start at that revision, like Android's `initialRevision`.
+        let shownRevision = (revisions[spec.id] ?? 0) + 1
+        revisions[spec.id] = shownRevision
+        stateRevisions = state.keys.reduce(into: [:]) { $0[$1] = shownRevision }
         self.spec = spec
         // The show result reports this mode, so the show itself is not a change.
         reportedDark = self.appearance?.dark

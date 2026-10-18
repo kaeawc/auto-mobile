@@ -11,7 +11,7 @@ import { parseGuardSource } from "./astGuard";
  * TAP_ON_ELEMENT_PLATFORM_COMPARISONS. The number may only shrink: lower it in the PR that
  * moves a branch into `strategies/`. Target is 0-1.
  */
-export const TAP_ON_ELEMENT_PLATFORM_COMPARISONS = 14;
+export const TAP_ON_ELEMENT_PLATFORM_COMPARISONS = 13;
 
 const FILE = "src/features/action/TapOnElement.ts";
 const ROOT = path.resolve(import.meta.dir, "../..");

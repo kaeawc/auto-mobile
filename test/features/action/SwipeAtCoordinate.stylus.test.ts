@@ -103,6 +103,21 @@ describe("swipeAt stylus pointer (#13081)", () => {
     expect(result.outcomeIndeterminate).toBe(true);
   });
 
+  test("a refusal that arrives as a rejected adb call is not indeterminate", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError(
+      "input stylus swipe",
+      Object.assign(new Error("Command failed: adb shell input stylus"), {
+        cause: Object.assign(new Error("exit 255"), { stderr: "Error: Unknown source stylus\n" }),
+      }),
+    );
+    const result = await fake.swipeAt.execute(stylusSwipe());
+
+    expect(result.success).toBe(false);
+    expect(result.outcomeIndeterminate).toBeUndefined();
+    expect(result.error).toContain("Unknown source");
+  });
+
   test("a command the device rejected is not indeterminate, so a retry is safe", async () => {
     const fake = androidWithSdk(34);
     fake.adb.setCommandResponse("input stylus swipe", {

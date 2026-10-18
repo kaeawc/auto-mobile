@@ -10,9 +10,13 @@ import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   InputCommandRejectedError,
+  assertTouchscreenInputSucceeded,
   executeShellInput,
   inputDurationArgument,
 } from "./touchscreenInput";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
+import type { ExecResult } from "../../models";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
 
 /**
  * First Android release whose `input` command sets the injected event's tool type from its source.
@@ -142,12 +146,65 @@ export function refusedTap(
   return { success: false, x: point.x, y: point.y, action, error };
 }
 
+/** The command was sent and the device never confirmed the result, so the gesture may have been applied. */
+export class StylusOutcomeIndeterminateError extends ActionableError {}
+
 /**
- * True when a failure came after the command was sent and the device did not refuse it: a timeout,
- * a lost connection or a cancelled hold may have left the gesture applied, so a retry could repeat it.
+ * The one place that decides what a failed stylus command means, for tap and swipe alike:
+ * - a stale display, or a refusal printed by the `input` command (even when adb rejected the call
+ *   to report it), changed nothing and is retry-safe: it passes through, as does any failure
+ *   before the command was sent;
+ * - anything else after the command was sent leaves the outcome indeterminate. A long press that
+ *   was interrupted also says how long the press may stay held.
  */
-export function failedAfterDispatch(error: unknown, dispatched: boolean): boolean {
-  return dispatched && !(error instanceof InputCommandRejectedError);
+export function classifyStylusFailure(
+  error: unknown,
+  context: { command: string; dispatched: boolean; holdMs?: number; signal?: AbortSignal },
+): unknown {
+  const { command, dispatched, holdMs, signal } = context;
+  if (error instanceof StaleDisplayError || error instanceof InputCommandRejectedError) {
+    return error;
+  }
+  try {
+    assertTouchscreenInputSucceeded(command, adbFailureOutput(error) as ExecResult);
+  } catch (rejected) {
+    return rejected;
+  }
+  if (!dispatched) {
+    return error;
+  }
+  const held =
+    holdMs === undefined ? undefined : longPressInterruptedMessage(error, holdMs, signal);
+  return new StylusOutcomeIndeterminateError(held ?? errorMessage(error), { cause: error });
+}
+
+interface StylusCommand {
+  command: string;
+  timeoutMs?: number;
+  /** Set for a long press: how long an interrupted press may stay held. */
+  holdMs?: number;
+}
+
+/** Check the SDK, send one stylus command, and classify any failure (see {@link classifyStylusFailure}). */
+async function runStylusCommand(
+  adb: AdbExecutor,
+  { command, timeoutMs, holdMs }: StylusCommand,
+  options: StylusDispatchOptions,
+): Promise<void> {
+  await assertStylusSdkSupported(adb, options.signal);
+  let dispatched = false;
+  try {
+    await executeShellInput(adb, command, {
+      ...options,
+      timeoutMs,
+      onDispatch: () => {
+        dispatched = true;
+        options.onDispatch?.();
+      },
+    });
+  } catch (error) {
+    throw classifyStylusFailure(error, { command, dispatched, holdMs, signal: options.signal });
+  }
 }
 
 /** A stylus tap, or a long press expressed as a zero-distance swipe with a duration. */
@@ -160,45 +217,42 @@ export async function dispatchStylusTap(
   const { x, y } = point;
   const durationMs = gesture.durationMs ?? LONG_PRESS_DEFAULT_MS;
   const longPress = gesture.action === "longPress";
-  const command = longPress
-    ? stylusInputCommand(`swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`)
-    : stylusInputCommand(`tap ${x} ${y}`);
-  let dispatched = false;
   try {
-    await assertStylusSdkSupported(adb, options.signal);
-    await executeShellInput(adb, command, {
-      ...options,
-      timeoutMs: longPress ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
-      onDispatch: () => {
-        dispatched = true;
-        options.onDispatch?.();
-      },
-    });
+    await runStylusCommand(
+      adb,
+      longPress
+        ? {
+            command: stylusInputCommand(
+              `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
+            ),
+            timeoutMs: resolveGestureCtrlProxyTimeoutMs(durationMs),
+            holdMs: durationMs,
+          }
+        : { command: stylusInputCommand(`tap ${x} ${y}`) },
+      options,
+    );
   } catch (error) {
-    if (failedAfterDispatch(error, dispatched)) {
-      // A held press outlives the killed adb process, so name how long it may stay down.
-      const held = longPress
-        ? longPressInterruptedMessage(error, durationMs, options.signal)
-        : undefined;
-      throw indeterminateTapError(held ?? errorMessage(error));
-    }
-    throw error;
+    throw error instanceof StylusOutcomeIndeterminateError
+      ? indeterminateTapError(error.message)
+      : error;
   }
 }
 
 /** A straight two-point stylus swipe. */
-export async function dispatchStylusSwipe(
+export function dispatchStylusSwipe(
   adb: AdbExecutor,
   gesture: { from: { x: number; y: number }; to: { x: number; y: number }; duration: number },
   options: StylusDispatchOptions = {},
 ): Promise<void> {
   const { from, to, duration } = gesture;
-  await assertStylusSdkSupported(adb, options.signal);
-  await executeShellInput(
+  return runStylusCommand(
     adb,
-    stylusInputCommand(
-      `swipe ${from.x} ${from.y} ${to.x} ${to.y} ${inputDurationArgument(duration)}`,
-    ),
-    { ...options, timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration) },
+    {
+      command: stylusInputCommand(
+        `swipe ${from.x} ${from.y} ${to.x} ${to.y} ${inputDurationArgument(duration)}`,
+      ),
+      timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration),
+    },
+    options,
   );
 }

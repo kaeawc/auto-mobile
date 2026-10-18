@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   STYLUS_INPUT_MIN_SDK,
+  StylusOutcomeIndeterminateError,
   checkStylusPointer,
+  classifyStylusFailure,
   dispatchStylusTap,
   stylusInputCommand,
 } from "../../../src/features/action/stylusPointer";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
+import { InputCommandRejectedError } from "../../../src/features/action/touchscreenInput";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const stylus = { toolType: "stylus" as const };
@@ -154,5 +158,49 @@ describe("stylus tap dispatch fence (#13081)", () => {
     );
     expect(checked).toBe(1);
     expect(adb.getExecutedCommands()).toEqual(["shell input stylus tap 1 2"]);
+  });
+});
+
+describe("classifyStylusFailure (#13081)", () => {
+  const command = "shell input stylus tap 1 2";
+  const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
+  const refusal = Object.assign(new Error("Command failed"), {
+    cause: Object.assign(new Error("exit 255"), { stderr: "Error: Unknown source\n" }),
+  });
+
+  test("a stale display and an already-classified refusal pass through unchanged", () => {
+    const stale = new StaleDisplayError({ observedGeneration: 1, currentGeneration: 2 });
+    const rejected = new InputCommandRejectedError("refused");
+
+    expect(classifyStylusFailure(stale, { command, dispatched: true })).toBe(stale);
+    expect(classifyStylusFailure(rejected, { command, dispatched: true })).toBe(rejected);
+  });
+
+  test("a refusal in a rejected adb call is retry-safe, even after the send began", () => {
+    const result = classifyStylusFailure(refusal, { command, dispatched: true });
+
+    expect(result).toBeInstanceOf(InputCommandRejectedError);
+    expect(result).not.toBeInstanceOf(StylusOutcomeIndeterminateError);
+  });
+
+  test("a failure before the command was sent passes through", () => {
+    expect(classifyStylusFailure(abort, { command, dispatched: false })).toBe(abort);
+  });
+
+  test("any other failure after the send is indeterminate", () => {
+    const result = classifyStylusFailure(new Error("adb connection lost"), {
+      command,
+      dispatched: true,
+    });
+
+    expect(result).toBeInstanceOf(StylusOutcomeIndeterminateError);
+  });
+
+  test("an interrupted long press names the hold window; an interrupted tap does not", () => {
+    const held = classifyStylusFailure(abort, { command, dispatched: true, holdMs: 800 });
+    const tap = classifyStylusFailure(abort, { command, dispatched: true });
+
+    expect((held as Error).message).toContain("still be held on the device for up to 800 ms");
+    expect((tap as Error).message).not.toContain("still be held");
   });
 });

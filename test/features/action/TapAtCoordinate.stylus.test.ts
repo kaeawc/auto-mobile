@@ -124,6 +124,21 @@ describe("tapAt stylus pointer (#13081)", () => {
     expect(result.error).not.toContain("still be held");
   });
 
+  test("a refusal that arrives as a rejected adb call is a plain failure, safe to retry", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError(
+      "input stylus tap",
+      Object.assign(new Error("Command failed: adb shell input stylus"), {
+        cause: Object.assign(new Error("exit 255"), { stderr: "Error: Unknown source stylus\n" }),
+      }),
+    );
+    const result = await fake.tapAt.execute(stylusTap());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Unknown source");
+    expect(result.error).not.toContain("Do not retry automatically");
+  });
+
   test("a command the device rejected is a plain failure, safe to retry", async () => {
     const fake = androidWithSdk(34);
     fake.adb.setCommandResponse("input stylus tap", {

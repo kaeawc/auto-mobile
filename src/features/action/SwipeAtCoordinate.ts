@@ -26,7 +26,11 @@ import {
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { dispatchStylusSwipe, failedAfterDispatch, stylusRefusal } from "./stylusPointer";
+import {
+  StylusOutcomeIndeterminateError,
+  dispatchStylusSwipe,
+  stylusRefusal,
+} from "./stylusPointer";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import {
   selectedDisplayPin,
@@ -383,31 +387,24 @@ export class SwipeAtCoordinate extends BaseVisualChange {
   ): Promise<SwipeResult> {
     const { from, to } = resolved;
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
-    let dispatched = false;
     try {
       await dispatchStylusSwipe(
         this.adb,
         { from, to, duration },
-        {
-          signal,
-          assertCurrent: fence?.assertCurrent,
-          onDispatch: () => {
-            dispatched = true;
-          },
-        },
+        { signal, assertCurrent: fence?.assertCurrent },
       );
       return { success: true, ...base, duration };
     } catch (error) {
-      // A cancellation after the command went out may still have applied the swipe: report that
-      // as an indeterminate outcome instead of an abort the caller could retry.
+      // An abort before the command was sent is a plain cancellation, as is a stale display.
       if (
         error instanceof StaleDisplayError ||
-        (error instanceof Error && error.name === "AbortError" && !dispatched)
+        (error instanceof Error && error.name === "AbortError")
       ) {
         throw error;
       }
       logger.warn(`${TOOL_NAME} stylus dispatch failed: ${errorMessage(error)}`, error);
-      return failedAfterDispatch(error, dispatched)
+      // Once the command was sent, an unconfirmed result may have been applied.
+      return error instanceof StylusOutcomeIndeterminateError
         ? {
             success: false,
             ...base,

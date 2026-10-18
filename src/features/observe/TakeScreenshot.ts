@@ -38,7 +38,7 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";
 import {
@@ -240,11 +240,8 @@ export class TakeScreenshot implements ScreenshotService {
     if (resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator") {
       return this.captureSimulatorObserverScreenshot(signal);
     }
-    const daemon = DaemonState.getInstance();
-    if (
-      daemon.isInitialized() &&
-      holderOf(daemon.getDevicePool().getDevice(this.device.deviceId))
-    ) {
+    const pool = defaultDaemonContext.devicePool();
+    if (pool && holderOf(pool.getDevice(this.device.deviceId))) {
       return { success: false, error: "Owned iOS device has no connected screenshot service" };
     }
     const transient = IOSCtrlProxyClient.createForObservationRead(this.device);

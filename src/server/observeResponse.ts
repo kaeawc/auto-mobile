@@ -30,7 +30,7 @@ import {
 } from "../features/observe/hierarchyLayer";
 import type { HierarchyLayer } from "../models/HierarchyLayer";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
 import { inlineScreenshotImage } from "../features/observe/screenshot/inlineScreenshotImage";
@@ -120,11 +120,10 @@ export function screenForObserve(
     onAvailabilityLost:
       device.platform === "android"
         ? (reason) => {
-            const daemonState = DaemonState.getInstance();
-            if (args.sessionUuid && daemonState.isInitialized()) {
-              daemonState
-                .getSessionManager()
-                .invalidateAutomationReadiness(args.sessionUuid, reason);
+            if (args.sessionUuid) {
+              defaultDaemonContext
+                .sessionManager()
+                ?.invalidateAutomationReadiness(args.sessionUuid, reason);
             }
           }
         : undefined,

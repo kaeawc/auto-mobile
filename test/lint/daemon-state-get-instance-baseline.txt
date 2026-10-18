@@ -11,13 +11,7 @@ src/daemon/streamSocketAuth.ts	2
 src/daemon/videoStreamSocketServer.ts	1
 src/daemon/webrtcStreamSocketServer.ts	1
 src/features/deviceLifecycle/deviceLifecycleCore.ts	17
-src/features/observe/DeviceHierarchyCapture.ts	1
-src/features/observe/DisplayTransition.ts	1
-src/features/observe/ObservationReadServiceStart.ts	1
 src/features/observe/ObserveScreenWiring.ts	1
-src/features/observe/TakeScreenshot.ts	1
-src/server/ToolExecutionContext.ts	1
-src/server/activeSessionDevice.ts	1
 src/server/bootedDeviceResources.ts	1
 src/server/brokerConnectionToolGate.ts	1
 src/server/criticalSectionTools.ts	1
@@ -32,7 +26,6 @@ src/server/deviceToolsStartupLease.ts	1
 src/server/foreignOwnedSessionRefusal.ts	2
 src/server/interactionTools.ts	2
 src/server/lifecycleDeviceOwnership.ts	5
-src/server/observeResponse.ts	1
 src/server/observeTools.ts	2
 src/server/pipeline/deviceCallDispatch.ts	4
 src/server/pipeline/executionTarget.ts	5
@@ -50,8 +43,6 @@ src/server/prototypeTools.ts	2
 src/server/resourceDeviceResolver.ts	1
 src/server/sessionBrokerToolGate.ts	1
 src/server/setActiveDevice.ts	3
-src/server/tasks/daemonTaskManager.ts	1
 src/server/undeliveredAcquisition.ts	1
 src/server/videoRecordingTools.ts	4
-src/server/webrtcStreamManager.ts	1
 src/utils/plan/PlanExecutor.ts	2

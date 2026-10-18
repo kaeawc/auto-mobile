@@ -164,12 +164,17 @@ than the `adb shell input stylus` cells has been demonstrated.
 
 ## Recommended API shape
 
-1. **Pointer options on the point-sequence tools, not on element tools.** Add an
+1. **Pointer options on the coordinate tools, not on element tools.** Add an
    optional `pointer` object (`toolType`: `finger` | `stylus`; later `eraser`,
-   `mouse`; `pressure`: 0–1) to `swipeAt` and `dragPath`, the tools that already
-   take raw coordinates. Element tools (`tapOn`, `swipeOn`) stay finger-only: a
-   stylus has no accessibility-element meaning, and widening them multiplies the
-   surface for no recorded use case.
+   `mouse`; `pressure`: a constant, 0–1) to `tapAt`, `swipeAt` and `dragPath`, the
+   tools that already take raw coordinates. Element tools (`tapOn`, `swipeOn`) stay
+   finger-only: a stylus has no accessibility-element meaning, and widening them
+   multiplies the surface for no recorded use case. A recorded stationary stylus
+   contact therefore exports through `tapAt`, never `tapOn`, so its tool type is not
+   lost. A pressure _curve_ is carried by an optional per-point `pressure` on
+   `dragPath` points, which already carry per-segment timing; `tapAt` and `swipeAt`
+   carry the constant only. The first slice accepts the constant only, because no
+   curve is proven injectable yet.
 2. **Fail loudly instead of downgrading.** If the active device or path cannot honor
    a requested `pointer`, return an actionable error naming the missing capability.
    Never fall back to a finger touch: a silent downgrade is exactly the failure
@@ -201,8 +206,9 @@ pressure series, and the exported `swipeAt`/`dragPath` step to carry `pointer`:
 - `GestureClassifier` must keep the tool type through classification, and
   hover-only sequences (pen in range, no `BTN_TOUCH`) must not be dropped as noise.
 - A drawn stroke needs path sampling and a drag classification (a new
-  `GestureEventType`) exported as `dragPath`; attaching `pointer` to a `swipeAt`
-  keeps only the endpoints.
+  `GestureEventType`) exported as `dragPath`, with the sampled pressure written to the
+  per-point `pressure`; attaching `pointer` to a `swipeAt` keeps only the endpoints. A
+  stationary stylus contact exports as `tapAt` with `pointer`.
 - Export must degrade visibly: a plan step recorded from stylus input and replayed
   on a platform that cannot honor it should warn at export (as the existing geometry
   warnings do), not silently become a finger step.

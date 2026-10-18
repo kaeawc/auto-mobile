@@ -4,7 +4,7 @@ import type {
   DaemonToolCallOptions,
 } from "../../src/daemon/client";
 import type { TaskRelayFrame, TaskRelayMethod } from "../../src/server/tasks/taskRelay";
-import { DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";
 import { FakeIdGenerator } from "./FakeIdGenerator";
@@ -115,6 +115,9 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   async close(): Promise<void> {
     this.connected = false;
+    // The real client forgets its handlers when it closes; a reconnect starts with none.
+    this.notificationHandlers.clear();
+    this.connectionClosedHandlers.clear();
     for (const unsubscribe of this.daemonUnsubscribes.splice(0)) {
       unsubscribe();
     }
@@ -122,9 +125,50 @@ export class FakeDaemonClient implements DaemonClientLike {
   }
 
   private deliver(notification: DaemonNotification): void {
-    for (const handler of this.notificationHandlers) {
-      handler(notification);
+    for (const handler of [...this.notificationHandlers]) {
+      this.runHandler(() => handler(notification));
     }
+  }
+
+  /** The real client logs a throwing handler and still serves the ones after it. */
+  private runHandler(run: () => void): void {
+    try {
+      run();
+    } catch {
+      // Swallowed on purpose: one failing handler must not block its siblings.
+    }
+  }
+
+  /**
+   * The real client connects on demand; a daemon it cannot reach means the frame was never sent,
+   * so a request rejects as not delivered. The fake is always reachable unless `shouldFailConnect`.
+   */
+  private assertReachable(): void {
+    if (this.shouldFailConnect) {
+      throw new DaemonRequestNotDeliveredError("Connection failed", {
+        cause: new DaemonUnavailableError("Connection failed"),
+      });
+    }
+  }
+
+  /**
+   * Rejects when `signal` aborts before `pending` settles, as the real client does for an
+   * unanswered request. Without a signal `pending` is returned untouched, so a caller's await
+   * costs the same turns as before.
+   */
+  private abortable<T>(
+    pending: T | Promise<T>,
+    signal: AbortSignal | undefined,
+    onAbort: (reason: unknown) => Error,
+  ): T | Promise<T> {
+    if (!signal || !(pending instanceof Promise)) {
+      return pending;
+    }
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => reject(onAbort(signal.reason));
+      signal.addEventListener("abort", abort, { once: true });
+      pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
   }
 
   readonly callToolProgressTokens: Array<string | number | undefined> = [];
@@ -141,6 +185,8 @@ export class FakeDaemonClient implements DaemonClientLike {
     options?: DaemonToolCallOptions,
   ): Promise<any> {
     signal?.throwIfAborted();
+    this.assertReachable();
+    const abortReason = (reason: unknown) => reason as Error;
     this.callToolSignals.push(signal);
     this.callToolOptions.push(options);
     const requestId = this.requestIdGenerator.next();
@@ -151,7 +197,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     this.callToolCalls.push({ toolName, params: recordedParams });
     this.callToolProgressTokens.push(progressToken);
     if (this.onCallTool) {
-      await this.onCallTool(toolName, params);
+      await this.abortable(this.onCallTool(toolName, params), signal, abortReason);
     }
     const perToolResult = this.toolResultFor?.(toolName, params);
     if (perToolResult !== undefined || this.scriptedToolResult || !this.daemon) {
@@ -185,6 +231,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<any> {
     signal?.throwIfAborted();
+    this.assertReachable();
     this.readResourceSignals.push(signal);
     this.readResourceCalls.push(uri);
     const recordedParams = { ...params };
@@ -201,11 +248,21 @@ export class FakeDaemonClient implements DaemonClientLike {
     params: Record<string, any>,
     options?: DaemonMethodCallOptions,
   ): Promise<any> {
+    const signal = options?.signal;
+    const aborted = (reason: unknown) =>
+      new DaemonUnavailableError(`Daemon request ${method} aborted`, { cause: reason });
+    if (signal?.aborted) {
+      throw aborted(signal.reason);
+    }
+    if (this.shouldFailConnect) {
+      // A daemon method surfaces the real client's own connect failure unchanged.
+      throw new DaemonUnavailableError("Connection failed");
+    }
     const recordedParams = { ...params };
     delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
     this.callDaemonMethodCalls.push({ method, params: recordedParams });
     if (this.onCallDaemonMethod) {
-      const result = await this.onCallDaemonMethod(method, params);
+      const result = await this.abortable(this.onCallDaemonMethod(method, params), signal, aborted);
       if (result !== undefined) {
         return result;
       }
@@ -236,8 +293,8 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   emitConnectionClosed(): void {
     this.connected = false;
-    for (const handler of this.connectionClosedHandlers) {
-      handler();
+    for (const handler of [...this.connectionClosedHandlers]) {
+      this.runHandler(handler);
     }
   }
 
@@ -262,16 +319,18 @@ export class FakeDaemonClient implements DaemonClientLike {
     message?: string,
     requestId = this.callToolRequestIds.at(-1),
   ): void {
-    for (const handler of this.notificationHandlers) {
-      handler({
-        type: "daemon_notification",
-        method: "notifications/progress",
-        progressToken,
-        requestId,
-        progress,
-        ...(total !== undefined ? { total } : {}),
-        ...(message !== undefined ? { message } : {}),
-      });
+    for (const handler of [...this.notificationHandlers]) {
+      this.runHandler(() =>
+        handler({
+          type: "daemon_notification",
+          method: "notifications/progress",
+          progressToken,
+          requestId,
+          progress,
+          ...(total !== undefined ? { total } : {}),
+          ...(message !== undefined ? { message } : {}),
+        }),
+      );
     }
   }
 
@@ -284,16 +343,18 @@ export class FakeDaemonClient implements DaemonClientLike {
     uri?: string,
     recordingIds?: string[],
   ): void {
-    for (const handler of this.notificationHandlers) {
-      handler({
-        type: "daemon_notification",
-        method,
-        ...(recordingIds !== undefined ? { recordingIds } : {}),
-        ...(sessionId !== undefined ? { sessionId } : {}),
-        ...(reason !== undefined ? { reason } : {}),
-        ...(release !== undefined ? { release } : {}),
-        ...(uri !== undefined ? { uri } : {}),
-      });
+    for (const handler of [...this.notificationHandlers]) {
+      this.runHandler(() =>
+        handler({
+          type: "daemon_notification",
+          method,
+          ...(recordingIds !== undefined ? { recordingIds } : {}),
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(reason !== undefined ? { reason } : {}),
+          ...(release !== undefined ? { release } : {}),
+          ...(uri !== undefined ? { uri } : {}),
+        }),
+      );
     }
   }
 }

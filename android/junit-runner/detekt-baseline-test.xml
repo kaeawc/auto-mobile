@@ -2,6 +2,9 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>CyclomaticComplexMethod:AutoMobilePlanExecutorTest.kt:AutoMobilePlanExecutorTest$@Test fun `failed health frames wait or fail with reasons from details`</ID>
+    <ID>CyclomaticComplexMethod:AutoMobilePlanExecutorTest.kt:AutoMobilePlanExecutorTest$@Test fun `recovery corpus waits without retries and permanent health failures include reasons`</ID>
+    <ID>CyclomaticComplexMethod:HeldDeviceWaitingMCPClientTest.kt:HeldDeviceWaitingMCPClientTest$@Test fun `recovery corpus waits only for recoverable refusals and honours hints`</ID>
     <ID>EmptyFunctionBlock:AIAgentFactoryBinaryCompatTest.kt:AIAgentFactoryBinaryCompatTest.StubMCPClient${}</ID>
     <ID>EmptyFunctionBlock:AutoMobileAgentTest.kt:AutoMobileAgentTest.&lt;no name provided&gt;${}</ID>
     <ID>EmptyFunctionBlock:MultiDevicePlanTest.kt:TwoDeviceCriticalSectionTestTarget${}</ID>
@@ -12,6 +15,10 @@
     <ID>EmptyFunctionBlock:WaitForToolRedactionTest.kt:WaitForToolRedactionTest.FailingClient${}</ID>
     <ID>EmptyFunctionBlock:WaitForToolRedactionTest.kt:WaitForToolRedactionTest.FixedResultClient${}</ID>
     <ID>EmptyFunctionBlock:WaitForToolRedactionTest.kt:WaitForToolRedactionTest.ThrowingClient${}</ID>
+    <ID>LargeClass:AutoMobileAgentTest.kt:AutoMobileAgentTest</ID>
+    <ID>LargeClass:AutoMobilePlanExecutorTest.kt:AutoMobilePlanExecutorTest</ID>
+    <ID>LongMethod:RecoveryToolContractTest.kt:RecoveryToolContractTest$private fun cases: Map&lt;String, List&lt;suspend () -&gt; Unit&gt;&gt;</ID>
+    <ID>LongParameterList:RecoveryLoopTest.kt:RecoveryLoopTest$private fun buildFailureResponse: DaemonResponse</ID>
     <ID>SwallowedException:AIAgentFactoryBinaryCompatTest.kt:AIAgentFactoryBinaryCompatTest$e: UnsupportedOperationException</ID>
     <ID>TooGenericExceptionThrown:AutoMobileAgentTest.kt:AutoMobileAgentTest.&lt;no name provided&gt;$throw RuntimeException("MCP server returned status 500: {\"field\":\"token $secret\"}")</ID>
     <ID>TooGenericExceptionThrown:DeviceAvailabilityCheckerTest.kt:DeviceAvailabilityCheckerTest$throw RuntimeException("boom")</ID>

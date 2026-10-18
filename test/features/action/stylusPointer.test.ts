@@ -124,7 +124,7 @@ describe("stylus pointer capability (#13081)", () => {
 
 describe("stylus tap dispatch fence (#13081)", () => {
   test("a changed display refuses the tap before any command is spawned", async () => {
-    const adb = new FakeAdbExecutor();
+    const adb = adbWithSdk(34);
     const stale = new Error("display changed");
 
     await expect(
@@ -143,7 +143,7 @@ describe("stylus tap dispatch fence (#13081)", () => {
   });
 
   test("a current display lets the tap through the fence", async () => {
-    const adb = new FakeAdbExecutor();
+    const adb = adbWithSdk(34);
     let checked = 0;
 
     await dispatchStylusTap(

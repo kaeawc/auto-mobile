@@ -26,7 +26,7 @@ import {
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { checkStylusPointer, dispatchStylusSwipe, failedAfterDispatch } from "./stylusPointer";
+import { dispatchStylusSwipe, failedAfterDispatch, stylusRefusal } from "./stylusPointer";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import {
   selectedDisplayPin,
@@ -443,18 +443,14 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       if (durationError) {
         return failure(durationError);
       }
-      const stylusRefusal = await checkStylusPointer(
-        this.adb,
-        {
-          pointer: options.pointer,
-          platform: this.device.platform,
-          gesture: "swipe",
-          display: options.display,
-        },
-        signal,
-      );
-      if (stylusRefusal) {
-        return failure(stylusRefusal);
+      const stylusError = stylusRefusal({
+        pointer: options.pointer,
+        platform: this.device.platform,
+        gesture: "swipe",
+        display: options.display,
+      });
+      if (stylusError) {
+        return failure(stylusError);
       }
       if (options.display !== undefined) {
         return await this.executeOnDisplay(options, options.display, {

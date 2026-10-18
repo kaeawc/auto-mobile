@@ -515,7 +515,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       signalArg,
       planContextArg,
     );
-    const error = await stylusTapRefusal(this.adb, this.device.platform, options, signal);
+    const error = stylusTapRefusal(this.device.platform, options);
     if (error) {
       return refusedTap(error, inputPoint(options), options.action);
     }

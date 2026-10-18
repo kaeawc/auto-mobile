@@ -5,6 +5,7 @@ import type { PointerOption } from "../../models/PointerOption";
 import { LONG_PRESS_DEFAULT_MS } from "./tapAtGesture";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { indeterminateTapError } from "./coordinateTapDispatch";
+import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   InputCommandRejectedError,
@@ -38,15 +39,10 @@ export function stylusInputCommand(action: string): string {
 }
 
 /**
- * Capability error for a stylus request, or undefined when it can be injected (or no pointer was
- * requested). Everything that is not supported fails here, before any input, so nothing ever
- * degrades to a finger touch. The device is read only after the static checks pass.
+ * Capability error that needs no device read, or undefined. Everything unsupported fails here,
+ * before any input, so nothing ever degrades to a finger touch.
  */
-export async function checkStylusPointer(
-  adb: Pick<AdbExecutor, "executeCommand">,
-  request: StylusRequest,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
+export function stylusRefusal(request: StylusRequest): string | undefined {
   const { pointer, platform, gesture, display } = request;
   if (pointer === undefined) {
     return undefined;
@@ -66,6 +62,17 @@ export async function checkStylusPointer(
   if (display !== undefined) {
     return "stylus pointer does not support display selection yet; omit display";
   }
+  return undefined;
+}
+
+/**
+ * Capability error from the device's Android API level, or undefined. This awaits a device read, so
+ * the dispatch helpers run it after the display fence is captured and before the fence is re-checked.
+ */
+export async function stylusSdkRefusal(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
   const apiLevel = await readAndroidDeviceApiLevel(
     adb as AdbExecutor,
     SDK_READ_TIMEOUT_MS,
@@ -79,6 +86,25 @@ export async function checkStylusPointer(
     return `stylus input needs Android API ${STYLUS_INPUT_MIN_SDK} or newer (this device reports API ${apiLevel}): older releases build the injected event without a stylus tool type`;
   }
   return undefined;
+}
+
+/** Both checks in order; the device is read only after the static ones pass. */
+export async function checkStylusPointer(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  request: StylusRequest,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  return stylusRefusal(request) ?? (request.pointer ? stylusSdkRefusal(adb, signal) : undefined);
+}
+
+async function assertStylusSdkSupported(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<void> {
+  const refusal = await stylusSdkRefusal(adb, signal);
+  if (refusal) {
+    throw new ActionableError(refusal);
+  }
 }
 
 export interface StylusDispatchOptions {
@@ -96,23 +122,14 @@ interface StylusTapRequest {
   display?: string;
 }
 
-/** Capability error for a `tapAt` request, or undefined to proceed (see {@link checkStylusPointer}). */
-export function stylusTapRefusal(
-  adb: Pick<AdbExecutor, "executeCommand">,
-  platform: string,
-  options: StylusTapRequest,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  return checkStylusPointer(
-    adb,
-    {
-      pointer: options.pointer,
-      platform,
-      gesture: options.action ?? "tap",
-      display: options.display,
-    },
-    signal,
-  );
+/** Static capability error for a `tapAt` request, or undefined to proceed (see {@link stylusRefusal}). */
+export function stylusTapRefusal(platform: string, options: StylusTapRequest): string | undefined {
+  return stylusRefusal({
+    pointer: options.pointer,
+    platform,
+    gesture: options.action ?? "tap",
+    display: options.display,
+  });
 }
 
 /** The failed `tapAt` result for a refused stylus request; nothing was sent to the device. */
@@ -147,6 +164,7 @@ export async function dispatchStylusTap(
     : stylusInputCommand(`tap ${x} ${y}`);
   let dispatched = false;
   try {
+    await assertStylusSdkSupported(adb, options.signal);
     await executeShellInput(adb, command, {
       ...options,
       timeoutMs: longPress ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
@@ -170,6 +188,7 @@ export async function dispatchStylusSwipe(
   options: StylusDispatchOptions = {},
 ): Promise<void> {
   const { from, to, duration } = gesture;
+  await assertStylusSdkSupported(adb, options.signal);
   await executeShellInput(
     adb,
     stylusInputCommand(

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
+import type { ObserveResult } from "../../../src/models";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
+import { observation } from "../../helpers/tapAtCoordinate";
 import type { SwipeAtOptions } from "../../../src/models/SwipeAtOptions";
 import { createSwipeAt } from "../../helpers/swipeAtCoordinate";
 
@@ -122,5 +125,30 @@ describe("swipeAt stylus pointer (#13081)", () => {
 
     expect(result.success).toBe(false);
     expect(fake.swipes).toEqual([]);
+  });
+
+  test("a display transition while the SDK is read refuses the swipe before any stylus command", async () => {
+    const transitions = new FakeDisplayTransitionReader();
+    const fake = createSwipeAt(ANDROID, 100, 200, undefined, {
+      displayTransitions: transitions,
+      renderedDisplayRevision: () => 41,
+      renderedDisplayGeneration: () => 7,
+    });
+    fake.observeScreen.setObserveResult({
+      ...observation(100, 200),
+      displayRevision: 41,
+      display: { key: "inner", role: "inner", posture: "opened", generation: 7 },
+    } as ObserveResult);
+    fake.adb.setAndroidApiLevel(34);
+    const read = fake.adb.getAndroidApiLevel.bind(fake.adb);
+    fake.adb.getAndroidApiLevel = async (...args) => {
+      transitions.transition();
+      return read(...args);
+    };
+
+    const result = await fake.swipeAt.execute(stylusSwipe());
+
+    expect(result.success).toBe(false);
+    expect(fake.adb.getExecutedCommands().some((c) => c.includes("stylus"))).toBe(false);
   });
 });

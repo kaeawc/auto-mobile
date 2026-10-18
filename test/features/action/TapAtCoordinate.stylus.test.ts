@@ -123,4 +123,21 @@ describe("tapAt stylus pointer (#13081)", () => {
     expect(result.success).toBe(false);
     expect(fake.androidDispatches).toEqual([]);
   });
+
+  test("a display change while the SDK is read refuses the tap before any stylus command", async () => {
+    let sdkRead = false;
+    const fake = createTapAt(ANDROID, 10, 10, undefined, () => (sdkRead ? 2 : 1));
+    fake.adb.setAndroidApiLevel(34);
+    const read = fake.adb.getAndroidApiLevel.bind(fake.adb);
+    fake.adb.getAndroidApiLevel = async (...args) => {
+      sdkRead = true;
+      return read(...args);
+    };
+
+    const result = await fake.tapAt.execute(stylusTap());
+
+    expect(result.success).toBe(false);
+    expect(fake.adb.getExecutedCommands().some((c) => c.includes("stylus"))).toBe(false);
+    expect(fake.androidDispatches).toEqual([]);
+  });
 });

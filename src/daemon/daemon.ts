@@ -75,12 +75,6 @@ import {
   createForeignCtrlProxyForwardEvidence,
   type ForeignCtrlProxyForwardEvidence,
 } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
-import {
-  assertControlNotOnForeignDaemonDevice,
-  assertInputNotOnForeignBindingDevice,
-} from "./inputDeviceOwnership";
-import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OwnerDisconnectExecutionVeto,
@@ -248,7 +242,6 @@ import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,
   getDeviceDataStreamServer,
-  type DeviceDataStreamSocketServer,
 } from "./deviceDataStreamSocketServer";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
@@ -283,19 +276,16 @@ import { getDaemonSocketPathsByName } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { pushInitialObservationFramesForSubscriber } from "./observationInitialFrame";
+import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
-  pushInitialObservationFramesForSubscriber,
-  type ObservationStreamIosClient,
-} from "./observationInitialFrame";
-import {
-  LEGACY_PROVENANCE_SENTINEL,
-  NavigationGraphManager,
-} from "../features/navigation/NavigationGraphManager";
-import type { NavigationGraphStreamSource } from "../features/navigation/NavigationGraphStreamSource";
-import {
-  convertSummaryToStreamData,
-  createNavigationGraphRequestHandler,
-} from "./navigationGraphRequestHandler";
+  NavigationGraphStreamBridge,
+  type StorageSubscriptionRequest,
+  applyStorageSubscriptionRequest,
+  createObservationStreamIosClient,
+  isHeldByAnotherOwner,
+  logSkippedObservationStreamDevice,
+} from "./daemonStreamRouting";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -549,8 +539,6 @@ export function isProcessWideAdbServerReset(
  * - PID file management
  * - Graceful shutdown handling
  */
-/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
-const STORAGE_WATCH_PURPOSE = "to watch stored values";
 
 /**
  * The steps of `Daemon.start()` that touch the machine: the process's working directory and
@@ -757,11 +745,12 @@ export class Daemon {
     DefaultObservationInitialFrameCoordinator
   >();
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphStreamSource>();
-  private readonly navigationGraphSeededStreamManagers = new WeakMap<
-    DeviceDataStreamSocketServer,
-    WeakSet<NavigationGraphStreamSource>
-  >();
+  private readonly navigationGraphBridge = new NavigationGraphStreamBridge({
+    server: () => this.deviceDataStreamServer,
+    sessionIds: () => this.sessionManager.getAllSessions().map((session) => session.sessionId),
+    defaultManager: () => NavigationGraphManager.getInstance(),
+    managerForSession: (sessionId) => NavigationGraphManager.getInstanceForSession(sessionId),
+  });
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
   private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
@@ -1361,11 +1350,10 @@ export class Daemon {
       managedExecutionReowner: () => this.managedExecutionReowner,
       devicePool: () => this.devicePool,
       passiveWorkPolicy: () => this.passiveWorkPolicy,
-      navigationGraphListenerManagers: this.navigationGraphListenerManagers,
+      navigationGraphListenerManagers: this.navigationGraphBridge.listenerManagers,
       shutdownReleaseNotifications: () => this.shutdownReleaseNotifications,
       shutdownFallbackReleaseNotifications: () => this.shutdownFallbackReleaseNotifications,
-      setupNavigationGraphUpdateListener: (manager) =>
-        this.setupNavigationGraphUpdateListener(manager),
+      setupNavigationGraphUpdateListener: (manager) => this.navigationGraphBridge.attach(manager),
       reownRehydratedManagedExecutions: (rehydrated) =>
         this.reownRehydratedManagedExecutions(rehydrated),
       hasActiveSessionExecution: (sessionId, query) =>
@@ -2170,20 +2158,6 @@ export class Daemon {
     }
   }
 
-  private logSkippedObservationStreamDevice(
-    platform: "android" | "ios",
-    deviceId: string,
-    action: string,
-  ): void {
-    const optInEnv =
-      platform === "android"
-        ? "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES"
-        : "AUTOMOBILE_IOS_WARMUP_DEVICES";
-    logger.info(
-      `[Daemon] Skipping observation-stream ${action} for ${platform} device ${deviceId}: passive-work policy filtered it; set ${optInEnv} to opt in`,
-    );
-  }
-
   private getInitialFrameCoordinator(
     server: NonNullable<ReturnType<typeof getDeviceDataStreamServer>>,
   ) {
@@ -2219,7 +2193,7 @@ export class Daemon {
       const allDevices = selectObservationStreamDevices(
         pooledDevices,
         this.passiveWorkPolicy,
-        (device) => this.logSkippedObservationStreamDevice(device.platform, device.id, "connect"),
+        (device) => logSkippedObservationStreamDevice(device.platform, device.id, "connect"),
       );
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
@@ -2234,7 +2208,8 @@ export class Daemon {
         },
         androidClientFactory: (device) =>
           AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
-        iosClientFactory: (device) => this.createObservationStreamIosClient(device),
+        iosClientFactory: (device) =>
+          createObservationStreamIosClient(device, getDeviceDataStreamServer),
       }).catch((error) => {
         logger.warn(`[Daemon] Error pushing initial observation frame: ${error}`);
       });
@@ -2252,7 +2227,7 @@ export class Daemon {
       for (const device of devices) {
         if (device.platform === "android") {
           if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("android", device.id, "screenshot cadence");
+            logSkippedObservationStreamDevice("android", device.id, "screenshot cadence");
             continue;
           }
           AndroidCtrlProxyClient.getExistingInstance(
@@ -2260,7 +2235,7 @@ export class Daemon {
           )?.refreshObservationStreamScreenshotCadence();
         } else if (device.platform === "ios") {
           if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("ios", device.id, "screenshot cadence");
+            logSkippedObservationStreamDevice("ios", device.id, "screenshot cadence");
             continue;
           }
           IOSCtrlProxyClient.getExistingInstance(
@@ -2278,7 +2253,7 @@ export class Daemon {
       for (const device of devices) {
         if (device.platform === "android") {
           if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("android", device.id, "hierarchy cadence");
+            logSkippedObservationStreamDevice("android", device.id, "hierarchy cadence");
             continue;
           }
           AndroidCtrlProxyClient.getExistingInstance(
@@ -2286,7 +2261,7 @@ export class Daemon {
           )?.refreshObservationStreamHierarchyCadence();
         } else if (device.platform === "ios") {
           if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("ios", device.id, "hierarchy cadence");
+            logSkippedObservationStreamDevice("ios", device.id, "hierarchy cadence");
             continue;
           }
           const client = IOSCtrlProxyClient.getExistingInstance(device.id);
@@ -2342,7 +2317,11 @@ export class Daemon {
       return runObservationRequestBatch(
         pooledDevices,
         createDaemonObservationExecutor(requestStart, (pooledDevice) =>
-          this.isHeldByAnotherOwner(pooledDevice, sessionUuid),
+          isHeldByAnotherOwner(
+            { sessionManager: this.sessionManager, devicePool: this.devicePool },
+            pooledDevice,
+            sessionUuid,
+          ),
         ),
         {
           timer: this.timer,
@@ -2362,295 +2341,14 @@ export class Daemon {
     this.setupNavigationGraphStreamListener(server);
   }
 
-  /**
-   * Whether a device is held by a session other than the requester's (a derived
-   * `${base}:${label}` session counts as its base). Such a requester only watches it (#10967).
-   */
-  private isHeldByAnotherSession(deviceId: string, requesterSessionUuid?: string): boolean {
-    const holder =
-      this.sessionManager.getSessionForDevice(deviceId) ??
-      holderOf(this.devicePool.getDevice(deviceId));
-    if (!holder) {
-      return false;
-    }
-    const base = (sessionUuid: string | undefined) =>
-      resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessionManager);
-    return base(holder) !== base(requesterSessionUuid?.trim() || undefined);
+  private applyStorageSubscriptionRequest(request: StorageSubscriptionRequest): Promise<void> {
+    return applyStorageSubscriptionRequest({ devicePool: this.devicePool }, request);
   }
 
-  /**
-   * Whether anyone but the requester holds the device, for classifying a READ: another local
-   * session, a broker binding (idle or not, unless the requester is the binding's execution), or
-   * another daemon's claim. Such a request is downgraded to the connect-only read, never refused.
-   * An ownership state that cannot be read counts as held: a read must not risk a rebind on a
-   * device that may belong to someone else. The checks reuse the pool's own gates and their
-   * one-second snapshots, so an observation adds no cross-daemon round trip beyond them.
-   */
-  private async isHeldByAnotherOwner(
-    pooledDevice: PooledDevice,
-    requesterSessionUuid?: string,
-  ): Promise<boolean> {
-    const deviceId = pooledDevice.id;
-    if (this.isHeldByAnotherSession(deviceId, requesterSessionUuid)) {
-      return true;
-    }
-    if (this.sessionManager.getSessionForDevice(deviceId) ?? holderOf(pooledDevice)) {
-      // The requester's own session holds it; the pool's gates govern others, not the holder.
-      return false;
-    }
-    const platform = pooledDevice.platform;
-    const requester = requesterSessionUuid?.trim() || undefined;
-    try {
-      await assertInputNotOnForeignBindingDevice({
-        action: "observe",
-        deviceId,
-        platform,
-        requesterSessionUuid: requester,
-        sessionManager: this.sessionManager,
-        gate: this.devicePool,
-      });
-      await assertControlNotOnForeignDaemonDevice({
-        deviceId,
-        platform,
-        gate: this.devicePool,
-      });
-      return false;
-    } catch (error) {
-      if (
-        error instanceof DeviceAssignedToBindingError ||
-        error instanceof DeviceOwnedByOtherDaemonError
-      ) {
-        // A broker binding or another daemon holds the device: an expected verdict, so the read is
-        // downgraded to connect-only rather than refused.
-        logger.debug(`[Daemon] observation of ${deviceId} is read-only: ${errorMessage(error)}`);
-      } else {
-        // Unknown ownership is treated as held; the trace says why the read was downgraded.
-        logger.warn(
-          `[Daemon] ownership of ${deviceId} unreadable; observation is read-only: ${errorMessage(error)}`,
-          error,
-        );
-      }
-      return true;
-    }
-  }
-
-  /**
-   * Expand one storage (un)subscription to the devices it targets and apply it.
-   *
-   * FUNNEL 2 for every target the expansion produces. A request that scopes
-   * itself to a serial is already refused at the socket server, but an
-   * ALL-DEVICE request names no serial at all, so nothing there can preflight it
-   * — and `deviceId === null` means every pooled Android device here. Gating each
-   * expanded target is what stops the request from installing a content observer
-   * on whichever replacement AVD now answers on a quarantined serial and still
-   * acking success. The refusals are collected rather than thrown at the first
-   * one, so a healthy device still gets its observer and the caller learns which
-   * targets the request could not cover -- the same partial-completion shape the
-   * all-device observation path uses
-   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-   *
-   * Teardown is exempt, as it is at the socket server: refusing it would strand
-   * the observer this daemon registered, and releasing one touches only
-   * bookkeeping the quarantine does not question.
-   */
-  private async applyStorageSubscriptionRequest({
-    deviceId,
-    sessionUuid,
-    packageName,
-    fileName,
-    subscribe,
-  }: {
-    deviceId: string | null;
-    sessionUuid?: string;
-    packageName: string;
-    fileName: string;
-    subscribe: boolean;
-  }): Promise<void> {
-    const devices = this.devicePool
-      .getAllDevices()
-      .filter((device) => deviceId === null || device.id === deviceId);
-    const refusals: string[] = [];
-    const authenticator = createDefaultStreamSocketAuthenticator("observationStream", {
-      allowObserverSessions: true,
-    });
-    for (const device of devices) {
-      if (device.platform !== "android") {
-        continue;
-      }
-      try {
-        // Watching stored values is a read: a held device admits any live identity (#10830).
-        authenticator.authorize({ sessionUuid, deviceId: device.id, admitViewer: true });
-      } catch (error) {
-        refusals.push(errorMessage(error));
-        continue;
-      }
-      if (subscribe) {
-        try {
-          this.devicePool.assertDeviceActionable(device.id, STORAGE_WATCH_PURPOSE);
-        } catch (error) {
-          refusals.push(errorMessage(error));
-          continue;
-        }
-      }
-      const client = AndroidCtrlProxyClient.getExistingInstance(device.id);
-      if (!client) {
-        continue;
-      }
-      if (subscribe) {
-        await client.subscribeStorage(packageName, fileName);
-      } else {
-        await client.unsubscribeStorage(`${packageName}:${fileName}`);
-      }
-    }
-    if (refusals.length > 0) {
-      throw new ActionableError(refusals.join("; "));
-    }
-  }
-
-  private createObservationStreamIosClient(device: BootedDevice): ObservationStreamIosClient {
-    const client = IOSCtrlProxyClient.getInstance(device);
-    return {
-      ensureConnected: async () => {
-        const connected = await client.ensureConnected();
-        const server = getDeviceDataStreamServer();
-        if (connected && server) {
-          client.refreshObservationStreamHierarchyCadence(
-            server.getHierarchyIntervalMsForDevice(device.deviceId),
-          );
-        }
-        return connected;
-      },
-      getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
-      requestHierarchySyncWithoutObservationStreamPush: async (...args) => {
-        const result = await client.requestHierarchySyncWithoutObservationStreamPush(...args);
-        return result
-          ? {
-              hierarchy: result.hierarchy,
-              ...(result.frameContext === undefined ? {} : { frameContext: result.frameContext }),
-            }
-          : null;
-      },
-      convertToViewHierarchyResult: (hierarchy) =>
-        client.convertToViewHierarchyResult(hierarchy as never),
-      recordInitialObservationStreamHierarchy: (hierarchy, captureSequence) =>
-        client.recordInitialObservationStreamHierarchy(hierarchy, captureSequence),
-      requestScreenshotWithoutObservationStreamPush: (...args) =>
-        client.requestScreenshotWithoutObservationStreamPush(...args),
-    };
-  }
-
-  /**
-   * Set up listener for navigation graph changes.
-   * When the navigation graph changes, push updates to all subscribed IDE plugins.
-   */
   private setupNavigationGraphStreamListener(
     server: ReturnType<typeof getDeviceDataStreamServer>,
   ): void {
-    if (!server) {
-      return;
-    }
-
-    this.setupNavigationGraphUpdateListener(NavigationGraphManager.getInstance());
-    for (const session of this.sessionManager.getAllSessions()) {
-      this.setupNavigationGraphUpdateListener(
-        NavigationGraphManager.getInstanceForSession(session.sessionId),
-      );
-    }
-
-    // Requests retain the legacy unattributed graph behavior. Live graph changes
-    // above are also wired to each active session manager, which is where tool
-    // execution records navigation state.
-    server.setOnNavigationGraphRequested(
-      createNavigationGraphRequestHandler({
-        exportGraphSummary: () => this.resolveUnscopedNavigationGraphManager().exportGraphSummary(),
-        exportGraphSummaryForApp: (appId) =>
-          this.resolveUnscopedNavigationGraphManager().exportGraphSummaryForApp(appId),
-      }),
-    );
-
-    logger.info("[Daemon] Navigation graph stream listener configured");
-  }
-
-  private resolveUnscopedNavigationGraphManager(): NavigationGraphStreamSource {
-    const sessions = this.sessionManager.getAllSessions();
-    return sessions.length === 1
-      ? NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId)
-      : NavigationGraphManager.getInstance();
-  }
-
-  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphStreamSource): void {
-    const streamServer = this.deviceDataStreamServer;
-    if (
-      streamServer &&
-      !this.navigationGraphSeededStreamManagers.get(streamServer)?.has(navGraphManager)
-    ) {
-      const seededManagers =
-        this.navigationGraphSeededStreamManagers.get(streamServer) ??
-        new WeakSet<NavigationGraphStreamSource>();
-      seededManagers.add(navGraphManager);
-      this.navigationGraphSeededStreamManagers.set(streamServer, seededManagers);
-      for (const context of navGraphManager.getBuildContexts()) {
-        if (context.deviceId !== LEGACY_PROVENANCE_SENTINEL) {
-          streamServer.pushBuildContextUpdate(context.deviceId, context.appId, {
-            packageId: context.appId,
-            versionCode: context.versionCode,
-            ...(context.versionKey === undefined ? {} : { versionKey: context.versionKey }),
-            contentHash: context.contentHash,
-          });
-        }
-      }
-    }
-    if (this.navigationGraphListenerManagers.has(navGraphManager)) {
-      return;
-    }
-    this.navigationGraphListenerManagers.add(navGraphManager);
-    navGraphManager.setBuildContextUpdateListener(({ appId, deviceId, buildContext }) => {
-      if (
-        !this.navigationGraphListenerManagers.has(navGraphManager) ||
-        deviceId === LEGACY_PROVENANCE_SENTINEL
-      ) {
-        return;
-      }
-      this.deviceDataStreamServer?.pushBuildContextUpdate(
-        deviceId,
-        appId,
-        buildContext === null
-          ? null
-          : {
-              packageId: appId,
-              versionCode: buildContext.versionCode,
-              ...(buildContext.versionKey === undefined
-                ? {}
-                : { versionKey: buildContext.versionKey }),
-              contentHash: buildContext.contentHash,
-            },
-      );
-    });
-    navGraphManager.setGraphUpdateListener(async () => {
-      logger.info("[Daemon] Navigation graph listener triggered, exporting summary...");
-      try {
-        const summary = await navGraphManager.exportGraphSummary();
-        if (!this.navigationGraphListenerManagers.has(navGraphManager)) {
-          logger.debug("[Daemon] Ignoring navigation update from a released or rebound session");
-          return;
-        }
-        logger.info(
-          `[Daemon] Got summary: appId=${summary.appId}, nodes=${summary.nodes.length}, edges=${summary.edges.length}`,
-        );
-
-        const streamData = convertSummaryToStreamData(summary);
-        // Attribute the update to the device that owns this app's graph so panes
-        // watching other devices are not cross-contaminated (epic #5256; #4837).
-        const deviceId = navGraphManager.getDeviceIdForApp(summary.appId);
-        this.deviceDataStreamServer?.pushNavigationGraphUpdate(streamData, deviceId);
-
-        logger.info(
-          `[Daemon] Pushed navigation graph update: ${summary.nodes.length} nodes, ${summary.edges.length} edges`,
-        );
-      } catch (error) {
-        logger.warn(`[Daemon] Failed to push navigation graph update: ${error}`);
-      }
-    });
+    this.navigationGraphBridge.listen(server);
   }
 
   /**

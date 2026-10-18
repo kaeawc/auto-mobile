@@ -41,6 +41,7 @@ import {
   type PlistValue,
 } from "../utils/ios-cmdline-tools/XctestrunPlist";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 import { SKIP_CTRL_PROXY_DOWNLOAD_ENV, isTruthyEnvValue } from "../utils/ctrlProxyDownloadControl";
 import {
   type IosPrerequisiteDetector,
@@ -61,23 +62,22 @@ import { sortedReaddir, sortedReaddirEntries } from "../utils/io";
  * OS-enforced on the simulator anyway, so the value here is defense-in-depth on
  * physical devices alongside the #4759 hash re-verification.
  */
-export const IOS_HELPER_REQUIRE_CODESIGN_ENV = "AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN";
+export const IOS_HELPER_REQUIRE_CODESIGN_ENV = ENV.IOS_HELPER_REQUIRE_CODESIGN.name;
 /**
  * Optional pinned Apple Team ID. When set, the runner bundle's
  * `TeamIdentifier` must match; a mismatch warns (or refuses, under
  * {@link IOS_HELPER_REQUIRE_CODESIGN_ENV}). Unset by default because we ship no
  * canonical Team ID (issue #4760).
  */
-export const IOS_HELPER_TEAM_ID_ENV = "AUTOMOBILE_IOS_HELPER_TEAM_ID";
+export const IOS_HELPER_TEAM_ID_ENV = ENV.IOS_HELPER_TEAM_ID.name;
 /**
  * Expected SHA256 for an explicitly supplied or source-built runner. This keeps
  * the pre-launch integrity gate active when the local runner intentionally does
  * not match the published release artifact selected by package.json.
  */
-export const IOS_CTRL_PROXY_RUNNER_SHA256_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256";
+export const IOS_CTRL_PROXY_RUNNER_SHA256_ENV = ENV.CTRL_PROXY_IOS_RUNNER_SHA256.name;
 /** Executable represented by {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV}. */
-export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
-  "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET";
+export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV = ENV.CTRL_PROXY_IOS_RUNNER_SHA256_TARGET.name;
 /**
  * First-class "serve a locally built runner" switch (issue #5561). When truthy
  * (`1`/`true`) and no explicit {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV} is set,
@@ -92,7 +92,7 @@ export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
  * This removes the run-fail-read-`Got:`-sha-rerun dance the manual-test flow
  * previously required.
  */
-export const IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD";
+export const IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV = ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD.name;
 
 /**
  * Turn a codesign inspection outcome into a list of human-readable problems,
@@ -315,17 +315,17 @@ export class IosCtrlProxyBuilder {
     this.config = {
       projectRoot:
         config.projectRoot ||
-        process.env.AUTOMOBILE_PROJECT_ROOT ||
+        readEnvRaw(ENV.PROJECT_ROOT) ||
         IosCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
       derivedDataPath:
         config.derivedDataPath ||
-        process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA ||
+        readEnvRaw(ENV.CTRL_PROXY_IOS_DERIVED_DATA) ||
         getTempDir(IosCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
       scheme: config.scheme || IosCtrlProxyBuilder.DEFAULT_SCHEME,
       destination: config.destination || IosCtrlProxyBuilder.DEFAULT_DESTINATION,
       bundleCacheDir:
         config.bundleCacheDir ||
-        process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR ||
+        readEnvRaw(ENV.CTRL_PROXY_IOS_CACHE_DIR) ||
         // Shared downloaded bundle cache stays coordinated across data dirs.
         // AUTOMOBILE_COORDINATION_DIR relocates it; the cache-specific variable
         // above can relocate it independently.
@@ -996,11 +996,11 @@ export class IosCtrlProxyBuilder {
   }
 
   private getBundleUrl(): string {
-    const override = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL?.trim();
+    const override = readEnvTrimmed(ENV.CTRL_PROXY_IOS_BUNDLE_URL);
     if (override) {
       // Reject a plaintext http:// bundle override unless the opt-out is set
       // (issue #4761); resolveIpaUrl already enforces https on the mirror knob.
-      assertHttpsAssetUrl(override, "AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL");
+      assertHttpsAssetUrl(override, ENV.CTRL_PROXY_IOS_BUNDLE_URL.name);
       return override;
     }
     return resolveIpaUrl();
@@ -1008,8 +1008,7 @@ export class IosCtrlProxyBuilder {
 
   private getBundlePathOverride(): string | null {
     const override =
-      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim() ||
-      process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+      readEnvTrimmed(ENV.CTRL_PROXY_IOS_IPA_PATH) || readEnvTrimmed(ENV.CTRL_PROXY_IOS_BUNDLE_PATH);
     return override && override.length > 0
       ? resolvePathFromDaemonLaunchWorkingDirectory(override)
       : null;
@@ -1028,7 +1027,7 @@ export class IosCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV]?.trim();
+    const environmentOverride = readEnvTrimmed(ENV.CTRL_PROXY_IOS_RUNNER_SHA256);
     if (environmentOverride) {
       if (!/^[a-f0-9]{64}$/i.test(environmentOverride)) {
         throw new ActionableError(
@@ -1045,7 +1044,7 @@ export class IosCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV]?.trim();
+    const environmentOverride = readEnvTrimmed(ENV.CTRL_PROXY_IOS_RUNNER_SHA256_TARGET);
     if (environmentOverride === "runner" || environmentOverride === "xctest") {
       return environmentOverride;
     }
@@ -1066,7 +1065,7 @@ export class IosCtrlProxyBuilder {
     }
     // For device platform, check generic overrides and the release constant (device build hash)
     if (platform === "device") {
-      const genericOverride = process.env.AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH;
+      const genericOverride = readEnvRaw(ENV.IOS_CTRL_PROXY_APP_HASH);
       if (genericOverride && genericOverride.trim().length > 0) {
         return genericOverride.trim();
       }
@@ -1248,8 +1247,8 @@ export class IosCtrlProxyBuilder {
     ) {
       return false;
     }
-    const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
-    const bundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+    const ipaPath = readEnvTrimmed(ENV.CTRL_PROXY_IOS_IPA_PATH);
+    const bundlePath = readEnvTrimmed(ENV.CTRL_PROXY_IOS_BUNDLE_PATH);
     if ((ipaPath && ipaPath.length > 0) || (bundlePath && bundlePath.length > 0)) {
       return false;
     }
@@ -1490,7 +1489,7 @@ export class IosCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    return isTruthyEnvValue(process.env[IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV]);
+    return isTruthyEnvValue(readEnvRaw(ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD));
   }
 
   private isLocalBuildMode(): boolean {
@@ -1572,7 +1571,7 @@ export class IosCtrlProxyBuilder {
    * the release-pinned baseline, which local-build mode is designed to relax.
    */
   private hasExplicitRunnerShaOverride(): boolean {
-    const environmentOverride = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV]?.trim();
+    const environmentOverride = readEnvTrimmed(ENV.CTRL_PROXY_IOS_RUNNER_SHA256);
     return environmentOverride !== undefined && environmentOverride.length > 0;
   }
 
@@ -1760,8 +1759,8 @@ export class IosCtrlProxyBuilder {
       return;
     }
 
-    const requireCodesign = isTruthyEnvValue(process.env[IOS_HELPER_REQUIRE_CODESIGN_ENV]);
-    const pinnedTeamId = process.env[IOS_HELPER_TEAM_ID_ENV]?.trim() || null;
+    const requireCodesign = isTruthyEnvValue(readEnvRaw(ENV.IOS_HELPER_REQUIRE_CODESIGN));
+    const pinnedTeamId = readEnvTrimmed(ENV.IOS_HELPER_TEAM_ID) ?? null;
 
     let outcome: CodesignVerificationOutcome;
     try {

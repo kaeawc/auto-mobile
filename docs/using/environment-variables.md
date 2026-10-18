@@ -821,6 +821,8 @@ Not AutoMobile-specific; read to locate the Android emulator and the default SDK
 | `ANDROID_ADB_SERVER_ADDRESS`, `ANDROID_ADB_SERVER_PORT` | ADB server host and port when `ADB_SERVER_SOCKET` is unset.                                                   | `localhost`, `5037` |
 | `LOCALAPPDATA`                                          | Windows local application data directory; used to probe the default Android SDK location.                     | unset               |
 | `MCP_SERVER_VERSION`                                    | Exact MCP server version override for CI and test pins; never stamped with git metadata.                      | unset               |
+| `CTRL_PROXY_IOS_BUNDLE_ID`                              | Target app bundle ID for iOS CtrlProxy when none is set explicitly.                                           | unset               |
+| `CTRL_PROXY_IOS_TIMEOUT`                                | iOS CtrlProxy XCUITest runner timeout in seconds, forwarded to the runner.                                    | `86400`             |
 | `npm_package_version`                                   | Package version exported by npm and `bun run`; last-resort fallback when the manifest version is unavailable. | unset               |
 
 ### Boot capacity

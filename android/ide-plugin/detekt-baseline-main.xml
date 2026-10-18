@@ -2,6 +2,8 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>InjectDispatcher:FeatureFlagsConfigurable.kt:FeatureFlagsViewModel$IO</ID>
+    <ID>InjectDispatcher:TestTimingPanel.kt:IO</ID>
     <ID>UnsafeCallOnNullableType:TestPlanSchemaStore.kt:TestPlanSchemaStore$rootSchema!!</ID>
   </CurrentIssues>
 </SmellBaseline>

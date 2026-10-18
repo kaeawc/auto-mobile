@@ -2,6 +2,43 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>InjectDispatcher:AutoMobileContent.kt:Default</ID>
+    <ID>InjectDispatcher:AutoMobileContent.kt:IO</ID>
+    <ID>InjectDispatcher:ConveyorUpdateController.kt:ConveyorUpdateController$IO</ID>
+    <ID>InjectDispatcher:DaemonNotificationClient.kt:DaemonNotificationClient$IO</ID>
+    <ID>InjectDispatcher:DaemonStatusSection.kt:IO</ID>
+    <ID>InjectDispatcher:DatabaseInspector.kt:IO</ID>
+    <ID>InjectDispatcher:DeviceControlsDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:DeviceListSection.kt:IO</ID>
+    <ID>InjectDispatcher:DeviceThumbnail.kt:ObservationScreenshotSource$Default</ID>
+    <ID>InjectDispatcher:DeviceThumbnail.kt:ObservationScreenshotSource$IO</ID>
+    <ID>InjectDispatcher:DiagnosticsDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:GitHubReleaseSource.kt:GitHubReleaseSource$IO</ID>
+    <ID>InjectDispatcher:LayoutInspectorDashboard.kt:Default</ID>
+    <ID>InjectDispatcher:McpConnectionSection.kt:IO</ID>
+    <ID>InjectDispatcher:MemoryPressureMonitor.kt:MemoryPressureMonitor$Default</ID>
+    <ID>InjectDispatcher:NavigationCanvasView.kt:IO</ID>
+    <ID>InjectDispatcher:NavigationDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:NavigationDetailViews.kt:IO</ID>
+    <ID>InjectDispatcher:NavigationFacet.kt:IO</ID>
+    <ID>InjectDispatcher:NetworkFacet.kt:IO</ID>
+    <ID>InjectDispatcher:ObservationStreamClient.kt:ObservationStreamClient$IO</ID>
+    <ID>InjectDispatcher:OfflineNavigationBrowser.kt:IO</ID>
+    <ID>InjectDispatcher:PerformanceDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:RealNetworkGraphDataSource.kt:RealNetworkGraphDataSource$IO</ID>
+    <ID>InjectDispatcher:RealNetworkRequestsDataSource.kt:RealNetworkRequestsDataSource$IO</ID>
+    <ID>InjectDispatcher:RealStorageDataSource.kt:RealStorageDataSource$IO</ID>
+    <ID>InjectDispatcher:SettingsDialog.kt:FeatureFlagsViewModel$IO</ID>
+    <ID>InjectDispatcher:SnapshotsDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:SourceFileOpener.kt:SourceFileOpener$IO</ID>
+    <ID>InjectDispatcher:StorageDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:StorageFacet.kt:IO</ID>
+    <ID>InjectDispatcher:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$IO</ID>
+    <ID>InjectDispatcher:TestDashboard.kt:IO</ID>
+    <ID>InjectDispatcher:TestFacet.kt:IO</ID>
+    <ID>InjectDispatcher:WorkspaceDeviceControl.kt:Default</ID>
+    <ID>InjectDispatcher:WorkspaceShell.kt:IO</ID>
+    <ID>RedundantSuspendModifier:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$suspend</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.recompositionRate!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.timeToInteractiveMs!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.touchLatencyMs!!</ID>
@@ -11,7 +48,6 @@
     <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.fileName!!</ID>
     <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:element.lineNumber!!</ID>
     <ID>UnsafeCallOnNullableType:FailuresDashboard.kt:selectedFailure!!</ID>
-    <ID>UnsafeCallOnNullableType:FailuresPushSocketClient.kt:FailuresPushSocketClient$channel!!</ID>
     <ID>UnsafeCallOnNullableType:McpConnectionSection.kt:connectedProcess!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:hoveredTransitionId!!</ID>
     <ID>UnsafeCallOnNullableType:NavigationCanvasView.kt:screenshotBitmap!!</ID>

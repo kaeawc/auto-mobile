@@ -1,7 +1,7 @@
 complexity:
   active: false
 coroutines:
-  active: false
+  active: true
 empty-blocks:
   active: false
 exceptions:

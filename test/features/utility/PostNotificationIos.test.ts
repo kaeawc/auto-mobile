@@ -17,8 +17,7 @@ describe("PostNotification - iOS Simulator", () => {
   const makeDevice = (deviceId: string): BootedDevice =>
     ({ deviceId, platform: "ios" }) as BootedDevice;
 
-  const make = (deviceId: string) =>
-    new PostNotification(makeDevice(deviceId), null, null, simctl as any);
+  const make = (deviceId: string) => new PostNotification(makeDevice(deviceId), null, null, simctl);
 
   const pushCalls = () => simctl.getMethodCalls("pushNotification");
 

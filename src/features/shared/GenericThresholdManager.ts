@@ -1,5 +1,10 @@
-import { sql, type Kysely } from "kysely";
+import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
+import {
+  ThresholdRepository,
+  type ThresholdTableRow,
+  type ThresholdWhere,
+} from "../../db/thresholdRepository";
 import type { Database } from "../../db/types";
 import { logger } from "../../utils/logger";
 import {
@@ -9,12 +14,7 @@ import {
   WEIGHT_BOUNDS,
 } from "./MetricsUtils";
 
-type ThresholdValue = string | number;
-
-export interface ThresholdWhere<Row> {
-  column: Extract<keyof Row, string>;
-  value: ThresholdValue;
-}
+export type { ThresholdWhere };
 
 export interface WeightedThresholdColumn<Row> {
   column: Extract<keyof Row, string>;
@@ -39,19 +39,14 @@ interface UpdateThresholdWeightOptions<Row> {
   updatedMessage: string;
 }
 
-interface ThresholdRow {
-  id: number;
-  created_at: string;
-  ttl_hours: number;
-  weight: number;
-}
-
-export class GenericThresholdManager<Row extends ThresholdRow> {
+export class GenericThresholdManager<Row extends ThresholdTableRow> {
   private readonly injectedDb: Kysely<Database> | null;
   private readonly descriptor: ThresholdDescriptor<Row>;
+  private readonly repository: ThresholdRepository<Row>;
 
   constructor(descriptor: ThresholdDescriptor<Row>, db?: Kysely<Database>) {
     this.descriptor = descriptor;
+    this.repository = new ThresholdRepository<Row>(descriptor.tableName);
     this.injectedDb = db ?? null;
   }
 
@@ -66,13 +61,7 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
     db: Kysely<Database> = this.db,
   ): Promise<void> {
     try {
-      let query = (db as any)
-        .deleteFrom(this.descriptor.tableName)
-        .where(sql`datetime(created_at, '+' || ttl_hours || ' hours')`, "<", sql`datetime('now')`);
-
-      query = this.applyWhere(query, where);
-      const deleted = await query.executeTakeFirst();
-      const deletedCount = Number(deleted.numDeletedRows) || 0;
+      const deletedCount = await this.repository.deleteExpired(db, where);
 
       if (deletedCount > 0) {
         logger.info(
@@ -92,13 +81,7 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
   ): Promise<Row[]> {
     await this.cleanupExpiredThresholds(cleanupWhere, cleanupDescription, db);
 
-    let query = (db as any)
-      .selectFrom(this.descriptor.tableName)
-      .selectAll()
-      .where(sql`datetime(created_at, '+' || ttl_hours || ' hours')`, ">=", sql`datetime('now')`);
-
-    query = this.applyWhere(query, where);
-    return await query.orderBy("created_at", "desc").execute();
+    return await this.repository.selectValid(db, where);
   }
 
   calculateWeightedAverageThresholds(rows: Row[]): WeightedThresholdResult<Row> | null {
@@ -131,12 +114,12 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
   }
 
   async storeThresholds(
-    values: Record<string, unknown>,
+    values: Record<string, string | number | null>,
     description: string,
     db: Kysely<Database> = this.db,
   ): Promise<void> {
     try {
-      await (db as any).insertInto(this.descriptor.tableName).values(values).execute();
+      await this.repository.insert(db, values);
 
       logger.info(`[${this.descriptor.logPrefix}] Stored new thresholds for ${description}`);
     } catch (error) {
@@ -155,26 +138,14 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
         options.cleanupWhere ?? where,
         this.describeWhere(options.cleanupWhere ?? where),
       );
-      const adjustedWeight = passed
-        ? sql<number>`min(weight * ${WEIGHT_BOUNDS.successMultiplier}, ${WEIGHT_BOUNDS.max})`
-        : sql<number>`max(weight * ${WEIGHT_BOUNDS.failureMultiplier}, ${WEIGHT_BOUNDS.min})`;
+      const updatedRows = await this.repository.adjustLatestWeight(
+        this.db,
+        where,
+        passed,
+        WEIGHT_BOUNDS,
+      );
 
-      let latestValidThreshold = (this.db as any)
-        .selectFrom(this.descriptor.tableName)
-        .select("id")
-        .where(sql`datetime(created_at, '+' || ttl_hours || ' hours')`, ">=", sql`datetime('now')`)
-        .orderBy("created_at", "desc")
-        .limit(1);
-
-      latestValidThreshold = this.applyWhere(latestValidThreshold, where);
-
-      const result = await (this.db as any)
-        .updateTable(this.descriptor.tableName)
-        .set({ weight: adjustedWeight })
-        .where("id", "=", latestValidThreshold)
-        .executeTakeFirst();
-
-      if (Number(result.numUpdatedRows) === 0) {
+      if (updatedRows === 0) {
         logger.warn(`[${this.descriptor.logPrefix}] ${options.missingMessage}`);
         return;
       }
@@ -183,13 +154,6 @@ export class GenericThresholdManager<Row extends ThresholdRow> {
     } catch (error) {
       logger.warn(`[${this.descriptor.logPrefix}] Failed to update threshold weight: ${error}`);
     }
-  }
-
-  private applyWhere<Query>(query: Query, where: Array<ThresholdWhere<Row>>): Query {
-    return where.reduce(
-      (currentQuery, clause) => (currentQuery as any).where(clause.column, "=", clause.value),
-      query,
-    );
   }
 
   private describeWhere(where: Array<ThresholdWhere<Row>>): string {

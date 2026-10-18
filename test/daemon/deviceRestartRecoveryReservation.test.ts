@@ -511,7 +511,7 @@ describe("device restart reserves the entire recovery window", () => {
       if (args[3] === "restart-recovery-timeout") {
         events.push("write");
         expect(args[4]).toMatchObject({
-          expectedRowGeneration: 1,
+          expectedRowGeneration: 0,
           onlyIfOwnedByDaemon: DAEMON_A,
           onlyIfRecoverable: true,
           onlyIfRestartRecoveryHandoff: {
@@ -589,7 +589,7 @@ describe("device restart reserves the entire recovery window", () => {
         status: "released",
         release_reason: `device-restart:${SIM.name}`,
         daemon_session_id: DAEMON_B,
-        stable_identity_generation: 2,
+        stable_identity_generation: 1,
       });
       expect(notices).toBe(0);
       expect(sessions.getTerminalReleaseSnapshot(HOLDER)).toBeUndefined();

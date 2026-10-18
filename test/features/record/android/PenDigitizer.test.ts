@@ -251,6 +251,29 @@ describe("pen contacts", () => {
     expect(gestures[0].toolType).toBeUndefined();
   });
 
+  test("on an MT node a finger in another slot never takes the node-wide eraser or buttons", () => {
+    const lines = [
+      "[  1.0] EV_KEY    BTN_TOOL_RUBBER      DOWN",
+      "[  1.0] EV_KEY    BTN_STYLUS           DOWN",
+      "[  1.0] EV_ABS    ABS_MT_SLOT          00000000",
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_ABS    ABS_MT_SLOT          00000001",
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    00000100",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    00000200",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const [frame] = run(lines).frames;
+    const bySlot = new Map(frame.activeSlots.map((slot) => [slot.slotId, slot]));
+    expect(bySlot.get(0)?.toolType).toBe("eraser");
+    expect(bySlot.get(0)?.buttons).toEqual(["stylusPrimary"]);
+    expect(bySlot.get(1)?.toolType).toBeUndefined();
+    expect(bySlot.get(1)?.buttons).toBeUndefined();
+  });
+
   test("single-touch axes are ignored on a multitouch node", () => {
     const { frames } = run(PEN_STROKE);
     expect(frames.every((frame) => frame.activeSlots.length === 0)).toBe(true);

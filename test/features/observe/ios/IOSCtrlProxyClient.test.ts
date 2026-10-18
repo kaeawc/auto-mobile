@@ -39,6 +39,10 @@ import { SimCtlClient } from "../../../../src/utils/ios-cmdline-tools/SimCtlClie
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
+import type {
+  CtrlProxySyncedHierarchy,
+  XCTestHierarchy,
+} from "../../../../src/features/observe/ios/types";
 
 import { getPerfWindowBuffer } from "../../../../src/features/performance/PerfWindowBuffer";
 
@@ -598,11 +602,11 @@ describe("IOSCtrlProxyClient", function () {
           () => manager,
           async () => [testDevice],
         );
-        (client as any).autoReconnectEnabled = false;
+        client["autoReconnectEnabled"] = false;
         try {
           expect(await client.ensureConnected()).toBe(false);
           expect(
-            (client as any).createHierarchyDelegateContext().getLastConnectFailure(),
+            client["createHierarchyDelegateContext"]().getLastConnectFailure?.(),
           ).toMatchObject({
             reason,
             detail: "iOS CtrlProxy runner exited during startup",
@@ -639,11 +643,11 @@ describe("IOSCtrlProxyClient", function () {
           () => manager,
           async () => [testDevice],
         );
-        (client as any).autoReconnectEnabled = false;
+        client["autoReconnectEnabled"] = false;
         try {
           expect(await client.ensureConnected()).toBe(false);
           expect(
-            (client as any).createHierarchyDelegateContext().getLastConnectFailure(),
+            client["createHierarchyDelegateContext"]().getLastConnectFailure?.(),
           ).toMatchObject({
             reason,
             detail: "iOS CtrlProxy startup was cancelled by stop()",
@@ -672,13 +676,13 @@ describe("IOSCtrlProxyClient", function () {
         () => manager,
         async () => (booted ? [testDevice] : []),
       );
-      (client as any).autoReconnectEnabled = false;
+      client["autoReconnectEnabled"] = false;
       try {
         expect(await client.ensureConnected()).toBe(false);
-        const failure = (client as any).createHierarchyDelegateContext().getLastConnectFailure();
-        expect(failure.reason).toBe(reason);
+        const failure = client["createHierarchyDelegateContext"]().getLastConnectFailure?.();
+        expect(failure?.reason).toBe(reason);
         if (booted) {
-          expect(failure.detail).toBe(message);
+          expect(failure?.detail).toBe(message);
         }
       } finally {
         await client.close();
@@ -688,8 +692,8 @@ describe("IOSCtrlProxyClient", function () {
     test("cancels screenshot backoff when the connection closes", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
 
-      (ctrlProxyClient as any).screenshotBackoffScheduler = scheduler;
-      (ctrlProxyClient as any).onConnectionClosed();
+      ctrlProxyClient["screenshotBackoffScheduler"] = scheduler;
+      ctrlProxyClient["onConnectionClosed"]();
 
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
     });
@@ -697,7 +701,7 @@ describe("IOSCtrlProxyClient", function () {
     test("refreshes screenshot cadence by rescheduling keepalive", function () {
       const scheduler = new FakeScreenshotBackoffScheduler();
 
-      (ctrlProxyClient as any).screenshotBackoffScheduler = scheduler;
+      ctrlProxyClient["screenshotBackoffScheduler"] = scheduler;
       ctrlProxyClient.refreshObservationStreamScreenshotCadence();
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
@@ -786,7 +790,7 @@ describe("IOSCtrlProxyClient", function () {
         notifier,
       );
 
-      (testClient as any).onConnectionClosed();
+      testClient["onConnectionClosed"]();
 
       expect(lostDeviceIds).toEqual(["A1B2C3D4-E5F6-7890-ABCD-EF1234567890"]);
     });
@@ -796,15 +800,15 @@ describe("IOSCtrlProxyClient", function () {
       // transient reconnect on a static screen must restart it or the live view
       // freezes forever. startScreenshotBackoff() is itself subscriber-gated.
       let backoffStarts = 0;
-      (ctrlProxyClient as any).startScreenshotBackoff = () => {
+      ctrlProxyClient["startScreenshotBackoff"] = () => {
         backoffStarts++;
       };
       // Isolate from SDK polling side effects for this unit.
-      (ctrlProxyClient as any).startSdkEventPolling = () => {
+      ctrlProxyClient["startSdkEventPolling"] = () => {
         /* no-op */
       };
 
-      (ctrlProxyClient as any).onConnectionEstablished();
+      ctrlProxyClient["onConnectionEstablished"]();
 
       expect(backoffStarts).toBe(1);
     });
@@ -1257,7 +1261,7 @@ describe("IOSCtrlProxyClient", function () {
         );
         await flushMicrotasks();
 
-        const capabilityPromise = (testClient as any).ensureSdkCapability("highlight");
+        const capabilityPromise = testClient["ensureSdkCapability"]("highlight");
         await respondToSdkCapabilityQuery(socket, true, "com.example.sdk", 2);
 
         expect(await capabilityPromise).toBe(true);
@@ -1288,7 +1292,7 @@ describe("IOSCtrlProxyClient", function () {
         await respondToSdkCapabilityQuery(socket, false);
         fakeTimer.advanceTime(5000);
 
-        const capabilityPromise = (testClient as any).ensureSdkCapability("highlight");
+        const capabilityPromise = testClient["ensureSdkCapability"]("highlight");
         await respondToSdkCapabilityQuery(socket, false, undefined, 2);
 
         expect(await capabilityPromise).toBe(false);
@@ -1912,7 +1916,7 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         await testClient.ensureConnected();
@@ -1940,7 +1944,7 @@ describe("IOSCtrlProxyClient", function () {
         createConnectionTimeoutWebSocketFactory(testTimer),
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       const failAfterConnectionTimeout = async (): Promise<void> => {
         const resultPromise = testClient.ensureConnected();
@@ -1975,7 +1979,7 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         await testClient.ensureConnected();
@@ -2008,7 +2012,7 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         await testClient.ensureConnected();
@@ -2034,7 +2038,7 @@ describe("IOSCtrlProxyClient", function () {
 
     test("preserves stale hierarchy while reporting reconnecting metadata during cooldown", async function () {
       const testTimer = new FakeTimer();
-      const cachedHierarchy: CtrlProxyHierarchy = {
+      const cachedHierarchy: XCTestHierarchy = {
         updatedAt: 1750934585218,
         packageName: "com.example.cached",
         hierarchy: { text: "Cached screen" },
@@ -2046,14 +2050,14 @@ describe("IOSCtrlProxyClient", function () {
         createInstantFailureWebSocketFactory(testTimer),
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
-      (testClient as any).cachedHierarchy = {
+      testClient["autoReconnectEnabled"] = false;
+      testClient["cachedHierarchy"] = {
         hierarchy: cachedHierarchy,
         receivedAt: 0,
         fresh: false,
       };
-      (testClient as any).connectionAttempts = 3;
-      (testClient as any).lastConnectionAttempt = 1000;
+      testClient["connectionAttempts"] = 3;
+      testClient["lastConnectionAttempt"] = 1000;
       testTimer.advanceTime(1000);
 
       try {
@@ -2262,11 +2266,11 @@ describe("IOSCtrlProxyClient", function () {
       };
 
       try {
-        (testClient as any).sdkCapabilities = {
+        testClient["sdkCapabilities"] = {
           bundleId: "com.example.sdk",
           capabilities: new Set(["highlight"]),
         };
-        (testClient as any).sdkCapabilitiesKnown = true;
+        testClient["sdkCapabilitiesKnown"] = true;
         const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
@@ -2328,11 +2332,11 @@ describe("IOSCtrlProxyClient", function () {
       };
 
       try {
-        (testClient as any).sdkCapabilities = {
+        testClient["sdkCapabilities"] = {
           bundleId: "com.example.sdk",
           capabilities: new Set(["highlight"]),
         };
-        (testClient as any).sdkCapabilitiesKnown = true;
+        testClient["sdkCapabilitiesKnown"] = true;
         const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
@@ -2488,7 +2492,7 @@ describe("IOSCtrlProxyClient", function () {
 
       try {
         const socket = await connectWithSdkCommands(testClient, getSocket);
-        const waiter = (testClient as any).ensureSdkCapability("database", "com.example.a");
+        const waiter = testClient["ensureSdkCapability"]("database", "com.example.a");
         await flushMicrotasks();
 
         socket.simulateMessage(foregroundHierarchyUpdate("com.example.b"));
@@ -3202,7 +3206,7 @@ describe("IOSCtrlProxyClient", function () {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        const requestManager = (testClient as any).requestManager as {
+        const requestManager = testClient["requestManager"] as {
           getPendingCount(): number;
         };
         expect(requestManager.getPendingCount()).toBe(1);
@@ -3873,7 +3877,7 @@ describe("IOSCtrlProxyClient", function () {
           throw new Error("automatic setup must not run");
         },
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         expect(await testClient.connectWithoutSetup()).toBe(false);
@@ -3893,7 +3897,7 @@ describe("IOSCtrlProxyClient", function () {
         createConnectionTimeoutWebSocketFactory(testTimer),
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         const connection = testClient.connectWithoutSetup(controller.signal);
@@ -3901,7 +3905,7 @@ describe("IOSCtrlProxyClient", function () {
         controller.abort(cancellation);
 
         await expect(connection).rejects.toBe(cancellation);
-        expect((testClient as any).isConnecting).toBe(false);
+        expect(testClient["isConnecting"]).toBe(false);
       } finally {
         await testClient.close();
       }
@@ -3919,7 +3923,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         const connectionA = testClient.connectWithoutSetup(callerA.signal);
@@ -3939,7 +3943,7 @@ describe("IOSCtrlProxyClient", function () {
         socket!.emit("open");
         testTimer.advanceTime(100);
         await expect(connectionB).resolves.toBe(true);
-        expect((testClient as any).pendingConnectJoiners).toBe(0);
+        expect(testClient["pendingConnectJoiners"]).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -3957,7 +3961,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         const connectionA = testClient.connectWithoutSetup(callerA.signal);
@@ -3977,7 +3981,7 @@ describe("IOSCtrlProxyClient", function () {
         socket!.emit("open");
         testTimer.advanceTime(100);
         await expect(connectionB).resolves.toBe(true);
-        expect((testClient as any).pendingConnectJoiners).toBe(0);
+        expect(testClient["pendingConnectJoiners"]).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -4025,8 +4029,8 @@ describe("IOSCtrlProxyClient", function () {
         testTimer.advanceTime(100);
         await flushPromises();
         expect(testClient.isConnected()).toBe(true);
-        expect((testClient as any).isConnecting).toBe(false);
-        expect((testClient as any).pendingConnectJoiners).toBe(0);
+        expect(testClient["isConnecting"]).toBe(false);
+        expect(testClient["pendingConnectJoiners"]).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -4044,7 +4048,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         const connectionA = testClient.connectWithoutSetup(callerA.signal);
@@ -4060,7 +4064,7 @@ describe("IOSCtrlProxyClient", function () {
         callerB.abort(new Error("caller B cancelled"));
         await expect(connectionB).rejects.toThrow("caller B cancelled");
         expect(socket?.readyState).toBe(WebSocketState.CLOSING);
-        expect((testClient as any).isConnecting).toBe(false);
+        expect(testClient["isConnecting"]).toBe(false);
 
         const reconnect = testClient.connectWithoutSetup();
         await flushPromises();
@@ -4091,8 +4095,8 @@ describe("IOSCtrlProxyClient", function () {
       try {
         await expect(testClient.connectWithoutSetup(controller.signal)).rejects.toBe(cancellation);
         expect(getCreatedSocketCount()).toBe(0);
-        expect((testClient as any).isConnecting).toBe(false);
-        expect((testClient as any).pendingConnectJoiners).toBe(0);
+        expect(testClient["isConnecting"]).toBe(false);
+        expect(testClient["pendingConnectJoiners"]).toBe(0);
       } finally {
         await testClient.close();
       }
@@ -4107,7 +4111,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      (testClient as any).autoReconnectEnabled = false;
+      testClient["autoReconnectEnabled"] = false;
 
       try {
         const resolved = createTrackedAbortSignal();
@@ -4129,7 +4133,7 @@ describe("IOSCtrlProxyClient", function () {
           createInstantFailureWebSocketFactory(testTimer),
           testTimer,
         );
-        (failedClient as any).autoReconnectEnabled = false;
+        failedClient["autoReconnectEnabled"] = false;
         const failedConnection = failedClient.connectWithoutSetup(failed.signal);
         expect(failed.getListenerCount()).toBe(1);
         await expect(failedConnection).resolves.toBe(false);
@@ -4143,7 +4147,7 @@ describe("IOSCtrlProxyClient", function () {
           createConnectionTimeoutWebSocketFactory(testTimer),
           testTimer,
         );
-        (abortedClient as any).autoReconnectEnabled = false;
+        abortedClient["autoReconnectEnabled"] = false;
         const abortedConnection = abortedClient.connectWithoutSetup(aborted.signal);
         await flushPromises();
         expect(aborted.getListenerCount()).toBe(1);
@@ -4717,16 +4721,16 @@ describe("IOSCtrlProxyClient", function () {
 
         socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: hierarchy }));
         await flushPromises();
-        const firstReceivedAt = (testClient as any).cachedHierarchy.receivedAt;
-        expect((testClient as any).cachedHierarchy.captureReceivedAt).toBe(firstReceivedAt);
+        const firstReceivedAt = testClient["cachedHierarchy"]!.receivedAt;
+        expect(testClient["cachedHierarchy"]!.captureReceivedAt).toBe(firstReceivedAt);
 
         testTimer.advanceTime(10_000);
         const repeatedPushAt = testTimer.now();
         socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: hierarchy }));
         await flushPromises();
 
-        expect((testClient as any).cachedHierarchy.receivedAt).toBe(repeatedPushAt);
-        expect((testClient as any).cachedHierarchy.captureReceivedAt).toBe(firstReceivedAt);
+        expect(testClient["cachedHierarchy"]!.receivedAt).toBe(repeatedPushAt);
+        expect(testClient["cachedHierarchy"]!.captureReceivedAt).toBe(firstReceivedAt);
       } finally {
         await testClient.close();
       }
@@ -6614,7 +6618,7 @@ describe("IOSCtrlProxyClient", function () {
 
     test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", function () {
       let backoffStarts = 0;
-      (ctrlProxyClient as any).startScreenshotBackoff = () => {
+      ctrlProxyClient["startScreenshotBackoff"] = () => {
         backoffStarts++;
       };
 
@@ -6628,7 +6632,7 @@ describe("IOSCtrlProxyClient", function () {
         42,
       );
 
-      expect((ctrlProxyClient as any).screenGeometry.bind()).toEqual({
+      expect(ctrlProxyClient["screenGeometry"].bind()).toEqual({
         captureSequence: 42,
         width: 1170,
         height: 2532,
@@ -6637,7 +6641,7 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("drops stale provenance when an initial hierarchy has no assigned identity", function () {
-      const geometry = (ctrlProxyClient as any).screenGeometry;
+      const geometry = ctrlProxyClient["screenGeometry"];
       geometry.update(1170, 2532);
       geometry.markForwarded(41);
 
@@ -6662,11 +6666,11 @@ describe("IOSCtrlProxyClient", function () {
        * it routes it as a spontaneous push.
        */
       const receiveHierarchy = (data: Record<string, unknown>, requestId?: string): void => {
-        (ctrlProxyClient as any).processMessage({
+        ctrlProxyClient["processMessage"]({
           type: "hierarchy_update",
           ...(requestId ? { requestId } : {}),
           timestamp: fakeTimer.now(),
-          data: { packageName: "com.example.ios", hierarchy: {}, ...data },
+          data: { updatedAt: 0, packageName: "com.example.ios", hierarchy: {}, ...data },
         });
       };
 
@@ -6755,8 +6759,12 @@ describe("IOSCtrlProxyClient", function () {
     // the final failed attempt).
     interface ProbeStub {
       connect: boolean[] | boolean;
-      hierarchy: Array<{ hierarchy: unknown } | null | Error>;
+      hierarchy: Array<CtrlProxySyncedHierarchy | null | Error>;
     }
+
+    const readyHierarchy = (): CtrlProxySyncedHierarchy => ({
+      hierarchy: { updatedAt: 0, packageName: "com.example.ios", hierarchy: {} },
+    });
 
     const buildClient = (timer: FakeTimer, stub: ProbeStub): IOSCtrlProxyClient => {
       const client = IOSCtrlProxyClient.createForTesting(
@@ -6773,7 +6781,7 @@ describe("IOSCtrlProxyClient", function () {
       );
 
       let connectIndex = 0;
-      (client as any).ensureConnected = async (): Promise<boolean> => {
+      client["ensureConnected"] = async (): Promise<boolean> => {
         if (typeof stub.connect === "boolean") {
           return stub.connect;
         }
@@ -6783,7 +6791,7 @@ describe("IOSCtrlProxyClient", function () {
       };
 
       let hierarchyIndex = 0;
-      (client as any).requestHierarchySync = async (): Promise<{ hierarchy: unknown } | null> => {
+      client["requestHierarchySync"] = async (): Promise<CtrlProxySyncedHierarchy | null> => {
         const value = stub.hierarchy[Math.min(hierarchyIndex, stub.hierarchy.length - 1)]!;
         hierarchyIndex++;
         if (value instanceof Error) {
@@ -6798,7 +6806,7 @@ describe("IOSCtrlProxyClient", function () {
     test("returns true on the first attempt when connected and hierarchy is present", async function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const client = buildClient(timer, { connect: true, hierarchy: [{ hierarchy: {} }] });
+      const client = buildClient(timer, { connect: true, hierarchy: [readyHierarchy()] });
       try {
         expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
         // Success on attempt 1 waits zero times.
@@ -6813,7 +6821,7 @@ describe("IOSCtrlProxyClient", function () {
       timer.enableAutoAdvance();
       // Attempt 1 fails to connect (waits, no hierarchy request), attempt 2 connects
       // and returns a hierarchy.
-      const client = buildClient(timer, { connect: [false, true], hierarchy: [{ hierarchy: {} }] });
+      const client = buildClient(timer, { connect: [false, true], hierarchy: [readyHierarchy()] });
       try {
         expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
         expect(timer.getSleepHistory()).toEqual([1000]);
@@ -6825,7 +6833,7 @@ describe("IOSCtrlProxyClient", function () {
     test("retries when connected but hierarchy is null, then succeeds", async function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const client = buildClient(timer, { connect: true, hierarchy: [null, { hierarchy: {} }] });
+      const client = buildClient(timer, { connect: true, hierarchy: [null, readyHierarchy()] });
       try {
         expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);
         expect(timer.getSleepHistory()).toEqual([1000]);
@@ -6839,7 +6847,7 @@ describe("IOSCtrlProxyClient", function () {
       timer.enableAutoAdvance();
       const client = buildClient(timer, {
         connect: true,
-        hierarchy: [new Error("hierarchy request failed"), { hierarchy: {} }],
+        hierarchy: [new Error("hierarchy request failed"), readyHierarchy()],
       });
       try {
         expect(await client.verifyServiceReady(3, 1000, 5000)).toBe(true);

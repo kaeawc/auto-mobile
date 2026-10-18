@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../../helpers/scratchRoot";
 import fs from "fs/promises";
-import os from "os";
 import path from "path";
 import {
   AccessibilityAuditor,
@@ -162,13 +162,10 @@ describe("resolveObservationScreenshotPath", () => {
   let dir: string;
   let store: InMemoryScreenshotStateStore;
 
+  const scratch = useScratchRoot("auditor-observation-shot-");
   beforeEach(async () => {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), "auditor-observation-shot-"));
+    dir = scratch.next();
     store = new InMemoryScreenshotStateStore(new FakeTimer());
-  });
-
-  afterEach(async () => {
-    await fs.rm(dir, { recursive: true, force: true });
   });
 
   async function seedScreenshot(name: string): Promise<string> {

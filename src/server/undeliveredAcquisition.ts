@@ -3,7 +3,7 @@ import {
   runWithAcquisitionReceipt,
   type AcquisitionReceipt,
 } from "../daemon/acquisitionReceipt";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ActionableError } from "../models/ActionableError";
 import { isClientCancelled, runOutsideRequestContext } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -48,8 +48,8 @@ export async function undoUndeliveredAcquisition(
   receipt: AcquisitionReceipt,
   reason: unknown,
 ): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const pool = defaultDaemonContext.devicePoolWrites();
+  if (!pool) {
     return;
   }
   const heldElsewhere = sessionHeldElsewhere(receipt);
@@ -64,7 +64,7 @@ export async function undoUndeliveredAcquisition(
   try {
     // The request that started this work is over; its cancellation must not stop the undo.
     await runOutsideRequestContext(async () => {
-      await daemonState.getDevicePool().releaseUndeliveredAcquisition(receipt);
+      await pool.releaseUndeliveredAcquisition(receipt);
       receipt.minted = undefined;
       receipt.rebound = undefined;
       await started?.rollBack(reason);

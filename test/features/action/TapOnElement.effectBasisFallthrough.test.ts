@@ -18,7 +18,7 @@ afterEach(() => {
 // instead of being taken as final proof nothing changed.
 
 function makeHierarchy(marker: string): ViewHierarchyResult {
-  return { hierarchy: { node: { marker } } } as unknown as ViewHierarchyResult;
+  return { hierarchy: { node: { "resource-id": marker } } };
 }
 
 function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
@@ -34,7 +34,7 @@ function createTapOnElement(): TapOnElement {
   timer.enableAutoAdvance();
   return new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     { timer },
   );
 }
@@ -109,10 +109,10 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
       viewHierarchy: makeHierarchy("time-picker-dialog"),
     });
 
-    const effect = (tap as any).deriveTapEffect(previous, current);
+    const effect = tap.deriveTapEffect(previous, current);
 
-    expect(effect.screenChanged).toBe(true);
-    expect(effect.basis).toBe("viewHierarchy changed");
+    expect(effect?.screenChanged).toBe(true);
+    expect(effect?.basis).toBe("viewHierarchy changed");
   });
 
   test("returns false when neither activeWindow nor viewHierarchy changed", () => {
@@ -126,10 +126,10 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
     const previous = makeObservation({ activeWindow, viewHierarchy: hierarchy });
     const current = makeObservation({ activeWindow, viewHierarchy: hierarchy });
 
-    const effect = (tap as any).deriveTapEffect(previous, current);
+    const effect = tap.deriveTapEffect(previous, current);
 
-    expect(effect.screenChanged).toBe(false);
-    expect(effect.basis).toBe("activeWindow unchanged");
+    expect(effect?.screenChanged).toBe(false);
+    expect(effect?.basis).toBe("activeWindow unchanged");
   });
 
   test("still reports true immediately when activeWindow itself changed", () => {
@@ -151,9 +151,9 @@ describe("deriveTapEffect basis fallthrough (#6258)", () => {
       viewHierarchy: makeHierarchy("settings"),
     });
 
-    const effect = (tap as any).deriveTapEffect(previous, current);
+    const effect = tap.deriveTapEffect(previous, current);
 
-    expect(effect.screenChanged).toBe(true);
-    expect(effect.basis).toBe("activeWindow changed");
+    expect(effect?.screenChanged).toBe(true);
+    expect(effect?.basis).toBe("activeWindow changed");
   });
 });

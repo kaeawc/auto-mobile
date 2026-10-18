@@ -1,7 +1,7 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeEach } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "fs";
 import * as path from "path";
-import * as os from "os";
 import {
   getIosCtrlProxyOverrideRaw,
   hasIosCtrlProxyOverride,
@@ -10,16 +10,10 @@ import {
 
 describe("iosCtrlProxyOverride (#4221)", () => {
   let dir: string;
+  const scratch = useScratchRoot("ios-override-test-");
 
   beforeEach(async () => {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), "ios-override-test-"));
-  });
-  afterEach(async () => {
-    try {
-      await fs.rm(dir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
+    dir = scratch.next();
   });
 
   const env = (o: Record<string, string | undefined>): NodeJS.ProcessEnv => o as NodeJS.ProcessEnv;

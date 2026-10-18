@@ -1,8 +1,8 @@
 import AdmZip from "adm-zip";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { logger } from "../../../src/utils/logger";
 import * as fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import {
   VIDEO_SERVER_JAR_CACHE_FILENAME,
@@ -48,8 +48,9 @@ describe("VideoServerJarProvider (#3831)", function () {
     });
   }
 
+  const scratch = useScratchRoot("video-jar-test-");
   beforeEach(async function () {
-    cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "video-jar-test-"));
+    cacheDir = scratch.next();
     downloader = new FakeFileDownloader();
     downloader.payload = validJarBuffer();
     checksum = new FakeChecksumCalculator();
@@ -62,7 +63,6 @@ describe("VideoServerJarProvider (#3831)", function () {
 
   afterEach(async function () {
     VideoServerJarProvider.resetInstances();
-    await fs.rm(cacheDir, { recursive: true, force: true });
   });
 
   test("downloads, verifies, and caches the jar with a metadata sidecar", async function () {

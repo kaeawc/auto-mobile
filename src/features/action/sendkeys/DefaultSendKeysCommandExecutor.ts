@@ -209,29 +209,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       timer: this.timer,
       resetCaretState: () => this.resetCaretState(),
     });
-    this.eventAllTyper = new EventAllTyper({
-      session: this.session,
-      textClient: this.textClient,
-      hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
-      graphemeCodePoints: (graphemes) => graphemeCodePoints(graphemes),
-      markPartialAfterPriorMutation: (result, mutated) =>
-        markPartialAfterPriorMutation(result, mutated),
-      insertText: (text, options, signal) => this.insertText(text, options, signal),
-      requireFocusedAndroidInput: (signal, error, display) =>
-        this.requireFocusedAndroidInput(signal, error, display),
-      readPrecedingState: (needed) => this.readPrecedingState(needed),
-      executeKeyEventPlanSafely: (plan, mutated, signal) =>
-        this.executeKeyEventPlanSafely(plan, mutated, signal),
-      withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-      verifyKeyEventLetterCase: (text, typed, mode, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, mode, signal, display, before),
-      checkAbort: (signal, error) => this.checkAbort(signal, error),
-      getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
-      clearForReplace: (operation, signal, display) =>
-        this.clearForReplace(operation, signal, display),
-      readFocusedText: (observation) => this.readFocusedText(observation),
-      readFreshObservation: (signal, display) => this.readFreshObservation(signal, display),
-    });
+    this.eventAllTyper = this.createEventAllTyper();
     this.imeCommitTyper = new ImeCommitTyper(
       {
         executeAndroidImeCommit: (...args) => this.executeAndroidImeCommit(...args),
@@ -312,6 +290,33 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private createTextClient(adbFactory: AdbClientFactory): SendKeysTextClient {
     return createSendKeysTextClient(this.device, adbFactory);
+  }
+
+  private createEventAllTyper(): EventAllTyper {
+    return new EventAllTyper({
+      session: this.session,
+      textClient: this.textClient,
+      hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
+      graphemeCodePoints: (graphemes) => graphemeCodePoints(graphemes),
+      markPartialAfterPriorMutation: (result, mutated) =>
+        markPartialAfterPriorMutation(result, mutated),
+      insertText: (text, options, signal) => this.insertText(text, options, signal),
+      requireFocusedAndroidInput: (signal, error, display) =>
+        this.requireFocusedAndroidInput(signal, error, display),
+      readPrecedingState: (needed) => this.readPrecedingState(needed),
+      executeKeyEventPlanSafely: (plan, mutated, signal) =>
+        this.executeKeyEventPlanSafely(plan, mutated, signal),
+      withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
+      verifyKeyEventLetterCase: (text, typed, mode, signal, display, before) =>
+        this.verifyKeyEventLetterCase(text, typed, mode, signal, display, before),
+      checkAbort: (signal, error) => this.checkAbort(signal, error),
+      getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
+      getAndroidApiLevel: (signal) => this.getAndroidApiLevel(signal),
+      clearForReplace: (operation, signal, display) =>
+        this.clearForReplace(operation, signal, display),
+      readFocusedText: (observation) => this.readFocusedText(observation),
+      readFreshObservation: (signal, display) => this.readFreshObservation(signal, display),
+    });
   }
 
   private createKeyEventSupport(): KeyEventSupport {

@@ -91,6 +91,18 @@ describe("EventAllTyper", () => {
     ).toBe(text);
   });
 
+  test("types a long ASCII run as one input text command on API 30", async () => {
+    const { host, calls } = eventHost();
+    host.getAndroidApiLevel = async () => 30;
+    const text = "abcdefghij".repeat(7);
+    await new EventAllTyper(host).type({ text, operation: "insert", focusedInputVerified: true });
+    const plan = calls.find(
+      (call): call is { plan: KeyEventPlan } =>
+        typeof call === "object" && call !== null && "plan" in call,
+    )?.plan;
+    expect(plan).toEqual({ commands: [`shell input text '${text}'`], textLength: text.length });
+  });
+
   test("keeps password key events separate and redacts delivery failures", async () => {
     const { host, calls } = eventHost();
     host.session.typingPasswordField = true;

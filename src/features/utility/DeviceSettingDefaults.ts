@@ -1,4 +1,11 @@
-import type { BootedDevice, Platform } from "../../models";
+import type { BootedDevice } from "../../models";
+import {
+  DEVICE_SETTING_KEYS,
+  type DeviceSettingDefaultsPersistence,
+  type DeviceSettingKey,
+  type DeviceSettingValue,
+  type DeviceSettingValues,
+} from "../../models/DeviceSettingDefaults";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -19,42 +26,6 @@ import {
   type ThemeBaselineStore,
 } from "./DisplayConfig";
 import { SystemConfigurationManager } from "./SystemConfigurationManager";
-
-/**
- * Display and system settings a session can change on a device (#11145). They are not restored
- * when the session releases the device; the next acquisition by a different session resets each
- * one that differs from the value recorded before any session first changed it.
- */
-export const DEVICE_SETTING_KEYS = [
-  "fontScale",
-  "density",
-  "nightMode",
-  "locale",
-  "timeFormat",
-  "calendarSystem",
-] as const;
-
-export type DeviceSettingKey = (typeof DEVICE_SETTING_KEYS)[number];
-
-/** A setting's value in the form its writer accepts back; `null` is an unset setting. */
-export type DeviceSettingValue = string | number | null;
-
-export type DeviceSettingValues = Partial<Record<DeviceSettingKey, DeviceSettingValue>>;
-
-export interface DeviceSettingDefaultsRecord {
-  platform: Platform;
-  name: string;
-  /** The session that most recently changed a recorded setting. */
-  sessionId: string;
-  /** Per setting: the value observed before any session first changed it. */
-  values: DeviceSettingValues;
-}
-
-export interface DeviceSettingDefaultsPersistence {
-  get(deviceId: string): Promise<DeviceSettingDefaultsRecord | null>;
-  put(deviceId: string, record: DeviceSettingDefaultsRecord): Promise<void>;
-  delete(deviceId: string): Promise<void>;
-}
 
 /** Reads and writes the settings on a device. */
 export interface DeviceSettingsAccess {

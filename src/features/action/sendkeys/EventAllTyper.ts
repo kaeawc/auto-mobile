@@ -15,6 +15,7 @@ import { logger } from "../../../utils/logger";
 import { segmentGraphemes } from "./AndroidTypingConstants";
 import {
   buildAndroidInputTextPlan,
+  splitAndroidInputText,
   canJoinAndroidInputText,
 } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 
@@ -199,12 +200,11 @@ export class EventAllTyper implements AndroidModeTyper {
           index,
           (await this.eventAllKeyEventRunEnd(graphemes, index)) + 1,
         );
-        const eventFailure = await this.executeEventAllKeyRunSafely(
-          run,
-          plan,
-          progress.mutated,
-          signal,
-        );
+        const { failure: eventFailure, deliveredGraphemes } =
+          await this.executeEventAllKeyRunSafely(run, plan, progress.mutated, signal);
+        // Chunks that completed before a later one failed stay committed, so a retry from
+        // committedGraphemes does not type them again.
+        progress.committedGraphemes += deliveredGraphemes;
         if (eventFailure) {
           return this.host.withTextWarnings(
             {
@@ -216,7 +216,6 @@ export class EventAllTyper implements AndroidModeTyper {
           );
         }
         progress.mutated = true;
-        progress.committedGraphemes += run.length;
         progress.pendingKeyText += run.join("");
         progress.sinceLastInsertEvents = true;
         index += run.length - 1;
@@ -296,16 +295,27 @@ export class EventAllTyper implements AndroidModeTyper {
     plan: KeyEventPlan,
     previouslyMutated: boolean,
     signal?: AbortSignal,
-  ): Promise<TextActionResult | undefined> {
+  ): Promise<{ failure?: TextActionResult; deliveredGraphemes: number }> {
     if (run.length === 1) {
-      return this.host.executeKeyEventPlanSafely(plan, previouslyMutated, signal);
+      const failure = await this.host.executeKeyEventPlanSafely(plan, previouslyMutated, signal);
+      return failure ? { failure, deliveredGraphemes: 0 } : { deliveredGraphemes: 1 };
     }
-    // The process may have typed part of the run before failing, so any failure is partial.
-    return this.host.executeKeyEventPlanSafely(
-      buildAndroidInputTextPlan(run.join(""), await this.host.getAndroidApiLevel(signal)),
-      true,
-      signal,
-    );
+    const apiLevel = await this.host.getAndroidApiLevel(signal);
+    // One dispatch per chunk: a failure in a later chunk must not hide the finished ones.
+    let deliveredGraphemes = 0;
+    for (const chunk of splitAndroidInputText(run.join(""), apiLevel)) {
+      // The process may have typed part of the chunk before failing, so any failure is partial.
+      const failure = await this.host.executeKeyEventPlanSafely(
+        buildAndroidInputTextPlan(chunk, apiLevel),
+        true,
+        signal,
+      );
+      if (failure) {
+        return { failure, deliveredGraphemes };
+      }
+      deliveredGraphemes += chunk.length;
+    }
+    return { deliveredGraphemes };
   }
 
   private async eventAllInsertRunEnd(graphemes: string[], index: number): Promise<number> {

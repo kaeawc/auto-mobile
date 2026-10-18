@@ -18,21 +18,7 @@ import {
   BindingConfigError,
 } from "./provisionRequest";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../sessionLivenessWindows";
-import type { LivenessLeasePhase } from "../../livenessOwnerLease";
-
-export const MANAGED_EXECUTION_LIVENESS_POLICY = "managed-execution";
-
-/**
- * The shared idle-deadline exception. Without a lease phase (persistence and idle reapers),
- * managed executions defer entirely to owner-loss/recovery rules. Reporting supplies the judged
- * phase: only live and suspect leases advertise exemption, never a lapsed owner.
- */
-export function ignoresManagedExecutionIdleDeadline(
-  policy: string | null | undefined,
-  leasePhase?: LivenessLeasePhase,
-): boolean {
-  return policy === MANAGED_EXECUTION_LIVENESS_POLICY && leasePhase !== "lapsed";
-}
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
 
 /**
  * Bound on the proxy's release of its managed execution sessions at shutdown (stdin EOF, owner

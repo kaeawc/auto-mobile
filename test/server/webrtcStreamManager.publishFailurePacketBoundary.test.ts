@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { RTCPeerConnection } from "werift";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import {
@@ -11,8 +10,8 @@ import {
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
-import type { AndroidH264Source } from "../../src/features/webrtc";
 import type { AndroidH264SourceOptions } from "../../src/features/webrtc/H264CaptureSource";
+import { FakePublisherPeerConnection } from "../fakes/FakePublisherPeerConnection";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../helpers/capturedH264Stream";
 import { fakeWhipClient } from "../helpers/fakeWhipClient";
@@ -29,26 +28,6 @@ const IOS: BootedDevice = {
 } as BootedDevice;
 const ENDPOINT = "https://coord.example.com/whip";
 const NAL_TYPE_SPS = 7;
-
-class FakePeerConnection {
-  closed = false;
-  connectionState = "new";
-  iceGatheringState = "complete";
-  connectionStateChange = { subscribe: () => {} };
-  iceGatheringStateChange = { watch: async () => {} };
-  localDescription = { sdp: "v=0" };
-  addTransceiver() {
-    return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "v=0" };
-  }
-  async setLocalDescription() {}
-  async setRemoteDescription() {}
-  async close() {
-    this.closed = true;
-  }
-}
 
 /** The real publisher, recording every media call that reaches it after `stop()`. */
 class RecordingPublisher extends WebRtcPublisher {
@@ -107,7 +86,7 @@ function installFakes() {
         {
           ...deps,
           timer,
-          createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+          createPeerConnection: () => new FakePublisherPeerConnection(),
           createWhipClient: () =>
             fakeWhipClient({
               publish: () =>
@@ -127,7 +106,7 @@ function installFakes() {
     createSource: (options: AndroidH264SourceOptions) => {
       const source = new GatedSource();
       sources.push({ source, options });
-      return source as unknown as AndroidH264Source;
+      return source;
     },
     resolveVideoJar: async () => null,
     // A fresh registry per test: the process-wide default keeps a capture that an earlier test
@@ -147,13 +126,15 @@ async function settle(): Promise<void> {
 
 const startRequest = { device: IOS, overrides: { whipEndpoint: ENDPOINT } };
 
+let warnSpy: Mock<typeof logger.warn>;
+
 beforeEach(() => {
-  spyOn(logger, "warn").mockImplementation(() => {});
+  warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   resetWebRtcStreamManager();
-  (logger.warn as unknown as { mockRestore(): void }).mockRestore();
+  warnSpy.mockRestore();
 });
 
 describe("a publish that fails after packet boundaries were delivered (#10149, #10150)", () => {

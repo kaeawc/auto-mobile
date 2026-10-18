@@ -128,7 +128,7 @@ function createHarness(peerCloses = true) {
     }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
-  const server = createTestUnixSocketServer("unused", "http://localhost:0/mcp", state, timer);
+  const server = createTestUnixSocketServer("unused", state, timer);
   const internals = server as unknown as SocketServerInternals;
   const socket = new TerminalSocket(peerCloses);
   internals.acceptingRequests = true;

@@ -189,7 +189,6 @@ describe("UnixSocketServer MCP forward failures: no reconnect or replay (#11820)
     terminalReleaseSnapshot = undefined;
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(
         () => sessionIsValid,
         () => secondarySessionIsValid,

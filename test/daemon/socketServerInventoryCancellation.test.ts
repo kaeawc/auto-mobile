@@ -41,12 +41,7 @@ interface Internals {
 }
 function harness() {
   const state = { isInitialized: () => false } as DaemonStateAccess;
-  const server = createTestUnixSocketServer(
-    "unused",
-    "http://localhost:0/mcp",
-    state,
-    new FakeTimer(),
-  );
+  const server = createTestUnixSocketServer("unused", state, new FakeTimer());
   const internal = server as unknown as Internals;
   internal.acceptingRequests = true;
   const connect = () => {

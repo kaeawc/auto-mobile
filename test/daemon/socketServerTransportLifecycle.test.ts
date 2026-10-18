@@ -51,12 +51,7 @@ function connectedSocketFixture(socketSessionId: string): {
   internals: ServerInternals;
   socket: Socket;
 } {
-  const server = createTestUnixSocketServer(
-    "/fake/socket",
-    "http://127.0.0.1:1/mcp",
-    undefined,
-    new FakeTimer(),
-  );
+  const server = createTestUnixSocketServer("/fake/socket", undefined, new FakeTimer());
   const internals = server as unknown as ServerInternals;
   const socket = new RpcSocket() as unknown as Socket;
   internals.clientSockets.set(socketSessionId, socket);
@@ -67,12 +62,7 @@ describe("daemon socket transport lifecycle", () => {
   afterEach(() => resetToolCallRecordingState());
 
   test("ide/status advertises structured session-not-found errors", async () => {
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      new FakeTimer(),
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, new FakeTimer());
     const internals = server as unknown as ServerInternals;
     await expect(
       internals.handleLocalSocketRequest({
@@ -86,12 +76,7 @@ describe("daemon socket transport lifecycle", () => {
 
   test("codes a missing socket session without changing its message", async () => {
     const timer = new FakeTimer();
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      timer,
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, timer);
     const internals = server as unknown as ServerInternals;
     await expect(
       internals.handleRequest(
@@ -119,7 +104,6 @@ describe("daemon socket transport lifecycle", () => {
       const timer = new FakeTimer();
       const server = createTestUnixSocketServer(
         "/fake/socket",
-        "http://127.0.0.1:1/mcp",
         undefined,
         timer,
         null,
@@ -141,12 +125,7 @@ describe("daemon socket transport lifecycle", () => {
 
   test("a stale socket release preserves the newer incarnation's recording", () => {
     const timer = new FakeTimer();
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      timer,
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, timer);
     const internals = server as unknown as ServerInternals;
     const oldSocket = new RpcSocket() as unknown as Socket;
     const newSocket = new RpcSocket() as unknown as Socket;
@@ -210,12 +189,7 @@ describe("daemon socket transport lifecycle", () => {
   });
 
   test("daemon RPC reader preserves UTF-8 split across socket events", async () => {
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      new FakeTimer(),
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, new FakeTimer());
     const internals = server as unknown as ServerInternals;
     const socket = new RpcSocket();
     const requests: DaemonRequest[] = [];
@@ -267,7 +241,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/resource-lifecycle/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,
@@ -321,7 +294,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,
@@ -373,7 +345,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,
@@ -459,7 +430,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,

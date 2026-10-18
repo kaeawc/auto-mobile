@@ -21,7 +21,6 @@ let socketCounter = 0;
 function createServer(timer: FakeTimer): UnixSocketServer {
   return createTestUnixSocketServer(
     join(tmpdir(), `cancel-dispatch-hold-${++socketCounter}.sock`),
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => ({

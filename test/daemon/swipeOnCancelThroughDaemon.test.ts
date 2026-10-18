@@ -156,7 +156,6 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     nextSwipe = [];
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       { isInitialized: () => false } as DaemonStateAccess,
       timer,
     );

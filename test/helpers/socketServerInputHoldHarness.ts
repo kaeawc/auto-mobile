@@ -200,7 +200,6 @@ export function socketHarness(state?: DaemonStateAccess) {
   const { timer, stamps, handler: admission } = harness();
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     state ?? ({ isInitialized: () => false } as DaemonStateAccess),
     timer,
     null,

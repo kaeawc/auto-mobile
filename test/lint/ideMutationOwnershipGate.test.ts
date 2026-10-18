@@ -11,49 +11,66 @@ import { parseGuardSource } from "./astGuard";
  */
 const GATE = "assertIdeMutationOwnership";
 
-/** `this.<method>(...)` callees reachable inside each class method of the source. */
-export function thisCallsByMethod(file: string, source: string): Map<string, Set<string>> {
+/**
+ * What each top-level function of the source calls: `<receiver>.<name>(...)` as `<name>` for the
+ * `deps` receiver, and a bare `name(...)` call as itself.
+ */
+export function callsByFunction(file: string, source: string): Map<string, Set<string>> {
   const program = parseGuardSource(file, source);
-  const methods = new Map<string, Set<string>>();
+  const functions = new Map<string, Set<string>>();
   const stack: Set<string>[] = [];
   new Visitor({
-    MethodDefinition(node) {
+    FunctionDeclaration(node) {
       const calls = new Set<string>();
-      if (node.key.type === "Identifier") {
-        methods.set(node.key.name, calls);
+      if (node.id) {
+        functions.set(node.id.name, calls);
       }
       stack.push(calls);
     },
-    "MethodDefinition:exit"() {
+    "FunctionDeclaration:exit"() {
       stack.pop();
     },
     CallExpression(node) {
       const callee = node.callee;
-      if (
-        stack.length > 0 &&
+      if (stack.length === 0) {
+        return;
+      }
+      const calls = stack[stack.length - 1];
+      if (callee.type === "Identifier") {
+        calls.add(callee.name);
+      } else if (
         callee.type === "MemberExpression" &&
-        callee.object.type === "ThisExpression" &&
+        callee.object.type === "Identifier" &&
+        callee.object.name === "deps" &&
         !callee.computed &&
         callee.property.type === "Identifier"
       ) {
-        stack[stack.length - 1].add(callee.property.name);
+        calls.add(callee.property.name);
       }
     },
   }).visit(program);
-  return methods;
+  return functions;
 }
 
-/** The handler method a route's table entry names (`ide/setKeyValue` -> `ideSetKeyValue`). */
+/** The handler function a route's table entry names (`ide/setKeyValue` -> `setKeyValue`). */
 function handlerName(route: string): string {
-  return `ide${route.slice("ide/".length).replace(/^./, (c) => c.toUpperCase())}`;
+  return route.slice("ide/".length);
 }
 
 describe("mutating ide/* routes reach the device ownership gate (#10827)", () => {
   let methods: Map<string, Set<string>>;
 
   beforeAll(() => {
-    const file = join(import.meta.dir, "..", "..", "src", "daemon", "socketServer.ts");
-    methods = thisCallsByMethod(file, readFileSync(file, "utf8"));
+    const file = join(
+      import.meta.dir,
+      "..",
+      "..",
+      "src",
+      "daemon",
+      "socketServer",
+      "ideDeviceRoutes.ts",
+    );
+    methods = callsByFunction(file, readFileSync(file, "utf8"));
   });
 
   function calls(method: string): Set<string> {
@@ -74,19 +91,17 @@ describe("mutating ide/* routes reach the device ownership gate (#10827)", () =>
   });
 
   test("a handler that drops the gate call, or only mentions it, is detected", () => {
-    const violating = thisCallsByMethod(
+    const violating = callsByFunction(
       "fixture.ts",
-      `class S {
-        async ideUpdateService() { const note = "this.assertIdeMutationOwnership("; /* this.assertIdeMutationOwnership() */ this.other(); }
-        async ideSetKeyValue() { this.resolveKeyValueMutationClient(); }
-      }`,
+      `async function updateService(deps) { const note = "deps.assertIdeMutationOwnership("; /* deps.assertIdeMutationOwnership() */ deps.other(); }
+      async function setKeyValue() { resolveKeyValueMutationClient(); }`,
     );
-    expect(violating.get("ideUpdateService")).not.toContain(GATE);
-    expect(violating.get("ideSetKeyValue")).toContain("resolveKeyValueMutationClient");
-    const compliant = thisCallsByMethod(
+    expect(violating.get("updateService")).not.toContain(GATE);
+    expect(violating.get("setKeyValue")).toContain("resolveKeyValueMutationClient");
+    const compliant = callsByFunction(
       "fixture.ts",
-      "class S { async ideUpdateService() { await this.assertIdeMutationOwnership(1); } }",
+      "async function updateService(deps) { await deps.assertIdeMutationOwnership(1); }",
     );
-    expect(compliant.get("ideUpdateService")).toContain(GATE);
+    expect(compliant.get("updateService")).toContain(GATE);
   });
 });

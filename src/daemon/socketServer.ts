@@ -19,7 +19,7 @@ import {
   runPassthroughForward,
   type InputRouteHandlers,
 } from "./socketServer/controlRoutes";
-import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import { IDE_DEVICE_MUTATION_METHODS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
 import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
 import {
@@ -173,15 +173,6 @@ import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../features/deviceLifecycle
 
 /** Slack after the handler's settlement wait for it to finish rollback and build its result. */
 const PROVISION_CANCELLATION_OUTCOME_GRACE_MS = 2_000;
-import { preferenceSetWarning, validateTypeForPlatform } from "../server/storageTools";
-import {
-  clearAndroidKeyValueFileDirect,
-  directFileFallbackRelaunchWarning,
-  removeAndroidKeyValueDirect,
-  setAndroidKeyValueDirect,
-  withAndroidSharedPreferencesInspectionFallback,
-} from "../features/storage/AndroidSharedPreferencesKeyValueFile";
-import { rethrowForRouteWithoutUserId } from "../features/preferences/resolveAndroidPreferencesUser";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
@@ -206,11 +197,6 @@ import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { indeterminateTapError } from "../features/action/coordinateTapDispatch";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
-import type {
-  KeyValueType,
-  PreferenceStoreResolution,
-  StorageWriteOptions,
-} from "../features/storage/storageTypes";
 import type {
   AppendTextFailureSource,
   BootedDevice,
@@ -269,6 +255,7 @@ import {
 } from "./socketServer/PendingRequestTracker";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import { runTrackedIdeMutation, type IdeMutationCall } from "./socketServer/ideMutationCall";
+import { ideDeviceRoutes } from "./socketServer/ideDeviceRoutes";
 import { buildIdeStatus } from "./socketServer/ideStatus";
 import {
   SessionReleasedDuringCallError,
@@ -677,34 +664,6 @@ export function strokeAdmissionEndedError(method: string, admission: StrokeAdmis
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
 const OWNED_GESTURE_CANCEL_TIMEOUT_MS = 5000;
-
-/**
- * The narrow key-value mutation surface the `ide/*` handlers need from a
- * platform CtrlProxy client. Both AndroidCtrlProxyClient and IOSCtrlProxyClient
- * satisfy it structurally (#4708). Storage writes notify onDispatch synchronously after a
- * successful socket send; connecting, cancellation and send failures are not session use.
- */
-interface KeyValueMutationClient {
-  setPreference(
-    packageName: string,
-    fileName: string,
-    key: string,
-    value: string,
-    type: KeyValueType,
-    timeoutMsOrOptions?: number | StorageWriteOptions,
-  ): Promise<PreferenceStoreResolution | void>;
-  removePreference(
-    packageName: string,
-    fileName: string,
-    key: string,
-    timeoutMsOrOptions?: number | StorageWriteOptions,
-  ): Promise<PreferenceStoreResolution | void>;
-  clearPreferenceStore(
-    packageName: string,
-    fileName: string,
-    timeoutMsOrOptions?: number | StorageWriteOptions,
-  ): Promise<PreferenceStoreResolution | void>;
-}
 
 /**
  * Preserve the normal failed socket envelope while carrying append progress for
@@ -3136,26 +3095,36 @@ export class UnixSocketServer {
           acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
         }),
     ],
-    [
-      "ide/updateService",
-      (request, socketSessionId, ideMutation) =>
-        this.ideUpdateService(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setKeyValue",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetKeyValue(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/removeKeyValue",
-      (request, socketSessionId, ideMutation) =>
-        this.ideRemoveKeyValue(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/clearKeyValueFile",
-      (request, socketSessionId, ideMutation) =>
-        this.ideClearKeyValueFile(request, socketSessionId, ideMutation),
-    ],
+    ...ideDeviceRoutes({
+      resolveIdeActionDevices: (platform, serial) => this.resolveIdeActionDevices(platform, serial),
+      reconcileDiscoveryObservation: (devices, source) =>
+        this.reconcileDiscoveryObservation(devices, source),
+      assertDeviceActionable: (deviceId, purpose) => this.assertDeviceActionable(deviceId, purpose),
+      isShutdownReserved: async (deviceId) =>
+        (await this.daemonState.getDevicePool().isShutdownReserved?.(deviceId)) ?? false,
+      assertIdeMutationOwnership: (request, device, action, force, ideMutation) =>
+        this.assertIdeMutationOwnership(request, device, action, force, ideMutation),
+      assertSocketToolEnabled: (deviceId, toolName) =>
+        this.assertSocketToolEnabled(deviceId, toolName),
+      keyValueClient: (platform, device) =>
+        platform === "ios"
+          ? IOSCtrlProxyClient.getInstance(device)
+          : AndroidCtrlProxyClient.getInstance(device, this.adbClientFactory),
+      createAdb: (device) => this.adbClientFactory.create(device),
+      androidCtrlProxy: (device) => ({
+        resumeAfterDeviceStart: () =>
+          AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId),
+        ensureCompatibleVersion: (options) =>
+          AndroidCtrlProxyManager.getInstance(device).ensureCompatibleVersion(options),
+      }),
+      iosCtrlProxy: (device) => {
+        const manager = IOSCtrlProxyManager.getInstance(device);
+        return {
+          resumeAfterDeviceStart: () => IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId),
+          forceRestart: () => manager.forceRestart(),
+        };
+      },
+    }),
   ]);
 
   /**
@@ -3169,211 +3138,6 @@ export class UnixSocketServer {
   ): Promise<any | undefined> {
     const handler = this.ideRouteHandlers.get(request.method);
     return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
-  }
-
-  private async ideUpdateService(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/updateService"](request.params);
-
-    // Find the booted device
-    const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
-      args.platform,
-      args.deviceId,
-    );
-    // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
-    await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
-    this.assertDeviceActionable(deviceId, "to update the accessibility service");
-    const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
-    if (!targetDevice) {
-      throw new Error(`Device not found: ${args.deviceId}`);
-    }
-    if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
-      throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
-    }
-    // A lifecycle action on a held device: only the holder, or an explicit `force` (as
-    // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
-    await this.assertIdeMutationOwnership(
-      request,
-      targetDevice,
-      "ide/updateService",
-      args.force,
-      ideMutation,
-    );
-    if (args.platform === "android") {
-      getAbortSignal()?.throwIfAborted();
-      ideMutation?.dispatching();
-      AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
-      const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
-      const result = await manager.ensureCompatibleVersion({
-        allowDownloadWhenInstalled: true,
-        bypassVersionCheckCache: true,
-      });
-      const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
-      return {
-        success: successStatuses.has(result.status),
-        message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,
-        status: result,
-      };
-    } else {
-      const manager = IOSCtrlProxyManager.getInstance(targetDevice);
-      getAbortSignal()?.throwIfAborted();
-      ideMutation?.dispatching();
-      IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
-      await manager.forceRestart();
-      return {
-        success: true,
-        message: "CtrlProxy iOS restarted",
-      };
-    }
-  }
-
-  private async ideSetKeyValue(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/setKeyValue"](request.params);
-    await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-    const { platform, client, device } = await this.resolveKeyValueMutationClient(
-      args.platform,
-      args.deviceId,
-      request,
-      "ide/setKeyValue",
-      ideMutation,
-    );
-    const appId = args.appId;
-    const fileName = args.fileName;
-    const key = args.key;
-    let usedDirectFileFallback = false;
-    let resolution: PreferenceStoreResolution | undefined;
-    if (args.value === null || args.value === undefined) {
-      ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-        platform,
-        device,
-        appId,
-        fileName,
-        {
-          dispatching: () => ideMutation?.dispatching(),
-          viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
-          viaDirectFile: (adb) =>
-            removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
-        },
-      ));
-    } else {
-      // Enforce the same cross-platform type guidance as the MCP-tool path
-      // (storageTools.ts) before dispatch, so a platform-incompatible type
-      // fails with an actionable error rather than deeper in the client (#5022).
-      validateTypeForPlatform(platform, args.type as KeyValueType);
-      const value = args.value;
-      const type = args.type as KeyValueType;
-      ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-        platform,
-        device,
-        appId,
-        fileName,
-        {
-          dispatching: () => ideMutation?.dispatching(),
-          viaSdk: (onDispatch) =>
-            client.setPreference(appId, fileName, key, value, type, { onDispatch }),
-          viaDirectFile: (adb) =>
-            setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
-        },
-      ));
-    }
-    const resolvedStore = resolution?.resolvedStore;
-    const effectiveValueDiffers = resolution?.effectiveValueDiffers;
-    const warning = preferenceSetWarning(
-      usedDirectFileFallback ? directFileFallbackRelaunchWarning(appId, fileName) : undefined,
-      effectiveValueDiffers,
-    );
-    return {
-      success: true,
-      ...(resolvedStore ? { resolvedStore } : {}),
-      ...(effectiveValueDiffers ? { effectiveValueDiffers } : {}),
-      ...(warning ? { warning } : {}),
-    };
-  }
-
-  private async ideRemoveKeyValue(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/removeKeyValue"](request.params);
-    await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-    const { platform, client, device } = await this.resolveKeyValueMutationClient(
-      args.platform,
-      args.deviceId,
-      request,
-      "ide/removeKeyValue",
-      ideMutation,
-    );
-    const appId = args.appId;
-    const fileName = args.fileName;
-    const key = args.key;
-    const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-      platform,
-      device,
-      appId,
-      fileName,
-      {
-        dispatching: () => ideMutation?.dispatching(),
-        viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
-        viaDirectFile: (adb) =>
-          removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
-      },
-    );
-    const resolvedStore = resolution?.resolvedStore;
-    const warning = usedDirectFileFallback
-      ? directFileFallbackRelaunchWarning(appId, fileName)
-      : undefined;
-    return {
-      success: true,
-      ...(resolvedStore ? { resolvedStore } : {}),
-      ...(warning ? { warning } : {}),
-    };
-  }
-
-  private async ideClearKeyValueFile(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/clearKeyValueFile"](request.params);
-    await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-    const { platform, client, device } = await this.resolveKeyValueMutationClient(
-      args.platform,
-      args.deviceId,
-      request,
-      "ide/clearKeyValueFile",
-      ideMutation,
-    );
-    const appId = args.appId;
-    const fileName = args.fileName;
-    const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-      platform,
-      device,
-      appId,
-      fileName,
-      {
-        dispatching: () => ideMutation?.dispatching(),
-        viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
-        viaDirectFile: (adb) =>
-          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
-      },
-    );
-    const resolvedStore = resolution?.resolvedStore;
-    const warning = usedDirectFileFallback
-      ? directFileFallbackRelaunchWarning(appId, fileName)
-      : undefined;
-    return {
-      success: true,
-      ...(resolvedStore ? { resolvedStore } : {}),
-      ...(warning ? { warning } : {}),
-    };
   }
 
   /**
@@ -3577,102 +3341,6 @@ export class UnixSocketServer {
       this.daemonState.isInitialized() ? this.daemonState.getDevicePool() : undefined,
       deviceId,
     );
-  }
-
-  /**
-   * Resolve the platform-appropriate storage-mutation client for a key-value
-   * `ide/*` request. iOS Storage-facet edits carry `platform: "ios"` so the pane
-   * targets the iOS simulator + IOSCtrlProxyClient; a missing platform defaults
-   * to Android for backward compatibility with older desktop clients (#4708).
-   */
-  private async resolveKeyValueMutationClient(
-    platformValue: string | undefined,
-    deviceId: string,
-    request: DaemonRequest,
-    action: string,
-    ideMutation?: IdeMutationCall,
-  ): Promise<{
-    platform: "android" | "ios";
-    client: KeyValueMutationClient;
-    device: BootedDevice;
-  }> {
-    const platform = platformValue ?? "android";
-    if (platform !== "android" && platform !== "ios") {
-      throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
-    }
-    const { devices: bootedDevices, deviceId: canonicalDeviceId } =
-      await this.resolveIdeActionDevices(platform, deviceId);
-    // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
-    await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
-    this.assertDeviceActionable(canonicalDeviceId, "to mutate stored values");
-    const targetDevice = bootedDevices.find((d) => d.deviceId === canonicalDeviceId);
-    if (!targetDevice) {
-      throw new Error(`Device not found: ${deviceId}`);
-    }
-    await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
-    getAbortSignal()?.throwIfAborted();
-    const client =
-      platform === "ios"
-        ? IOSCtrlProxyClient.getInstance(targetDevice)
-        : AndroidCtrlProxyClient.getInstance(targetDevice, this.adbClientFactory);
-    return { platform, client, device: targetDevice };
-  }
-
-  /**
-   * Run a key-value mutation from an `ide/*` route through the shared SharedPreferences
-   * inspection-disabled fallback (issue #6292). On Android, if the SDK ContentProvider path
-   * is gated because inspection is disabled, this falls back to the same direct-file
-   * `adb shell run-as` XML edit the MCP `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`
-   * tools use — so the desktop Storage pane can write/delete/clear even when inspection is
-   * off, exactly like the MCP path. iOS has no on-device XML fallback, so `viaSdk` runs alone.
-   * Stamps session use once: from the SDK successful-send hook, or immediately after the
-   * fallback abort check before direct-file work. Connecting alone never stamps.
-   * Returns the SDK resolution and whether the fallback ran, for store and warning reporting.
-   */
-  private async runIdeKeyValueMutation(
-    platform: "android" | "ios",
-    device: BootedDevice,
-    appId: string,
-    fileName: string,
-    mutation: {
-      dispatching: () => void;
-      viaSdk: (onDispatch: () => void) => Promise<PreferenceStoreResolution | void>;
-      viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
-    },
-  ): Promise<{
-    usedDirectFileFallback: boolean;
-    resolution: PreferenceStoreResolution | undefined;
-  }> {
-    let dispatched = false;
-    const onDispatch = () => {
-      if (dispatched) {
-        return;
-      }
-      dispatched = true;
-      mutation.dispatching();
-    };
-    if (platform !== "android") {
-      getAbortSignal()?.throwIfAborted();
-      const resolution = (await mutation.viaSdk(onDispatch)) || undefined;
-      return { usedDirectFileFallback: false, resolution };
-    }
-    let resolution: PreferenceStoreResolution | undefined;
-    const result = await withAndroidSharedPreferencesInspectionFallback(
-      appId,
-      fileName,
-      () => this.adbClientFactory.create(device),
-      async () => {
-        getAbortSignal()?.throwIfAborted();
-        resolution = (await mutation.viaSdk(onDispatch)) || undefined;
-      },
-      // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
-      (adb) => {
-        getAbortSignal()?.throwIfAborted();
-        onDispatch();
-        return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
-      },
-    );
-    return { ...result, resolution };
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {

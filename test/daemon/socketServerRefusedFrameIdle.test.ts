@@ -24,6 +24,8 @@ import { PressButton } from "../../src/features/action/PressButton";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { runIdeKeyValueMutation } from "../../src/daemon/socketServer/ideDeviceRoutes";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarness";
@@ -52,17 +54,6 @@ interface Internals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
-  runIdeKeyValueMutation(
-    platform: "android",
-    device: typeof androidDevice,
-    appId: string,
-    fileName: string,
-    mutation: {
-      dispatching: () => void;
-      viaSdk: (onDispatch: () => void) => Promise<void>;
-      viaDirectFile: () => Promise<void>;
-    },
-  ): Promise<{ usedDirectFileFallback: boolean }>;
   handleIdeSocketRequest(request: DaemonRequest): Promise<unknown>;
 }
 
@@ -232,7 +223,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       },
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
-      // After resolveKeyValueMutationClient's abort check, before the mutation's own check.
+      // After the key-value client resolution's abort check, before the mutation's own check.
       beforeDeviceWork?.();
       return {
         getScreenScaleMetadata: () => screenGeometry,
@@ -757,21 +748,28 @@ describe("a holder's control frame refused before it reaches the device", () => 
           let directWrites = 0;
           const call = new AbortController();
           const pending = runWithAbortSignal(call.signal, () =>
-            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", "prefs", {
-              dispatching: () => stamps++,
-              viaSdk: async (onDispatch) => {
-                if (sdkSent) {
-                  onDispatch?.();
-                }
-                if (cancelled) {
-                  call.abort(new Error("cancel before fallback"));
-                }
-                throw new Error("SharedPreferences inspection is disabled");
+            runIdeKeyValueMutation(
+              { createAdb: () => new FakeAdbExecutor() },
+              "android",
+              androidDevice,
+              "com.example",
+              "prefs",
+              {
+                dispatching: () => stamps++,
+                viaSdk: async (onDispatch) => {
+                  if (sdkSent) {
+                    onDispatch?.();
+                  }
+                  if (cancelled) {
+                    call.abort(new Error("cancel before fallback"));
+                  }
+                  throw new Error("SharedPreferences inspection is disabled");
+                },
+                viaDirectFile: async () => {
+                  directWrites++;
+                },
               },
-              viaDirectFile: async () => {
-                directWrites++;
-              },
-            }),
+            ),
           );
           if (cancelled) {
             await expect(pending).rejects.toThrow("cancel before fallback");

@@ -19,7 +19,11 @@ describe("ide/* admission table", () => {
   });
 
   test("every classified method has a handler entry in the server", () => {
-    const source = ["src/daemon/socketServer.ts", "src/daemon/socketServer/ideRouteModule.ts"]
+    const source = [
+      "src/daemon/socketServer.ts",
+      "src/daemon/socketServer/ideRouteModule.ts",
+      "src/daemon/socketServer/ideDeviceRoutes.ts",
+    ]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
     for (const method of Object.keys(IDE_ROUTE_ADMISSION)) {

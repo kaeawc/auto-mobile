@@ -1,4 +1,6 @@
+import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../logger";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import {
   androidAvdConfigurationSchema,
   androidAvdConfigurationKeys,
@@ -206,10 +208,10 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     this.readFileFn = readFileFn ?? ((p: string, e: string) => fs.promises.readFile(p, e));
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const homeDir = readEnvRaw(AMBIENT_ENV.HOME) || readEnvRaw(AMBIENT_ENV.USERPROFILE);
     const androidUserHome = nonEmptyEnvironmentValue(process.env.ANDROID_USER_HOME);
     const avdHomeEnv = nonEmptyEnvironmentValue(process.env.ANDROID_AVD_HOME);
-    const androidSdkHome = nonEmptyEnvironmentValue(process.env.ANDROID_SDK_HOME);
+    const androidSdkHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_SDK_HOME));
     const configHome = this.resolveConfigHome(
       androidUserHome,
       androidSdkHome,
@@ -480,5 +482,32 @@ export function normalizeAndroidArchitecture(value: string | undefined): string 
       return "x86_64";
     default:
       return undefined;
+  }
+}
+
+/** Modern Google Play system images (API 30+) need a minimum RAM size to boot. */
+const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
+
+/** Throws when a modern Play image AVD has a missing/invalid or too-small hw.ramSize. */
+export function validateAvdMemory(avdName: string, avdConfig: AvdConfig | null): void {
+  if (!avdConfig) {
+    return;
+  }
+  const isModernPlayImage =
+    avdConfig.tag?.toLowerCase().includes("play") &&
+    (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
+  if (isModernPlayImage && avdConfig.ramSizeInvalid) {
+    throw new ActionableError(
+      `Cannot start AVD '${avdName}': hw.ramSize is invalid. Use a whole number in MB or a K, M, or G size suffix and retry.`,
+    );
+  }
+  if (
+    isModernPlayImage &&
+    avdConfig.ramSizeMb !== undefined &&
+    avdConfig.ramSizeMb < MIN_AVD_RAM_MB
+  ) {
+    throw new ActionableError(
+      `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`,
+    );
   }
 }

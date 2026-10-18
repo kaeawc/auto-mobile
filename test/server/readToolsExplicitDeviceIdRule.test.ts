@@ -23,6 +23,7 @@ import {
   type DeviceInfo,
   type Platform,
 } from "../../src/models";
+import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { settleByFakeEvents, drainUntilQuiescent, drainUntil } from "../helpers/fakeTimerStepping";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
@@ -548,7 +549,7 @@ for (const platform of ["android", "ios"] as const) {
       } finally {
         executionTracker.endExecution(execution.id);
       }
-      expect(h.handledDevices).toEqual([h.device]);
+      expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
       expect(h.runs).toHaveLength(1);
       expect(h.runs[0].sessionUuid).toBeUndefined();
       const operations = (
@@ -899,7 +900,7 @@ for (const platform of ["android", "ios"] as const) {
             expect(h.timer.now()).toBe(0);
             expect(h.timer.getSleepCallCount()).toBe(0);
             expect(h.detect).toHaveBeenCalledTimes(1);
-            expect(h.handledDevices).toEqual([h.device]);
+            expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
           }
           expect(h.manager.getCurrentDevice()).toBeUndefined();
           expect(h.manager.getCurrentPlatform()).toBeUndefined();
@@ -1188,8 +1189,7 @@ test("a serial acquired during discovery is rechecked before readiness", async (
       { deviceId: h.device.deviceId, sessionUuid: undefined, readPath: true },
     ]);
     expect(listings).toBe(1);
-    expect(h.handledDevices).toEqual([listedDevice]);
-    expect(h.handledDevices[0]).toBe(listedDevice);
+    expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([listedDevice]);
     expect(h.detect).toHaveBeenCalledTimes(1);
     expect(h.ensure).not.toHaveBeenCalled();
     expect(h.verify).not.toHaveBeenCalled();
@@ -1989,4 +1989,11 @@ for (const platform of ["android", "ios"] as const) {
       });
     }
   }
+}
+
+/** Whether a path hydrates the display inventory is not under test here; drop the stamped outcome. */
+function withoutInventoryOutcome(device: BootedDevice): BootedDevice {
+  const stripped = { ...device };
+  delete stripped[displayInventoryOutcome];
+  return stripped;
 }

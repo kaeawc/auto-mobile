@@ -118,6 +118,7 @@ export class MultiTouchGesture extends BaseVisualChange {
       plan.fingerSpacing,
       request.signal,
       request.onDispatch,
+      request.beforeSend,
     );
   }
 

@@ -26,10 +26,8 @@
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import { BindingDiscoveryIncompleteError, BindingRegistrySchemaUnsupportedError } from "./refusal";
 import { failure as reconcileFailure } from "./reconciler";
-import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
-  resolveManagedExecutionIdleTimeoutMs,
-} from "./executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
+import { resolveManagedExecutionIdleTimeoutMs } from "./executionLiveness";
 import type { BrokerProvisionRequest, BrokerDeviceRequest } from "./provisionRequest";
 import type {
   BindingResultEntry,

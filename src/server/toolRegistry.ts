@@ -11,7 +11,7 @@ import {
   setToolTransportRecovery,
   type ToolTransportRecovery,
 } from "./toolTransportRecovery";
-import { McpServer, type StandardSchemaWithJSON } from "@modelcontextprotocol/server";
+import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
@@ -145,10 +145,10 @@ export class ToolRegistryClass {
   // fan out to ALL live sessions — a single retained server would be
   // last-writer-wins (issue #3223). Entries are pruned via the underlying
   // server's onclose hook when a session's transport closes.
-  private servers: Set<McpServer> = new Set();
+  private servers: Set<ToolRegistryHost> = new Set();
   // Per-request servers (#4678), tracked only until they close and never sent
   // list_changed; see ServerRegistrationOptions.
-  private ephemeralServers: Set<McpServer> = new Set();
+  private ephemeralServers: Set<ToolRegistryHost> = new Set();
   // Per-transport server-side session-binding teardown handlers (issue #4611 Gap
   // D). `createMcpServer` registers one per loopback transport; the plan-release
   // path fans a released session UUID out to all of them so each transport's
@@ -772,7 +772,7 @@ export class ToolRegistryClass {
   // capability and schemas only: the server's one `tools/call` handler is
   // installed by `installToolCallDispatcher` (#6545) and replaces the SDK's
   // per-tool dispatch, so the callback below is never live.
-  registerWithServer(server: McpServer, options: ServerRegistrationOptions = {}): void {
+  registerWithServer(server: ToolRegistryHost, options: ServerRegistrationOptions = {}): void {
     // Retained so runtime changes that alter tool definitions can emit
     // notifications/tools/list_changed (issue #2963) to EVERY live session, not
     // just the most recently created one (issue #3223), mirroring how
@@ -788,7 +788,7 @@ export class ToolRegistryClass {
         tool.name,
         {
           description: tool.description,
-          inputSchema: erased<StandardSchemaWithJSON>(tool.schema),
+          inputSchema: erased<ToolRegistrySchema>(tool.schema),
           ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
             _meta: { "anthropic/alwaysLoad": true },
           }),
@@ -802,7 +802,7 @@ export class ToolRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks — and vice versa.
-  private trackServer(server: McpServer, ephemeral: boolean): void {
+  private trackServer(server: ToolRegistryHost, ephemeral: boolean): void {
     if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
@@ -821,7 +821,7 @@ export class ToolRegistryClass {
    * closed before it ever connected has no transport, so the SDK never fires its
    * `onclose` and the prune hook installed by `trackServer` would not run.
    */
-  untrackServer(server: McpServer): void {
+  untrackServer(server: ToolRegistryHost): void {
     this.servers.delete(server);
     this.ephemeralServers.delete(server);
   }

@@ -1,5 +1,4 @@
 import { fakeServerContext } from "../../helpers/fakeServerContext";
-import type { McpServer } from "@modelcontextprotocol/server";
 import {
   afterAll,
   afterEach,
@@ -63,7 +62,7 @@ async function payload(uri: string, context: ResourceReadContext = {}) {
 
 async function connect(context: ResourceReadContext): Promise<FakeMcpServer> {
   const server = new FakeMcpServer();
-  ResourceRegistry.registerWithServer(server as unknown as McpServer, () => context);
+  ResourceRegistry.registerWithServer(server, () => context);
   for (const uri of [graphUri, "automobile:navigation/history", "automobile:navigation/apps"]) {
     await server.server.handlersBySchema.get("resources/subscribe")!({ params: { uri } });
   }

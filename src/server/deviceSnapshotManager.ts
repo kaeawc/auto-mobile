@@ -1,5 +1,4 @@
-import { promises as fs } from "fs";
-import type { Dirent } from "fs";
+import { promises as fs, type Dirent } from "fs";
 import * as path from "path";
 import {
   ActionableError,
@@ -11,6 +10,7 @@ import {
 } from "../models";
 import {
   DeviceSnapshotRepository,
+  type DeviceSnapshotRepositoryPort,
   type DeviceSnapshotRecord,
 } from "../db/deviceSnapshotRepository";
 import {
@@ -19,6 +19,7 @@ import {
 } from "../db/keyedJsonConfigRepository";
 import {
   DeviceSnapshotStore,
+  type DeviceSnapshotStorePort,
   SNAPSHOT_REPLACING_SUFFIX,
   SNAPSHOT_IOS_SCOPE_ROOT,
   SNAPSHOT_ANDROID_SCOPE_ROOT,
@@ -167,9 +168,9 @@ export interface OrphanedAvdSnapshotSummary {
 }
 
 interface DeviceSnapshotManagerDependencies {
-  snapshotRepository: DeviceSnapshotRepository;
+  snapshotRepository: DeviceSnapshotRepositoryPort;
   configRepository: ConfigRepository<DeviceSnapshotConfig>;
-  snapshotStore: DeviceSnapshotStore;
+  snapshotStore: DeviceSnapshotStorePort;
   /** Emulator-owned side of a VM snapshot: its in-AVD size and its console delete (#6490). */
   avdSnapshots: AvdSnapshotOperations;
   timer: Timer;
@@ -178,12 +179,12 @@ interface DeviceSnapshotManagerDependencies {
   createCaptureProvider: (
     device: BootedDevice,
     timer: Timer,
-    store: DeviceSnapshotStore,
+    store: DeviceSnapshotStorePort,
   ) => SnapshotCaptureProvider;
   createRestoreProvider: (
     device: BootedDevice,
     timer: Timer,
-    store: DeviceSnapshotStore,
+    store: DeviceSnapshotStorePort,
   ) => SnapshotRestoreProvider;
   deviceIncarnationInvalidator: DeviceIncarnationInvalidator;
 }
@@ -441,12 +442,10 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       timer: defaultTimer,
       vmRetentionRetryBackoff: exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 5000 }),
       now: () => new Date(),
-      createCaptureProvider: (device, timer, store) => {
-        return new CaptureSnapshot(device, undefined, undefined, timer, store);
-      },
-      createRestoreProvider: (device, timer, store) => {
-        return new RestoreSnapshot(device, undefined, undefined, timer, store);
-      },
+      createCaptureProvider: (device, timer, store) =>
+        new CaptureSnapshot(device, undefined, undefined, timer, store),
+      createRestoreProvider: (device, timer, store) =>
+        new RestoreSnapshot(device, undefined, undefined, timer, store),
       deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator(),
     };
   }
@@ -569,7 +568,7 @@ function isVmSnapshotRecord(record: { platform: string; snapshotType: string }):
 async function resolveSnapshotSizeBytes(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotStore: DeviceSnapshotStorePort,
   avdSnapshots: AvdSnapshotOperations,
   pathOptions: SnapshotPathOptions | undefined,
 ): Promise<number | null> {
@@ -638,7 +637,7 @@ interface FailedVmSnapshotReclaimContext {
   device: BootedDevice;
   snapshotName: string;
   includeSettings: boolean;
-  snapshotRepository: DeviceSnapshotRepository;
+  snapshotRepository: DeviceSnapshotRepositoryPort;
   avdSnapshots: AvdSnapshotOperations;
   vmSnapshotTimeoutMs: number;
   now: () => Date;
@@ -835,7 +834,7 @@ async function readManifestFile(manifestPath: string): Promise<DeviceSnapshotMan
  */
 async function readSnapshotManifest(
   snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotStore: DeviceSnapshotStorePort,
   pathOptions: SnapshotPathOptions | undefined,
 ): Promise<DeviceSnapshotManifest | null> {
   const modern = await readManifestFile(snapshotStore.getMetadataPath(snapshotName, pathOptions));
@@ -866,7 +865,7 @@ async function readSnapshotManifest(
  */
 async function readSettingsOnlyManifest(
   snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotStore: DeviceSnapshotStorePort,
   pathOptions: SnapshotPathOptions | undefined,
   now: () => Date,
 ): Promise<DeviceSnapshotManifest | null> {
@@ -919,7 +918,7 @@ async function readSettingsOnlyManifest(
  */
 async function discoverSnapshotManifest(
   snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotStore: DeviceSnapshotStorePort,
   pathOptions: SnapshotPathOptions | undefined,
   now: () => Date,
 ): Promise<DeviceSnapshotManifest | null> {
@@ -938,8 +937,8 @@ async function discoverSnapshotManifest(
 async function importLegacySnapshot(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
-  snapshotStore: DeviceSnapshotStore,
-  snapshotRepository: DeviceSnapshotRepository,
+  snapshotStore: DeviceSnapshotStorePort,
+  snapshotRepository: DeviceSnapshotRepositoryPort,
   now: () => Date,
   pathOptions?: SnapshotPathOptions,
 ): Promise<DeviceSnapshotRecord | null> {
@@ -979,8 +978,8 @@ async function importLegacySnapshot(
 
 async function hydrateLegacySnapshot(
   snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
-  snapshotRepository: DeviceSnapshotRepository,
+  snapshotStore: DeviceSnapshotStorePort,
+  snapshotRepository: DeviceSnapshotRepositoryPort,
   now: () => Date,
 ): Promise<DeviceSnapshotRecord | null> {
   const flatManifest = await discoverSnapshotManifest(snapshotName, snapshotStore, undefined, now);
@@ -1015,7 +1014,7 @@ async function hydrateLegacySnapshot(
  * rather than re-deriving path structure at each call site (issue #6492).
  */
 async function* iterateScopedSnapshotDirs(
-  snapshotStore: DeviceSnapshotStore,
+  snapshotStore: DeviceSnapshotStorePort,
 ): AsyncGenerator<{ pathOptions: SnapshotPathOptions; scopedDirPath: string }> {
   for (const platform of ["android", "ios"] as const) {
     const scopeRootPath = path.join(snapshotStore.getBasePath(), platform);
@@ -1047,7 +1046,7 @@ async function* iterateScopedSnapshotDirs(
 
 async function findScopedSnapshotManifest(
   snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotStore: DeviceSnapshotStorePort,
   now: () => Date,
 ): Promise<{ manifest: DeviceSnapshotManifest; pathOptions: SnapshotPathOptions } | null> {
   for await (const { pathOptions } of iterateScopedSnapshotDirs(snapshotStore)) {
@@ -1070,8 +1069,8 @@ async function findScopedSnapshotManifest(
  * (pre-#5707 layout, and physical-device captures that never scope by AVD).
  */
 async function importFlatLegacySnapshots(
-  snapshotRepository: DeviceSnapshotRepository,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotRepository: DeviceSnapshotRepositoryPort,
+  snapshotStore: DeviceSnapshotStorePort,
   now: () => Date,
   existingSnapshots: Set<string>,
 ): Promise<boolean> {
@@ -1141,8 +1140,8 @@ async function importFlatLegacySnapshots(
  * (issue #6492).
  */
 async function importScopedLegacySnapshots(
-  snapshotRepository: DeviceSnapshotRepository,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotRepository: DeviceSnapshotRepositoryPort,
+  snapshotStore: DeviceSnapshotStorePort,
   now: () => Date,
   existingSnapshots: Set<string>,
 ): Promise<boolean> {
@@ -1205,8 +1204,8 @@ async function importScopedLegacySnapshots(
 }
 
 async function importLegacySnapshotArchive(
-  snapshotRepository: DeviceSnapshotRepository,
-  snapshotStore: DeviceSnapshotStore,
+  snapshotRepository: DeviceSnapshotRepositoryPort,
+  snapshotStore: DeviceSnapshotStorePort,
   now: () => Date,
   existingSnapshots: Set<string>,
 ): Promise<boolean> {

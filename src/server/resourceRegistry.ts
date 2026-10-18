@@ -1,10 +1,10 @@
 import {
-  McpServer,
   type ReadResourceResult,
   type Resource,
   type ResourceTemplateType as ResourceTemplate,
 } from "@modelcontextprotocol/server";
 import { McpError } from "./mcpError";
+import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
 import {
   ListChangedBroadcaster,
@@ -254,14 +254,17 @@ class ResourceRegistryClass {
   // all live sessions, resource updates reach subscribed sessions. A single
   // retained server would be last-writer-wins (issue #3223). Entries and their
   // subscriptions are pruned when a session's transport closes.
-  private servers: Set<McpServer> = new Set();
+  private servers: Set<ResourceRegistryHost> = new Set();
   // Per-request servers (#4678), tracked only until they close and never sent
   // notifications; see ServerRegistrationOptions.
-  private ephemeralServers: Set<McpServer> = new Set();
+  private ephemeralServers: Set<ResourceRegistryHost> = new Set();
   // Tail of each session's pending notification chain (per-session ordering).
-  private deliveryTails: Map<McpServer, Promise<void>> = new Map();
-  private subscriptions: Map<McpServer, Set<string>> = new Map();
-  private readContexts = new Map<McpServer, (signal: AbortSignal) => ResourceReadContext>();
+  private deliveryTails: Map<ResourceRegistryHost, Promise<void>> = new Map();
+  private subscriptions: Map<ResourceRegistryHost, Set<string>> = new Map();
+  private readContexts = new Map<
+    ResourceRegistryHost,
+    (signal: AbortSignal) => ResourceReadContext
+  >();
   // Bumped when the registered set is cleared, so a registration skipped while the set
   // was intact runs again afterwards (#13068).
   private clearEpoch = 0;
@@ -388,7 +391,7 @@ class ResourceRegistryClass {
   // transport closes. The underlying Protocol preserves a pre-set `onclose`
   // (both the transport's and the server's), so chaining here cannot clobber
   // other lifecycle hooks (e.g. ToolRegistry's identical prune hook).
-  private trackServer(server: McpServer, ephemeral: boolean): void {
+  private trackServer(server: ResourceRegistryHost, ephemeral: boolean): void {
     if (this.servers.has(server) || this.ephemeralServers.has(server)) {
       return;
     }
@@ -409,7 +412,7 @@ class ResourceRegistryClass {
    * closed before it ever connected has no transport, so the SDK never fires its
    * `onclose` and the prune hook installed by `trackServer` would not run.
    */
-  untrackServer(server: McpServer): void {
+  untrackServer(server: ResourceRegistryHost): void {
     this.servers.delete(server);
     this.ephemeralServers.delete(server);
     this.subscriptions.delete(server);
@@ -418,7 +421,7 @@ class ResourceRegistryClass {
 
   // Register all resources with an MCP server
   registerWithServer(
-    server: McpServer,
+    server: ResourceRegistryHost,
     getReadContext: (signal: AbortSignal) => ResourceReadContext = () => ({}),
     options: ServerRegistrationOptions = {},
   ): void {
@@ -618,7 +621,7 @@ class ResourceRegistryClass {
   // Per-session FIFO: two notifications to the same session are never reordered,
   // while different sessions proceed independently. A failing task never poisons
   // the tail (tasks catch their own errors; the chain logs any remainder).
-  private enqueueForServer(server: McpServer, task: () => Promise<void>): Promise<void> {
+  private enqueueForServer(server: ResourceRegistryHost, task: () => Promise<void>): Promise<void> {
     const previous = this.deliveryTails.get(server) ?? Promise.resolve();
     const tail = previous.then(task).catch((error) => {
       logger.warn(`[ResourceRegistry] Notification delivery failed unexpectedly: ${error}`);
@@ -633,7 +636,7 @@ class ResourceRegistryClass {
   }
 
   private ownsUpdateSession(
-    server: McpServer,
+    server: ResourceRegistryHost,
     sessionUuid?: string,
     unboundSessionUuid?: string,
   ): boolean {
@@ -648,7 +651,10 @@ class ResourceRegistryClass {
     );
   }
 
-  private async notifySubscribedServer(server: McpServer, targetUris: string[]): Promise<void> {
+  private async notifySubscribedServer(
+    server: ResourceRegistryHost,
+    targetUris: string[],
+  ): Promise<void> {
     for (const targetUri of targetUris) {
       if (!this.servers.has(server)) {
         return;

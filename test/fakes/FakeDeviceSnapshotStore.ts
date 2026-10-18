@@ -7,6 +7,9 @@ type DeviceSnapshotStoreContract = Pick<
   | "getBasePath"
   | "getSnapshotPath"
   | "getSnapshotPathWithOptions"
+  | "getMetadataPath"
+  | "getSettingsPath"
+  | "getAppDataPath"
   | "recoverSnapshotData"
   | "discardSnapshotArtifacts"
   | "listLeftoverSnapshotJournals"
@@ -57,6 +60,18 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   getSnapshotPathWithOptions(snapshotName: string, options?: SnapshotPathOptions): string {
     return new DeviceSnapshotStore(this.basePath).getSnapshotPathWithOptions(snapshotName, options);
+  }
+
+  getMetadataPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getMetadataPath(snapshotName, options);
+  }
+
+  getSettingsPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getSettingsPath(snapshotName, options);
+  }
+
+  getAppDataPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getAppDataPath(snapshotName, options);
   }
 
   queueRecoveryFailure(error: Error): void {

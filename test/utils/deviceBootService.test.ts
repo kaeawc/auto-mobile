@@ -1969,7 +1969,8 @@ describe("DeviceBootService", () => {
     const result = await service(devices, matcher).boot({ platform: "android" });
 
     expect(result.source).toBe("booted");
-    expect(result.sourceImage).toEqual(image);
+    // The listing overlays the booted emulator, so the adopted image is running.
+    expect(result.sourceImage).toEqual({ ...image, isRunning: true });
     expect(result.processHandle).toBeUndefined();
     expect(result.processId).toBeUndefined();
     expect(devices.getExecutedOperations()).toContain("waitForDeviceReady:Pixel_9_API_35:180000");

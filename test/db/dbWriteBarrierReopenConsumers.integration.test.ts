@@ -241,7 +241,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       const drained = new FakeDbWriteBarrier();
       drained.beginDrain();
       let current: DbWriteBarrier = drained;
-      const repo = new FailureAnalyticsRepository(timer, db, () => current);
+      const repo = new FailureAnalyticsRepository(db, timer, () => current);
 
       const reopened = new FakeDbWriteBarrier();
       current = reopened;
@@ -259,7 +259,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
       timer.setCurrentTime(1000000);
       const draining = new FakeDbWriteBarrier();
       draining.beginDrain();
-      const repo = new FailureAnalyticsRepository(timer, db, () => draining);
+      const repo = new FailureAnalyticsRepository(db, timer, () => draining);
 
       await repo.recordFailure(makeFailureInput());
       await Promise.resolve();
@@ -271,7 +271,7 @@ describe("captured-reference consumers survive a same-process barrier reopen (is
     test("default resolver reads the shared singleton at use-time (acceptance #1)", async () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000000);
-      const repo = new FailureAnalyticsRepository(timer, db); // default resolver
+      const repo = new FailureAnalyticsRepository(db, timer); // default resolver
 
       const reopened = reopenSharedBarrier();
       // Spy the reopened instance rather than counting in-flight writes: this

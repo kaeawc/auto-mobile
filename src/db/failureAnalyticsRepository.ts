@@ -175,22 +175,22 @@ interface FailuresStreamResponse {
 const STREAM_LIMIT_MAX = 500;
 
 export class FailureAnalyticsRepository {
-  private timer: Timer;
   private db: Kysely<Database> | null;
+  private timer: Timer;
   private getBarrier: () => DbWriteBarrier;
   private idGenerator: IdGenerator;
 
   constructor(
-    timer: Timer = defaultTimer,
     db?: Kysely<Database>,
+    timer: Timer = defaultTimer,
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     idGenerator: IdGenerator = defaultIdGenerator,
   ) {
-    this.timer = timer;
     this.db = db ?? null;
+    this.timer = timer;
     this.getBarrier = getBarrier;
     this.idGenerator = idGenerator;
   }

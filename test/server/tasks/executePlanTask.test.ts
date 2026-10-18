@@ -193,7 +193,7 @@ describe("executePlan as an MCP task (#13088)", () => {
   afterEach(teardown);
 
   test("executePlan is task-eligible beside startDevice", () => {
-    expect([...TASK_ELIGIBLE_TOOLS].sort()).toEqual(["executePlan", "startDevice"]);
+    expect([...TASK_ELIGIBLE_TOOLS].sort()).toEqual(["executePlan", "installApp", "startDevice"]);
   });
 
   test("a non-declaring call blocks for the plan result and creates no task", async () => {

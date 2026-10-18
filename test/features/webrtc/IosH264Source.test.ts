@@ -19,6 +19,7 @@ import {
   IOS_HELPER_STOP_TIMEOUT_MS,
   IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
+  IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS,
   IosH264Source,
   ScreenRecordingPermissionError,
   defaultIosBitrateBps,
@@ -2459,6 +2460,40 @@ describe("IosH264Source", () => {
     const started = source.start();
     await started.catch(() => undefined);
     expect(lookups).toBe(3);
+    await source.stop();
+  });
+
+  test("polls for the Simulator window across the whole resolution timeout (#13066)", async () => {
+    const LOOKUP_LATENCY_MS = 100;
+    const helper = new FakeFrameCaptureHelper();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let lookups = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      timer,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => {
+        throw new Error("encoder spawn is out of scope for this test");
+      },
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          lookups += 1;
+          timer.advanceTime(LOOKUP_LATENCY_MS);
+          return { stdout: JSON.stringify({ windows: [] }), stderr: "", exitCode: 0, signal: null };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    await source.start().catch(() => undefined);
+
+    // Lookups start every (latency + interval) while the next sleep still fits the timeout.
+    const period = LOOKUP_LATENCY_MS + IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS;
+    expect(lookups).toBe(Math.ceil(IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS / period));
     await source.stop();
   });
 

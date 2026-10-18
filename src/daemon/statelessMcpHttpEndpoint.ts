@@ -11,14 +11,14 @@ import { INTERNAL_MCP_SESSION_PARAM } from "./constants";
  * The daemon's internal MCP HTTP endpoint, stateless (#4678, owner decision 2026-10-17).
  *
  * Every POST gets its own MCP server and transport, closed when its response closes.
- * There is no transport map, no idle reaper and no `mcp-session-id`: the caller's
+ * There is no transport map, no idle reaper and no transport session header: the caller's
  * session key ({@link readMcpSessionKey}, else the in-band `__mcpSessionId`) is the
  * only thing that links one request to the next. GET and DELETE answer 405 because
  * there is no session stream to open or terminate.
  *
  * What the per-session transport used to provide is kept per request:
  * - cancellation: each request runs under its own `requestScopeId` (the one-shot
- *   server's `sessionContext.sessionId`), so a response that closes early cancels
+ *   server's per-request scope id), so a response that closes early cancels
  *   exactly the executions that request started, and shutdown cancels them with the
  *   daemon's handoff reason;
  * - `notifications/cancelled`: it arrives on a different POST, which reaches a fresh

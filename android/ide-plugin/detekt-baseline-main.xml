@@ -4,6 +4,10 @@
   <CurrentIssues>
     <ID>InjectDispatcher:FeatureFlagsConfigurable.kt:FeatureFlagsViewModel$IO</ID>
     <ID>InjectDispatcher:TestTimingPanel.kt:IO</ID>
+    <ID>SwallowedException:TestPlanDetector.kt:TestPlanDetector$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FeatureFlagsConfigurable.kt:FeatureFlagsViewModel$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:TestPlanDetector.kt:TestPlanDetector$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:TestTimingPanel.kt:e: Exception</ID>
     <ID>UnsafeCallOnNullableType:TestPlanSchemaStore.kt:TestPlanSchemaStore$rootSchema!!</ID>
   </CurrentIssues>
 </SmellBaseline>

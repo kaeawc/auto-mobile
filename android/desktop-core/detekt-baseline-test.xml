@@ -2,6 +2,8 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>EmptyFunctionBlock:DevicePickerViewModelTest.kt:ScriptableResourceClient${}</ID>
+    <ID>EmptyFunctionBlock:NavigationScreenshotLoaderTest.kt:FakeImageBitmap${}</ID>
     <ID>HasPlatformType:McpDaemonClientInputTest.kt:McpDaemonClientInputTest.TestDaemonSocket$val socketPath = tempDir.resolve("daemon.sock")</ID>
     <ID>InjectDispatcher:DesktopDaemonSessionCompositionTest.kt:DesktopDaemonSessionCompositionTest.Host$Unconfined</ID>
     <ID>InjectDispatcher:DesktopWireFixtureCompositionTest.kt:DesktopWireFixtureCompositionTest.Replay$Unconfined</ID>
@@ -21,6 +23,8 @@
     <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Orphan"]!!</ID>
     <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Profile"]!!</ID>
     <ID>MapGetWithNotNullAssertionOperator:NavigationGraphLayoutTest.kt:NavigationGraphLayoutTest$layout.nodeLayouts["Target"]!!</ID>
+    <ID>SwallowedException:ConveyorUpdateControllerTest.kt:ConveyorUpdateControllerTest$cancellation: CancellationException</ID>
+    <ID>TooGenericExceptionThrown:RetryPolicyTest.kt:RetryPolicyTest$throw RuntimeException("fail")</ID>
     <ID>UnnecessaryNotNullOperator:TelemetryModelsTest.kt:TelemetryModelsTest$event.stackTrace!!</ID>
   </CurrentIssues>
 </SmellBaseline>

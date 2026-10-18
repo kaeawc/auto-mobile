@@ -22,6 +22,8 @@ data class ProbeEvent(
   val source: Int,
   val buttonState: Int,
   val pointers: List<ProbePointer>,
+  /** MotionEvent.eventTime; identifies one hover event seen by both the View and Compose. */
+  val eventTimeMs: Long = 0L,
 )
 
 /**

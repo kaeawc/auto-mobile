@@ -101,6 +101,7 @@ fun probeEventOf(via: String, event: MotionEvent): ProbeEvent {
     source = event.source,
     buttonState = event.buttonState,
     pointers = pointers,
+    eventTimeMs = event.eventTime,
   )
 }
 
@@ -115,7 +116,15 @@ fun PointerProbeScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.pointer.probe", composableName = "PointerProbeScreen") {
     val events = remember { mutableStateListOf<String>() }
     var totalCount by remember { mutableIntStateOf(0) }
-    val recordEvent: (ProbeEvent) -> Unit = { probeEvent ->
+    // Hover can reach both the View and the Compose fallback; log each MotionEvent once. The two
+    // copies differ in coordinate space, so they are matched by device, action and event time.
+    val lastHover = remember { arrayOfNulls<Triple<Int, Int, Long>>(1) }
+    val recordEvent: (ProbeEvent) -> Unit = recordEvent@{ probeEvent ->
+      if (isHoverAction(probeEvent.action and MotionEvent.ACTION_MASK)) {
+        val key = Triple(probeEvent.deviceId, probeEvent.action, probeEvent.eventTimeMs)
+        if (key == lastHover[0]) return@recordEvent
+        lastHover[0] = key
+      }
       totalCount += 1
       events.add(0, PointerProbeFormatter.format(totalCount, probeEvent))
       while (events.size > POINTER_PROBE_MAX_EVENTS) {

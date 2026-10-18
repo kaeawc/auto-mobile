@@ -136,8 +136,8 @@ export function findPosixPathLiteralExpectations(source: string): string[] {
     const expectations: Array<{ literal: Node; actual: Node }> = [];
     new Visitor({
       VariableDeclarator(node) {
-        if (node.id.type === "Identifier" && node.init) {
-          initializers.set(node.id.name, node.init as unknown as Node);
+        if (node.id.type === "Identifier" && isNode(node.init)) {
+          initializers.set(node.id.name, node.init);
         }
       },
       CallExpression(node) {
@@ -150,8 +150,8 @@ export function findPosixPathLiteralExpectations(source: string): string[] {
           }
           return;
         }
-        const callee = node.callee as unknown as Node;
-        if (name === "startsWith" && isNode(callee.object)) {
+        const callee = node.callee;
+        if (name === "startsWith" && isNode(callee) && isNode(callee.object)) {
           for (const literal of stringLiterals(node.arguments)) {
             expectations.push({ literal, actual: callee.object });
           }
@@ -195,8 +195,8 @@ export function findPosixPathLiteralExpectations(source: string): string[] {
         (argument) =>
           argument.type === "ArrowFunctionExpression" || argument.type === "FunctionExpression",
       );
-      if (body) {
-        scanTest(body as unknown as Node);
+      if (isNode(body)) {
+        scanTest(body);
       }
     },
   }).visit(parsed.program);

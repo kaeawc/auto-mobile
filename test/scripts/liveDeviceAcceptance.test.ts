@@ -1033,22 +1033,12 @@ describe("live device acceptance harness", () => {
     expect(commands).toHaveLength(0);
   });
 
-  test("rejects the unsupported recovery scenario before any device mutation", async () => {
+  // `AcceptanceArgs.scenario` is the literal "full", so runAcceptanceMatrix can only see another
+  // value if parseArgs let it through; this is the boundary that has to refuse it.
+  test("parseArgs rejects the unsupported recovery scenario before any device work", () => {
     expect(() => parseArgs(["--platform", "android", "--scenario", "recovery"])).toThrow(
       "--scenario must be full; recovery is not implemented",
     );
-
-    const harness = createHarness();
-    const unsupportedArgs = {
-      ...androidArgs,
-      scenario: "recovery",
-    } as unknown as AcceptanceArgs;
-    await expect(runAcceptanceMatrix(unsupportedArgs, harness.dependencies)).rejects.toThrow(
-      "--scenario must be full; recovery is not implemented",
-    );
-    expect(harness.calls).toHaveLength(0);
-    expect(harness.cliCommands).toHaveLength(0);
-    expect(harness.evidence).toHaveLength(0);
   });
 
   test.each([

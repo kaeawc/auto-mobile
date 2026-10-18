@@ -5,7 +5,7 @@
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1540	src/daemon/client.ts
-5233	src/daemon/daemon.ts
+5232	src/daemon/daemon.ts
 6008	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
@@ -79,7 +79,7 @@
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
 1661	src/server/finalizeToolResponse.ts
-3133	src/server/interactionTools.ts
+3137	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2851	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts

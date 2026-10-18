@@ -35,8 +35,13 @@ NSInteger ObjCExceptionCatcher_pinchSegmentCount(CGFloat rotationDegrees) {
     if (!isfinite(degrees) || degrees == 0) {
         return 1;
     }
-    NSInteger segments = (NSInteger)ceil(degrees / 10.0);
-    return segments < 1 ? 1 : (segments > 36 ? 36 : segments);
+    // Clamp in floating point before converting: casting a double beyond NSInteger range is
+    // undefined behavior (#13059).
+    double steps = ceil((double)degrees / 10.0);
+    if (steps < 1.0) {
+        return 1;
+    }
+    return steps > 36.0 ? 36 : (NSInteger)steps;
 }
 
 ObjCPinchFingers ObjCExceptionCatcher_computePinchFingersAt(

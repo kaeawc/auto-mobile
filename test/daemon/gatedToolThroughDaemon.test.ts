@@ -137,14 +137,9 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
     internals.handleConnection(daemonSide as unknown as Socket);
-    daemonClient = new DaemonClient(
-      "/fake/socket",
-      60_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      new FakeIdGenerator(),
-    );
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
     daemonClient.attachSocketForTesting(clientSide as never);
     daemonSide.deliver = (frame) => daemonClient.simulateIncomingDataForTesting(Buffer.from(frame));
     const manager = new FakeDaemonManager();

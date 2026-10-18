@@ -488,14 +488,17 @@ describe("authoritative iOS local builds", () => {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     const deviceApps = new DeviceAppManager();
     const installed = spyOn(deviceApps, "getInstalledAppBundleHash").mockResolvedValue(null);
-    const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-      { deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890", platform: "ios", name: "fake simulator" },
-      new FakeTimer(),
+    const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+      device: {
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+        platform: "ios",
+        name: "fake simulator",
+      },
+      timer: new FakeTimer(),
       builder,
-      new FakeProcessExecutor(),
-      undefined,
-      deviceApps,
-    );
+      processExecutor: new FakeProcessExecutor(),
+      deviceAppManager: deviceApps,
+    });
     const running = spyOn(manager, "isRunning").mockResolvedValue(false);
     try {
       const result = await manager.setup();

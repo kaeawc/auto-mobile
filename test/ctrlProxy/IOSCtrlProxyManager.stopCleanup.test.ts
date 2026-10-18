@@ -18,18 +18,12 @@ function makeManager(
   executor: FakeProcessExecutor,
   processClient?: IosCtrlProxyProcessClient,
 ): IOSCtrlProxyManager {
-  return IOSCtrlProxyManager.createForTestingWithDeps(
+  return IOSCtrlProxyManager.createForTestingWithOptions({
     device,
-    new FakeTimer(),
-    undefined,
-    executor,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    timer: new FakeTimer(),
+    processExecutor: executor,
     processClient,
-  );
+  });
 }
 
 describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {

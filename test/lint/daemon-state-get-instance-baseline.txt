@@ -6,7 +6,7 @@ src/daemon/daemonContext.ts	3
 src/daemon/deviceGestureRecordingSocketServer.ts	2
 src/daemon/deviceGestureRecordingStartAdmission.ts	1
 src/daemon/discoveryReconcile.ts	1
-src/daemon/manager.ts	1
+src/daemon/managerDefaults.ts	1
 src/daemon/socketServer.ts	1
 src/daemon/videoStreamSocketServer.ts	1
 src/daemon/webrtcStreamSocketServer.ts	1

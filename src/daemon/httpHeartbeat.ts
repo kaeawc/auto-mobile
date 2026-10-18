@@ -4,7 +4,7 @@ import {
   isTokenOwnedOrClaimPending,
   resolveHeartbeatMiss,
   type HeartbeatMiss,
-} from "./daemonRequestHandlers";
+} from "./heartbeatHandler";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { releasedSessionNotFoundFields } from "./types";
 

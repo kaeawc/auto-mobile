@@ -14,7 +14,9 @@ import {
   installListeningProcessFakes,
 } from "../helpers/iosCtrlProxyManagerHarness";
 
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithOptions>[0]["remoteRunner"]
+>;
 
 /** A host-control runner that reports itself enabled, with `overrides` replacing individual calls. */
 function physicalRemoteRunner(overrides: Partial<RemoteRunner> = {}): RemoteRunner {
@@ -112,12 +114,12 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           ignoreTerm,
         }));
         installListeningProcessFakes(executor, processes);
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          createFakeBuilder(),
-          executor,
-        );
+        const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: createFakeBuilder(),
+          processExecutor: executor,
+        });
         manager.setXcTestProcessIdForTesting(42);
         manager.registerForTesting();
         let settled = false;
@@ -241,16 +243,14 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
             deviceKind === "physical device"
               ? { ...testDevice, deviceId: "00008030-001E28C11E" }
               : testDevice;
-          const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          const manager = IOSCtrlProxyManager.createForTestingWithOptions({
             device,
-            fakeTimer,
-            createFakeBuilder(),
-            new FakeProcessExecutor(),
-            undefined,
-            undefined,
+            timer: fakeTimer,
+            builder: createFakeBuilder(),
+            processExecutor: new FakeProcessExecutor(),
             remoteRunner,
-            { isAvailable: async () => true },
-          ).registerForTesting();
+            hostPortAvailabilityChecker: { isAvailable: async () => true },
+          }).registerForTesting();
           spyOn(manager, "isRunning").mockResolvedValue(false);
 
           const startup = manager.start();
@@ -293,16 +293,14 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           return stoppedPids.length === 1 ? new Promise<never>(() => {}) : { success: true };
         },
       });
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        { ...testDevice, deviceId: "00008030-001E28C11E" },
-        fakeTimer,
-        createFakeBuilder(),
-        new FakeProcessExecutor(),
-        undefined,
-        undefined,
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: { ...testDevice, deviceId: "00008030-001E28C11E" },
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: new FakeProcessExecutor(),
         remoteRunner,
-        { isAvailable: async () => true },
-      );
+        hostPortAvailabilityChecker: { isAvailable: async () => true },
+      });
       // The startup is cancelled by stop() below and its settlement is not asserted here.
       void manager.start().catch(() => {});
       await startCalled.promise;

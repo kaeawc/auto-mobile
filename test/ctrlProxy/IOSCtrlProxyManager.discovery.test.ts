@@ -41,7 +41,11 @@ describe("IOSCtrlProxyManager doctor discovery", () => {
     return {
       ports,
       executor,
-      manager: IOSCtrlProxyManager.createForTestingWithDeps(device, timer, undefined, executor),
+      manager: IOSCtrlProxyManager.createForTestingWithOptions({
+        device,
+        timer,
+        processExecutor: executor,
+      }),
     };
   }
 
@@ -58,12 +62,11 @@ describe("IOSCtrlProxyManager doctor discovery", () => {
     for (const body of [JSON.stringify({ status: "ok" }), "OK"]) {
       const executor = new FakeProcessExecutor();
       executor.setCommandResponse("curl", createExecResult(body, ""));
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
         device,
         timer,
-        undefined,
-        executor,
-      );
+        processExecutor: executor,
+      });
       expect(await manager.discoverRunnerPort()).toBeNull();
     }
   });

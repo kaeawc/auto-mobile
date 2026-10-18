@@ -17,7 +17,9 @@ function getTunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
   return client;
 }
 
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithOptions>[0]["remoteRunner"]
+>;
 const simulator = {
   platform: "ios" as const,
   deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
@@ -82,16 +84,13 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
   });
 
   function makeManager(device = simulator, remote = remoteRunner()) {
-    return IOSCtrlProxyManager.createForTestingWithDeps(
+    return IOSCtrlProxyManager.createForTestingWithOptions({
       device,
       timer,
-      undefined,
-      new FakeProcessExecutor(),
-      undefined,
-      undefined,
-      remote,
-      { isAvailable: async () => true },
-    );
+      processExecutor: new FakeProcessExecutor(),
+      remoteRunner: remote,
+      hostPortAvailabilityChecker: { isAvailable: async () => true },
+    });
   }
 
   test.each(["installed", "absent", "failed", "missing data", "throws"])(
@@ -139,14 +138,13 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     async (branch) => {
       const events: string[] = [];
       const builder = IosCtrlProxyBuilder.getInstance();
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        simulator,
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: simulator,
         timer,
         builder,
-        new FakeProcessExecutor(),
-        undefined,
-        fakeDeviceAppManager(),
-      );
+        processExecutor: new FakeProcessExecutor(),
+        deviceAppManager: fakeDeviceAppManager(),
+      });
       const result = { success: branch !== "failed build", message: "built", error: "build error" };
       const pin = spyOn(IosCtrlProxyBuilder, "isPinnedVersionUnverifiable").mockReturnValue(false);
       const legacy = spyOn(manager, "uninstallLegacyAppIfPresent").mockResolvedValue();
@@ -370,12 +368,11 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     "listener cleanup preserves loop exits: %s",
     async (branch) => {
       const events: string[] = [];
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        simulator,
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: simulator,
         timer,
-        undefined,
-        new FakeProcessExecutor(),
-      );
+        processExecutor: new FakeProcessExecutor(),
+      });
       const owned = { pid: 5555, port: 8765, command: "xcodebuild" };
       const foreign = { pid: 5556, port: 8765, command: "foreign" };
       let probes = 0;

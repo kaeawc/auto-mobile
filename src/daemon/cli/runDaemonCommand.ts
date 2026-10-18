@@ -7,7 +7,8 @@ import {
 import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { isSessionReleasing } from "../sessionReleaseState";
 import { releaseSessionAndDevice } from "../releaseSessionAndDevice";
-import { handleDaemonRequest, refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
+import { handleDaemonRequest } from "../daemonRequestHandlers";
+import { refuseCliKeeperOnProxySession } from "../heartbeatHandler";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
@@ -399,10 +400,9 @@ function cliIdleNoopMessage(sessionId: string): string {
 
 /** Record a keeper heartbeat in-process; false when the session is a no-op cli-idle session. */
 function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: string): boolean {
-  const sessionManager = daemonState.getSessionManager();
-  const session =
-    sessionManager.getSession(sessionId) ?? sessionManager.getReleasingSession(sessionId);
-  if (!session || isSessionReleasing(sessionManager, sessionId, session)) {
+  const manager = daemonState.getSessionManager();
+  const session = manager.getSession(sessionId) ?? manager.getReleasingSession(sessionId);
+  if (!session || isSessionReleasing(manager, sessionId, session)) {
     throw new ActionableError(`Session not found: ${sessionId}`);
   }
   const refusal = refuseCliKeeperOnProxySession(CLI_KEEPER_LIVENESS_OWNER_KIND, session);
@@ -414,11 +414,11 @@ function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: str
       ),
     );
   }
-  if (session.livenessPolicy === "cli-idle") {
-    return false;
+  const recordable = session.livenessPolicy !== "cli-idle";
+  if (recordable) {
+    manager.recordHeartbeat(sessionId);
   }
-  sessionManager.recordHeartbeat(sessionId);
-  return true;
+  return recordable;
 }
 
 async function runDaemonLifecycleCommand(

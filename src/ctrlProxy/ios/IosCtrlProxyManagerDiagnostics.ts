@@ -6,7 +6,7 @@ import type { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppMa
 import type { Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import type { ProcessSupervisor } from "../../utils/ProcessSupervisor";
 import type { IosCtrlProxyBuilder } from "../IosCtrlProxyBuilder";
-import type { RemoteCtrlProxyIOSRunner } from "../IOSCtrlProxyManager";
+import type { RemoteCtrlProxyIOSRunner } from "../RemoteCtrlProxyIOSRunner";
 import type { HostPortAvailabilityChecker } from "./IOSHostPortAvailabilityChecker";
 import type { IosCtrlProxyProcessClient } from "./IosCtrlProxyProcessClient";
 import type { IosDeviceDetector } from "./IosDeviceDetector";

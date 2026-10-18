@@ -409,21 +409,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
               ? options.deviceReadiness(args)
               : options.deviceReadiness,
         },
-        execution,
-        admittedSession,
-        // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
-        // above already partitions every state (throws for a never-issued id,
-        // returns a live session so the fallback is skipped, returns undefined
-        // only for a persisted non-terminal row — restart recovery — which the
-        // createUnseenSession guard also admits), so this flag rejects nothing
-        // admit does not already reject HERE. It exists so the pool-minting
-        // primitive itself refuses to mint a never-issued id: if a future route
-        // reaches createToolExecutionContext for a caller-provided sessionUuid
-        // without going through admit, issuance is still enforced. See the PR
-        // discussion for why the reported #6069 bound-connection bypass could not
-        // be reproduced through any current public route in-harness.
-        true,
-        signal,
+        { execution, admittedSession, requireIssuedSession: true, signal },
       );
       assertSessionDeviceRouting(
         name,

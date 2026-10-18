@@ -5,7 +5,7 @@ import type { DaemonLauncher, DaemonLaunchCommand, DaemonProcessSpawner } from "
 import type { IdentityRecoveryIO } from "./identityRecovery";
 import type { DaemonPortAvailabilityChecker } from "./portAvailability";
 import type { DaemonProcessFinder, DaemonProcessSignaler } from "./processTable";
-import type { ExtractionCleaner } from "./manager";
+import type { ExtractionCleaner } from "./extractionRoot";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import type { RetryExecutor } from "../utils/retry/RetryExecutor";
 import type { IdGenerator } from "../utils/IdGenerator";

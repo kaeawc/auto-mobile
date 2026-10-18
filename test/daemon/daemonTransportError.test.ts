@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toDaemonTransportError } from "../../src/daemon/client";
+import { toDaemonTransportError } from "../../src/daemon/daemonResponseErrors";
 import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";

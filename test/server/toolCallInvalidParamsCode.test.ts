@@ -3,7 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { ErrorCode } from "../../src/server/mcpError";
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/daemonResponseErrors";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { prototypeSchema } from "../../src/server/prototypeTools";

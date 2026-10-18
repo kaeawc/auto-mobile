@@ -37,9 +37,7 @@ function makeWire(): Wire {
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(),
-    "darwin",
-    LIMIT,
+    { idGenerator: new FakeIdGenerator(), platform: "darwin", maxInboundFrameBytes: LIMIT },
   );
   client.attachSocketForTesting(socket);
   const requests: DaemonRequest[] = [];

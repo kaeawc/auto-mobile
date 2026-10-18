@@ -323,9 +323,7 @@ export class InMemoryDaemonClient extends DaemonClient {
       // The stale-socket hint must never read the host's PID file.
       { pidFilePath: `${IN_MEMORY_DATA_DIR}/no-daemon.pid`, isProcessRunning: () => true },
       undefined,
-      idGenerator,
-      undefined,
-      maxInboundFrameBytes,
+      { idGenerator, maxInboundFrameBytes },
     );
   }
 

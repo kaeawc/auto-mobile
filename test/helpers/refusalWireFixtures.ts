@@ -46,7 +46,7 @@ import { DaemonRestartPendingError } from "../../src/daemon/DaemonRestartPending
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/daemonResponseErrors";
 import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
 import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";

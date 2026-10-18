@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveExtractionRootForEntryScript } from "../../src/daemon/manager";
+import { resolveExtractionRootForEntryScript } from "../../src/daemon/extractionRoot";
 
 const entryUnder = (root: string): string =>
   path.join(root, "node_modules", "@kaeawc", "auto-mobile", "dist", "src", "index.js");

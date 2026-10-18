@@ -134,6 +134,21 @@ export interface SessionOptions {
   deviceReadiness?: DeviceReadinessLevel;
 }
 
+/** Per-execution inputs of {@link createToolExecutionContext}, beyond the session and its options. */
+interface ToolExecutionContextOptions {
+  execution?: SessionExecutionMetadata;
+  admittedSession?: Session;
+  /**
+   * #6069: set by the device-tool path so the getOrCreateSession fallback cannot mint a brand-new
+   * pooled session for a never-issued sessionUuid. Only a live session (resolved via
+   * admittedSession / getSessionForNewExecution) or a persisted, non-terminal row (restart
+   * recovery) is admissible. Internal callers that intentionally mint fresh derived sessions
+   * (device labels) leave it false.
+   */
+  requireIssuedSession?: boolean;
+  signal?: AbortSignal;
+}
+
 /**
  * Create tool execution context from session UUID
  *
@@ -144,15 +159,12 @@ export async function createToolExecutionContext(
   sessionManager: SessionManager,
   devicePool: DevicePool,
   sessionOptions: SessionOptions = {},
-  execution?: SessionExecutionMetadata,
-  admittedSession?: Session,
-  // #6069: set by the device-tool path so the getOrCreateSession fallback below
-  // cannot mint a brand-new pooled session for a never-issued sessionUuid. Only a
-  // live session (resolved via admittedSession / getSessionForNewExecution) or a
-  // persisted, non-terminal row (restart recovery) is admissible. Internal callers
-  // that intentionally mint fresh derived sessions (device labels) leave it false.
-  requireIssuedSession = false,
-  signal?: AbortSignal,
+  {
+    execution,
+    admittedSession,
+    requireIssuedSession = false,
+    signal,
+  }: ToolExecutionContextOptions = {},
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};

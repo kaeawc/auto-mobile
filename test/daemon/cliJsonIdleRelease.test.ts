@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/daemonResponseErrors";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 

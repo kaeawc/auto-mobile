@@ -13,7 +13,11 @@ function makeManager(
   executor: FakeProcessExecutor,
   timer: FakeTimer = new FakeTimer(),
 ): IOSCtrlProxyManager {
-  return IOSCtrlProxyManager.createForTestingWithDeps(device, timer, undefined, executor);
+  return IOSCtrlProxyManager.createForTestingWithOptions({
+    device,
+    timer,
+    processExecutor: executor,
+  });
 }
 
 describe("IOSCtrlProxyManager physical runner tunnel start (#11154)", () => {

@@ -32,14 +32,9 @@ function createConnectedClient(
   idGenerator: CountingIdGenerator,
   writes: string[],
 ): DaemonClient {
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    fakeTimer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
+  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, ISOLATED_DAEMON_RECOVERY, null, {
     idGenerator,
-  );
+  });
   (client as any).connected = true;
   (client as any).socket = createCapturingSocket(writes);
   return client;

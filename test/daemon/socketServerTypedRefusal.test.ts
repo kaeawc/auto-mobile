@@ -1,6 +1,6 @@
 import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { expect, test } from "bun:test";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/daemonResponseErrors";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";

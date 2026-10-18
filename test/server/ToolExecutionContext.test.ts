@@ -613,10 +613,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       sessionOptions,
-      undefined,
-      undefined,
-      false,
-      controller.signal,
+      { signal: controller.signal },
     );
     // The fake timer's auto-advance fires the retry sleep only once the microtask
     // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
@@ -671,16 +668,9 @@ describe("ToolExecutionContext", () => {
     };
 
     const startContext = (sessionId: string, signal?: AbortSignal) =>
-      createToolExecutionContext(
-        sessionId,
-        manualSessionManager,
-        manualPool,
-        sessionOptions,
-        undefined,
-        undefined,
-        false,
+      createToolExecutionContext(sessionId, manualSessionManager, manualPool, sessionOptions, {
         signal,
-      );
+      });
 
     const abandonedLogs = (debugSpy: { mock: { calls: unknown[][] } }) =>
       debugSpy.mock.calls.filter((call) =>
@@ -849,10 +839,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       sessionOptions,
-      undefined,
-      undefined,
-      false,
-      controller.signal,
+      { signal: controller.signal },
     );
     await setupStarted.promise;
     controller.abort(reason);
@@ -1632,8 +1619,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      original,
+      { admittedSession: original },
     );
     await oldEntered;
 
@@ -1663,8 +1649,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      replacement,
+      { admittedSession: replacement },
     );
 
     releaseOldGate();
@@ -1900,10 +1885,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      controller.signal,
+      { signal: controller.signal },
     );
 
     controller.abort(new Error("request cancelled"));
@@ -1932,10 +1914,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      controller.signal,
+      { signal: controller.signal },
     );
 
     expect(setupSignal).toBeDefined();
@@ -1969,10 +1948,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      firstController.signal,
+      { signal: firstController.signal },
     );
     await new Promise((resolve) => setImmediate(resolve));
     const second = createToolExecutionContext("session-shared-flight", sessionManager, devicePool, {
@@ -2014,10 +1990,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       { ...sessionOptions, deviceReadiness: "automationReady" },
-      undefined,
-      undefined,
-      false,
-      cancelled.signal,
+      { signal: cancelled.signal },
     );
     await setupEntered.promise;
     cancelled.abort(new Error("first request cancelled"));
@@ -2069,10 +2042,7 @@ describe("ToolExecutionContext", () => {
       sessionManager,
       devicePool,
       sessionOptions,
-      undefined,
-      undefined,
-      false,
-      firstController.signal,
+      { signal: firstController.signal },
     );
     await setupEntered.promise;
     expect(resetCalls).toBe(1);
@@ -2125,10 +2095,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         sessionOptions,
-        undefined,
-        undefined,
-        false,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("cancelled before readiness");
     expect(resetCalls).toBe(0);
@@ -2246,14 +2213,9 @@ describe("ToolExecutionContext", () => {
     await sessionManager.releaseSession("session-1", "explicit-release");
 
     await expect(
-      createToolExecutionContext(
-        "session-1",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
+      createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions, {
         admittedSession,
-      ),
+      }),
     ).rejects.toThrow("Session session-1 was released during setup");
     expect(sessionManager.getSession("session-1")).toBeNull();
   });
@@ -2405,14 +2367,9 @@ describe("ToolExecutionContext", () => {
     await Promise.resolve();
 
     await expect(
-      createToolExecutionContext(
-        "session-releasing",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
-        session,
-      ),
+      createToolExecutionContext("session-releasing", sessionManager, devicePool, sessionOptions, {
+        admittedSession: session,
+      }),
     ).rejects.toThrow("released during setup");
 
     finishSetup();
@@ -2441,8 +2398,7 @@ describe("ToolExecutionContext", () => {
           sessionManager,
           devicePool,
           sessionOptions,
-          undefined,
-          session,
+          { admittedSession: session },
         ),
       ).rejects.toThrow("released during setup");
     } finally {
@@ -2647,9 +2603,7 @@ describe("ToolExecutionContext", () => {
           sessionManager,
           devicePool,
           sessionOptions,
-          undefined,
-          undefined,
-          true, // requireIssuedSession — the device-tool boundary
+          { requireIssuedSession: true }, // requireIssuedSession — the device-tool boundary
         ),
       ).rejects.toThrow(/not an active daemon session/);
 
@@ -2703,9 +2657,7 @@ describe("ToolExecutionContext", () => {
           recoveryManager,
           recoveryPool,
           sessionOptions,
-          undefined,
-          undefined,
-          true, // requireIssuedSession must NOT block restart recovery
+          { requireIssuedSession: true }, // requireIssuedSession must NOT block restart recovery
         );
         expect(context.deviceId).toBe("device-1");
         expect(recoveryManager.getSession("restarted-session")?.assignedDevice).toBe("device-1");
@@ -2733,9 +2685,7 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         sessionOptions,
-        undefined,
-        undefined,
-        true,
+        { requireIssuedSession: true },
       );
 
       expect(context.deviceId).toBe("device-1");

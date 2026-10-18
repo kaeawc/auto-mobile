@@ -1,67 +1,53 @@
-import { createConnection, Socket } from "node:net";
-import { errorMessage } from "../utils/describeUnknownError";
-import type { Duplex } from "node:stream";
-import { existsSync, statSync } from "node:fs";
-import { platform } from "node:os";
 import { z } from "zod";
-import { logger } from "../utils/logger";
-import { encodeNonFinite } from "../utils/nonFiniteJson";
-import { ActionableError } from "../models";
 import {
-  isRelayedJsonRpcError,
-  type TaskRelayFrame,
-  type TaskRelayMethod,
-} from "../server/tasks/taskRelay";
-import type { LivenessOwnerHold } from "./livenessOwnerLease";
-import {
-  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DaemonNotification,
   DaemonRequest,
   DaemonResponse,
-  DaemonNotification,
+  PROGRESS_NOTIFICATION_METHOD,
   daemonNotificationSchema,
   daemonResponseSchema,
-  PROGRESS_NOTIFICATION_METHOD,
-  sanitizeBoundSessionLoss,
-  sanitizeDaemonRequestFailureCause,
-  daemonInstanceFromError,
-  releasedSessionNotFoundFields,
+  type DaemonOptions,
+  type DaemonStatus,
 } from "./types";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { Socket, createConnection } from "node:net";
+import type { Duplex } from "node:stream";
+import { MAX_SETTIMEOUT_DELAY_MS, defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
-  SOCKET_PATH,
-  PID_FILE_PATH,
-  CONNECTION_TIMEOUT_MS,
-  DAEMON_VERSION,
-  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
-  DAEMON_CANCEL_REQUEST_METHOD,
-  DAEMON_NON_FINITE_ENCODED_PARAM,
-} from "./constants";
-import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
-import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
-import {
+  ProgressExtendableDeadline,
   clampCallerMcpRequestTimeoutMs,
   resolveMcpRequestTimeoutMs,
-  ProgressExtendableDeadline,
 } from "./mcpRequestTimeout";
-import { McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
-import { McpOverloadError } from "./McpOverloadError";
+import { McpTimeoutError } from "./McpTimeoutError";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
-import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import {
-  DeviceControlTransportError,
-  sanitizeDeviceControlTransportFailure,
-} from "./deviceControlTransportFailure";
-import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
-import { isDaemonHandshakeFailure } from "./daemonHandshake";
-import type { DaemonOptions, DaemonStatus } from "./types";
 import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
-import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
-import { DaemonHandshakeMismatchError } from "./DaemonHandshakeMismatchError";
+import { getCurrentBuildIdentity, type BuildIdentity } from "./buildIdentity";
+import {
+  CONNECTION_TIMEOUT_MS,
+  DAEMON_CANCEL_REQUEST_METHOD,
+  DAEMON_NON_FINITE_ENCODED_PARAM,
+  DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  DAEMON_VERSION,
+  PID_FILE_PATH,
+  SOCKET_PATH,
+} from "./constants";
+import { platform } from "node:os";
+import { encodeNonFinite } from "../utils/nonFiniteJson";
+import { existsSync, statSync } from "node:fs";
+import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DaemonUnavailableError } from "./DaemonUnavailableError";
+import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
+import {
+  daemonResponseError,
+  taskRelayField,
+  toDaemonTransportError,
+} from "./daemonResponseErrors";
+import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
+import { ActionableError } from "../models";
+import type { TaskRelayFrame, TaskRelayMethod } from "../server/tasks/taskRelay";
 import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
-import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
-import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
+import { errorMessage } from "../utils/describeUnknownError";
 
 export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),
@@ -113,6 +99,7 @@ export const daemonOptionsSchema = z.object({
 // otherwise silently strip before startup-option reconciliation can inspect it.
 type DaemonOptionsSchemaCoversAllKeys =
   Exclude<keyof DaemonOptions, keyof typeof daemonOptionsSchema.shape> extends never ? true : never;
+
 export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys = true;
 
 /** Bound on remembered cancelled request ids (issue #6384); oldest are evicted first. */
@@ -153,164 +140,6 @@ const socketOptionsStatusSchema = z.object({
   options: daemonOptionsSchema.optional(),
   effectiveDebug: z.boolean().optional(),
 });
-
-/**
- * Normalize a socket-level transport failure into a `DaemonUnavailableError`.
- *
- * When a daemon restart/crash tears down the connection, an in-flight request's
- * socket emits a raw transport error (`ECONNRESET` / `EPIPE` / "socket hang up")
- * with no daemon-level meaning. Surfacing that raw error verbatim wedges every
- * other connected session (#2599): the proxy only treats `DaemonUnavailableError`
- * and the daemon's own `Session not found` as recoverable, so a raw `ECONNRESET`
- * is not retried (#2737). Typing it here — at the layer that knows it is a socket
- * failure — keeps the recoverability signal in one place: the proxy reconnects via
- * its existing `instanceof DaemonUnavailableError` branch, and a *daemon-returned*
- * application error that merely mentions a transport code (e.g. a tool reporting a
- * downstream `connect ECONNREFUSED`) stays an `ActionableError` and is correctly
- * not retried. Already-typed `DaemonUnavailableError`s pass through unchanged.
- */
-export function toDaemonTransportError(error: Error): DaemonUnavailableError {
-  if (error instanceof DaemonUnavailableError) {
-    return error;
-  }
-  return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`, {
-    cause: error,
-  });
-}
-
-function daemonLifecycleResponseError(response: DaemonResponse): Error | undefined {
-  if (isDaemonHandshakeFailure(response.handshakeFailure)) {
-    return new DaemonHandshakeMismatchError(
-      response.handshakeFailure,
-      response.error || "Daemon identity mismatch",
-    );
-  }
-  if (isDaemonShuttingDownFailure(response.daemonShuttingDown)) {
-    return new DaemonShuttingDownError(
-      response.daemonShuttingDown.requestMayHaveDispatched === true,
-    );
-  }
-  const overloadFailure = sanitizeMcpOverloadFailure(response.overloadFailure);
-  if (overloadFailure) {
-    return new McpOverloadError(
-      response.error || "Daemon rejected overloaded MCP work",
-      overloadFailure,
-    );
-  }
-  return undefined;
-}
-
-function daemonSessionResponseError(response: DaemonResponse): Error | undefined {
-  const boundSessionLoss = sanitizeBoundSessionLoss(response.boundSessionLoss);
-  if (boundSessionLoss) {
-    return new DaemonBoundSessionLostError(boundSessionLoss);
-  }
-  const transportFailure = sanitizeDeviceControlTransportFailure(response.transportFailure);
-  if (transportFailure) {
-    return new DeviceControlTransportError(
-      response.error || "Device-control transport failure",
-      transportFailure,
-    );
-  }
-  return undefined;
-}
-
-function daemonFallbackResponseError(response: DaemonResponse): Error {
-  const requestFailureCause = sanitizeDaemonRequestFailureCause(response.requestFailureCause);
-  const cause = requestFailureCause ? new Error(requestFailureCause.message) : undefined;
-  if (cause && requestFailureCause) {
-    cause.name = requestFailureCause.name;
-  }
-  return new ActionableError(response.error || "Unknown error from daemon", { cause });
-}
-
-const livenessOwnerHoldSchema = z.object({
-  state: z.enum(["live", "suspect", "lapsed"]),
-  remainingMs: z.number().finite().nonnegative(),
-  holdRemainingMs: z.number().finite().nonnegative(),
-});
-
-/**
- * The owner's hold a `liveness_owner_conflict` refusal reports (#10701), when well-formed. A
- * challenger waits it out instead of guessing the daemon's lease from its own configuration.
- */
-function livenessOwnerHoldFromResponse(response: DaemonResponse): LivenessOwnerHold | undefined {
-  const parsed = livenessOwnerHoldSchema.safeParse(response.result?.liveness);
-  return parsed.success ? parsed.data : undefined;
-}
-
-/**
- * The daemon's `releaseReason` on a session-not-found answer (#10730), as an error field, with its
- * `idle: true` for an idle-window release (#10832, #10972).
- */
-function releaseReasonField(response: DaemonResponse): { releaseReason?: string; idle?: true } {
-  if (typeof response.releaseReason !== "string" || response.releaseReason.length === 0) {
-    return {};
-  }
-  // Daemon and proxy versions always match, so the shared reason table reproduces daemon idle.
-  return releasedSessionNotFoundFields(response.releaseReason);
-}
-
-/** A typed refusal's retry intent from a failed response (#11244), as error fields. */
-function typedRefusalResponseFields(
-  response: DaemonResponse,
-): Pick<DaemonResponse, "retryable" | "retryAfterMs" | "nextAction" | "details"> {
-  return {
-    ...(typeof response.retryable === "boolean" ? { retryable: response.retryable } : {}),
-    ...(typeof response.retryAfterMs === "number" ? { retryAfterMs: response.retryAfterMs } : {}),
-    ...(typeof response.nextAction === "string" ? { nextAction: response.nextAction } : {}),
-    ...(response.details && typeof response.details === "object"
-      ? { details: response.details }
-      : {}),
-  };
-}
-
-/** A request frame's Tasks relay (#4668): present only when the proxy relays the extension. */
-function taskRelayField(tasks: TaskRelayFrame | undefined): Pick<DaemonRequest, "tasks"> {
-  return tasks === undefined ? {} : { tasks };
-}
-
-/** A relayed `tasks/*` request's JSON-RPC error (#4668), when the frame carried a well-formed one. */
-function relayedJsonRpcErrorField(response: DaemonResponse): Pick<DaemonResponse, "jsonRpcError"> {
-  return isRelayedJsonRpcError(response.jsonRpcError)
-    ? { jsonRpcError: response.jsonRpcError }
-    : {};
-}
-
-/** The error a failed daemon response rejects with, carrying its structured code and details. */
-export function daemonResponseError(response: DaemonResponse): Error {
-  const error =
-    daemonLifecycleResponseError(response) ??
-    daemonSessionResponseError(response) ??
-    daemonFallbackResponseError(response);
-  // Preserve both top-level codes and the existing typed failure envelopes.
-  const code = [
-    response.code,
-    response.handshakeFailure?.code,
-    response.daemonShuttingDown?.code,
-    response.overloadFailure?.code,
-    response.boundSessionLoss?.code,
-    response.transportFailure?.code,
-  ].find((value) => value !== undefined);
-  const daemonInstance = daemonInstanceFromError(response);
-  if (daemonInstance !== undefined) {
-    Object.assign(error, { daemonInstance });
-  }
-  if (code === undefined) {
-    return error;
-  }
-  const livenessOwnerHold =
-    code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
-      ? livenessOwnerHoldFromResponse(response)
-      : undefined;
-  return Object.assign(error, {
-    code,
-    ...relayedJsonRpcErrorField(response),
-    ...typedRefusalResponseFields(response),
-    ...(livenessOwnerHold ? { livenessOwnerHold } : {}),
-    ...releaseReasonField(response),
-  });
-}
 
 /**
  * Options consulted ONLY to produce a helpful diagnostic hint on a failed
@@ -362,6 +191,13 @@ export interface DaemonMethodCallOptions {
  * - Receive and parse responses
  * - Handle timeouts and errors
  */
+/** Injectable host seams of {@link DaemonClient}; every field defaults to the real implementation. */
+interface DaemonClientInternals {
+  idGenerator?: IdGenerator;
+  platform?: NodeJS.Platform;
+  maxInboundFrameBytes?: number;
+}
+
 export class DaemonClient {
   private socket: Socket | Duplex | null = null;
   private socketPath: string;
@@ -416,6 +252,7 @@ export class DaemonClient {
    * skipped there, mirroring the platform branch already in {@link isAvailable}.
    */
   private readonly platform: NodeJS.Platform;
+  private readonly maxInboundFrameBytes: number;
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -429,10 +266,13 @@ export class DaemonClient {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     },
-    idGenerator: IdGenerator = defaultIdGenerator,
-    platformOverride: NodeJS.Platform = platform(),
-    private readonly maxInboundFrameBytes: number = DAEMON_CLIENT_MAX_FRAME_BYTES,
+    {
+      idGenerator = defaultIdGenerator,
+      platform: platformOverride = platform(),
+      maxInboundFrameBytes = DAEMON_CLIENT_MAX_FRAME_BYTES,
+    }: DaemonClientInternals = {},
   ) {
+    this.maxInboundFrameBytes = maxInboundFrameBytes;
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
     this.timer = timer;

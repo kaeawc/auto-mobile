@@ -32,6 +32,7 @@ src/daemon/daemonMcpProxy.ts -> src/server/tasks/mcpTasksExtension
 src/daemon/daemonMcpProxy.ts -> src/server/tasks/taskRelay
 src/daemon/daemonMcpProxy.ts -> src/server/toolEnvelopePayload
 src/daemon/daemonRequestHandlers.ts -> src/server/executionTracker
+src/daemon/daemonResponseErrors.ts -> src/server/tasks/taskRelay
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/appearanceManager
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/appearanceSessionKey
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/executionTracker

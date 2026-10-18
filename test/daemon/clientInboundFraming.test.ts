@@ -16,16 +16,11 @@ import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 function setup(limit = 256) {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    new FakeIdGenerator(["p"]),
-    "darwin",
-    limit,
-  );
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new FakeIdGenerator(["p"]),
+    platform: "darwin",
+    maxInboundFrameBytes: limit,
+  });
   client.attachSocketForTesting(socket);
   const feed = (frame: unknown) =>
     client.simulateIncomingDataForTesting(Buffer.from(JSON.stringify(frame) + "\n"));
@@ -225,16 +220,11 @@ async function withSocketConnection(
     callbacks.push(callback!);
     return socket;
   });
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    new FakeIdGenerator(["p", "q"]),
-    "win32",
-    128,
-  );
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new FakeIdGenerator(["p", "q"]),
+    platform: "win32",
+    maxInboundFrameBytes: 128,
+  });
   try {
     await scenario(client, sockets, callbacks, timer);
   } finally {

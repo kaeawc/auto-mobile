@@ -10,7 +10,9 @@ import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const device = { platform: "ios" as const, deviceId: "00008030-001E28C11E", name: "iPhone" };
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithOptions>[0]["remoteRunner"]
+>;
 const restores: Array<() => void> = [];
 const timers: FakeTimer[] = [];
 afterEach(() => {
@@ -99,16 +101,13 @@ function realFixture(remoteMode = false) {
       return { success: true, data: { running: true } };
     },
   };
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+  const manager = IOSCtrlProxyManager.createForTestingWithOptions({
     device,
     timer,
-    undefined,
-    executor,
-    undefined,
-    undefined,
-    remote,
-    { isAvailable: async () => true },
-  );
+    processExecutor: executor,
+    remoteRunner: remote,
+    hostPortAvailabilityChecker: { isAvailable: async () => true },
+  });
   manager.setStateForTesting({ servicePort: 8765 });
   const isRunning = manager.isProcessRunning.bind(manager);
   keep(

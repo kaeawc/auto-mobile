@@ -52,18 +52,14 @@ test("test construction preserves injected dependencies and defaults undefined f
   const signing = new XcodeSigningManager();
   const apps = new DeviceAppManager();
   const ports = { isAvailable: async () => true };
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+  const manager = IOSCtrlProxyManager.createForTestingWithOptions({
     device,
     timer,
-    undefined,
-    executor,
-    signing,
-    apps,
-    undefined,
-    ports,
-    undefined,
-    undefined,
-  );
+    processExecutor: executor,
+    signingManager: signing,
+    deviceAppManager: apps,
+    hostPortAvailabilityChecker: ports,
+  });
   expect(manager.diagnostics.timer).toBe(timer);
   expect(manager.diagnostics.processExecutor).toBe(executor);
   expect(manager.diagnostics.signingManager).toBe(signing);
@@ -94,7 +90,7 @@ test("test construction preserves every injected dependency", () => {
     throw new Error("Constructor must not perform operations");
   };
   const remoteRunner: NonNullable<
-    Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]
+    Parameters<typeof IOSCtrlProxyManager.createForTestingWithOptions>[0]["remoteRunner"]
   > = {
     isEnabled: () => false,
     isRunningInDocker: () => false,
@@ -117,18 +113,18 @@ test("test construction preserves every injected dependency", () => {
     startStreaming: unexpectedOperation,
   };
   const processClient = new IosCtrlProxyProcessClient(executor, timer);
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+  const manager = IOSCtrlProxyManager.createForTestingWithOptions({
     device,
     timer,
     builder,
-    executor,
-    signing,
-    apps,
+    processExecutor: executor,
+    signingManager: signing,
+    deviceAppManager: apps,
     remoteRunner,
-    ports,
+    hostPortAvailabilityChecker: ports,
     xcodebuild,
     processClient,
-  );
+  });
   expect(manager.diagnostics.device).toBe(device);
   expect(manager.diagnostics.timer).toBe(timer);
   expect(manager.diagnostics.builder).toBe(builder);

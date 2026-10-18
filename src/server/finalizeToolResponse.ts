@@ -1754,15 +1754,16 @@ function hasCompatibleStableMutationIdentity(
   );
 }
 
+/** The window/package facts that identify which app surface an observation shows. */
+function windowPackageSurface(result: ObserveResult): readonly string[] {
+  return [
+    result.activeWindow?.appId ?? "",
+    result.activeWindow?.activityName ?? "",
+    result.viewHierarchy?.packageName ?? "",
+  ];
+}
+
 function hasSameWindowPackageSurface(baseline: ObserveResult, next: ObserveResult): boolean {
-  if ((baseline.activeWindow?.appId ?? "") !== (next.activeWindow?.appId ?? "")) {
-    return false;
-  }
-  if ((baseline.activeWindow?.activityName ?? "") !== (next.activeWindow?.activityName ?? "")) {
-    return false;
-  }
-  if ((baseline.viewHierarchy?.packageName ?? "") !== (next.viewHierarchy?.packageName ?? "")) {
-    return false;
-  }
-  return true;
+  const nextSurface = windowPackageSurface(next);
+  return windowPackageSurface(baseline).every((value, index) => value === nextSurface[index]);
 }

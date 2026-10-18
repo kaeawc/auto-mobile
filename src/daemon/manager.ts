@@ -1,88 +1,20 @@
-import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
-import {
-  isCompleteRecoveryRecord,
-  recoveryOwnerSchema,
-  republishResultSchema,
-  type IdentityRecoveryIO,
-} from "./identityRecovery";
-import { createServer } from "node:net";
-import { errorMessage } from "../utils/describeUnknownError";
-import {
-  consumeDaemonExitRecord,
-  defaultDaemonExitRecordFileSystem,
-  removeDaemonExitRecord,
-  resolveDaemonExitOptions,
-  DAEMON_EXIT_RECORD_TTL_MS,
-  type DaemonExitRecordFileSystem,
-} from "./daemonExitRecord";
-import { getCurrentBuildIdentity } from "./buildIdentity";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { open, readFile, rm } from "node:fs/promises";
-import {
-  constants,
-  existsSync,
-  openSync,
-  closeSync,
-  fstatSync,
-  readFileSync,
-  writeSync,
-} from "node:fs";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
-import { devNull, tmpdir } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
-import { isPathInside } from "../utils/filesystem/pathContainment";
-import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
-  INCOMPLETE_EXTRACTION_CODE,
-  INCOMPLETE_EXTRACTION_EXIT_CODE,
-} from "../db/migrationDependencyIntegrity";
+  DaemonLauncher,
+  type DaemonLaunchCommand,
+  type DaemonLaunchedProcess,
+} from "./DaemonLauncher";
 import {
-  assertUnitTestLogsDirIsolated,
-  ensureSecureLogsDirSync,
-  resolveAutoMobileLogsDir,
-} from "../utils/tempDir";
-import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
-import { EVENT_ALL_MARKERS_FLAG } from "../utils/eventAllMarkers";
-import { ActionableError } from "../models";
-import {
-  PID_FILE_PATH,
-  SOCKET_PATH,
-  DEFAULT_PID_FILE_PATH,
-  DEFAULT_SOCKET_PATH,
-  LOCK_FILE_PATH,
-  DAEMON_LAUNCH_LOG_PATH_ENV,
-  DAEMON_STARTUP_TIMEOUT_MS,
-  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
-  DAEMON_SHUTDOWN_TIMEOUT_MS,
-  DAEMON_FORCED_STOP_TIMEOUT_MS,
-  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-  DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
-  DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS,
-  DAEMON_RESTART_HANDOFF_DELAY_MS,
-  READINESS_PROBE_MAX_ATTEMPTS,
-  READINESS_PROBE_BACKOFF_MS,
-  DEFAULT_DAEMON_PORT,
-  DAEMON_VERSION,
-  DAEMON_VERSION_RESTART_COOLDOWN_MS,
-} from "./constants";
-import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
-import {
-  DaemonClient,
-  type DaemonClientFactory,
-  type DaemonClientFactoryOptions,
-  type DaemonClientLike,
-} from "./client";
-import {
-  DAEMON_REPUBLISH_IDENTITY_METHOD,
-  DAEMON_PREPARE_MAINTENANCE_METHOD,
-  DAEMON_COMPLETE_MAINTENANCE_METHOD,
-  DAEMON_PREPARE_RESTART_METHOD,
-  DAEMON_RESTART_ADMITTED_METHOD,
-  type AcceptanceSessionRestartScope,
-  DaemonRestartDeferredError,
-  type DaemonAdmittedRestart,
-  type DaemonRestartPreparation,
-} from "./daemonRestartAdmission";
+  DAEMON_SOCKET_PATH_FLAG,
+  createDefaultDaemonProcessFinder,
+  isShellCommandWrapper,
+  parseDaemonSocketPath,
+  type DaemonProcessFinder,
+  type DaemonProcessLivenessChecker,
+  type DaemonProcessRecord,
+  type DaemonProcessSignaler,
+} from "./processTable";
+import { DaemonOptions, DaemonStatus, PidFileData } from "./types";
 import {
   mergeRestartOptions,
   restartAcceptanceSession as restartAcceptanceSessionDaemon,
@@ -93,30 +25,63 @@ import {
   type DaemonRestartResult,
 } from "./daemonRestart";
 import {
+  DAEMON_COMPLETE_MAINTENANCE_METHOD,
+  DAEMON_PREPARE_MAINTENANCE_METHOD,
+  DAEMON_PREPARE_RESTART_METHOD,
+  DAEMON_REPUBLISH_IDENTITY_METHOD,
+  DAEMON_RESTART_ADMITTED_METHOD,
+  DaemonRestartDeferredError,
+  type AcceptanceSessionRestartScope,
+  type DaemonAdmittedRestart,
+  type DaemonRestartPreparation,
+} from "./daemonRestartAdmission";
+import { basename, isAbsolute, join } from "node:path";
+import { createServer } from "node:net";
+import {
+  isCompleteRecoveryRecord,
+  recoveryOwnerSchema,
+  republishResultSchema,
+  type IdentityRecoveryIO,
+} from "./identityRecovery";
+import {
+  DaemonClient,
+  type DaemonClientFactory,
+  type DaemonClientFactoryOptions,
+  type DaemonClientLike,
+} from "./client";
+import type { DaemonStateLike } from "./daemonState";
+import type { Timer } from "../utils/SystemTimer";
+import type { RetryExecutor } from "../utils/retry/RetryExecutor";
+import type { DaemonPortAvailabilityChecker } from "./portAvailability";
+import type { ExtractionCleaner } from "./extractionRoot";
+import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
-import { DaemonState, type DaemonStateLike } from "./daemonState";
-import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { sequenceBackoff } from "../utils/Backoff";
-import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryExecutor";
 import {
-  cleanupDaemonFiles,
-  clearDaemonLaunchLogOwnerTombstoneSync,
-  isConfirmedRecycledProcess,
-  readPidFileDataSync,
-  shouldProtectLiveDaemonVersion,
-} from "./daemonFiles";
-import { recordProvesFormerSocketOwner } from "./incumbentOwnerGuard";
+  DAEMON_EXIT_RECORD_TTL_MS,
+  consumeDaemonExitRecord,
+  defaultDaemonExitRecordFileSystem,
+  removeDaemonExitRecord,
+  resolveDaemonExitOptions,
+  type DaemonExitRecordFileSystem,
+} from "./daemonExitRecord";
 import {
-  compareProcessGenerationTokens,
-  type ProcessGenerationTokenComparison,
-} from "./processGeneration";
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
 import {
-  processGenerationRecordFields,
-  recordedProcessGenerationToken,
-  type ProcessGenerationRecordFields,
-} from "./processGenerationFields";
+  DAEMON_LAUNCH_CWD_ENV,
+  resolveDaemonLaunchWorkingDirectory,
+  resolvePathFromDaemonLaunchWorkingDirectory,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
+import { getCurrentBuildIdentity } from "./buildIdentity";
 import {
   compareLockOwnerGeneration,
   formatLockContent,
@@ -125,44 +90,75 @@ import {
   tryAcquireExclusiveLock,
   type LockOwnerGenerationProbe,
 } from "../utils/fileLock";
-import { defaultIdGenerator } from "../utils/IdGenerator";
+import type { DaemonManagerOptions } from "./managerOptions";
 import {
-  DAEMON_LAUNCH_CWD_ENV,
-  resolveDaemonLaunchWorkingDirectory,
-  resolvePathFromDaemonLaunchWorkingDirectory,
-  resolveStableDaemonWorkingDirectory,
-} from "../utils/workingDirectory";
-import { TOOL_OUTPUTS_DIR_ENV } from "../utils/toolOutputArtifacts";
+  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
+  DAEMON_FORCED_STOP_TIMEOUT_MS,
+  DAEMON_LAUNCH_LOG_PATH_ENV,
+  DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_DELAY_MS,
+  DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+  DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS,
+  DAEMON_VERSION,
+  DAEMON_VERSION_RESTART_COOLDOWN_MS,
+  DEFAULT_DAEMON_PORT,
+  DEFAULT_PID_FILE_PATH,
+  DEFAULT_SOCKET_PATH,
+  LOCK_FILE_PATH,
+  PID_FILE_PATH,
+  READINESS_PROBE_BACKOFF_MS,
+  READINESS_PROBE_MAX_ATTEMPTS,
+  SOCKET_PATH,
+} from "./constants";
+import { resolveManagerEnvironment, resolveManagerServices } from "./managerDefaults";
 import {
-  DaemonLauncher,
-  type DaemonLaunchCommand,
-  type DaemonLaunchedProcess,
-} from "./DaemonLauncher";
-import { RUNNER_READINESS_TIMEOUT_FLAG } from "../utils/runnerReadinessConfig";
+  cleanupDaemonFiles,
+  clearDaemonLaunchLogOwnerTombstoneSync,
+  isConfirmedRecycledProcess,
+  readPidFileDataSync,
+  shouldProtectLiveDaemonVersion,
+} from "./daemonFiles";
+import { errorMessage } from "../utils/describeUnknownError";
+import { ActionableError } from "../models";
+import {
+  processGenerationRecordFields,
+  recordedProcessGenerationToken,
+  type ProcessGenerationRecordFields,
+} from "./processGenerationFields";
+import { sequenceBackoff } from "../utils/Backoff";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { daemonProcessEnvironment, daemonProcessOptions } from "./daemonOptionScopes";
+import { resolveDaemonInstallSpecifier } from "../constants/release";
+import { devNull } from "node:os";
 import {
-  createDefaultDaemonProcessFinder,
-  isShellCommandWrapper,
-  DAEMON_SOCKET_PATH_FLAG,
-  parseDaemonSocketPath,
-  type DaemonProcessFinder,
-  type DaemonProcessLivenessChecker,
-  type DaemonProcessRecord,
-  type DaemonProcessSignaler,
-} from "./processTable";
+  assertUnitTestLogsDirIsolated,
+  ensureSecureLogsDirSync,
+  resolveAutoMobileLogsDir,
+} from "../utils/tempDir";
 import {
-  NetDaemonPortAvailabilityChecker,
-  type DaemonPortAvailabilityChecker,
-} from "./portAvailability";
+  INCOMPLETE_EXTRACTION_CODE,
+  INCOMPLETE_EXTRACTION_EXIT_CODE,
+} from "../db/migrationDependencyIntegrity";
+import { TOOL_OUTPUTS_DIR_ENV } from "../utils/toolOutputArtifacts";
+import { daemonOptionsToArgs } from "./daemonOptionArgs";
+import { open, readFile } from "node:fs/promises";
+import {
+  compareProcessGenerationTokens,
+  type ProcessGenerationTokenComparison,
+} from "./processGeneration";
+import { DaemonGenerationExitedBeforeSignalError } from "./DaemonGenerationExitedBeforeSignalError";
+import { recordProvesFormerSocketOwner } from "./incumbentOwnerGuard";
 import {
   runDaemonCommand as runDaemonCommandWithManager,
   type RunDaemonCommandOptions,
 } from "./cli/runDaemonCommand";
-import { DaemonGenerationExitedBeforeSignalError } from "./DaemonGenerationExitedBeforeSignalError";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
+
 export type { DaemonManagerOptions } from "./managerOptions";
-import type { DaemonManagerOptions } from "./managerOptions";
+
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
@@ -171,15 +167,20 @@ export {
   parseDaemonProcessTable,
   parseDarwinDaemonProcessTable,
 } from "./processTable";
+
 export type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
   DaemonProcessRecord,
   DaemonProcessSignaler,
 } from "./processTable";
+
 export { NetDaemonPortAvailabilityChecker } from "./portAvailability";
+
 export type { DaemonPortAvailabilityChecker, ProbeListener } from "./portAvailability";
+
 export { parseDaemonArgs } from "./cli/daemonArgs";
+
 export {
   daemonBuildIdentityStatusLines,
   daemonCommandOptions,
@@ -187,6 +188,7 @@ export {
   parseDaemonHeartbeatCommandArgs,
   parseRestartAdmittedMaintenanceToken,
 } from "./cli/runDaemonCommand";
+
 export type { DaemonHeartbeatCommandArgs, RunDaemonCommandOptions } from "./cli/runDaemonCommand";
 
 /**
@@ -233,54 +235,6 @@ interface WaitForStopResult {
  * directions: an older process is not interchangeable with this generation.
  */
 const DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS = 2_000;
-
-const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
-  signal(pid, signal): void {
-    process.kill(pid, signal);
-  },
-};
-
-export interface ExtractionCleaner {
-  removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
-}
-
-/** Exported for tests. */
-export function resolveExtractionRootForEntryScript(entryScript: string): string | null {
-  const resolved = resolve(entryScript);
-  const parts = resolved.split(sep);
-  const nodeModulesIndex = parts.lastIndexOf("node_modules");
-  if (nodeModulesIndex <= 0) {
-    return null;
-  }
-
-  const packagePath = parts.slice(nodeModulesIndex + 1, nodeModulesIndex + 3).join("/");
-  if (packagePath !== "@kaeawc/auto-mobile") {
-    return null;
-  }
-
-  const root = parts.slice(0, nodeModulesIndex).join(sep) || sep;
-  if (root === sep) {
-    return null;
-  }
-
-  const tempRoot = resolve(tmpdir());
-  if (!isPathInside(tempRoot, root, { allowEqual: false })) {
-    return null;
-  }
-  return root;
-}
-
-const fileSystemExtractionCleaner: ExtractionCleaner = {
-  async removeExtractionForEntryScript(entryScript: string): Promise<boolean> {
-    const extractionRoot = resolveExtractionRootForEntryScript(entryScript);
-    if (!extractionRoot) {
-      return false;
-    }
-
-    await rm(extractionRoot, { recursive: true, force: true });
-    return true;
-  },
-};
 
 function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivenessChecker {
   return (
@@ -548,27 +502,24 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe;
 
   constructor(options: DaemonManagerOptions = {}) {
+    const { stateProvider, timer, lockFilePath, pidFilePath, socketPath, platform, idGenerator } =
+      resolveManagerEnvironment(options);
+    const {
+      processFinder,
+      extractionCleaner,
+      processSignaler,
+      portAvailabilityChecker,
+      retryExecutor,
+      lockOwnerGenerationProbe,
+    } = resolveManagerServices(options, timer);
     const {
       clientFactory,
-      stateProvider = () => DaemonState.getInstance(),
-      timer = defaultTimer,
-      lockFilePath = LOCK_FILE_PATH,
-      pidFilePath = PID_FILE_PATH,
-      socketPath = SOCKET_PATH,
-      processFinder = createDefaultDaemonProcessFinder(),
       processSpawner,
-      extractionCleaner = fileSystemExtractionCleaner,
       launcher,
       launchCommandResolver,
-      processSignaler = defaultDaemonProcessSignaler,
-      idGenerator = defaultIdGenerator,
       peerSocketReachability,
-      platform: platformOverride = process.platform,
-      portAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
-      retryExecutor = new DefaultRetryExecutor(timer),
       daemonProtocolHealthProbe,
       identityRecoveryIO,
-      lockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
     } = options;
     this.lockOwnerGenerationProbe = lockOwnerGenerationProbe;
     this.identityRecoveryIO = identityRecoveryIO ?? {
@@ -588,7 +539,7 @@ export class DaemonManager implements DaemonManagerLike {
             )
           : new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
     };
-    this.platform = platformOverride;
+    this.platform = platform;
     this.portAvailabilityChecker = portAvailabilityChecker;
     this.retryExecutor = retryExecutor;
     this.startupLockOwnerToken = idGenerator.next();
@@ -1709,127 +1660,14 @@ export class DaemonManager implements DaemonManagerLike {
 
   /** Merge the launch options into the daemon command. Public so tests can observe the launch options. */
   withDaemonOptions(launch: DaemonLaunchCommand, options: DaemonOptions): DaemonLaunchCommand {
-    const args = [
-      ...launch.args,
-      `${DAEMON_SOCKET_PATH_FLAG}=${encodeURIComponent(this.socketPath)}`,
-    ];
-    if (options.port) {
-      args.push("--port", options.port.toString());
-    }
-    if (options.host) {
-      args.push("--host", options.host);
-    }
-    if (options.strictPort) {
-      args.push("--strict-port");
-    }
-    if (options.debug) {
-      args.push("--debug");
-    }
-    if (options.debugPerf) {
-      args.push("--debug-perf");
-    }
-    if (options.planExecutionLockScope) {
-      args.push("--plan-execution-lock-scope", options.planExecutionLockScope);
-    }
-    if (options.runnerReadinessTimeoutMs !== undefined) {
-      args.push(RUNNER_READINESS_TIMEOUT_FLAG, options.runnerReadinessTimeoutMs.toString());
-    }
-    if (options.videoQualityPreset) {
-      args.push("--video-quality", options.videoQualityPreset);
-    }
-    if (options.videoTargetBitrateKbps !== undefined) {
-      args.push("--video-target-bitrate-kbps", options.videoTargetBitrateKbps.toString());
-    }
-    if (options.videoMaxThroughputMbps !== undefined) {
-      args.push("--video-max-throughput-mbps", options.videoMaxThroughputMbps.toString());
-    }
-    if (options.videoFps !== undefined) {
-      args.push("--video-fps", options.videoFps.toString());
-    }
-    if (options.videoFormat) {
-      args.push("--video-format", options.videoFormat);
-    }
-    if (options.videoMaxArchiveSizeMb !== undefined) {
-      args.push("--video-archive-size-mb", options.videoMaxArchiveSizeMb.toString());
-    }
-    if (options.networkMockable) {
-      args.push("--network-mockable");
-    }
-    if (options.embeddedSdk) {
-      args.push("--embedded-sdk");
-    }
-    for (const toolName of options.enabledTools ?? []) {
-      args.push("--enable-tool", toolName);
-    }
-    for (const toolName of options.disabledTools ?? []) {
-      args.push("--disable-tool", toolName);
-    }
-    if (options.dismissKeyboardAfterInput) {
-      args.push("--dismiss-keyboard-after-input");
-    }
-    if (options.eventAllMarkers && options.eventAllMarkers.length > 0) {
-      args.push(EVENT_ALL_MARKERS_FLAG, options.eventAllMarkers.join(","));
-    } else if (options.eventAllMarkersCliOverride) {
-      args.push(`${EVENT_ALL_MARKERS_FLAG}=`);
-    }
-    if (options.noUiPerfMode) {
-      args.push("--no-ui-perf-mode");
-    }
-    if (options.noNavigationScreenshots) {
-      args.push("--no-navigation-screenshots");
-    }
-    if (options.noWaitForPollingOverhead) {
-      args.push("--no-waitfor-polling-overhead");
-    }
-    if (options.noOcclusion) {
-      args.push("--no-occlusion");
-    }
-    // Accessibility-service view-filter flags (issue #4344 propagation audit):
-    // these were in the daemon-options object but serialized nowhere, so a
-    // manager-spawned daemon never received them on either transport.
-    if (options.noA11yIncludeNotImportantViews) {
-      args.push("--no-include-not-important-views");
-    }
-    if (options.noA11yReportViewIds) {
-      args.push("--no-report-view-ids");
-    }
-    if (options.noA11yRetrieveInteractiveWindows) {
-      args.push("--no-retrieve-interactive-windows");
-    }
-    if (options.memPerfAudit) {
-      args.push("--mem-perf-audit");
-    }
-    if (options.accessibilityAudit) {
-      args.push("--accessibility-audit");
-    }
-    if (options.accessibilityLevel) {
-      args.push("--a11y-level", options.accessibilityLevel);
-    }
-    if (options.accessibilityFailureMode) {
-      args.push("--a11y-failure-mode", options.accessibilityFailureMode);
-    }
-    if (options.accessibilityMinSeverity) {
-      args.push("--a11y-min-severity", options.accessibilityMinSeverity);
-    }
-    if (options.accessibilityUseBaseline) {
-      args.push("--a11y-use-baseline");
-    }
-    if (options.predictiveUi) {
-      args.push("--predictive-ui");
-    }
-    if (options.rawElementSearch) {
-      args.push("--raw-element-search");
-    }
-    if (options.skipCtrlProxyDownload) {
-      args.push("--skip-ctrl-proxy-download");
-    }
-    if (options.toolCallRecording) {
-      args.push("--tool-call-recording");
-    }
-    // Output-reduction flags (issue #2756): serialized off the shared specs so
-    // they can't drift from the daemon-side parse in parseDaemonArgs.
-    args.push(...outputReductionFlagsToArgs(options));
-    return { command: launch.command, args };
+    return {
+      command: launch.command,
+      args: [
+        ...launch.args,
+        `${DAEMON_SOCKET_PATH_FLAG}=${encodeURIComponent(this.socketPath)}`,
+        ...daemonOptionsToArgs(options),
+      ],
+    };
   }
 
   private resolveLaunchCommand(): DaemonLaunchCommand {

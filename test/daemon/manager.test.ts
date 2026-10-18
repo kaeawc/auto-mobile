@@ -39,7 +39,8 @@ import {
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
-import type { DaemonProcessSpawner, ExtractionCleaner } from "../../src/daemon/manager";
+import type { DaemonProcessSpawner } from "../../src/daemon/manager";
+import type { ExtractionCleaner } from "../../src/daemon/extractionRoot";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";

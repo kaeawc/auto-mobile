@@ -1,4 +1,4 @@
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/daemonResponseErrors";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

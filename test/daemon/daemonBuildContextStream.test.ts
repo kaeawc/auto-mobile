@@ -21,7 +21,7 @@ describe("daemon build-context stream wiring", () => {
   function manager(): NavigationGraphManager {
     return new NavigationGraphManager(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       new FakeTimer(),
     );
   }

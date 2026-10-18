@@ -59,10 +59,10 @@ function decodeIncident(value: string): EmulatorLossIncident | undefined {
  */
 export class EmulatorLossIncidentRepository implements EmulatorLossIncidentStore {
   constructor(
+    private readonly database?: Kysely<Database>,
     private readonly timer: Timer = defaultTimer,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
     private readonly maxRetained: number = DEFAULT_MAX_RETAINED_EMULATOR_LOSS_INCIDENTS,
-    private readonly database?: Kysely<Database>,
   ) {}
 
   async open(input: OpenEmulatorLossIncidentInput): Promise<EmulatorLossIncident> {

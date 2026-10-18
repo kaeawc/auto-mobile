@@ -30,7 +30,7 @@ export async function installBenchmarkNavigationManager(): Promise<BenchmarkNavi
   // Both repositories share the one connection (NavigationGraphManager's precondition).
   const manager = NavigationGraphManager.createForTesting(
     new NavigationRepository(db),
-    new TestCoverageRepository(undefined, db),
+    new TestCoverageRepository(db),
   );
   NavigationGraphManager.setInstanceForTesting(manager);
 

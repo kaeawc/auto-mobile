@@ -101,7 +101,7 @@ describe("DB concurrency RMW audit", () => {
     expect(failureGroups[0].unique_sessions).toBe(N);
     expect(failureOccurrences).toHaveLength(N);
 
-    const coverage = new TestCoverageRepository(timer, db);
+    const coverage = new TestCoverageRepository(db, timer);
     const sessions = await runConcurrentSameKeyStress({
       count: N,
       act: () => coverage.getOrCreateSession("coverage-session", "com.example.audit"),

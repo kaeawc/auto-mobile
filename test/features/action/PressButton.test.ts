@@ -340,7 +340,7 @@ describe("PressButton", () => {
 
     try {
       const pressButton = new PressButton(iosDevice);
-      const result = await pressButton.executeiOSButtonPress("back");
+      const result = await dispatch(pressButton, "back");
 
       expect(result.success).toBe(true);
       expect(backCalls).toBe(1);
@@ -363,7 +363,7 @@ describe("PressButton", () => {
 
     try {
       const pressButton = new PressButton(iosDevice);
-      const result = await pressButton.executeiOSButtonPress("recent");
+      const result = await dispatch(pressButton, "recent");
 
       expect(result.success).toBe(true);
       expect(recentCalls).toBe(1);
@@ -679,7 +679,7 @@ describe("PressButton", () => {
       const pressButton = new PressButton(iosDevice);
 
       for (const button of ["volume_up", "volume_down", "power"]) {
-        const result = await pressButton.executeiOSButtonPress(button);
+        const result = await dispatch(pressButton, button);
         expect(result).toEqual({ success: true, button, keyCode: -1 });
       }
 
@@ -703,7 +703,7 @@ describe("PressButton", () => {
       const pressButton = new PressButton(iosSimulator);
 
       for (const button of ["volume_up", "volume_down", "power"]) {
-        const result = await pressButton.executeiOSButtonPress(button);
+        const result = await dispatch(pressButton, button);
         expect(result).toEqual({ success: true, button, keyCode: -1 });
       }
 
@@ -775,7 +775,7 @@ describe("PressButton", () => {
 
     try {
       const pressButton = new PressButton(iosDevice);
-      const result = await pressButton.executeiOSButtonPress("power");
+      const result = await dispatch(pressButton, "power");
 
       expect(result.success).toBe(false);
       expect(result.button).toBe("power");
@@ -828,21 +828,12 @@ beforeOutputSchema(() => {
 });
 afterOutputSchema(() => pressOutputSchemaSpy.mockRestore());
 
-// Existing dispatch tests intentionally exercise the transport seam.
-const dispatchPrototype = PressButton.prototype;
-const dispatchForOutputSchema = dispatchPrototype.executeiOSButtonPress;
-let dispatchOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
-beforeOutputSchema(() => {
-  dispatchOutputSchemaSpy = spyOnOutputSchema(
-    dispatchPrototype,
-    "executeiOSButtonPress",
-  ).mockImplementation(async function (
-    this: PressButton,
-    ...args: Parameters<PressButton["press"]>
-  ) {
-    const result = await dispatchForOutputSchema.apply(this, args);
-    expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
-    return result;
-  });
-});
-afterOutputSchema(() => dispatchOutputSchemaSpy.mockRestore());
+// Dispatch tests drive the transport seam through testHooks and still validate the result schema.
+async function dispatch(
+  pressButton: PressButton,
+  ...args: Parameters<PressButton["press"]>
+): ReturnType<PressButton["press"]> {
+  const result = await pressButton.testHooks.executeiOSButtonPress(...args);
+  expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
+  return result;
+}

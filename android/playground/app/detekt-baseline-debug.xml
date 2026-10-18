@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>TooGenericExceptionCaught:DeepLinkManager.kt:DeepLinkManager$e: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

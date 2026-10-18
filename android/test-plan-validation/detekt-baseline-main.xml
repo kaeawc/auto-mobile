@@ -2,6 +2,8 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>SwallowedException:TestPlanValidator.kt:TestPlanValidator$e: ArithmeticException</ID>
+    <ID>TooGenericExceptionCaught:TestPlanValidator.kt:TestPlanValidator$e: Exception</ID>
     <ID>UnsafeCallOnNullableType:TestPlanValidator.kt:TestPlanValidator$schema!!</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -2,6 +2,9 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>EmptyFunctionBlock:FileSaver.kt:NoOpFileSaver${}</ID>
+    <ID>EmptyFunctionBlock:McpResourceClient.kt:FakeMcpResourceClient${}</ID>
+    <ID>EmptyFunctionBlock:NotificationHandler.kt:NoOpNotificationHandler${}</ID>
     <ID>InjectDispatcher:AutoMobileContent.kt:Default</ID>
     <ID>InjectDispatcher:AutoMobileContent.kt:IO</ID>
     <ID>InjectDispatcher:ConveyorUpdateController.kt:ConveyorUpdateController$IO</ID>
@@ -39,6 +42,91 @@
     <ID>InjectDispatcher:WorkspaceDeviceControl.kt:Default</ID>
     <ID>InjectDispatcher:WorkspaceShell.kt:IO</ID>
     <ID>RedundantSuspendModifier:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$suspend</ID>
+    <ID>SwallowedException:DeviceModels.kt:DeviceResourceParser$e: Exception</ID>
+    <ID>SwallowedException:DeviceScreenView.kt:e: Exception</ID>
+    <ID>SwallowedException:DiagnosticsDashboard.kt:e: Exception</ID>
+    <ID>SwallowedException:McpProcessDetector.kt:RealMcpProcessDetector$e: Exception</ID>
+    <ID>SwallowedException:McpProcessDetector.kt:SystemProcessRunner$e: Exception</ID>
+    <ID>SwallowedException:McpStdioClient.kt:McpStdioClient$e: Exception</ID>
+    <ID>SwallowedException:McpStdioClient.kt:McpStdioClient$e: ExecutionException</ID>
+    <ID>SwallowedException:NavigationScreenshotLoader.kt:NavigationScreenshotLoader$e: Exception</ID>
+    <ID>SwallowedException:NavigationScreenshotLoader.kt:NavigationScreenshotLoader$e: McpConnectionException</ID>
+    <ID>SwallowedException:RealLayoutDataSource.kt:HierarchyNodeDto$e: Exception</ID>
+    <ID>SwallowedException:RealLayoutDataSource.kt:RealLayoutDataSource$e: Exception</ID>
+    <ID>SwallowedException:RealPerformanceDataSource.kt:RealPerformanceDataSource$e: Exception</ID>
+    <ID>SwallowedException:TestDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AppListDataSource.kt:RealAppListDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileClient.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileClient.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:AutoMobileContent.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ConveyorUpdateController.kt:ConveyorUpdateController$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DaemonConnectionMonitor.kt:DaemonConnectionMonitor$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DaemonNotificationClient.kt:DaemonNotificationClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DaemonStatusSection.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DatabaseInspector.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DesktopDaemonLifecycle.kt:DesktopDaemonLifecycle$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DesktopDaemonLifecycle.kt:SystemDesktopBunInstaller$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceBootController.kt:RealDeviceBootController$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceControlInputForwarder.kt:DeviceControlInputForwarder$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceControlsDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceFilterPersistence.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceListSection.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceModels.kt:DeviceResourceParser$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DevicePickerViewModel.kt:DevicePickerViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceScreenView.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DeviceThumbnail.kt:ObservationScreenshotSource$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DiagnosticsDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailuresDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailuresDataSource.kt:McpFailuresDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailuresPushSocketClient.kt:FailuresPushSocketClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailuresViewModel.kt:FailuresViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FileSaver.kt:SwingFileSaver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FileSettingsProvider.kt:FileSettingsProvider$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ForegroundAppResolver.kt:ObservationForegroundAppResolver$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:HierarchyParser.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:McpDaemonClient.McpGestureInputStream$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpDaemonClient.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpHttpClient.kt:McpHttpClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpProcessDetector.kt:RealMcpProcessDetector$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpProcessDetector.kt:SystemProcessRunner$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpResourceClient.kt:DaemonMcpResourceClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpResourceClient.kt:McpResourceClientFactory$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:McpStdioClient.kt:McpStdioClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:MemoryPressureMonitor.kt:MemoryPressureMonitor$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NavigationDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NavigationFacet.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NavigationScreenshotLoader.kt:NavigationScreenshotLoader$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NavigationViewModel.kt:NavigationViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NetworkRequestRunner.kt:NetworkRequestRunner$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ObservationStreamClient.kt:ObservationStreamClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OfflineNavigationBrowser.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OneShotSocketRequest.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:PackagedVersionSource.kt:PackagedVersionSource$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:PerformanceDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealLayoutDataSource.kt:HierarchyNodeDto$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealLayoutDataSource.kt:RealLayoutDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealNavigationDataSource.kt:RealNavigationDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealNetworkGraphDataSource.kt:RealNetworkGraphDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealNetworkRequestsDataSource.kt:RealNetworkRequestsDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealPerformanceDataSource.kt:RealPerformanceDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealStorageDataSource.kt:RealStorageDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealTestDataSource.kt:RealTestDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:RealUpdateController.kt:RealUpdateController$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:RetryPolicy.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SettingsDialog.kt:FeatureFlagsViewModel$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SnapshotsDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SourceFileOpener.kt:SourceFileOpener$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StdioResponsePump.kt:StdioResponsePump$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StorageDashboard.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StreamingFailuresDataSource.kt:StreamingFailuresDataSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:TelemetryPushSocketClient.kt:TelemetryPushSocketClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:UpdateReadyButton.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoInputDispatcher.kt:VideoInputDispatcher$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoStreamClient.kt:VideoStreamClient$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WorkspaceShell.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:WorkspaceViewModel.kt:WorkspaceViewModel$error: Exception</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.recompositionRate!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.timeToInteractiveMs!!</ID>
     <ID>UnnecessaryNotNullOperator:PerformanceDashboard.kt:update.touchLatencyMs!!</ID>

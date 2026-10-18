@@ -6,6 +6,7 @@ import type { SessionOptions } from "./ToolExecutionContext";
 import type { DeviceLabelMap, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { logger } from "../utils/logger";
+import { holdTaskDeviceLeases } from "./tasks/runAsTask";
 import { combineAbortSignals } from "../utils/AbortContext";
 
 const buildDeviceLabelList = (labels: string[]): string[] => {
@@ -204,6 +205,8 @@ export const registerDeviceLabelMap = async (
   // expiry checker uses it to keep every labeled session alive for the active
   // base-plan execution while allocation/setup crosses an idle deadline.
   sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
+  // As an MCP task (#13088) the plan holds each label session alive until the task settles.
+  holdTaskDeviceLeases(Object.values(deviceLabelMap));
   await createToolExecutionContext(
     baseSessionUuid,
     sessionManager,

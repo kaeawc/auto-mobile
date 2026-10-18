@@ -52,6 +52,27 @@ describe("SwipeOn durationMs (#12538)", () => {
     expect(gesture.getSwipeCalls()[0].options?.duration).toBe(120);
   });
 
+  test("a single swipe reports velocityPxPerSecond from the dispatched duration (#12968)", async () => {
+    const result = await createSwipeOn().execute({
+      direction: "up",
+      autoTarget: false,
+      durationMs: 120,
+    });
+    const call = gesture.getSwipeCalls()[0];
+    const distance = Math.hypot(call.x2 - call.x1, call.y2 - call.y1);
+    expect(result.velocityPxPerSecond).toBe(Math.round((distance / 120) * 1000));
+  });
+
+  test("a boomerang omits velocityPxPerSecond because duration spans both legs (#12968)", async () => {
+    const result = await createSwipeOn().execute({
+      direction: "up",
+      autoTarget: false,
+      boomerang: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.velocityPxPerSecond).toBeUndefined();
+  });
+
   test("speed and durationMs together are rejected before dispatch", async () => {
     const result = await createSwipeOn().execute({
       direction: "up",

@@ -75,3 +75,44 @@ export function semanticScrollSuccess(
 export function explicitDuration(options: { durationMs?: number }): true | undefined {
   return options.durationMs === undefined ? undefined : true;
 }
+
+/** Adds the straight-line velocity of a successful swipe so the fling can be reproduced (#12538). */
+export function withVelocity<T extends SwipeResult>(
+  result: T,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  duration: number,
+): T {
+  if (duration <= 0) {
+    return result;
+  }
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  return { ...result, velocityPxPerSecond: Math.round((distance / duration) * 1000) };
+}
+
+/**
+ * swipeOn's velocity (#12968): distance over the duration the route really dispatched
+ * (`effectiveDurationMs` when the iOS runner clamped it). Omitted when the route ignored the
+ * duration (TalkBack semantic scroll), for a boomerang (`duration` is both legs plus the pause)
+ * and for a `lookFor` search (many swipes), where no single fling exists to reproduce.
+ */
+export function withSwipeOnVelocity<
+  T extends Pick<SwipeResult, "success" | "x1" | "y1" | "x2" | "y2" | "duration"> & {
+    durationIgnored?: boolean;
+    effectiveDurationMs?: number;
+  },
+>(result: T, options: { boomerang?: unknown; lookFor?: unknown }): T {
+  if (!result.success || result.durationIgnored || options.boomerang || options.lookFor) {
+    return result;
+  }
+  const coordinates = [result.x1, result.y1, result.x2, result.y2];
+  if (!coordinates.every(Number.isFinite)) {
+    return result;
+  }
+  return withVelocity(
+    result,
+    { x: result.x1, y: result.y1 },
+    { x: result.x2, y: result.y2 },
+    result.effectiveDurationMs ?? result.duration,
+  );
+}

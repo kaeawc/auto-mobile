@@ -288,8 +288,8 @@ describe("startDevice as an MCP task (#4668)", () => {
     expect(sessions.peekSession(sessionUuid)?.hasReceivedHeartbeat).toBe(false);
   });
 
-  test("startDevice is the eligible tool", () => {
-    expect([...TASK_ELIGIBLE_TOOLS]).toEqual(["startDevice"]);
+  test("startDevice is an eligible tool", () => {
+    expect(TASK_ELIGIBLE_TOOLS.has("startDevice")).toBe(true);
   });
 
   test("a declaring call gets a task that completes with the startDevice result, holding the bound session until then", async () => {

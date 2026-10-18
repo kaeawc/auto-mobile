@@ -391,6 +391,13 @@ function resolveCoordinateTap(
   args: Record<string, unknown>,
 ): EdgeTargetResolution {
   const { x, y } = args;
+  if (args.pointer !== undefined) {
+    // An element tap is a finger touch; replaying a stylus edge that way would silently change it.
+    return notValidatable(
+      edge,
+      'recorded "tapAt" used a stylus pointer, which an element tap cannot replay',
+    );
+  }
   if (typeof x !== "number" || typeof y !== "number") {
     return notValidatable(edge, 'recorded "tapAt" interaction has no numeric x/y coordinate');
   }

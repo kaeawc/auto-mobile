@@ -49,7 +49,8 @@ export function createSwipeAt(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const gesture = new RecordingGesture();
-  const swipeAt = new SwipeAtCoordinate(device, new FakeAdbExecutor(), {
+  const adb = new FakeAdbExecutor();
+  const swipeAt = new SwipeAtCoordinate(device, adb, {
     timer,
     snapshotReferences,
     executeGesture: gesture,
@@ -58,5 +59,13 @@ export function createSwipeAt(
   // Coordinate dispatch tests must not read the persistent per-device window cache.
   swipeAt.window = new FakeWindow();
   swipeAt.observeScreen = observeScreen;
-  return { swipeAt, observeScreen, gesture, swipes: gesture.swipes, fences: gesture.fences, timer };
+  return {
+    swipeAt,
+    adb,
+    observeScreen,
+    gesture,
+    swipes: gesture.swipes,
+    fences: gesture.fences,
+    timer,
+  };
 }

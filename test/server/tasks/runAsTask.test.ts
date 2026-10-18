@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { currentTaskContext, runAsTask, toJsonRpcError } from "../../../src/server/tasks/runAsTask";
+import {
+  currentTaskContext,
+  holdTaskDeviceLeases,
+  runAsTask,
+  toJsonRpcError,
+} from "../../../src/server/tasks/runAsTask";
+import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
 import { McpError } from "../../../src/server/mcpError";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 
@@ -62,6 +68,36 @@ describe("runAsTask (#4668)", () => {
     expect(record.status).toBe("completed");
     expect(record.result).toEqual(OK);
     expect(record.statusMessage).toBe("Progress 3");
+  });
+
+  test("holds each named session once per task and releases it when the task settles", async () => {
+    const manager = new FakeTaskManager();
+    const holds: TaskLeaseHoldRequest[] = [];
+    const released: string[] = [];
+    const keepalive = {
+      hold(request: TaskLeaseHoldRequest) {
+        holds.push(request);
+        return () => released.push(request.sessionUuid);
+      },
+    };
+    // Outside a task nothing is held.
+    holdTaskDeviceLeases(["outside"]);
+    const handle = await runAsTask(
+      { declared: true, ownerKey: "k", taskManager: manager, toolName: "t", keepalive },
+      async () => {
+        holdTaskDeviceLeases(["base", undefined, "", "base"]);
+        holdTaskDeviceLeases(["base", "base:B"]);
+        currentTaskContext()?.holdDeviceLease("base:B");
+        return OK;
+      },
+    );
+    const taskId = "taskId" in handle ? handle.taskId : "";
+    await settled(manager, taskId);
+    expect(holds).toEqual([
+      { taskId, ownerKey: "k", sessionUuid: "base" },
+      { taskId, ownerKey: "k", sessionUuid: "base:B" },
+    ]);
+    expect(released).toEqual(["base", "base:B"]);
   });
 
   test("an isError result after tasks/cancel settles as cancelled", async () => {

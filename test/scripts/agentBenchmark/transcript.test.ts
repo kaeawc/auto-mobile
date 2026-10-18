@@ -248,6 +248,14 @@ describe("agent benchmark transcript audit", () => {
     });
     const audit = auditTranscript(`${base}${result}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual([`tool_result for ${id} has malformed content`]);
+    // A missing body would otherwise count as a completed, successful call.
+    const bare = JSON.stringify({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false }] },
+    });
+    expect(auditTranscript(`${base}${bare}\n`, NO_PATTERNS).parseErrors).toEqual([
+      `tool_result for ${id} has no content`,
+    ]);
   });
 
   test("a JSON line that is not an object fails the transcript", () => {

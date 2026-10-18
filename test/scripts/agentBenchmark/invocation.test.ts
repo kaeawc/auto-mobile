@@ -200,6 +200,13 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).not.toContain("secret");
     expect(providerIdentity({})).toBe("");
+    // The Vertex project selects quota and capacity; it is digested, never echoed.
+    const vertex = providerIdentity({
+      CLAUDE_CODE_USE_VERTEX: "1",
+      ANTHROPIC_VERTEX_PROJECT_ID: "my-project",
+    });
+    expect(vertex).toContain(`ANTHROPIC_VERTEX_PROJECT_ID=sha256:${pathDigest("my-project")}`);
+    expect(vertex).not.toContain("my-project");
     // Every Claude/API/MCP/Bash timeout or watchdog override is run-shaping.
     for (const key of [
       "API_TIMEOUT_MS",

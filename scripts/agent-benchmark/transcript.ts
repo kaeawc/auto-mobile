@@ -282,8 +282,10 @@ function handleUser(event: JsonRecord, line: number, state: AuditState): void {
       state.audit.parseErrors.push(`duplicate tool_result for tool_use_id ${id}`);
       continue;
     }
-    if (
-      block.content !== undefined &&
+    if (block.content === undefined) {
+      // A missing body would count as a completed, successful call with empty text.
+      state.audit.parseErrors.push(`tool_result for ${id} has no content`);
+    } else if (
       typeof block.content !== "string" &&
       !(Array.isArray(block.content) && block.content.every(isContentBlock))
     ) {

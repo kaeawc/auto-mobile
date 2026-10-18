@@ -342,6 +342,9 @@ const PROVIDER_RESOURCE = /^ANTHROPIC_\w*RESOURCE$/;
 // Proxy routing passes through too (Claude may need it to reach the API at all), and a
 // different proxy changes latency. Upper- and lowercase forms are both honored.
 const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+// The Google Cloud project Vertex bills and routes through: projects differ in quota and
+// provisioned capacity. Digested, since a project ID names an account.
+const PROVIDER_PROJECTS = ["ANTHROPIC_VERTEX_PROJECT_ID"];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 // The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb
 // route changes every device call's latency. These name a socket or host and port, no secret.
@@ -350,8 +353,8 @@ const ADB_ENDPOINT = ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROI
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
  * host and a digest of the path (never credentials, the path itself, or the query) of any
- * provider base URL or proxy, the proxy bypass list, regions and service tiers, the adb
- * server endpoint,
+ * provider base URL or proxy, a digest of the Vertex project, the proxy bypass list, regions
+ * and service tiers, the adb server endpoint,
  * and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
  */
@@ -383,6 +386,13 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
   return [
     ...PROVIDER_FLAGS.filter(set).map((key) => `${key}=${env[key]}`),
     ...[...urls, ...PROXY_URLS].filter(set).map((key) => `${key}=${host(env[key] as string)}`),
+    ...PROVIDER_PROJECTS.filter(set).map(
+      (key) =>
+        `${key}=sha256:${createHash("sha256")
+          .update(env[key] as string)
+          .digest("hex")
+          .slice(0, 12)}`,
+    ),
     ...[...PROVIDER_REGIONS, ...regions, ...PROXY_BYPASS, ...ADB_ENDPOINT, ...routing]
       .filter(set)
       .map((key) => `${key}=${env[key]}`),

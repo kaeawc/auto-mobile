@@ -32,6 +32,7 @@ there is no transport session to expire, so a daemon restart needs no replay on 
 client side. The one session key is the `x-auto-mobile-mcp-session-id` header (or the
 in-band `__mcpSessionId` argument). The socket server forwards its socket session id
 in that header, and the desktop app sends one id per app session. Tool-to-session
-bindings live in a daemon-scoped store rather than on any one server. This is in
-progress (#4678); the design and open questions are in
+bindings live in a daemon-scoped store rather than on any one server. This landed
+in #4678 (slice L, device-control transport recovery in the socket server, #11820, is
+still in progress); the design and resolved questions are in
 [SDK v2 and stateless daemon layer](sdk-v2-stateless-migration.md).

@@ -59,7 +59,7 @@ export function runGestureExecutorContract(
       const controller = new AbortController();
       controller.abort();
       await expect(
-        executor.swipe(1, 2, 3, 4, { duration: 100 }, undefined, controller.signal),
+        executor.swipe(1, 2, 3, 4, { duration: 100 }, { signal: controller.signal }),
       ).rejects.toBeDefined();
       expect(dispatchedSwipes()).toBe(0);
     });

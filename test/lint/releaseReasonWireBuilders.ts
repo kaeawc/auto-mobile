@@ -23,7 +23,7 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/types.ts#releasedSessionNotFoundFields",
   "src/daemon/types.ts#sanitizeBoundSessionLoss",
   "src/daemon/socketServer/errorFrames.ts#sessionAdmissionRefusalFields",
-  "src/daemon/socketServer.ts#UnixSocketServer.broadcastSessionReleased",
+  "src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased",
   "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
   "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
   "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",

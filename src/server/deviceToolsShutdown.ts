@@ -318,7 +318,7 @@ function hasLiveAndroidObserverSessionBinding(
 }
 
 function bindLiveAndroidObserverSession(
-  observer: AndroidCtrlProxyClient,
+  observer: Pick<AndroidCtrlProxyClient, "bindSession">,
   device: BootedDevice,
   observerState: AndroidObserverShutdownState,
 ): void {
@@ -333,7 +333,7 @@ function bindLiveAndroidObserverSession(
   }
 }
 
-function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: string): void {
+function invalidateObserver(observer: import("./observerTypes").Invalidatable, id: string): void {
   // Removal is deliberately synchronous and precedes cleanup. `close()` can
   // wait on an ADB forward removal that does not honour the shutdown deadline;
   // retaining the singleton until that completes would keep an obsolete client
@@ -341,7 +341,7 @@ function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: s
   observer.invalidateForShutdownRecovery();
   void observer.close().catch((error) => {
     logger.warn(
-      `[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`,
+      `[DeviceTools] Failed to clean up invalidated Android observer for ${id}: ${error}`,
     );
   });
 }
@@ -360,7 +360,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
     ShutdownObserverRecoveryContext,
     "device" | "timer" | "shutdownDeadlineMs" | "requestAbortSignal" | "timeoutMs"
   >,
-  observer: AndroidCtrlProxyClient,
+  observer: import("./observerTypes").Reconnectable,
 ): Promise<boolean> {
   const { device, timer, shutdownDeadlineMs, requestAbortSignal, timeoutMs } = context;
   const reconnect = async (): Promise<boolean> => {
@@ -381,7 +381,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
         // Platform setup does not accept an AbortSignal. Invalidate the
         // in-flight client so a late port-forward cannot register a stale
         // observer or leave future callers waiting on its connection.
-        invalidateAndroidObserver(observer, device.deviceId);
+        invalidateObserver(observer, device.deviceId);
       }
       throw error;
     }
@@ -395,7 +395,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
 
 async function revalidateReconnectedAndroidObserver(
   context: ShutdownObserverRecoveryContext,
-  observer: AndroidCtrlProxyClient,
+  observer: import("./observerTypes").Invalidatable,
   observerState: AndroidObserverShutdownState,
 ): Promise<boolean> {
   const { device } = context;
@@ -413,7 +413,7 @@ async function revalidateReconnectedAndroidObserver(
   } catch (error) {
     // A connected observer cannot be safely retained when its incarnation
     // could not be reconfirmed within the same failed-shutdown budget.
-    invalidateAndroidObserver(observer, device.deviceId);
+    invalidateObserver(observer, device.deviceId);
     throw error;
   }
 }
@@ -468,7 +468,7 @@ async function restoreAndroidObserverAfterCommandFailure(
         observerState,
       );
       if (!sameIncarnation) {
-        invalidateAndroidObserver(observer, device.deviceId);
+        invalidateObserver(observer, device.deviceId);
         return;
       }
     }

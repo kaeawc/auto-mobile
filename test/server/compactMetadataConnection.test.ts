@@ -53,7 +53,7 @@ afterAll(async () => {
   for (const server of servers) {
     await server.close();
   }
-  Reflect.get(ToolRegistry, "tools").delete(TOOL);
+  ToolRegistry.removeToolForTesting(TOOL);
   serverConfig.setActionsCompactMetadataEnabled(previous);
   restore();
 });

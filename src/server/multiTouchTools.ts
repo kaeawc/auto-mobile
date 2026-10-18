@@ -17,6 +17,7 @@ import {
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
 import type { MultiTouchOptions } from "../models/MultiTouchOptions";
+import { multiTouchResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import { hierarchyLayerSchema } from "./elementSelectorSchemas";
 import {
@@ -177,6 +178,6 @@ export function registerMultiTouchTools() {
     "Simultaneous 2-5 finger tap, long press, or swipe at a screen point.",
     multiTouchSchema,
     multiTouchHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, outputSchema: multiTouchResultSchema },
   );
 }

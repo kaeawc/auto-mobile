@@ -40,7 +40,20 @@ runWindowContract(
       // NODE_ENV=test without a data dir keeps the disk cache off.
       { NODE_ENV: "test" },
     );
-    return { window, show: (which) => adb.setDefaultResponse(exec(dumps[which])) };
+    let shown = dumps.primary;
+    return {
+      window,
+      show: (which) => {
+        shown = dumps[which];
+        adb.setDefaultResponse(exec(shown));
+      },
+      relayout: () =>
+        adb.setDefaultResponse(
+          exec(
+            shown.replace(/mLayoutSeq=(\d+)/g, (_m, n: string) => `mLayoutSeq=${Number(n) + 1}`),
+          ),
+        ),
+    };
   },
   expected,
 );
@@ -49,13 +62,20 @@ runWindowContract(
   "FakeWindow",
   () => {
     const window = new FakeWindow();
+    let shown: "primary" | "secondary" = "primary";
+    let layoutSeqSum = 1;
+    const apply = () => window.configureActiveWindow({ ...expected[shown], layoutSeqSum });
     return {
       window,
-      show: (which) =>
-        window.configureActiveWindow({
-          ...expected[which],
-          layoutSeqSum: which === "primary" ? 1 : 2,
-        }),
+      show: (which) => {
+        shown = which;
+        layoutSeqSum = which === "primary" ? 1 : 2;
+        apply();
+      },
+      relayout: () => {
+        layoutSeqSum += 10;
+        apply();
+      },
     };
   },
   expected,

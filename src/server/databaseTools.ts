@@ -3,7 +3,8 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
 import { iosSqlErrorMessage } from "./storageSdkErrors";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
@@ -223,7 +224,7 @@ export function registerDatabaseTools() {
           ? `Query returned ${result.rows?.length ?? 0} row(s)`
           : `Mutation affected ${result.rowsAffected ?? 0} row(s)`;
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message,
         ...result,
       });
@@ -244,6 +245,7 @@ export function registerDatabaseTools() {
     {
       defaultEnabled: false,
       embeddedSdkOnly: true,
+      outputSchema: sqlQueryResultSchema,
       // Only a single read-only statement watches (#10830); anything the classifier cannot prove
       // read-only needs the device's holder and is refused with device_owned_by_other_session.
       deviceReadOnly: (args: SqlQueryArgs) =>

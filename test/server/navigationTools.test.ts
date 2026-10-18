@@ -74,7 +74,7 @@ describe("navigation tool session graph selection", () => {
         }),
         executeIosDetailedResult: async () => ({ successful: true, apps: [] }),
       };
-      registerNavigationTools({ installedAppsFactory: () => list });
+      registerNavigationTools({ navigationManagerFactory, installedAppsFactory: () => list });
       activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),

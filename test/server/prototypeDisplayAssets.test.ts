@@ -55,7 +55,7 @@ describe("prototype display together with assets", () => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    client.setSupportedCommands(["prototype_display_id_v1", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
+    client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
     adb.setCommandResponse(INVENTORY, { stdout: BOTH_PANELS, stderr: "" });
     reader = new FakePrototypeAssetFileReader().addFile("/img/logo.png", png);
@@ -104,7 +104,7 @@ describe("prototype display together with assets", () => {
     client.setSupportedCommands([]);
     const { response, payload } = await call({ action: "show", spec, assets, display: "inner" });
     expect(response.isError).toBe(true);
-    expect(payload.error).toContain("prototype_display_id_v1");
+    expect(payload.error).toContain("prototype_display_id_v2");
     expect(client.getPrototypeAssetHistory()).toEqual([]);
     expect(client.getPrototypeHistory()).toEqual([]);
     expect(payload.uploadedAssets).toBeUndefined();

@@ -63,6 +63,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import * as os from "os";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -165,9 +166,7 @@ describe("startDevice handler", () => {
       throw new Error("startDevice not registered");
     }
     const result = await tool.handler(args, progress, signal);
-    return JSON.parse(
-      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
-    );
+    return typeof result === "string" ? JSON.parse(result) : toolJson(result);
   }
 
   async function callListDevices(): Promise<Record<string, unknown>> {
@@ -176,9 +175,7 @@ describe("startDevice handler", () => {
       throw new Error("listDevices not registered");
     }
     const result = await tool.handler({ platform: "android" });
-    return JSON.parse(
-      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
-    );
+    return typeof result === "string" ? JSON.parse(result) : toolJson(result);
   }
 
   const androidDevice: BootedDevice = {

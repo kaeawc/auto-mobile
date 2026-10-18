@@ -72,6 +72,11 @@ import { shapeCallFailure } from "./shapeResult";
 export interface ToolCallIngressDeps {
   readonly options: McpServerOptions;
   readonly daemonMode: boolean;
+  /**
+   * The key this server binds a keyless call under: the request's session key
+   * header, else the stateful transport's own session id (#4678).
+   */
+  readonly serverBindingKey: string | undefined;
   readonly sessionToolBinding: SessionToolBinding;
   readonly planExecutionLock: PlanExecutionLock;
   readonly toolSelectionProfileRegistry: ToolSelectionProfileRegistry;
@@ -370,6 +375,8 @@ interface RoutedCall {
   readonly tool: ResolvedTool;
   readonly toolParams: Record<string, unknown>;
   readonly sessionId: string | undefined;
+  /** The session key this call's bindings are read and recorded under (#4678). */
+  readonly bindingKey: string | undefined;
   readonly context: CallContext;
   readonly implicitAutolockMcpSessionId: string | undefined;
   readonly routingSessionUuid: string | undefined;
@@ -391,10 +398,14 @@ function routeCall(
   const sessionId = options.sessionContext?.sessionId;
   const implicitAutolockMcpSessionId =
     context.requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
+  // The one session key (#4678): a daemon call's forwarded `__mcpSessionId`, else the
+  // request's session-key header, else the stateful transport's own id. Every binding
+  // read and write below goes through it, never the transport id directly.
+  const bindingKey = context.requestMcpSessionId ?? deps.serverBindingKey;
   let routingSessionUuid: string | undefined;
   let readOutsideBoundSession = false;
   try {
-    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams, {
+    routingSessionUuid = sessionToolBinding.effectiveSessionUuid(bindingKey, toolParams, {
       readOnly: ToolRegistry.getTool(name)?.isDeviceReadOnlyCall?.(toolParams) === true,
       onReadOutsideBoundSession: () => {
         readOutsideBoundSession = true;
@@ -408,13 +419,14 @@ function routeCall(
     };
   }
   const initialConnectionProfileUuid =
-    sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
+    sessionToolBinding.connectionToolSelectionProfileUuid(bindingKey);
   const tool = resolveTool(name, toolParams);
   const scope: RoutingScope = {
     name,
     tool,
     toolParams,
-    sessionId,
+    // The routing stages read `sessionId` only as the binding key.
+    sessionId: bindingKey,
     daemonMode,
     context,
     sessionToolBinding,
@@ -439,6 +451,7 @@ function routeCall(
     tool,
     toolParams,
     sessionId,
+    bindingKey,
     context,
     implicitAutolockMcpSessionId,
     routingSessionUuid: routed.routingSessionUuid,
@@ -520,7 +533,10 @@ function trackExecution(
     name,
     tool,
     toolParams,
-    executionSessionId: context.requestMcpSessionId ?? sessionId,
+    // Registered under the request's session key (in-band, else header, else the
+    // transport id), so `cancelSessionExecutions(key)` on a socket disconnect
+    // reaches it even when the key arrived only as a header (#4678).
+    executionSessionId: routed.bindingKey,
     executionSessionUuid: routed.executionSessionUuid,
     sessionId,
     implicitAutolockMcpSessionId,
@@ -641,7 +657,8 @@ async function executeToolCallBody(
       tool: routed.tool,
       toolParams: routed.toolParams,
       parsedParams: validated.parsedParams,
-      sessionId: routed.sessionId,
+      // The invoke and bind stages read `sessionId` only as the binding key.
+      sessionId: routed.bindingKey,
       context,
       options: deps.options,
       sessionToolBinding: deps.sessionToolBinding,

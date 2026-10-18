@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import { SessionToolBindingStore } from "./sessionToolBindingStore";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 
@@ -89,6 +90,21 @@ export interface McpServerOptions {
   planExecutionLock?: PlanExecutionLock;
   daemonMode?: boolean;
   /**
+   * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
+   * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
+   * on it (an in-band `__mcpSessionId` on a daemon `tools/call` takes precedence),
+   * so a binding survives across per-request servers that present the same key.
+   */
+  requestMcpSessionId?: string;
+  /**
+   * The server answers a single request and is closed after it (#4678). Keyed
+   * bindings then live in the daemon-scoped {@link daemonSessionToolBindingStore}
+   * instead of a store private to this server.
+   */
+  stateless?: boolean;
+  /** Overrides where keyed bindings live; tests share one store across servers. */
+  sessionToolBindingStore?: SessionToolBindingStore;
+  /**
    * Per-daemon live-acceptance capability captured at startup. Unlike tool
    * arguments, this is a server-construction boundary clients cannot set.
    */
@@ -159,14 +175,80 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerEmulatorLossIncidentResources();
 }
 
+/**
+ * A store whose release teardown follows both release sources (#4611 Gap D):
+ *   - the plan-release path, via ToolRegistry's injected teardown handler
+ *     (executePlan auto-release, deterministic, works in stdio mode too); and
+ *   - heartbeat/idle/explicit releases, via the process-wide
+ *     SessionReleaseBroadcaster (#4610), active in daemon mode.
+ * Clearing the binding stops a later sessionless tools/list or tools/call from
+ * enforcing the released session's stale profile. A list-changed notification is
+ * emitted only when a binding actually changed, so a duplicate release signal for
+ * the same session is a no-op.
+ */
+function createReleaseSubscribedBindingStore(): SessionToolBindingStore {
+  return new SessionToolBindingStore({
+    subscribeReleases: (onReleased) => {
+      const unregister = ToolRegistry.registerSessionBindingReleaseHandler({
+        onSessionReleased: onReleased,
+      });
+      const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionUuid) =>
+        onReleased(sessionUuid),
+      );
+      return () => {
+        unregister();
+        unsubscribe();
+      };
+    },
+    onBindingChanged: () => ToolRegistry.notifyToolListChanged(),
+  });
+}
+
+let daemonBindingStore: SessionToolBindingStore | undefined;
+
+/**
+ * The daemon's one binding store for stateless servers (#4678). Its release
+ * subscription is made once and lives with the process, so a release between two
+ * requests still clears the keyed binding. The socket server calls `forget(key)`
+ * when the connection behind a key goes away.
+ */
+export function daemonSessionToolBindingStore(): SessionToolBindingStore {
+  daemonBindingStore ??= createReleaseSubscribedBindingStore();
+  return daemonBindingStore;
+}
+
+/**
+ * The key this server's request-less paths (tools/list, resources) bind under:
+ * the request's session key, else the stateful transport's own session id.
+ */
+function serverBindingKey(options: McpServerOptions): string | undefined {
+  return options.requestMcpSessionId ?? options.sessionContext?.sessionId;
+}
+
+function resolveBindingStore(options: McpServerOptions): {
+  store: SessionToolBindingStore;
+  owned: boolean;
+} {
+  if (options.sessionToolBindingStore) {
+    return { store: options.sessionToolBindingStore, owned: false };
+  }
+  if (options.daemonMode && options.stateless) {
+    return { store: daemonSessionToolBindingStore(), owned: false };
+  }
+  return { store: createReleaseSubscribedBindingStore(), owned: true };
+}
+
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  const bindingStore = resolveBindingStore(options);
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
     options.sessionContext?.initialReleasedSession,
     namesLiveSessionOfBoundPlan,
+    bindingStore.store,
   );
+  const bindingKey = serverBindingKey(options);
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
@@ -232,44 +314,23 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all resources with the server
   ResourceRegistry.registerWithServer(server, (signal) => ({
-    sessionUuid: sessionToolBinding.effectiveSessionUuid(options.sessionContext?.sessionId),
-    ownsSession: (sessionUuid) =>
-      sessionToolBinding.ownsSession(options.sessionContext?.sessionId, sessionUuid),
-    releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(
-      options.sessionContext?.sessionId,
-    ),
+    sessionUuid: sessionToolBinding.effectiveSessionUuid(bindingKey),
+    ownsSession: (sessionUuid) => sessionToolBinding.ownsSession(bindingKey, sessionUuid),
+    releasedSessionUuid: sessionToolBinding.releasedResourceSessionUuid(bindingKey),
     signal,
   }));
 
-  // Tear down this transport's server-side SessionToolBinding when the daemon
-  // actually releases a session (issue #4611 Gap D). Two release sources funnel
-  // through the same idempotent `unbindSession`:
-  //   - the plan-release path, via ToolRegistry's injected teardown handler
-  //     (executePlan auto-release, deterministic, works in stdio mode too); and
-  //   - heartbeat/idle/explicit releases, via the process-wide
-  //     SessionReleaseBroadcaster (issue #4610), active in daemon mode.
-  // Clearing the binding stops a later sessionless tools/list or tools/call on
-  // this same MCP transport from enforcing the released session's stale profile.
-  // A list-changed notification is emitted only when a binding actually changed,
-  // so a duplicate release signal for the same session is a no-op.
-  const clearReleasedSessionBinding = (sessionUuid: string): void => {
-    if (sessionToolBinding.unbindSession(sessionUuid)) {
-      ToolRegistry.notifyToolListChanged();
-    }
-  };
-  const unregisterSessionBindingRelease = ToolRegistry.registerSessionBindingReleaseHandler({
-    onSessionReleased: clearReleasedSessionBinding,
-  });
-  const unsubscribeSessionReleaseBroadcast = SessionReleaseBroadcaster.subscribe(
-    clearReleasedSessionBinding,
-  );
-  // Chain onto the existing onclose (set by ToolRegistry.registerWithServer's
-  // server tracking) so the per-transport teardown subscriptions are dropped when
-  // the transport closes, and no other lifecycle hook is clobbered.
+  // Release teardown is subscribed by the binding store, once per store (see
+  // createReleaseSubscribedBindingStore); this server's binding is attached to it
+  // until the transport closes. Chain onto the existing onclose (set by
+  // ToolRegistry.registerWithServer's server tracking) so no other lifecycle hook
+  // is clobbered. A shared store keeps its keyed bindings and its subscription.
   const existingServerOnClose = server.server.onclose;
   server.server.onclose = () => {
-    unregisterSessionBindingRelease();
-    unsubscribeSessionReleaseBroadcast();
+    sessionToolBinding.dispose();
+    if (bindingStore.owned) {
+      bindingStore.store.dispose();
+    }
     if (!daemonMode) {
       dropToolCallRecording(options.sessionContext?.sessionId);
     }
@@ -278,6 +339,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   const listSessionTools = createListSessionTools({
     options,
+    bindingKey,
     sessionToolBinding,
     toolSelectionProfileRegistry,
   });
@@ -337,6 +399,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const executeToolCall = createToolCallExecutor({
     options,
     daemonMode,
+    serverBindingKey: bindingKey,
     sessionToolBinding,
     planExecutionLock,
     toolSelectionProfileRegistry,

@@ -19,7 +19,7 @@ function isFromIos(viewHierarchy: ViewHierarchyResult): boolean {
     return true;
   }
 
-  const h = viewHierarchy.hierarchy as Record<string, unknown>;
+  const h = viewHierarchy.hierarchy;
   if (h.type === "XCUIElementTypeApplication") {
     return true;
   }

@@ -3,6 +3,7 @@ import { HierarchyCollector } from "../../../../src/features/observe/collectors/
 import { FakeViewHierarchy } from "../../../fakes/FakeViewHierarchy";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { createObserveResultForTest } from "../flatHierarchyBuilders";
 import type { AdbClientFactory } from "../../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type {
   BootedDevice,
@@ -12,19 +13,17 @@ import type {
 } from "../../../../src/models";
 
 function makeResult(): ObserveResult {
-  return {
-    updatedAt: 0,
-    screenSize: { width: 0, height: 0 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  return createObserveResultForTest({ updatedAt: 0, screenSize: { width: 0, height: 0 } });
 }
+
+const unitBounds = { left: 0, top: 0, right: 1, bottom: 1 };
 
 function makeDevice(platform: "android" | "ios" = "android"): BootedDevice {
   return {
     name: "test-device",
     platform,
     deviceId: "test-device",
-  } as BootedDevice;
+  };
 }
 
 function makeStubAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
@@ -77,13 +76,13 @@ describe("HierarchyCollector", () => {
         expect(result.viewHierarchy).toBe(hierarchy);
         expect(result.updatedAt).toBe(42);
         calls.push("focus");
-        return { "resource-id": "field" };
+        return { "resource-id": "field", bounds: unitBounds };
       };
       fakeViewHierarchy.findAccessibilityFocusedElement = () => {
-        expect(result.focusedElement).toEqual({ "resource-id": "field" });
+        expect(result.focusedElement).toEqual({ "resource-id": "field", bounds: unitBounds });
         expect(result.intentChooserDetected).toBeUndefined();
         calls.push("accessibilityFocus");
-        return { "resource-id": "accessibility-field" };
+        return { "resource-id": "accessibility-field", bounds: unitBounds };
       };
       await collector.collect(
         result,
@@ -122,7 +121,7 @@ describe("HierarchyCollector", () => {
           throw new Error("intent unavailable");
         },
       };
-      fakeViewHierarchy.configureFocusedElement({ text: "Focused" });
+      fakeViewHierarchy.configureFocusedElement({ text: "Focused", bounds: unitBounds });
       const result = makeResult();
       await collector.collect(result, undefined, undefined, false, 0, undefined, true, hierarchy);
       expect(result.focusedElement?.text).toBe("Focused");
@@ -131,11 +130,11 @@ describe("HierarchyCollector", () => {
     });
 
     test("forwards the caller's remaining timeout to the hierarchy read", async () => {
-      fakeViewHierarchy.configureHierarchy({ hierarchy: { node: {} } } as any);
+      fakeViewHierarchy.configureHierarchy({ hierarchy: { node: {} } });
       let readTimeout: number | undefined;
       const read = fakeViewHierarchy.getViewHierarchy.bind(fakeViewHierarchy);
       fakeViewHierarchy.getViewHierarchy = async (...args) => {
-        readTimeout = args[5];
+        readTimeout = typeof args[5] === "number" ? args[5] : undefined;
         return read(...args);
       };
       await collector.collect(
@@ -153,9 +152,9 @@ describe("HierarchyCollector", () => {
     });
     test("populates viewHierarchy on success", async () => {
       fakeViewHierarchy.configureHierarchy({
-        hierarchy: { foo: "bar" },
+        hierarchy: { node: { bounds: unitBounds } },
         updatedAt: 12345,
-      } as any);
+      });
 
       const result = makeResult();
       await collector.collect(result);
@@ -166,8 +165,8 @@ describe("HierarchyCollector", () => {
     });
 
     test("populates focusedElement when found", async () => {
-      const focused: Element = { text: "Submit" } as Element;
-      fakeViewHierarchy.configureHierarchy({ hierarchy: {} } as any);
+      const focused: Element = { text: "Submit", bounds: unitBounds };
+      fakeViewHierarchy.configureHierarchy({ hierarchy: {} });
       fakeViewHierarchy.configureFocusedElement(focused);
 
       const result = makeResult();
@@ -177,8 +176,8 @@ describe("HierarchyCollector", () => {
     });
 
     test("populates accessibilityFocusedElement when found", async () => {
-      const a11y: Element = { "content-desc": "Submit button" } as Element;
-      fakeViewHierarchy.configureHierarchy({ hierarchy: {} } as any);
+      const a11y: Element = { "content-desc": "Submit button", bounds: unitBounds };
+      fakeViewHierarchy.configureHierarchy({ hierarchy: {} });
       fakeViewHierarchy.configureAccessibilityFocusedElement(a11y);
 
       const result = makeResult();
@@ -191,7 +190,7 @@ describe("HierarchyCollector", () => {
       fakeViewHierarchy.configureHierarchy({
         hierarchy: {},
         intentChooserDetected: true,
-      } as any);
+      });
 
       const result = makeResult();
       await collector.collect(result);
@@ -203,7 +202,7 @@ describe("HierarchyCollector", () => {
       fakeViewHierarchy.configureHierarchy({
         hierarchy: {},
         notificationPermissionDetected: true,
-      } as any);
+      });
 
       const result = makeResult();
       await collector.collect(result);
@@ -344,26 +343,26 @@ describe("HierarchyCollector", () => {
     test("parses Android object bounds format", () => {
       const size = collector.extractScreenSize({
         hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } } } },
-      } as any);
+      });
       expect(size).toEqual({ width: 1080, height: 2400 });
     });
 
     test("parses iOS bounds object format", () => {
       const size = collector.extractScreenSize({
         hierarchy: { bounds: { left: 0, top: 0, right: 402, bottom: 874 } },
-      } as any);
+      });
       expect(size).toEqual({ width: 402, height: 874 });
     });
 
     test("returns null when bounds are missing", () => {
-      const size = collector.extractScreenSize({ hierarchy: {} } as any);
+      const size = collector.extractScreenSize({ hierarchy: {} });
       expect(size).toBeNull();
     });
 
     test("returns null when width or height is zero", () => {
       const size = collector.extractScreenSize({
         hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } } },
-      } as any);
+      });
       expect(size).toBeNull();
     });
   });
@@ -373,23 +372,27 @@ describe("HierarchyCollector", () => {
       // Regression for #2683: the iOS runner reports 320x480 (legacy
       // compatibility mode) while the authoritative size from root bounds is
       // the real device size. screenWidth/screenHeight must follow screenSize.
-      const viewHierarchy = {
+      const viewHierarchy: ViewHierarchyResult = {
         hierarchy: { bounds: { left: 0, top: 0, right: 402, bottom: 874 } },
         screenWidth: 320,
         screenHeight: 480,
-      } as any;
+      };
 
       const result = collector.reconcileScreenDimensions(viewHierarchy, {
         width: 402,
         height: 874,
       });
 
-      expect(result.screenWidth).toBe(402);
-      expect(result.screenHeight).toBe(874);
+      expect(result?.screenWidth).toBe(402);
+      expect(result?.screenHeight).toBe(874);
     });
 
     test("mutates and returns the same view hierarchy object", () => {
-      const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {},
+        screenWidth: 320,
+        screenHeight: 480,
+      };
 
       const result = collector.reconcileScreenDimensions(viewHierarchy, {
         width: 402,
@@ -402,50 +405,55 @@ describe("HierarchyCollector", () => {
     });
 
     test("populates screenWidth/screenHeight when previously absent", () => {
-      const viewHierarchy = { hierarchy: {} } as any;
+      const viewHierarchy: ViewHierarchyResult = { hierarchy: {} };
 
       const result = collector.reconcileScreenDimensions(viewHierarchy, {
         width: 1170,
         height: 2532,
       });
 
-      expect(result.screenWidth).toBe(1170);
-      expect(result.screenHeight).toBe(2532);
+      expect(result?.screenWidth).toBe(1170);
+      expect(result?.screenHeight).toBe(2532);
     });
 
     test("leaves screenWidth/screenHeight untouched when screenSize is null", () => {
-      const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {},
+        screenWidth: 320,
+        screenHeight: 480,
+      };
 
       const result = collector.reconcileScreenDimensions(viewHierarchy, null);
 
-      expect(result.screenWidth).toBe(320);
-      expect(result.screenHeight).toBe(480);
+      expect(result?.screenWidth).toBe(320);
+      expect(result?.screenHeight).toBe(480);
     });
 
     test("leaves screenWidth/screenHeight untouched when screenSize has non-positive dimensions", () => {
-      const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: {},
+        screenWidth: 320,
+        screenHeight: 480,
+      };
 
       const zeroWidth = collector.reconcileScreenDimensions(viewHierarchy, {
         width: 0,
         height: 874,
       });
-      expect(zeroWidth.screenWidth).toBe(320);
-      expect(zeroWidth.screenHeight).toBe(480);
+      expect(zeroWidth?.screenWidth).toBe(320);
+      expect(zeroWidth?.screenHeight).toBe(480);
 
       const zeroHeight = collector.reconcileScreenDimensions(viewHierarchy, {
         width: 402,
         height: 0,
       });
-      expect(zeroHeight.screenWidth).toBe(320);
-      expect(zeroHeight.screenHeight).toBe(480);
+      expect(zeroHeight?.screenWidth).toBe(320);
+      expect(zeroHeight?.screenHeight).toBe(480);
     });
 
-    test("returns the input unchanged when view hierarchy is null", () => {
+    test("returns undefined unchanged when there is no view hierarchy", () => {
       expect(
-        collector.reconcileScreenDimensions(null as any, { width: 402, height: 874 }),
-      ).toBeNull();
-      expect(
-        collector.reconcileScreenDimensions(undefined as any, { width: 402, height: 874 }),
+        collector.reconcileScreenDimensions(undefined, { width: 402, height: 874 }),
       ).toBeUndefined();
     });
   });

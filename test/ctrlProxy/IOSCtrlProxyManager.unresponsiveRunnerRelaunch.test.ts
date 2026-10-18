@@ -57,15 +57,31 @@ function createHarness(
 ): Harness {
   const timer = new FakeTimer();
   const executor = new FakeProcessExecutor();
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-    DEVICE,
-    timer,
-    fakeBuilder(),
-    executor,
-  );
-  const harness: Harness = { manager, executor, timer, launches: [], terminated: [] };
   const launchedPids = (): number[] =>
     executor.getSpawnedProcesses().map((spawned) => spawned.process.pid ?? -1);
+  const terminated: number[] = [];
+  const manager: IOSCtrlProxyManager = IOSCtrlProxyManager.createForTestingWithOptions({
+    device: DEVICE,
+    timer,
+    builder: fakeBuilder(),
+    processExecutor: executor,
+    steps: {
+      isOwnRunnerProcessAlive: async (pid = manager.getXcTestProcessId()) =>
+        pid !== null && launchedPids().includes(pid) && !terminated.includes(pid),
+      terminateHungRunnerProcess: async (pid) => {
+        terminated.push(pid);
+        if (options.exitOnTerminate) {
+          // A real tree kill delivers the xcodebuild child's exit event while the
+          // retirement is still in flight, before the PID is untracked (#10653).
+          const killed = executor
+            .getSpawnedProcesses()
+            .find((spawned) => spawned.process.pid === pid)?.process;
+          (killed as FakeChildProcess | undefined)?.emit("exit", null, "SIGTERM");
+        }
+      },
+    },
+  });
+  const harness: Harness = { manager, executor, timer, launches: [], terminated };
   executor.setCommandResponse("pgrep", createExecResult("", ""));
   executor.setCommandHandler("curl -s", () => {
     // The health poll begins right after each launch, so record launches here.
@@ -81,26 +97,6 @@ function createHarness(
       answers ? JSON.stringify({ status: "ok", deviceId: DEVICE.deviceId }) : "",
       "",
     );
-  });
-  const internals = manager as unknown as {
-    isOwnRunnerProcessAlive(pid?: number | null): Promise<boolean>;
-    terminateHungRunnerProcess(pid: number): Promise<void>;
-    xcTestProcessId: number | null;
-  };
-  spyOn(internals, "isOwnRunnerProcessAlive").mockImplementation(
-    async (pid: number | null = internals.xcTestProcessId) =>
-      pid !== null && launchedPids().includes(pid) && !harness.terminated.includes(pid),
-  );
-  spyOn(internals, "terminateHungRunnerProcess").mockImplementation(async (pid: number) => {
-    harness.terminated.push(pid);
-    if (options.exitOnTerminate) {
-      // A real tree kill delivers the xcodebuild child's exit event while the
-      // retirement is still in flight, before the PID is untracked (#10653).
-      const killed = executor
-        .getSpawnedProcesses()
-        .find((spawned) => spawned.process.pid === pid)?.process;
-      (killed as FakeChildProcess | undefined)?.emit("exit", null, "SIGTERM");
-    }
   });
   return harness;
 }

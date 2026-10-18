@@ -9,6 +9,7 @@ import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
 import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
@@ -25,6 +26,8 @@ import {
   BOUNDARY_XCTESTRUN,
   FakeListeningProcess,
   createFakeBuilder,
+  createManagerWithOwnSteps,
+  createSupervisorProbe,
   deferred,
   flushUntil,
   installIosManagerSuiteHooks,
@@ -622,14 +625,15 @@ describe("IOSCtrlProxyManager simulator start", function () {
           "",
         ),
       );
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-      );
-      const supervisor = (manager as unknown as { processSupervisor: { start(): Promise<void> } })
-        .processSupervisor;
+      const probe = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: probe.factory,
+      });
+      const supervisor = probe.supervisor;
 
       await supervisor.start();
       fakeTimer.advanceTime(30_000);
@@ -671,14 +675,14 @@ describe("IOSCtrlProxyManager simulator start", function () {
             return "/tmp/automobile-runner-SIM.xctestrun";
           },
         });
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          fakeBuilder,
-          fakeExecutor,
-        );
+        const { manager, steps } = createManagerWithOwnSteps({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: fakeBuilder,
+          processExecutor: fakeExecutor,
+        });
 
-        await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+        await steps.startOnSimulator();
 
         const spawn = fakeExecutor.getSpawnedProcesses()[0];
         expect(manager.getServicePort()).toBe(8767);
@@ -720,17 +724,22 @@ describe("IOSCtrlProxyManager simulator start", function () {
       });
       try {
         const fakeBuilder = createStartableBuilder("/tmp/test.xctestrun");
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          fakeBuilder,
-          fakeExecutor,
-        );
+        const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+        let ownRunnerAlive = false;
+        const { manager, steps } = createManagerWithOwnSteps({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: fakeBuilder,
+          processExecutor: fakeExecutor,
+          processClient,
+          steps: (defaults) => ({
+            isOwnRunnerProcessAlive: (pid) =>
+              ownRunnerAlive ? Promise.resolve(true) : defaults.isOwnRunnerProcessAlive(pid),
+          }),
+        });
 
         const ambientRequestController = new AbortController();
-        await runWithAbortSignal(ambientRequestController.signal, () =>
-          (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator(),
-        );
+        await runWithAbortSignal(ambientRequestController.signal, () => steps.startOnSimulator());
 
         const spawn = fakeExecutor.getSpawnedProcesses()[0];
         expect(spawn.options?.signal).toBeDefined();
@@ -741,23 +750,17 @@ describe("IOSCtrlProxyManager simulator start", function () {
         ambientRequestController.abort();
         expect(spawn.options?.signal?.aborted).toBe(false);
 
-        const tracked = manager as unknown as {
-          xcTestProcessId: number | null;
-          processClient: IosCtrlProxyProcessClient;
-        };
-        const pid = tracked.xcTestProcessId!;
-        (
-          manager as unknown as { isOwnRunnerProcessAlive: () => Promise<boolean> }
-        ).isOwnRunnerProcessAlive = async () => true;
+        const pid = manager.getXcTestProcessId()!;
+        ownRunnerAlive = true;
         let terminated = false;
-        tracked.processClient.terminateProcessTree = async (target) => {
+        processClient.terminateProcessTree = async (target) => {
           expect(target).toBe(pid);
           expect(spawn.options?.signal?.aborted).toBe(false);
           terminated = true;
         };
         spawn.options?.signal?.addEventListener("abort", () => {
           expect(terminated).toBe(true);
-          tracked.xcTestProcessId = null;
+          manager.setXcTestProcessIdForTesting(null);
         });
         await manager.stop();
         expect(terminated).toBe(true);
@@ -778,17 +781,17 @@ describe("IOSCtrlProxyManager simulator start", function () {
       });
       try {
         const fakeBuilder = createStartableBuilder("/tmp/test.xctestrun");
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          fakeBuilder,
-          fakeExecutor,
-        );
+        const { manager, steps } = createManagerWithOwnSteps({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: fakeBuilder,
+          processExecutor: fakeExecutor,
+        });
         expect(manager.getServicePort()).toBe(8765);
 
         unavailablePorts.add(8765);
 
-        await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+        await steps.startOnSimulator();
 
         const spawn = fakeExecutor.getSpawnedProcesses()[0];
         expect(checkedPorts).toEqual([8765, 8765, 8767]);
@@ -827,14 +830,14 @@ describe("IOSCtrlProxyManager simulator start", function () {
           writeRunnerEnvironment: (p: string, env: Record<string, string>, id: string) =>
             realBuilder.writeRunnerEnvironment(p, env, id),
         });
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          fakeBuilder,
-          fakeExecutor,
-        );
+        const { manager, steps } = createManagerWithOwnSteps({
+          device: testDevice,
+          timer: fakeTimer,
+          builder: fakeBuilder,
+          processExecutor: fakeExecutor,
+        });
 
-        await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+        await steps.startOnSimulator();
 
         // Read back the port the runner WILL read from its own ProcessInfo.environment.
         const spawnArgs = fakeExecutor.getSpawnedProcesses()[0].args;
@@ -892,32 +895,21 @@ describe("IOSCtrlProxyManager simulator start", function () {
             return new FakeChildProcess(fakeTimer) as unknown as ChildProcess;
           },
         };
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          fakeTimer,
+        const { steps } = createManagerWithOwnSteps({
+          device: physicalDevice,
+          timer: fakeTimer,
           builder,
-          fakeExecutor,
-          signing,
-          undefined,
-          undefined,
-          undefined,
+          processExecutor: fakeExecutor,
+          signingManager: signing,
           xcodebuild,
-        );
-        const internal = manager as unknown as {
-          startOnDevice: () => Promise<void>;
-          startIproxyTunnel: () => Promise<void>;
-          assertTunnelForwardsServicePort: () => void;
-          verifyInstalledAppBundle: () => Promise<void>;
-        };
-        internal.startIproxyTunnel = async () => {};
-        // The tunnel is stubbed out, so there is no forwarded port to compare (#10232).
-        internal.assertTunnelForwardsServicePort = () => {};
-        internal.verifyInstalledAppBundle = async () => {};
+          // The tunnel is faked, so it forwards exactly the port the launch asks for (#10232).
+          tunnelClient: new FakeIosTunnelClient(),
+        });
         if (rejectVerification) {
-          await expect(internal.startOnDevice()).rejects.toThrow("runner verification rejected");
+          await expect(steps.startOnDevice()).rejects.toThrow("runner verification rejected");
           expect(events).toEqual(["xctestrun:device", "verify:device"]);
         } else {
-          await internal.startOnDevice();
+          await steps.startOnDevice();
           expect(events).toEqual(["xctestrun:device", "verify:device", "spawn"]);
         }
       },
@@ -937,6 +929,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
         const fakeBuilder = asIosCtrlProxyBuilder({
           getXctestrunPath: async () => "/tmp/device.xctestrun",
           getRunnerBinaryPath: async () => null,
+          getExpectedAppHash: () => "",
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: async (
             _p: string,
@@ -954,25 +947,17 @@ describe("IOSCtrlProxyManager simulator start", function () {
             warnings: [],
           }),
         } as unknown as XcodeSigningManager;
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          physicalDevice,
-          fakeTimer,
-          fakeBuilder,
-          fakeExecutor,
-          fakeSigning,
-        );
-        const internal = manager as unknown as {
-          verifyInstalledAppBundle: () => Promise<void>;
-          startIproxyTunnel: () => Promise<void>;
-          assertTunnelForwardsServicePort: () => void;
-          startOnDevice: () => Promise<void>;
-        };
-        // Bypass tunnel/install verification — not under test here.
-        internal.verifyInstalledAppBundle = async () => {};
-        internal.startIproxyTunnel = async () => {};
-        internal.assertTunnelForwardsServicePort = () => {};
+        const { steps } = createManagerWithOwnSteps({
+          device: physicalDevice,
+          timer: fakeTimer,
+          builder: fakeBuilder,
+          processExecutor: fakeExecutor,
+          signingManager: fakeSigning,
+          // Tunnel and install verification are not under test here.
+          tunnelClient: new FakeIosTunnelClient(),
+        });
 
-        await internal.startOnDevice();
+        await steps.startOnDevice();
 
         const spawn = fakeExecutor.getSpawnedProcesses()[0];
         expect(writeCalls).toHaveLength(1);
@@ -1002,44 +987,36 @@ describe("IOSCtrlProxyManager simulator start", function () {
         platform: "ios",
         name: "iPhone",
       };
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-        {
+      const { manager, steps } = createManagerWithOwnSteps({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        signingManager: {
           resolveSigningForDevice: async () => ({
             buildSettings: [],
             allowProvisioningUpdates: false,
             warnings: [],
           }),
         } as unknown as XcodeSigningManager,
-      );
-      const internal = manager as unknown as {
-        verifyInstalledAppBundle: () => Promise<void>;
-        startIproxyTunnel: () => Promise<void>;
-        assertTunnelForwardsServicePort: () => void;
-        startOnDevice: () => Promise<void>;
-        xcTestProcessId: number | null;
-        xcTestProcess: FakeChildProcess | null;
-      };
-      internal.verifyInstalledAppBundle = async () => {};
-      internal.startIproxyTunnel = async () => {};
-      internal.assertTunnelForwardsServicePort = () => {};
+        tunnelClient: new FakeIosTunnelClient(),
+      });
 
-      await internal.startOnDevice();
+      await steps.startOnDevice();
       const staleChild = fakeExecutor.getSpawnedProcesses()[0].process as FakeChildProcess;
       const replacement = new FakeChildProcess();
       replacement.pid = 41002;
-      internal.xcTestProcessId = replacement.pid;
-      internal.xcTestProcess = replacement;
+      manager.trackRunnerForTesting({
+        pid: replacement.pid,
+        process: replacement as unknown as ChildProcess,
+      });
 
       staleChild.emit("error", new Error("late stale failure"));
       staleChild.emit("exit", 1, null);
       await Promise.resolve();
 
-      expect(internal.xcTestProcessId).toBe(41002);
-      expect(internal.xcTestProcess).toBe(replacement);
+      expect(manager.runnerSnapshot().xcTestProcessId).toBe(41002);
+      expect(manager.runnerSnapshot().xcTestProcess).toBe(replacement);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     });
 
@@ -1062,19 +1039,17 @@ describe("IOSCtrlProxyManager simulator start", function () {
       fakeTimer.enableAutoAdvance();
       const child = new FakeChildProcess();
       child.pid = process.pid;
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        xcTestProcess: FakeChildProcess | null;
-      };
-      internal.xcTestProcessId = process.pid;
-      internal.xcTestProcess = child;
+      manager.trackRunnerForTesting({
+        pid: process.pid,
+        process: child as unknown as ChildProcess,
+      });
 
       await expect(manager.stop()).rejects.toThrow(
         "CtrlProxy process tree rooted at PID 42001 remained alive after SIGKILL",
       );
 
-      expect(internal.xcTestProcessId).toBe(42001);
-      expect(internal.xcTestProcess).toBe(child);
+      expect(manager.runnerSnapshot().xcTestProcessId).toBe(42001);
+      expect(manager.runnerSnapshot().xcTestProcess).toBe(child);
       expect(process.alive).toBe(true);
       expect(PortManager.getPort(testDevice.deviceId)).toBe(manager.getServicePort());
     });

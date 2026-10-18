@@ -24,6 +24,7 @@
  *   variadic `--allowedTools`/`--disallowedTools` flags would swallow it.
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
 
 /** The one AutoMobile setting shared with any resident daemon: device claims. */
@@ -380,7 +381,40 @@ const ADB_ENDPOINT = ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROI
  * and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
  */
-export function providerIdentity(env: Record<string, string | undefined>): string {
+/**
+ * The account a Google credentials file selects. Its project overrides the explicit project
+ * variables, so a different file can mean a different backend. Only the non-secret identity
+ * fields are read and they are digested; key material never leaves the file.
+ */
+export function googleCredentialsIdentity(
+  path: string,
+  readFile: (path: string) => string = (file) => readFileSync(file, "utf8"),
+): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFile(path));
+  } catch (error) {
+    // Unreadable is still an identity: it differs from any readable file's digest.
+    return `unreadable:${error instanceof SyntaxError ? "json" : "file"}`;
+  }
+  const record =
+    typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  const fields = [
+    "type",
+    "project_id",
+    "quota_project_id",
+    "client_email",
+    "client_id",
+    "audience",
+  ];
+  const identity = Object.fromEntries(fields.map((key) => [key, record[key] ?? null]));
+  return `sha256:${createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 12)}`;
+}
+
+export function providerIdentity(
+  env: Record<string, string | undefined>,
+  credentialsIdentity: (path: string) => string = googleCredentialsIdentity,
+): string {
   const host = (value: string) => {
     try {
       const url = new URL(value);
@@ -415,6 +449,13 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
           .digest("hex")
           .slice(0, 12)}`,
     ),
+    ...(set("GOOGLE_APPLICATION_CREDENTIALS")
+      ? [
+          `GOOGLE_APPLICATION_CREDENTIALS=${credentialsIdentity(
+            env.GOOGLE_APPLICATION_CREDENTIALS as string,
+          )}`,
+        ]
+      : []),
     ...[...PROVIDER_REGIONS, ...regions, ...PROXY_BYPASS, ...ADB_ENDPOINT, ...routing]
       .filter(set)
       .map((key) => `${key}=${env[key]}`),

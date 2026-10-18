@@ -295,6 +295,20 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.toolCalls[0].hasResult).toBe(false);
   });
 
+  test("a padded tool name is not canonicalized into a registered tool", () => {
+    const use = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "toolu_pad", name: " mcp__auto-mobile__observe ", input: {} },
+        ],
+      },
+    });
+    expect(auditTranscript(`${INIT}${use}\n`, NO_PATTERNS).parseErrors).toEqual([
+      "line 4: tool_use name has surrounding whitespace",
+    ]);
+  });
+
   test("tool blocks under the wrong message role fail the transcript", () => {
     const lines = [
       JSON.stringify({

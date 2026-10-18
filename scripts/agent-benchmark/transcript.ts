@@ -247,10 +247,15 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
     if (block.type !== "tool_use") {
       continue;
     }
-    const name = asString(block.name)?.trim() || "unknown";
+    const rawName = asString(block.name) ?? "";
+    const name = rawName.trim() || "unknown";
     if (name === "unknown") {
       // A nameless call would hide which tool ran from the counts and sequence.
       state.audit.parseErrors.push(`line ${line}: tool_use without a name`);
+    } else if (name !== rawName) {
+      // Tool names are exact identifiers; a padded one is not the registered tool, so it is
+      // not canonicalized into one.
+      state.audit.parseErrors.push(`line ${line}: tool_use name has surrounding whitespace`);
     }
     const id = asString(block.id)?.trim();
     if (!id) {

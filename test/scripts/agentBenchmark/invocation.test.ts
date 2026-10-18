@@ -5,6 +5,7 @@ import {
   buildMcpConfig,
   claudeLaunchEnv,
   fillPlaceholders,
+  googleCredentialsIdentity,
   isolatedServerEnv,
   providerIdentity,
   systemPromptFor,
@@ -214,6 +215,30 @@ describe("agent benchmark provider identity", () => {
     });
     expect(vertex).toContain(`ANTHROPIC_VERTEX_PROJECT_ID=sha256:${pathDigest("my-project")}`);
     expect(vertex).not.toContain("my-project");
+    // The credentials file's project overrides the explicit project variables; only its
+    // identity fields count, never the key, and the path itself does not.
+    const files: Record<string, string> = {
+      "/a.json": JSON.stringify({ type: "service_account", project_id: "p1", private_key: "K1" }),
+      "/b.json": JSON.stringify({ type: "service_account", project_id: "p1", private_key: "K2" }),
+      "/c.json": JSON.stringify({ type: "service_account", project_id: "p2", private_key: "K1" }),
+    };
+    const read = (path: string) => {
+      const content = files[path];
+      if (content === undefined) {
+        throw new Error("ENOENT");
+      }
+      return content;
+    };
+    const id = (path: string) => googleCredentialsIdentity(path, read);
+    expect(id("/a.json")).toBe(id("/b.json"));
+    expect(id("/a.json")).not.toBe(id("/c.json"));
+    expect(id("/missing.json")).toBe("unreadable:file");
+    expect(
+      providerIdentity(
+        { CLAUDE_CODE_USE_VERTEX: "1", GOOGLE_APPLICATION_CREDENTIALS: "/a.json" },
+        id,
+      ),
+    ).toContain(`GOOGLE_APPLICATION_CREDENTIALS=${id("/a.json")}`);
     // The AWS profile picks Bedrock's account through the credential chain.
     expect(providerIdentity({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "team-a" })).toContain(
       `AWS_PROFILE=sha256:${pathDigest("team-a")}`,

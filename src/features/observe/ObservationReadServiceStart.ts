@@ -2,7 +2,7 @@ import { isIdle, holderOf } from "../../daemon/deviceBinding";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
 import type { BootedDevice } from "../../models";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { ActionableError } from "../../models/ActionableError";
 import { SingleFlight } from "../../utils/cache/SingleFlight";
 import {
@@ -35,11 +35,10 @@ export interface ObservationServiceOwnershipGuard {
 
 export const daemonObservationServiceOwnershipGuard: ObservationServiceOwnershipGuard = {
   canStart(device) {
-    const daemon = DaemonState.getInstance();
-    if (!daemon.isInitialized()) {
+    const pool = defaultDaemonContext.devicePool();
+    if (!pool) {
       return false;
     }
-    const pool = daemon.getDevicePool();
     const pooled = pool.getDevice(device.deviceId);
     return (
       !getDeviceAcquisitionReadiness(deviceReadinessLockKey(device.platform, device.deviceId)) &&

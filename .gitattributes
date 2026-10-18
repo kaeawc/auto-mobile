@@ -191,3 +191,6 @@ test/fixtures/android-system-image-37/** text eol=lf
 test/fixtures/input-route-params/*.json text eol=lf
 test/fixtures/ide-route-params/*.json text eol=lf
 test/fixtures/docs-site/*.html text eol=lf
+test/fixtures/android-pin-dialog/*.json text eol=lf
+test/fixtures/android-pin-dialog/*.xml text eol=lf
+test/fixtures/android-pin-dialog/*.md text eol=lf

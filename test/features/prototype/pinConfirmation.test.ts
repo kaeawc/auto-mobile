@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 import {
   confirmPinDialog,
   findPinConfirmButton,
@@ -10,10 +12,39 @@ import { pinDialogTree } from "../../helpers/pinDialogTree";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-// No captured launcher pin-dialog hierarchy exists in the repo yet (#12261), so these trees only
-// exercise the matcher and control flow; real launcher dialogs stay needs-device-verify.
+// The real API 37 Pixel Launcher dialog is captured under test/fixtures/android-pin-dialog (see its
+// README). The synthetic pinDialogTree stays only for control-flow and label-variant cases the one
+// capture cannot cover: polling until the dialog appears, timeout, tap failure, an unknown dialog,
+// and the bare "Add" / other-launcher label variants.
 const searchable = new SearchableHierarchy();
 const nodesOf = (...labels: string[]) => searchable.project(pinDialogTree(labels));
+
+const fixtureDir = path.join(import.meta.dir, "../../fixtures/android-pin-dialog");
+const capturedObservation = JSON.parse(
+  JSON.parse(fs.readFileSync(path.join(fixtureDir, "pin-dialog-api37-observe-full.json"), "utf8"))
+    .content[0].text,
+) as { viewHierarchy: ViewHierarchyResult };
+const capturedDialog: ViewHierarchyResult = capturedObservation.viewHierarchy;
+
+describe("findPinConfirmButton on the captured API 37 launcher dialog", () => {
+  test("taps the centre of the captured Add to home screen button", () => {
+    // Captured bounds [616,2211][949,2254]; the buttons carry no click action in the capture.
+    expect(findPinConfirmButton(searchable.project(capturedDialog))).toEqual({
+      kind: "found",
+      label: "Add to home screen",
+      x: 783,
+      y: 2233,
+    });
+  });
+  test("confirmPinDialog taps it once on the first capture", async () => {
+    const d = driver([capturedDialog]);
+    expect(await confirmPinDialog(d.value)).toEqual({
+      status: "tapped",
+      label: "Add to home screen",
+    });
+    expect(d.taps).toEqual([[783, 2233]]);
+  });
+});
 
 describe("findPinConfirmButton", () => {
   test("taps the centre of Add to home screen", () => {

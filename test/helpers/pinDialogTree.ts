@@ -1,8 +1,8 @@
 import type { ViewHierarchyResult } from "../../src/models";
 
 /**
- * Synthetic launcher pin dialog: one clickable 100x60 button per label, 200 px apart. No captured
- * launcher dialog exists in the repo yet, so this only drives the matcher and control flow.
+ * Synthetic launcher pin dialog: one clickable 100x60 button per label, 200 px apart. The real
+ * API 37 dialog is captured in test/fixtures/android-pin-dialog; this only drives control flow and label variants.
  */
 export function pinDialogTree(labels: string[]): ViewHierarchyResult {
   const hierarchy: ViewHierarchyResult["hierarchy"] = {

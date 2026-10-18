@@ -45,15 +45,20 @@ function labelOf(entry: SearchableEntry): string {
 /**
  * Finds the launcher pin dialog's accept button in a captured hierarchy. Matching is by label
  * (the resource ids of OEM launchers are not captured, so none are guessed) and never selects a
- * cancel control. A dialog with a cancel button but no recognizable accept is `unrecognized`.
+ * cancel control. The API 37 Pixel Launcher dialog is Compose: its "Cancel" and "Add to home
+ * screen" nodes are plain text with no click action (the handler sits on an unreported ancestor),
+ * so any labelled node with bounds qualifies, and an actionable match is preferred over a
+ * non-actionable one. A dialog with a cancel button but no recognizable accept is `unrecognized`.
  */
 export function findPinConfirmButton(nodes: readonly SearchableEntry[]): PinConfirmButton {
-  const tappable = nodes.filter((entry) => entry.actionable && labelOf(entry) !== "");
-  const labelled = tappable.map((entry) => ({ entry, label: labelOf(entry).toLowerCase() }));
+  const labelled = nodes
+    .filter((entry) => entry.bounds !== undefined && labelOf(entry) !== "")
+    .map((entry) => ({ entry, label: labelOf(entry).toLowerCase() }));
   const hasCancel = labelled.some(({ label }) => CANCEL_LABELS.has(label));
-  const accept = labelled.find(
+  const matches = labelled.filter(
     ({ label }) => UNAMBIGUOUS_ACCEPT.has(label) || (hasCancel && label === BARE_ACCEPT),
   );
+  const accept = matches.find(({ entry }) => entry.actionable) ?? matches[0];
   const bounds = accept?.entry.bounds;
   if (accept && bounds) {
     return {
@@ -64,7 +69,7 @@ export function findPinConfirmButton(nodes: readonly SearchableEntry[]): PinConf
     };
   }
   return hasCancel
-    ? { kind: "unrecognized", visibleButtons: tappable.map(labelOf) }
+    ? { kind: "unrecognized", visibleButtons: labelled.map(({ entry }) => labelOf(entry)) }
     : { kind: "absent" };
 }
 

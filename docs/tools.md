@@ -3196,6 +3196,55 @@ the connection profile, never restart the shared daemon for it, and never persis
 Unset or other env values express no preference and use the daemon's effective setting.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).
 
+### Long-running calls as MCP tasks
+
+AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
+(`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
+answer a `tools/call` with a task handle instead of blocking; no tool opts in yet
+(`startDevice` is the first, then `executePlan`, `installApp` and recording start and stop).
+Short interaction tools stay synchronous.
+
+To opt in, a client declares the extension on **every request** that may return a task, and on
+every `tasks/*` request, in the per-request capabilities:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "startDevice",
+    "arguments": {},
+    "_meta": {
+      "io.modelcontextprotocol/clientCapabilities": {
+        "extensions": { "io.modelcontextprotocol/tasks": {} }
+      }
+    }
+  }
+}
+```
+
+- A client that also lists the extension in its `initialize` capabilities sees
+  `capabilities.extensions["io.modelcontextprotocol/tasks"]` in the `initialize` result. The
+  daemon speaks the 2025-era protocol, where `server/discover` does not exist.
+- Tasks belong to the session key (the `x-auto-mobile-mcp-session-id` header). A request without
+  one always runs synchronously, and another session key cannot read or cancel the task.
+- An opted-in call answers `{"resultType": "task", "taskId": …, "status": "working", "ttlMs":
+  null, "pollIntervalMs": 1000, …}`. Poll `tasks/get` with `{"taskId": …}` at `pollIntervalMs`.
+  `completed` carries the same `result` the synchronous call returns (including an `isError`
+  result), `failed` carries the JSON-RPC `error`, and `input_required` carries `inputRequests`
+  to answer with `tasks/update` (`{"taskId": …, "inputResponses": {…}}`).
+- `tasks/cancel` is cooperative: it is acknowledged at once and the running tool is aborted;
+  the task then reports `cancelled`, or `completed` if the tool had already finished.
+- A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
+  creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
+- Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that
+  was running when the daemon stopped reports `failed` with an "interrupted" error.
+- `tasks/*` requests without the per-request declaration answer `-32021` (Missing Required
+  Client Capability). Progress ticks of a task become its `statusMessage`; no
+  `notifications/progress` is sent for a task. Calls through the stdio proxy do not create tasks
+  yet.
+
 ## Checks
 
 Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses

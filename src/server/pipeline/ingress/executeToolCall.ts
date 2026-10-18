@@ -538,7 +538,9 @@ function trackExecution(
     // reaches it even when the key arrived only as a header (#4678).
     executionSessionId: routed.bindingKey,
     executionSessionUuid: routed.executionSessionUuid,
-    sessionId,
+    // A task's work outlives its request, so it registers under the task's own scope
+    // rather than the one-off request scope the endpoint cancels on close (#4668).
+    sessionId: extra.executionScopeId ?? sessionId,
     implicitAutolockMcpSessionId,
   });
   if (validated.plainReadCall) {

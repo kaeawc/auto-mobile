@@ -6,6 +6,7 @@ import { projectSkeleton } from "../../../src/features/observe/output/SkeletonPr
 import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ViewHierarchyResult } from "../../../src/models";
+import { wireCapture } from "../../helpers/wireCapture";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const node = (id: string, text = "", extra = {}) => ({
@@ -15,9 +16,9 @@ const node = (id: string, text = "", extra = {}) => ({
   clickable: true,
   ...extra,
 });
-const snapshot = (nodes: unknown[], id = "capture-1", windows?: any[]) => ({
+const snapshot = (nodes: unknown[], id = "capture-1", windows?: unknown[]) => ({
   id,
-  nodes: new SearchableHierarchy().project({ hierarchy: { node: nodes }, windows } as any),
+  nodes: new SearchableHierarchy().project(wireCapture({ hierarchy: { node: nodes }, windows })),
 });
 const resolver = new ElementResolver(() => 0.9);
 const tap = { action: "tap" as const };

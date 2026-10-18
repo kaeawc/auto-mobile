@@ -518,13 +518,7 @@ describe("ContrastChecker", function () {
 
     it("finds the same opaque pixel as the widening scan, including at edges and beyond 12", function () {
       const random = new SeededRandom(10_220);
-      const search = new ContrastChecker({ compositeOverlays: true }) as unknown as {
-        findUnderlyingColor(
-          image: ReturnType<typeof uniformRaw>,
-          x: number,
-          y: number,
-        ): { r: number; g: number; b: number } | null;
-      };
+      const search = new ContrastChecker({ compositeOverlays: true });
       const mismatches: string[] = [];
       for (const density of [0, 0.005, 0.03, 0.2]) {
         const image = uniformRaw(31, 27, 0, 0, 0);

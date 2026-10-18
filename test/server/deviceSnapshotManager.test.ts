@@ -58,9 +58,9 @@ describe("deviceSnapshotManager", () => {
     restoreCalls = [];
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       // No real ~/.android/avd scan in a unit test (#6490).
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: fakeTimer,
@@ -1336,7 +1336,7 @@ describe("deviceSnapshotManager", () => {
       );
 
       await setDeviceSnapshotManagerDependencies({
-        snapshotStore: legacyStore as any,
+        snapshotStore: legacyStore,
       });
 
       const { result, manifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
@@ -1389,7 +1389,7 @@ describe("deviceSnapshotManager", () => {
       );
 
       await setDeviceSnapshotManagerDependencies({
-        snapshotStore: legacyStore as any,
+        snapshotStore: legacyStore,
       });
 
       const { snapshots, count } = await listDeviceSnapshots();
@@ -1432,7 +1432,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       const snapshotName = "evict-me";
       const avdName = "Pixel_5";
@@ -1493,7 +1493,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       const snapshotName = "legacy-flat";
       const avdName = "Pixel_5";
@@ -1711,7 +1711,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       // A leftover set-aside dir from an interrupted overwrite: it holds the
       // prior snapshot's manifest.json at the flat base level. Importing it would
@@ -1747,7 +1747,7 @@ describe("deviceSnapshotManager", () => {
         noOpSnapshotFileSync,
       );
       await realStore.ensureSnapshotsDirectory();
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
       // A different AVD's real snapshot living under the "android" scope root.
       const other = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1801,7 +1801,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "baseline";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1851,7 +1851,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "baseline";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1904,7 +1904,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "settings-baseline";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_7" };
@@ -1957,7 +1957,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };
         const asideDir = realStore.getSnapshotPathWithOptions("ghost.replacing", androidOptions);
@@ -1993,7 +1993,7 @@ describe("deviceSnapshotManager", () => {
           noOpSnapshotFileSync,
         );
         await realStore.ensureSnapshotsDirectory();
-        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+        await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
         const snapshotName = "corrupt";
         const androidOptions = { platform: "android" as const, avdName: "Pixel_5" };

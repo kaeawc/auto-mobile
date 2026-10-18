@@ -1009,7 +1009,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.tapPoints.invisibleMatchFailure(...args);
   }
 
-  private resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
+  resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
     return this.tapPoints.resolveTapPoint(...args);
   }
 
@@ -3209,9 +3209,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   /**
    * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
-   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
+   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate. (@internal unit-test seam)
    */
-  private async executeAndroidTapWithCoordinates(
+  async executeAndroidTapWithCoordinates(
     action: string,
     x: number,
     y: number,

@@ -481,6 +481,28 @@ describe("agent benchmark harness", () => {
     expect(claims.at(-1)).toBe("release emulator-5554");
   });
 
+  test("after an unconfirmed daemon stop, a refused reclaim is retried through the orphan window", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    runner.on("/usr/bin/bun", () => ({ exitCode: 1, stderr: "timed out\n" }));
+    let attempts = 0;
+    const reserve = deps.deviceClaims.reserve;
+    deps.deviceClaims = {
+      reserve: async (serial) => {
+        const held = await reserve(serial);
+        return "refused" in held
+          ? held
+          : {
+              ...held,
+              // The lingering daemon holds its claim for two more attempts, then exits.
+              reclaim: async () => (++attempts <= 2 ? "is claimed by the run's daemon" : undefined),
+            };
+      },
+    };
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(attempts).toBe(3);
+    expect(result.outcome.screenError).toBeUndefined();
+  });
+
   test("the device claim is held through preflight and released before Claude starts", async () => {
     const { claims, runner, deps, options } = setup(PASSING);
     const order: string[] = [];

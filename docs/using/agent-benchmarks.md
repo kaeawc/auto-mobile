@@ -127,6 +127,9 @@ they can still affect results:
   `xcrun simctl` and `devicectl` on macOS): the benchmark's AutoMobile server discovers iOS too,
   which would make device selection ambiguous. If either check itself fails on macOS, the run stops
   rather than assuming none.
+- The device's foreground user must be the primary user (0): preference seeding with `run-as`
+  targets user 0 while the launch targets the current user, so another user would start an
+  unseeded app.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
 - `Bash` and `PowerShell` are always disallowed (and `CLAUDE_CODE_USE_POWERSHELL_TOOL` is removed

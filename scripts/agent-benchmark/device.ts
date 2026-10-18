@@ -470,12 +470,29 @@ export interface PreflightOutcome {
 }
 
 /** Run preflight steps; returns the step log and the installed app build. */
+/**
+ * `run-as` seeds user 0 unless told otherwise, while `am start` launches for the current
+ * user, so on a device whose foreground user is not 0 the app would start unseeded. Such
+ * devices are refused rather than half-prepared. A device too old to report its user (no
+ * numeric answer) only has user 0.
+ */
+async function assertPrimaryUser(runner: CommandRunner, target: string[]): Promise<void> {
+  const user = (await adb(runner, [...target, "shell", "am", "get-current-user"])).trim();
+  if (/^\d+$/.test(user) && user !== "0") {
+    throw new Error(
+      `the foreground Android user is ${user}; agent benchmarks run as user 0 only. ` +
+        "Switch to the primary user (adb shell am switch-user 0) and retry.",
+    );
+  }
+}
+
 export async function runPreflight(
   runner: CommandRunner,
   spec: PreflightSpec,
 ): Promise<PreflightOutcome> {
   const log: string[] = [];
   const target = ["-s", spec.serial];
+  await assertPrimaryUser(runner, target);
   if (spec.apkPath) {
     await adb(runner, [...target, "install", "-r", "-t", spec.apkPath], INSTALL_TIMEOUT_MS);
     log.push(`installed ${spec.apkPath}`);

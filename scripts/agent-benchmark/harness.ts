@@ -169,7 +169,16 @@ async function claudeVersion(deps: HarnessDeps, command: string): Promise<string
   }
 }
 
-async function stopPrivateDaemon(deps: HarnessDeps, options: RunOptions, paths: ServerPaths) {
+/** Reclaim attempts while a daemon whose stop failed exits on its orphan idle window. */
+const RECLAIM_RETRIES = 10;
+const RECLAIM_RETRY_MS = 1_000;
+
+/** Stops the run's private daemon; false when the stop did not confirm it exited. */
+async function stopPrivateDaemon(
+  deps: HarnessDeps,
+  options: RunOptions,
+  paths: ServerPaths,
+): Promise<boolean> {
   // The same sanitized environment as the run, so an inherited socket or PID override
   // can never point this stop at the resident daemon.
   const env = isolatedServerEnv(deps.env, paths);
@@ -182,19 +191,45 @@ async function stopPrivateDaemon(deps: HarnessDeps, options: RunOptions, paths: 
     );
     if (result.exitCode !== 0) {
       deps.log(`private daemon stop exited ${result.exitCode}: ${result.stderr.trim()}`);
+      return false;
     }
+    return true;
   } catch (error) {
     // Best effort: the daemon also exits on its own after the orphan idle window.
     deps.log(`private daemon stop failed: ${errorMessage(error)}`);
+    return false;
   }
 }
 
-async function screenAfterRun(deps: HarnessDeps, run: PreparedRun, packageName: string) {
+/**
+ * Takes the device claim back after the run. When the daemon's stop was not confirmed it may
+ * still hold its claim until its orphan idle window ends, so a refusal is retried for a
+ * bounded time instead of failing the paid run's screen check at once.
+ */
+async function reclaimAfterRun(
+  deps: HarnessDeps,
+  run: PreparedRun,
+  daemonStopConfirmed: boolean,
+): Promise<string | undefined> {
+  let refused = await run.reservation.reclaim();
+  for (let attempt = 0; refused && !daemonStopConfirmed && attempt < RECLAIM_RETRIES; attempt++) {
+    await deps.timer.sleep(RECLAIM_RETRY_MS);
+    refused = await run.reservation.reclaim();
+  }
+  return refused;
+}
+
+async function screenAfterRun(
+  deps: HarnessDeps,
+  run: PreparedRun,
+  packageName: string,
+  daemonStopConfirmed: boolean,
+) {
   // The private daemon released its claim on stop; another session could take the device
   // before the dump, so the screen read must happen under the benchmark's own claim again.
   let refused: string | undefined;
   try {
-    refused = await run.reservation.reclaim();
+    refused = await reclaimAfterRun(deps, run, daemonStopConfirmed);
   } catch (error) {
     // The run is already paid for: fail the screen check closed but still write the result.
     deps.log(`post-run screen dump skipped: reclaim failed: ${errorMessage(error)}`);
@@ -478,10 +513,10 @@ export async function runSuite(
   try {
     exit = await launchClaude(suite, options, deps, prepared);
     // Stop the private daemon first so its device claim is free for the benchmark to retake.
-    await stopPrivateDaemon(deps, options, prepared.paths);
+    const stopConfirmed = await stopPrivateDaemon(deps, options, prepared.paths);
     daemonStopped = true;
     if (definition.verify.screenIncludes.length > 0) {
-      screen = await screenAfterRun(deps, prepared, definition.app.packageName);
+      screen = await screenAfterRun(deps, prepared, definition.app.packageName, stopConfirmed);
     }
   } finally {
     if (!daemonStopped) {

@@ -124,6 +124,7 @@ describe("agent benchmark preflight", () => {
     );
     const s = "-s emulator-5554";
     expect(runner.adbCalls()).toEqual([
+      `${s} shell am get-current-user`,
       `${s} install -r -t /repo/app.apk`,
       `${s} shell pm path ${PACKAGE}`,
       `${s} shell dumpsys package ${PACKAGE}`,
@@ -150,6 +151,7 @@ describe("agent benchmark preflight", () => {
     const runner = new FakeCommandRunner().onAdb("pm path", { stdout: "package:/x.apk" });
     await runPreflight(runner, preflightSpec({ clearAppData: false }));
     expect(runner.adbCalls()).toEqual([
+      "-s emulator-5554 shell am get-current-user",
       `-s emulator-5554 shell pm path ${PACKAGE}`,
       `-s emulator-5554 shell dumpsys package ${PACKAGE}`,
       `-s emulator-5554 shell am force-stop ${PACKAGE}`,
@@ -283,7 +285,22 @@ describe("agent benchmark preflight", () => {
     await expect(runPreflight(runner, preflightSpec())).rejects.toThrow(
       /dev.example.app is not installed on emulator-5554; set app.apkPath/,
     );
-    expect(runner.adbCalls()).toHaveLength(1);
+    expect(runner.adbCalls()).toHaveLength(2);
+  });
+
+  test("a nonzero foreground user is refused before any app state changes", async () => {
+    const runner = new FakeCommandRunner().onAdb("get-current-user", { stdout: "10\n" });
+    await expect(runPreflight(runner, preflightSpec())).rejects.toThrow(
+      /foreground Android user is 10; agent benchmarks run as user 0 only/,
+    );
+    expect(runner.adbCalls()).toEqual(["-s emulator-5554 shell am get-current-user"]);
+    // User 0, or a device too old to answer, proceeds.
+    for (const stdout of ["0\n", "Unknown command: get-current-user\n"]) {
+      const ok = new FakeCommandRunner()
+        .onAdb("get-current-user", { stdout })
+        .onAdb("pm path", { stdout: "package:/x.apk" });
+      await runPreflight(ok, preflightSpec({ clearAppData: false }));
+    }
   });
 
   test("preference XML uses Android's typed tags and escapes values", () => {

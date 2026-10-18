@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  type InteractionToolDependencies,
   formatPinchOnMessage,
   pinchOnHandler,
-  resetPinchOnFactory,
-  setPinchOnFactory,
 } from "../../src/server/interactionTools";
 import type { PinchOnArgs } from "../../src/server/interactionToolTypes";
 import type { BootedDevice } from "../../src/models";
 import type { PinchOnResult } from "../../src/models";
 import type { ActionCall } from "../../src/features/action/ActionCall";
 
+const interactionDeps: InteractionToolDependencies = {};
 // Mirrors interactionTools.swipeOn.test.ts for the pinchOn message fix (#6056).
 // Before the fix, pinchOnHandler hardcoded `Pinched ${direction}` regardless of
 // outcome, so a validation failure (e.g. scale:0 -> success:false, error:"scale
@@ -64,7 +64,7 @@ describe("pinchOnHandler (registered handler wiring)", () => {
   const args: PinchOnArgs = { direction: "in", platform: "android" };
 
   afterEach(() => {
-    resetPinchOnFactory();
+    delete interactionDeps.pinchOnFactory;
   });
 
   const parseMessage = (response: { content: Array<{ type: string; text: string }> }): string => {
@@ -86,11 +86,11 @@ describe("pinchOnHandler (registered handler wiring)", () => {
     }) as PinchOnResult;
 
   test("serialized response carries the failure error, not a success message", async () => {
-    setPinchOnFactory(() => ({
+    interactionDeps.pinchOnFactory = () => ({
       execute: async () => fakeResult({ success: false, error: "scale must be greater than 0" }),
-    }));
+    });
 
-    const response = await pinchOnHandler(fakeDevice, args);
+    const response = await pinchOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     const message = parseMessage(response);
     expect(message).toBe("scale must be greater than 0");
     expect(message).not.toBe("Pinched in");
@@ -102,11 +102,11 @@ describe("pinchOnHandler (registered handler wiring)", () => {
   });
 
   test("serialized response reports a success message on a successful pinch", async () => {
-    setPinchOnFactory(() => ({
+    interactionDeps.pinchOnFactory = () => ({
       execute: async () => fakeResult({ success: true }),
-    }));
+    });
 
-    const response = await pinchOnHandler(fakeDevice, args);
+    const response = await pinchOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
     expect(parseMessage(response)).toBe("Pinched in");
     expect(response.isError).toBeUndefined();
   });
@@ -114,13 +114,13 @@ describe("pinchOnHandler (registered handler wiring)", () => {
   test("forwards the registry signal to pinchOn", async () => {
     const signal = new AbortController().signal;
     let forwarded: AbortSignal | undefined;
-    setPinchOnFactory(() => ({
+    interactionDeps.pinchOnFactory = () => ({
       execute: async (_options, call) => {
         forwarded = (call as ActionCall | undefined)?.signal;
         return fakeResult({ success: true });
       },
-    }));
-    await pinchOnHandler(fakeDevice, args, undefined, signal);
+    });
+    await pinchOnHandler(fakeDevice, args, undefined, signal, interactionDeps);
     expect(forwarded).toBe(signal);
   });
 });

@@ -243,17 +243,16 @@ beforeAll(async () => {
 });
 
 test("executor passes step geometry through the real tapAt handler", async () => {
-  const { tapAtHandler, tapAtSchema, setTapAtElementFactory, resetTapAtElementFactory } =
-    interactionTools;
+  const { tapAtHandler, tapAtSchema } = interactionTools;
   const { createTapAt } = tapAtCoordinate;
   const fake = createTapAt(SIMULATOR);
-  setTapAtElementFactory(() => fake.tapAt);
-  try {
+  {
     ToolRegistry.register(
       "tapAt",
       "fake native tap",
       tapAtSchema,
-      (args, progress, signal) => tapAtHandler(SIMULATOR, args, progress, signal),
+      (args, progress, signal) =>
+        tapAtHandler(SIMULATOR, args, progress, signal, { tapAtElementFactory: () => fake.tapAt }),
       { defaultEnabled: true },
     );
     const geometry = {
@@ -285,7 +284,5 @@ test("executor passes step geometry through the real tapAt handler", async () =>
     expect(incompatible.success).toBe(false);
     expect(incompatible.failedStep?.error).toContain("orientation mismatch");
     expect(fake.iosDispatches).toHaveLength(1);
-  } finally {
-    resetTapAtElementFactory();
   }
 });

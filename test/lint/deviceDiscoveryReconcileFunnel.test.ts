@@ -109,8 +109,17 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
     "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
       calls: 7,
+      reason: "Android emulator discovery producer; runs below the pool.",
+    },
+    "src/utils/android-cmdline-tools/EmulatorLaunchCoordinator.ts": {
+      calls: 2,
       reason:
-        "Android emulator discovery producer; runs below the pool. The 7th call (adoptsExistingAvdLaunch) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
+        "The host-interface declaration plus adoptsExistingAvdLaunch (moved verbatim out of AndroidEmulatorClient): #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
+    },
+    "src/utils/android-cmdline-tools/EmulatorKiller.ts": {
+      calls: 2,
+      reason:
+        "The host-interface declaration plus the kill-time serial rediscovery (moved verbatim out of AndroidEmulatorClient.discoverEmulatorsForKill); never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
       calls: 1,

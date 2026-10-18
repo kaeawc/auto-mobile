@@ -1,11 +1,11 @@
 complexity:
   active: false
 coroutines:
-  active: false
+  active: true
 empty-blocks:
-  active: false
+  active: true
 exceptions:
-  active: false
+  active: true
 naming:
   active: false
 performance:

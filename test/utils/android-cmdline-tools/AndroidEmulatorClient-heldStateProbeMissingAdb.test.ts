@@ -33,7 +33,11 @@ function emulatorClientWithMissingAdb(spawns: string[] = []): AndroidEmulatorCli
     timer,
   );
   const factory: AdbClientFactory = { create: () => adb };
-  return new AndroidEmulatorClient(async () => execResult(""), null, timer, factory);
+  return new AndroidEmulatorClient({
+    execAsync: async () => execResult(""),
+    timer,
+    adbFactory: factory,
+  });
 }
 
 /**

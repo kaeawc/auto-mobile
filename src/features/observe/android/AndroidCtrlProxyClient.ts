@@ -78,6 +78,15 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import {
+  forwardLeaseActivity,
+  heldForwardLeaseDeviceIds,
+  releaseForwardLeasesForShutdown,
+  releaseIdleForwardLease,
+  type ForwardLeaseActivity,
+  type ForwardLeaseClient,
+  type ForwardLeaseClientRegistry,
+} from "./CtrlProxyForwardLeaseRegistry";
+import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
 } from "../../../ctrlProxy/ForcedRestartBudget";
@@ -104,11 +113,11 @@ import { AndroidClientRequests } from "./AndroidClientRequests";
 import { AndroidBuildContextResolver } from "./AndroidBuildContextResolver";
 import { AndroidSdkScreenIdentityStore } from "./AndroidSdkScreenIdentityStore";
 import { AndroidInteractionTracker, MAX_CACHED_INTERACTIONS } from "./AndroidNavigationEvents";
+import { AndroidServiceReadinessVerifier } from "./AndroidServiceReadinessVerifier";
 import { AndroidScreenshotRequester } from "./AndroidScreenshotRequester";
 import { AndroidNavigationWriteQueue } from "./AndroidNavigationWriteQueue";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { type SendCommandOptions } from "../DeviceServiceUtils";
-import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import {
   TrackedScreenGeometry,
   screenshotBindingPushOptions,
@@ -588,16 +597,6 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestLaunchIntent(packageName: string, timeoutMs?: number): Promise<A11yLaunchIntentResult>;
 }
-
-/**
- * verifyServiceReady stops retrying once the SAME correlated runner error text has been observed
- * on this many CONSECUTIVE verification attempts (issue #3097). A runner handler failure that
- * reproduces byte-identically after a retry delay is deterministic in practice — retrying to
- * exhaustion just burns the remaining `maxAttempts * (timeout + delay)` budget. Kept at 2 (not 1)
- * so a single handler error during service bring-up — where transient failures are expected —
- * always gets one retry before the loop concludes the failure is deterministic.
- */
-const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 
 /** Isolation markers kept for hierarchy requests whose waiter already gave up. */
 const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
@@ -1085,107 +1084,69 @@ export class AndroidCtrlProxyClient
 
   /** Devices whose singleton client holds the cross-process forwarding lease. */
   public static getForwardLeaseHeldDeviceIds(): string[] {
-    return [...AndroidCtrlProxyClient.instances.entries()]
-      .filter(([, client]) => client.ctrlProxyForwardLease.isHeld?.() === true)
-      .map(([deviceId]) => deviceId);
+    return heldForwardLeaseDeviceIds(AndroidCtrlProxyClient.forwardLeaseRegistry());
   }
 
-  /**
-   * CtrlProxy use of a device by this process (#10497): requests in flight
-   * through its singleton and any detached observer, and time since the last
-   * request or since the lease was taken, whichever is later. `null` when
-   * this process neither holds the lease nor has used the device.
-   */
+  /** CtrlProxy use of a device by this process (#10497); see {@link forwardLeaseActivity}. */
   public static getForwardLeaseActivity(
     deviceId: string,
     timer: Timer = defaultTimer,
-  ): { inFlightRequests: number; idleForMs: number | null } {
-    const clients = [
-      AndroidCtrlProxyClient.instances.get(deviceId),
-      ...[...AndroidCtrlProxyClient.activeObservers].filter(
-        (observer) => observer.device.deviceId === deviceId,
-      ),
-    ].filter((client): client is AndroidCtrlProxyClient => client !== undefined);
-    const activities = clients.map((client) => client.getRequestActivity());
-    const observers = clients.length - (AndroidCtrlProxyClient.instances.has(deviceId) ? 1 : 0);
-    const lastTimes = [
-      ...activities.map((activity) => activity.lastActivityAt),
-      AndroidCtrlProxyClient.instances.get(deviceId)?.ctrlProxyForwardLease.getAcquiredAt?.(),
-    ].filter((time): time is number => time !== undefined);
+  ): ForwardLeaseActivity {
+    return forwardLeaseActivity(AndroidCtrlProxyClient.forwardLeaseRegistry(), deviceId, timer);
+  }
+
+  /** Give up an idle device's forwarding lease (issue #10497). */
+  public static releaseIdleForwardLease(deviceId: string): Promise<void> {
+    return releaseIdleForwardLease(AndroidCtrlProxyClient.forwardLeaseRegistry(), deviceId);
+  }
+
+  /** Graceful daemon stop: close every client and release its forwarding lease, bounded. */
+  public static releaseForwardLeasesForShutdown(timer: Timer, timeoutMs: number): Promise<void> {
+    return releaseForwardLeasesForShutdown(
+      AndroidCtrlProxyClient.forwardLeaseRegistry(),
+      timer,
+      timeoutMs,
+    );
+  }
+
+  /** Lease-bookkeeping view over the static client registry (instances map stays here). */
+  private static forwardLeaseRegistry(): ForwardLeaseClientRegistry {
     return {
-      // A live detached observer is a read in progress even between its requests.
-      inFlightRequests:
-        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) +
-        observers +
-        clients.reduce((sum, client) => sum + client.readinessHolds, 0),
-      idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
+      singletonEntries: () =>
+        [...AndroidCtrlProxyClient.instances.entries()].map(([deviceId, client]) => [
+          deviceId,
+          client.asForwardLeaseClient(),
+        ]),
+      singleton: (deviceId) =>
+        AndroidCtrlProxyClient.instances.get(deviceId)?.asForwardLeaseClient(),
+      observers: () =>
+        [...AndroidCtrlProxyClient.activeObservers].map((c) => c.asForwardLeaseClient()),
+      evictSingleton: (deviceId) => {
+        const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+        if (!client) {
+          return null;
+        }
+        AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+        return client.asForwardLeaseClient();
+      },
+      clearSingletons: () => AndroidCtrlProxyClient.instances.clear(),
     };
   }
 
-  /**
-   * Give up an idle device's forwarding lease (issue #10497): evict the
-   * singleton first so a new call builds a fresh client that re-acquires the
-   * lease, then close the old one, which removes its forward and releases it.
-   */
-  public static async releaseIdleForwardLease(deviceId: string): Promise<void> {
-    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
-    if (!client) {
-      return;
-    }
-    AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
-    await client.close();
-  }
-
-  /**
-   * Graceful daemon stop: close every client this process holds (removing the
-   * forwards it recorded, never unrecorded ones) and release its forwarding
-   * leases, so the next daemon need not reclaim them. Bounded by `timeoutMs`:
-   * a hung adb must not block shutdown, so on timeout the leases are released
-   * anyway while the recorded forward stays on disk for the next daemon.
-   */
-  public static async releaseForwardLeasesForShutdown(
-    timer: Timer,
-    timeoutMs: number,
-  ): Promise<void> {
-    const clients = new Set<AndroidCtrlProxyClient>([
-      ...AndroidCtrlProxyClient.instances.values(),
-      ...AndroidCtrlProxyClient.activeObservers,
-    ]);
-    if (clients.size === 0) {
-      return;
-    }
-    AndroidCtrlProxyClient.instances.clear();
-    const closes = [...clients].map((client) =>
-      client.close().catch((error) => {
-        logger.warn(
-          `[CTRL_PROXY] Failed to close CtrlProxy client for ${client.device.deviceId} during shutdown: ${errorMessage(error)}`,
-          error,
-        );
-      }),
-    );
-    const timedOut = Symbol("ctrlproxy shutdown release timeout");
-    try {
-      await raceWithDeadline(Promise.all(closes), {
-        timer,
-        timeoutMs,
-        label: "CtrlProxy forward lease shutdown release",
-        timeoutError: () => timedOut,
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      logger.warn(
-        `[CTRL_PROXY] Timed out after ${timeoutMs}ms removing CtrlProxy forwards during shutdown; ` +
-          `releasing forwarding leases anyway`,
-      );
-      for (const client of clients) {
-        // A close still stuck on adb must not later remove a forward that a
-        // successor daemon creates on the freed lease and port (#10690).
+  private asForwardLeaseClient(): ForwardLeaseClient {
+    const client = this;
+    return {
+      deviceId: client.device.deviceId,
+      forwardLease: client.ctrlProxyForwardLease,
+      get readinessHolds() {
+        return client.readinessHolds;
+      },
+      getRequestActivity: () => client.getRequestActivity(),
+      close: () => client.close(),
+      markForwardLeaseForceReleased: () => {
         client.forwardLeaseForceReleased = true;
-        client.ctrlProxyForwardLease.release();
-      }
-    }
+      },
+    };
   }
 
   /**
@@ -2500,96 +2461,36 @@ export class AndroidCtrlProxyClient
     return this.requestScreenshot(timeoutMs, perf, true);
   }
 
+  private serviceReadinessVerifierInstance: AndroidServiceReadinessVerifier | undefined;
+  private getServiceReadinessVerifier(): AndroidServiceReadinessVerifier {
+    if (!this.serviceReadinessVerifierInstance) {
+      const client = this;
+      this.serviceReadinessVerifierInstance = new AndroidServiceReadinessVerifier({
+        get retryExecutor() {
+          return client.retryExecutor;
+        },
+        get logger() {
+          return client.loggerInstance;
+        },
+        requestHierarchySync: (signal, timeoutMs, diagnostics) =>
+          client.requestHierarchySync(
+            new NoOpPerformanceTracker(),
+            false,
+            signal,
+            timeoutMs,
+            diagnostics,
+          ),
+      });
+    }
+    return this.serviceReadinessVerifierInstance;
+  }
+
   async verifyServiceReady(
     maxAttempts: number = 5,
     delayMs: number = 500,
     timeoutMs: number = 3000,
   ): Promise<boolean> {
-    const signal = combineWithAmbientAbort();
-    signal?.throwIfAborted();
-    // Remember the most recent runner error text across attempts (issue #3062) so the terminal
-    // warn — the one visible at the default log level — attributes the deterministic handler
-    // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
-    // error and a plain timeout previously both surfaced identically here).
-    let lastRunnerError: string | undefined;
-    // Consecutive attempts that failed with byte-identical correlated runner error text
-    // (issue #3097). A handler failure that reproduces verbatim after a retry delay is treated
-    // as deterministic — the service will not become ready by retrying — so the loop stops
-    // instead of burning the remaining attempts. Two safety valves protect the startup path
-    // this method exists to verify (where a handler error CAN be transient during bring-up):
-    // the first runner error always gets one retry, and a plain timeout in between resets the
-    // streak (mixed signals are not evidence of determinism). Classifying specific runner
-    // messages (allow/deny lists, structured codes) is deliberately avoided here: codes belong
-    // in the runner's wire contract, and TS string-matching individual messages would be
-    // fragile against runner text changes.
-    let identicalRunnerErrorStreak = 0;
-    let shortCircuited = false;
-    const result = await this.retryExecutor.execute(
-      async (attempt) => {
-        logger.debug(`[CTRL_PROXY] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
-
-        const diagnostics: HierarchySyncDiagnostics = {};
-        const hierarchyResult = await this.requestHierarchySync(
-          new NoOpPerformanceTracker(),
-          false,
-          signal,
-          timeoutMs,
-          diagnostics,
-        );
-
-        if (hierarchyResult && hierarchyResult.hierarchy) {
-          logger.debug(`[CTRL_PROXY] Service verified ready after ${attempt} attempt(s)`);
-          return true;
-        }
-
-        if (diagnostics.runnerError) {
-          identicalRunnerErrorStreak =
-            diagnostics.runnerError === lastRunnerError ? identicalRunnerErrorStreak + 1 : 1;
-          lastRunnerError = diagnostics.runnerError;
-        } else {
-          // A plain timeout breaks the deterministic-failure streak but keeps lastRunnerError,
-          // so the terminal warn still attributes the most recent runner error.
-          identicalRunnerErrorStreak = 0;
-        }
-        const runnerErrorSuffix = diagnostics.runnerError
-          ? `: runner error: ${diagnostics.runnerError}`
-          : "";
-        throw new Error(
-          `Verification attempt ${attempt} returned no hierarchy${runnerErrorSuffix}`,
-        );
-      },
-      {
-        maxAttempts,
-        delays: delayMs,
-        signal,
-        shouldRetry: () => {
-          if (identicalRunnerErrorStreak >= VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT) {
-            shortCircuited = true;
-            return false;
-          }
-          return true;
-        },
-        onRetry: (error, attempt) => {
-          logger.debug(`[CTRL_PROXY] Verification attempt ${attempt} failed: ${error.message}`);
-          logger.debug(`[CTRL_PROXY] Waiting ${delayMs}ms before next verification attempt`);
-        },
-      },
-    );
-
-    signal?.throwIfAborted();
-
-    if (!result.success) {
-      const runnerErrorSuffix = lastRunnerError ? ` (last runner error: ${lastRunnerError})` : "";
-      const attemptsSummary = shortCircuited
-        ? `${result.attempts}/${maxAttempts} verification attempts (short-circuited: identical runner error on ${VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT} consecutive attempts)`
-        : `${maxAttempts} verification attempts`;
-      this.loggerInstance.warn(
-        `[CTRL_PROXY] Service not ready after ${attemptsSummary}${runnerErrorSuffix}`,
-      );
-      return false;
-    }
-
-    return result.value ?? false;
+    return this.getServiceReadinessVerifier().verifyServiceReady(maxAttempts, delayMs, timeoutMs);
   }
 
   // ===========================================================================

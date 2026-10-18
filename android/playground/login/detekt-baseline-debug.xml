@@ -2,6 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>TooGenericExceptionCaught:LoginDataSource.kt:LoginDataSource$e: Throwable</ID>
     <ID>UnsafeCallOnNullableType:LoginScreen.kt:loginError!!</ID>
   </CurrentIssues>
 </SmellBaseline>

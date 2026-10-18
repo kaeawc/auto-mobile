@@ -7,5 +7,6 @@
     <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and PromoOrange.toArgb())</ID>
     <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and backgroundColor.toArgb())</ID>
     <ID>ImplicitDefaultLocale:MermaidDiagramSlideItem.kt:String.format("#%06X", 0xFFFFFF and textColor.toArgb())</ID>
+    <ID>TooGenericExceptionCaught:MermaidDiagramSlideItem.kt:&lt;no name provided&gt;$e: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

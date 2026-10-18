@@ -2,6 +2,13 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>InjectDispatcher:NetworkTestScreen.kt:IO</ID>
+    <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: IndexOutOfBoundsException</ID>
+    <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: NullPointerException</ID>
+    <ID>TooGenericExceptionCaught:HandledExceptionDemoScreen.kt:e: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:NetworkTestScreen.kt:e: Exception</ID>
+    <ID>TooGenericExceptionThrown:BugReproScreen.kt:throw RuntimeException("Intentional crash from Bug Reproduction screen")</ID>
+    <ID>TooGenericExceptionThrown:HandledExceptionDemoScreen.kt:throw RuntimeException("Custom runtime exception for testing")</ID>
     <ID>UnsafeCallOnNullableType:HandledExceptionDemoScreen.kt:nullString!!</ID>
   </CurrentIssues>
 </SmellBaseline>

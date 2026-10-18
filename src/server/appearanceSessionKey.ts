@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
 /**
@@ -6,13 +6,16 @@ import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/s
  * derived `${base}:${label}` device session shares its owner's config. Undefined without a
  * session, which selects the global config.
  */
-export function resolveAppearanceSessionKey(sessionId: string | undefined): string | undefined {
+export function resolveAppearanceSessionKey(
+  sessionId: string | undefined,
+  daemon: DaemonContext = defaultDaemonContext,
+): string | undefined {
   const trimmed = sessionId?.trim();
   if (!trimmed) {
     return undefined;
   }
-  const daemonState = DaemonState.getInstance();
-  return daemonState.isInitialized()
-    ? (resolveToolSelectionBaseSessionUuid(trimmed, daemonState.getSessionManager()) ?? trimmed)
+  const sessionManager = daemon.sessionManager();
+  return sessionManager
+    ? (resolveToolSelectionBaseSessionUuid(trimmed, sessionManager) ?? trimmed)
     : trimmed;
 }

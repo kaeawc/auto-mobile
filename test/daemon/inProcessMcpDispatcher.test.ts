@@ -4,11 +4,11 @@ import {
   DaemonHandoffInterruptionError,
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
 } from "../../src/daemon/daemonHandoffInterruption";
+import { type AsyncScope, InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import {
-  type AsyncScope,
-  InProcessMcpDispatcher,
-  mcpForwardTransportFromEnv,
-} from "../../src/daemon/inProcessMcpDispatcher";
+  currentForwardSessionKey,
+  runWithForwardSessionKey,
+} from "../../src/daemon/socketServer/forwardSessionKey";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import type { McpRequestSessionContext } from "../../src/daemon/statelessMcpServerFactory";
 import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
@@ -192,11 +192,13 @@ describe("InProcessMcpDispatcher (#11820)", () => {
     expect(h.built).toHaveLength(1);
   });
 
-  test("the environment selects in-process forwarding only when asked", () => {
-    expect(mcpForwardTransportFromEnv({})).toBe("http");
-    expect(mcpForwardTransportFromEnv({ AUTOMOBILE_MCP_FORWARD_TRANSPORT: "http" })).toBe("http");
-    expect(mcpForwardTransportFromEnv({ AUTOMOBILE_MCP_FORWARD_TRANSPORT: "in-process" })).toBe(
-      "in-process",
-    );
+  test("a forward's session key travels with its async chain to the client factory", async () => {
+    expect(currentForwardSessionKey()).toBeUndefined();
+    const seen = await runWithForwardSessionKey("socket-7", async () => {
+      await Promise.resolve();
+      return currentForwardSessionKey();
+    });
+    expect(seen).toBe("socket-7");
+    expect(currentForwardSessionKey()).toBeUndefined();
   });
 });

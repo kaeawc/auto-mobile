@@ -80,7 +80,7 @@ interface Internals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
-  getMcpClient(): Promise<Pick<Client, "callTool">>;
+  mcpClientFactory(): Promise<Pick<Client, "callTool" | "close">>;
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -162,7 +162,8 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     );
     internals = server as unknown as Internals;
     internals.acceptingRequests = true;
-    internals.getMcpClient = async () => ({
+    internals.mcpClientFactory = async () => ({
+      close: async () => {},
       callTool: (_params, options) => {
         const call: LoopbackCall = {
           signal: options?.signal,

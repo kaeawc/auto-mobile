@@ -791,7 +791,25 @@ export class ExecutionTracker {
   }
 
   async waitForToolExecutionsToEnd(toolName: string, timeoutMs: number): Promise<boolean> {
-    if (!this.hasActiveToolExecutionGlobal(toolName)) {
+    return await this.waitUntilNoneActive(
+      () => this.hasActiveToolExecutionGlobal(toolName),
+      timeoutMs,
+    );
+  }
+
+  /**
+   * Wait until no execution keyed on `sessionId` (a transport session) is running: true once
+   * drained, false at the timeout.
+   */
+  async waitForSessionExecutionsToEnd(sessionId: string, timeoutMs: number): Promise<boolean> {
+    return await this.waitUntilNoneActive(
+      () => this.hasActiveSessionExecutions(sessionId),
+      timeoutMs,
+    );
+  }
+
+  private async waitUntilNoneActive(isActive: () => boolean, timeoutMs: number): Promise<boolean> {
+    if (!isActive()) {
       return true;
     }
     return await new Promise<boolean>((resolve) => {
@@ -809,7 +827,7 @@ export class ExecutionTracker {
         resolve(drained);
       };
       const check = (): void => {
-        if (!this.hasActiveToolExecutionGlobal(toolName)) {
+        if (!isActive()) {
           finish(true);
         }
       };

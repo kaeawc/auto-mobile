@@ -6,20 +6,31 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { type AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { z } from "zod/v4";
 import {
   requestAcquisitionReceipt,
   runWithAcquisitionReceipt,
 } from "../../src/daemon/acquisitionReceipt";
-import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import {
+  DAEMON_CANCEL_REQUEST_METHOD,
+  DAEMON_RELEASED_SESSION_HEADER,
+  DAEMON_SESSION_TOOL_BINDING_HEADER,
+  DAEMON_TOOL_SELECTION_PROFILE_HEADER,
+} from "../../src/daemon/constants";
+import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
 import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { currentLoopbackSessionKey } from "../../src/daemon/socketServer/loopbackMcpClientPool";
+import {
+  currentForwardSessionKey,
+  type McpClientFactory,
+} from "../../src/daemon/socketServer/forwardSessionKey";
+import { LoopbackMcpClient } from "../../src/daemon/socketServer/loopbackMcpClient";
 import { StatelessMcpHttpEndpoint } from "../../src/daemon/statelessMcpHttpEndpoint";
 import {
   buildMcpRequestContext,
@@ -52,9 +63,11 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { buildRefusalWireFixtures } from "../helpers/refusalWireFixtures";
 
 /**
- * Byte parity of a control-socket forward through the daemon's HTTP loopback and through an
- * in-memory MCP pair (#11820). Both paths build the request's server with the same factory and
- * serve the same socket frames; the raw response lines each socket writes must be identical.
+ * Byte parity of a control-socket forward through the HTTP loopback the daemon used before #11820
+ * (an MCP client over the daemon's real stateless endpoint, which still serves the desktop app and
+ * external clients) and through the in-process dispatcher that replaced it. Both paths build the
+ * request's server with the same factory and serve the same socket frames; the raw response lines
+ * each socket writes must be identical.
  * The context-leak probe checks that a handler reached in memory sees its own request's
  * AsyncLocalStorage stores, not the stores of the socket chain that forwarded it.
  */
@@ -88,6 +101,41 @@ function fakeDaemonState() {
   };
 }
 
+/**
+ * The forward client the daemon used before #11820: an MCP client over streamable HTTP to the
+ * daemon's own endpoint, sending the forward's context and session key as headers. Kept here as
+ * the reference the in-process path must match byte for byte.
+ */
+function httpForwardClientFactory(url: string): McpClientFactory {
+  return async (boundSessionUuid, toolSelectionProfileUuid, releasedSessionUuid) => {
+    const sessionKey = currentForwardSessionKey();
+    const headers: Record<string, string> = {
+      ...(sessionKey ? { [MCP_SESSION_KEY_HEADER]: sessionKey } : {}),
+      ...(boundSessionUuid ? { [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid } : {}),
+      ...(releasedSessionUuid ? { [DAEMON_RELEASED_SESSION_HEADER]: releasedSessionUuid } : {}),
+      ...(toolSelectionProfileUuid
+        ? { [DAEMON_TOOL_SELECTION_PROFILE_HEADER]: toolSelectionProfileUuid }
+        : {}),
+    };
+    const client = new LoopbackMcpClient(
+      { name: "auto-mobile-daemon-client", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(url), {
+        requestInit: { headers },
+        reconnectionOptions: {
+          initialReconnectionDelay: 1000,
+          maxReconnectionDelay: 30_000,
+          reconnectionDelayGrowFactor: 1.5,
+          maxRetries: 0,
+        },
+      }),
+    );
+    return client;
+  };
+}
+
 /** What a handler sees of the async context it runs in. */
 interface ContextSnapshot {
   readonly abortSignalIsRequestOwn: boolean;
@@ -97,7 +145,7 @@ interface ContextSnapshot {
   readonly acquisitionReceipt: boolean;
   readonly daemonLifecycleAllowed: boolean;
   readonly displayPin: string | undefined;
-  readonly loopbackSessionKey: string | undefined;
+  readonly forwardSessionKey: string | undefined;
 }
 
 const SOCKET_SIDE_REQUEST: RequestContext = {
@@ -195,12 +243,13 @@ async function startHarness(
     fakeDaemonState(),
     defaultTimer,
     null,
-    path === "http"
-      ? { mcpForwardTransport: "http" }
-      : { mcpForwardTransport: "in-process", mcpDispatcher: dispatcher },
+    { mcpDispatcher: dispatcher },
     new CountingIdGenerator("socket"),
     { bindLock: fakeBindLock },
   );
+  if (path === "http") {
+    socketServer.mcpClientFactory = httpForwardClientFactory(endpointUrl);
+  }
   const start = () => socketServer.start();
   await (options.socketSideStores ? withSocketSideStores(start) : start());
   return {
@@ -382,7 +431,7 @@ describe("control-socket forward byte parity: HTTP loopback vs in process (#1182
           acquisitionReceipt: requestAcquisitionReceipt() !== undefined,
           daemonLifecycleAllowed: daemonLifecycleAllowed(),
           displayPin: selectedDisplayPin(),
-          loopbackSessionKey: currentLoopbackSessionKey(),
+          forwardSessionKey: currentForwardSessionKey(),
         });
         return { content: [{ type: "text", text: "probed" }] };
       },
@@ -524,7 +573,7 @@ describe("control-socket forward byte parity: HTTP loopback vs in process (#1182
       acquisitionReceipt: false,
       daemonLifecycleAllowed: true,
       displayPin: undefined,
-      loopbackSessionKey: undefined,
+      forwardSessionKey: undefined,
     });
     expect(http.callerMcpSessionId).not.toBe("socket-side-caller");
     expect(http.labelSessionUuids).not.toEqual(["socket-side-label"]);

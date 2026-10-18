@@ -35,7 +35,7 @@ import {
   type StatelessMcpRequestScope,
   type StatelessMcpServer,
 } from "./statelessMcpHttpEndpoint";
-import { InProcessMcpDispatcher } from "./inProcessMcpDispatcher";
+import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
   buildMcpRequestContext,
   createStatelessMcpServer,
@@ -723,17 +723,13 @@ export class Daemon {
         : "streamable_http_onclose",
   });
   /** Runs control-socket forwards in process, one client and server each (#11820). */
-  private readonly mcpDispatcher = new InProcessMcpDispatcher({
+  private readonly mcpDispatcher = createDaemonMcpDispatcher({
+    base: () => this.statelessMcpServerBase(),
     idGenerator: { next: () => this.idGenerator.next() },
-    createServer: (context, scope) =>
-      createStatelessMcpServer(this.statelessMcpServerBase(), context, scope),
-    cancelScopeExecutions: (requestScopeId, reason) =>
-      executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
     closeReason: () =>
       this.shutdownInProgress
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
-        : "streamable_http_onclose",
+        : MCP_FORWARD_CLOSED_REASON,
   });
   /** HTTP requests whose response is still open (SSE streams included). */
   private openHttpRequests = 0;
@@ -5328,6 +5324,7 @@ export class Daemon {
    */
   private async quiesceProvisioningIngress(): Promise<void> {
     this.acceptingHttpSessions = false;
+    this.mcpHttpEndpoint.stopAccepting();
     // No forward reaches the MCP server from here on: the in-process gate HTTP's 503 was.
     this.mcpDispatcher.stopAccepting();
     this.shutdownIngressAbort.abort();

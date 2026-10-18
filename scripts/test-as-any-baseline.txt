@@ -145,7 +145,6 @@
 1	test/server/interactionTools.clipboard.test.ts
 2	test/server/openLinkWaitFor.test.ts
 4	test/server/sessionPlatformRouting.daemon.integration.test.ts
-2	test/server/snapshotTools.test.ts
 2	test/server/unissuedSessionBoundConnection.integration.test.ts
 2	test/utils/DeviceSessionManager.test.ts
 17	test/utils/android-cmdline-tools/AndroidEmulatorClient-corruptImage.test.ts

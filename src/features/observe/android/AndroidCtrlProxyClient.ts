@@ -723,7 +723,7 @@ export class AndroidCtrlProxyClient
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
   private restartRearmTimeout: NodeJS.Timeout | null = null;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
-  private readonly forcedRestartBudget: ForcedRestartBudget;
+  public readonly forcedRestartBudget: ForcedRestartBudget;
   private serviceRecovery: AndroidServiceRecovery | undefined;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = OBSERVE_RECOVERY_WAIT_MS;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;

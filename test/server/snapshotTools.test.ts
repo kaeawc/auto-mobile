@@ -51,9 +51,9 @@ describe("snapshot tool", () => {
     restoreOverrides = {};
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
+      snapshotRepository: repository,
       configRepository: configRepository,
-      snapshotStore: store as any,
+      snapshotStore: store,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
       createCaptureProvider: () => ({

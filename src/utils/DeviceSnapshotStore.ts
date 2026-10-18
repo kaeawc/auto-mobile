@@ -581,3 +581,27 @@ export class DeviceSnapshotStore {
     }
   }
 }
+
+/**
+ * The store surface the snapshot manager and capture/restore providers use.
+ * `FakeDeviceSnapshotStore` satisfies it, so tests inject it without a cast.
+ */
+export type DeviceSnapshotStorePort = Pick<
+  DeviceSnapshotStore,
+  | "getBasePath"
+  | "getSnapshotPath"
+  | "getSnapshotPathWithOptions"
+  | "getMetadataPath"
+  | "getSettingsPath"
+  | "getAppDataPath"
+  | "recoverSnapshotData"
+  | "discardSnapshotArtifacts"
+  | "listLeftoverSnapshotJournals"
+  | "generateSnapshotName"
+  | "snapshotDirectoryExists"
+  | "getSnapshotSizeBytes"
+  | "getDirectorySize"
+  | "listSubdirectoryNames"
+  | "deleteSnapshotData"
+  | "replaceSnapshotData"
+>;

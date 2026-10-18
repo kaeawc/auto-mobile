@@ -91,8 +91,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
   beforeEach(arrange);
   afterEach(dispose);
 
-  const budget = (): ForcedRestartBudget =>
-    (client as unknown as { forcedRestartBudget: ForcedRestartBudget }).forcedRestartBudget;
+  const budget = (): ForcedRestartBudget => client.forcedRestartBudget;
 
   const intruderSelects = async (): Promise<unknown> =>
     ToolRegistry.getTool("setActiveDevice")!

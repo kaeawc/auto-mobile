@@ -330,3 +330,14 @@ export class DeviceSnapshotRepository {
     return Number(result.numDeletedRows ?? 0) > 0;
   }
 }
+
+/** The repository surface the snapshot manager uses; `FakeDeviceSnapshotRepository` satisfies it. */
+export type DeviceSnapshotRepositoryPort = Pick<
+  DeviceSnapshotRepository,
+  | "insertSnapshot"
+  | "updateSnapshot"
+  | "getSnapshot"
+  | "listSnapshots"
+  | "touchSnapshot"
+  | "deleteSnapshot"
+>;

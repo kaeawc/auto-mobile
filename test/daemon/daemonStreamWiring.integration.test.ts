@@ -109,7 +109,7 @@ interface DaemonStreamInternals {
   setupDeviceSessionRouting(): void;
   setupDeviceDataStreamCallback(): void;
   setupNavigationGraphStreamListener(server: unknown): void;
-  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
+  navigationGraphBridge: { attach(manager: NavigationGraphManager): void };
   attemptRecovery(failureKind?: string): Promise<void>;
   applyStorageSubscriptionRequest(request: {
     deviceId: string | null;
@@ -414,7 +414,7 @@ describe("Daemon stream wiring", () => {
           failuresPush: null,
           telemetryPush: null,
         });
-        internals.setupNavigationGraphUpdateListener = () => {};
+        internals.navigationGraphBridge.attach = () => {};
         const pool = internals.devicePool as unknown as DevicePool;
         try {
           internals.setupDeviceSessionRouting();
@@ -1143,7 +1143,7 @@ describe("Daemon stream wiring", () => {
     const stream = new FakeDeviceDataStreamServer();
     internals.getDeviceSessionRoutingTargets = () => targets(stream);
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.setupNavigationGraphUpdateListener = (manager) => {
+    internals.navigationGraphBridge.attach = (manager) => {
       attachedManagers.push(manager);
     };
 
@@ -1236,7 +1236,7 @@ describe("Daemon stream wiring", () => {
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.setupNavigationGraphUpdateListener = (manager) => {
+    internals.navigationGraphBridge.attach = (manager) => {
       attachedManagers.push(manager);
     };
 

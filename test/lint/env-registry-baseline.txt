@@ -74,8 +74,6 @@ src/daemon/constants.ts	AUTO_MOBILE_DAEMON_SOCKET_PATH
 src/daemon/constants.ts	AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS
 src/daemon/constants.ts	AUTO_MOBILE_DAEMON_TIMEOUT_MS
 src/daemon/constants.ts	USERNAME
-src/daemon/daemon.ts	AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES
-src/daemon/daemon.ts	AUTOMOBILE_IOS_WARMUP_DEVICES
 src/daemon/daemon.ts	NODE_ENV
 src/daemon/daemonFiles.ts	AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH
 src/daemon/daemonFiles.ts	AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH
@@ -83,6 +81,8 @@ src/daemon/daemonOptionScopes.ts	AUTOMOBILE_ACTIONS_COMPACT_METADATA
 src/daemon/daemonOptionScopes.ts	AUTOMOBILE_DISABLED_TOOLS
 src/daemon/daemonOptionScopes.ts	AUTOMOBILE_ENABLED_TOOLS
 src/daemon/daemonOptionScopes.ts	AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT
+src/daemon/daemonStreamRouting.ts	AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES
+src/daemon/daemonStreamRouting.ts	AUTOMOBILE_IOS_WARMUP_DEVICES
 src/daemon/foreignDeviceOwnership.ts	ADB_SERVER_SOCKET
 src/daemon/foreignDeviceOwnership.ts	ANDROID_ADB_SERVER_ADDRESS
 src/daemon/foreignDeviceOwnership.ts	ANDROID_ADB_SERVER_PORT

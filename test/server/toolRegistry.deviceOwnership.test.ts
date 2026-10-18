@@ -1,6 +1,10 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
 import {
   type InteractionToolDependencies,
   registerInteractionTools,
@@ -46,9 +50,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   const observer = "d0000000-0000-4000-8000-000000000001";
 
   let ran: Array<{ name: string; deviceId: string }>;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
@@ -99,12 +101,14 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([held, free]);
     devices = fakeDeviceSessionManager;
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -152,9 +156,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     dispatched = undefined;
     callerSignal = undefined;
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     expect(DaemonState.getInstance().isInitialized()).toBe(false);

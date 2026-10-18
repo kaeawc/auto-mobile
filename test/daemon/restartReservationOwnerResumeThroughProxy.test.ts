@@ -10,7 +10,7 @@ import {
   getDeviceToolsDependencies,
   resetDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import {
   executionTracker,
   type SessionClockOffsetProvider,
@@ -67,7 +67,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
         env: Array<string | undefined>;
         clockOffset: SessionClockOffsetProvider;
         embeddedSdk: boolean;
-        registry: unknown[];
+        registry: ToolRegistryCollaborators;
         appearance: typeof defaultAppearanceSyncDependencies;
         recording: typeof defaultRecordingSessionCleanupDeps;
       }
@@ -96,17 +96,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
         previous.clockOffset,
       );
       expect(ENV_KEYS.map((key) => process.env[key])).toEqual(previous.env);
-      expect(
-        [
-          "deviceSessionManager",
-          "toolCallRepository",
-          "navigationToolCallRecorder",
-          "executionTargetResolver",
-          "auditRunner",
-          "afterToolCall",
-          "env",
-        ].map((key) => Reflect.get(ToolRegistry, key)),
-      ).toEqual(previous.registry);
+      expect(ToolRegistry.getCollaboratorsForTesting()).toEqual(previous.registry);
       expect(defaultAppearanceSyncDependencies).toEqual(previous.appearance);
       expect(defaultRecordingSessionCleanupDeps).toEqual(previous.recording);
       expect(serverConfig.isEmbeddedSdkEnabled()).toBe(previous.embeddedSdk);
@@ -119,15 +109,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
       env: ENV_KEYS.map((key) => process.env[key]),
       clockOffset: Reflect.get(executionTracker, "sessionClockOffsetProvider"),
       embeddedSdk: serverConfig.isEmbeddedSdkEnabled(),
-      registry: [
-        "deviceSessionManager",
-        "toolCallRepository",
-        "navigationToolCallRecorder",
-        "executionTargetResolver",
-        "auditRunner",
-        "afterToolCall",
-        "env",
-      ].map((key) => Reflect.get(ToolRegistry, key)),
+      registry: ToolRegistry.getCollaboratorsForTesting(),
       appearance: { ...defaultAppearanceSyncDependencies },
       recording: { ...defaultRecordingSessionCleanupDeps },
     };

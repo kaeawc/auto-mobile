@@ -5081,9 +5081,7 @@ describe("IOSCtrlProxyClient", function () {
         fakeTimer,
         () => manager,
       );
-      (
-        IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }
-      ).instances.set(testDevice.deviceId, client);
+      IOSCtrlProxyClient.registerForTesting(client, testDevice.deviceId);
 
       const screenshot = client.requestScreenshot(5_000);
       const socket = await waitForSocket(getSocket);
@@ -5159,9 +5157,7 @@ describe("IOSCtrlProxyClient", function () {
         fakeTimer,
         () => manager,
       );
-      (
-        IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }
-      ).instances.set(testDevice.deviceId, fresh);
+      IOSCtrlProxyClient.registerForTesting(fresh, testDevice.deviceId);
       expect(IOSCtrlProxyClient.getInstance(testDevice, serverPort)).toBe(fresh);
       expect(fresh).not.toBe(retired);
       expect(await fresh.ensureConnected()).toBe(true);

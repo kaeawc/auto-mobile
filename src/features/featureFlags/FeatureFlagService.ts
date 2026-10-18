@@ -45,6 +45,16 @@ export class FeatureFlagService {
     return FeatureFlagService.instance;
   }
 
+  /** Test-only: the current singleton without creating one (null before first use). */
+  static peekInstanceForTesting(): FeatureFlagService | null {
+    return FeatureFlagService.instance;
+  }
+
+  /** Test-only: restore a previously peeked singleton; there is no production reset. */
+  static setInstanceForTesting(instance: FeatureFlagService | null): void {
+    FeatureFlagService.instance = instance;
+  }
+
   constructor(
     private readonly repository: FeatureFlagRepository,
     private readonly applier: FeatureFlagApplier,
@@ -61,6 +71,11 @@ export class FeatureFlagService {
    */
   setToolListChangedNotifier(notifier: ToolListChangedNotifier): void {
     this.notifier = notifier;
+  }
+
+  /** Test-only: the installed notifier, so a suite can restore it after wiring a server. */
+  toolListChangedNotifierForTesting(): ToolListChangedNotifier {
+    return this.notifier;
   }
 
   async initialize(): Promise<void> {

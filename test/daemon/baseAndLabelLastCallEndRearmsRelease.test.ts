@@ -30,11 +30,6 @@ const OWNER = "last-call-owner";
 const TOOL = "__base_and_label_last_control__";
 
 /** Reach the daemon's own end subscription without starting sockets or device discovery. */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 describe("base call ends retry deferred release and all orders finish with nothing waiting (#11381)", () => {
   let restoreHermeticServer: () => void;
   let fixture: McpTestFixture;
@@ -76,7 +71,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     manager.onSessionRelease((sessionId, _deviceId, reason) => {
       releases.push({ sessionId, reason });
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon.subscribeToolCallEndActivity();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -126,7 +121,7 @@ describe("base call ends retry deferred release and all orders finish with nothi
     await fixture.teardown();
     ToolRegistry.unregister(TOOL);
     unsubscribeEnds();
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon.stopSessionTimers();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

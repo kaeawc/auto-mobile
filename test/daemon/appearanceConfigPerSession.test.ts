@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { Socket } from "node:net";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
 import {
   AppearanceSyncScheduler,
@@ -16,7 +15,7 @@ import {
   type StreamAuthSessionManager,
 } from "../../src/daemon/streamSocketAuth";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer, FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * #10976: appearance and sync config is per session. A session's choice reaches only the devices
@@ -126,14 +125,17 @@ describe("AppearanceSocketServer with per-session config", () => {
   );
 
   class Harness extends AppearanceSocketServer {
+    markListening(): void {
+      this.server = new FakeListeningServer();
+    }
+
+    authenticatorForTest(): unknown {
+      return this.authenticator;
+    }
+
     async send(socket: FakeSocket, request: Record<string, unknown>) {
-      await (this as unknown as { processLine(s: Socket, l: string): Promise<void> }).processLine(
-        socket as unknown as Socket,
-        JSON.stringify(request),
-      );
-      await (
-        this as unknown as { pendingBySocket: Map<unknown, Promise<void>> }
-      ).pendingBySocket.get(socket);
+      await this.processLine(socket, JSON.stringify(request));
+      await this.pendingBySocket.get(socket);
       return socket.getWrittenMessages<AppearanceSocketResponse>().at(-1)!;
     }
   }
@@ -168,7 +170,7 @@ describe("AppearanceSocketServer with per-session config", () => {
       },
       dependencies,
     );
-    (server as unknown as { server: object }).server = { listening: true };
+    server.markListening();
     return { server, store, applied, keys };
   }
 
@@ -218,9 +220,12 @@ describe("AppearanceSocketServer with per-session config", () => {
   });
 
   test("the production server admits observer sessions on its authenticator", () => {
-    const authenticator = (
-      new AppearanceSocketServer("/fake/appearance.sock") as unknown as { authenticator: unknown }
-    ).authenticator;
+    class Probe extends AppearanceSocketServer {
+      authenticatorForTest(): unknown {
+        return this.authenticator;
+      }
+    }
+    const authenticator = new Probe("/fake/appearance.sock").authenticatorForTest();
     expect(authenticator).toBeInstanceOf(ObserverAdmittingStreamAuthenticator);
   });
 });

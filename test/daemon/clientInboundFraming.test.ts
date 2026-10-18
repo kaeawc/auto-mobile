@@ -3,7 +3,7 @@ import * as net from "node:net";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
-import type { DaemonNotification, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonNotification } from "../../src/daemon/types";
 import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -55,7 +55,7 @@ for (const newline of [false, true]) {
       expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(remove).toHaveBeenCalled();
-      expect((client as unknown as { connected: boolean }).connected).toBe(false);
+      expect(client.connected).toBe(false);
       expect(closes).toBe(1);
       client.simulateIncomingDataForTesting(Buffer.from("null\n" + "x".repeat(65)));
       expect(warn).toHaveBeenCalledTimes(1);
@@ -109,10 +109,7 @@ for (const [index, shape] of wrongShapes.entries()) {
     const { client, timer, request, feed } = setup();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const errors = spyOn(logger, "error").mockImplementation(() => {});
-    const receiver = spyOn(
-      client as unknown as { handleResponse(response: DaemonResponse): void },
-      "handleResponse",
-    );
+    const receiver = spyOn(client, "handleResponse");
     const result = request();
     try {
       feed(shape);
@@ -144,10 +141,7 @@ for (const [index, shape] of wrongShapes.entries()) {
 
 test("valid response preserves unknown and unchecked additive fields", async () => {
   const { client, request, feed } = setup(512);
-  const receiver = spyOn(
-    client as unknown as { handleResponse(response: DaemonResponse): void },
-    "handleResponse",
-  );
+  const receiver = spyOn(client, "handleResponse");
   const result = request();
   const frame = {
     id: "p",

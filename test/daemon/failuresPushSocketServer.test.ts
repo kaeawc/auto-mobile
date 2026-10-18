@@ -7,7 +7,7 @@ import {
   type FailureNotificationPush,
 } from "../../src/daemon/failuresPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 
 /**
@@ -20,13 +20,13 @@ class TestableFailuresPushSocketServer extends FailuresPushSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
-    (this as any).onServerStarted();
+    this.server = new FakeListeningServer();
+    this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   simulateSubscription(options: {
@@ -35,12 +35,11 @@ class TestableFailuresPushSocketServer extends FailuresPushSocketServer {
     deviceSessionUuid?: string | null;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();
-    const subscriptionId = `failurespush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `failurespush-${++this.subscriptionCounter}`;
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         type: options.type ?? null,
         severity: options.severity ?? null,

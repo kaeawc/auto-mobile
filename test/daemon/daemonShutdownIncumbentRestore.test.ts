@@ -31,10 +31,6 @@ class RecordingIncumbentGuard extends IncumbentOwnerGuard {
   }
 }
 
-interface DaemonBindInternals {
-  socketBindCommitted: boolean;
-}
-
 function daemonWith(guard: IncumbentOwnerGuard): Daemon {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -95,7 +91,7 @@ describe("Daemon shutdown before the socket bind (#11156)", () => {
   test("leaves the PID record alone once this daemon committed the socket bind", async () => {
     const guard = new RecordingIncumbentGuard();
     const daemon = daemonWith(guard);
-    (daemon as unknown as DaemonBindInternals).socketBindCommitted = true;
+    daemon.socketBindCommitted = true;
 
     await daemon.stop();
 

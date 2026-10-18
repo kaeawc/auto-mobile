@@ -3,7 +3,6 @@ import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSoc
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import type { ObserverReleaseSource } from "../../src/daemon/observerReleaseBroadcast";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
-import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
@@ -88,8 +87,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
     hierarchyIntervalMs?: number | null;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();
-    const subscriptionId = `devicedatastream-${++this["subscriptionCounter"]}`;
-    const timer = this["timer"] as FakeTimer;
+    const subscriptionId = `devicedatastream-${++this.subscriptionCounter}`;
     // Bind serial↔uuid so pushes for this device resolve to the same key we filter on.
     let deviceSessionUuid: string | null;
     if (options.deviceSessionUuid !== undefined) {
@@ -101,9 +99,9 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
       deviceSessionUuid = null;
     }
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         deviceSessionUuid,
         deviceId: options.deviceId ?? null,
@@ -116,16 +114,20 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
     return { socket, subscriptionId };
   }
 
+  liveFrameGenerationsForTest(): ReadonlyMap<string, number> {
+    return this.liveFrameGenerations;
+  }
+
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
-    await this.processLine(socket as unknown as Socket, line);
+    await this.processLine(socket, line);
   }
 
   closeConnectionForTest(socket: FakeSocket): void {
-    this.onConnectionClose(socket as unknown as Socket);
+    this.onConnectionClose(socket);
   }
 
   errorConnectionForTest(socket: FakeSocket): void {
-    this.onConnectionError(socket as unknown as Socket, new Error("socket error"));
+    this.onConnectionError(socket, new Error("socket error"));
   }
 }
 
@@ -398,8 +400,7 @@ describe("DeviceDataStreamSocketServer", () => {
   ];
 
   it("reading generations does not retain capture-only serials", () => {
-    const generations = (server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> })
-      .liveFrameGenerations;
+    const generations = server.liveFrameGenerationsForTest();
     const size = generations.size;
     server.getLiveFrameGeneration("never-pushed-1");
     server.getLiveFrameGeneration("never-pushed-2");
@@ -422,11 +423,7 @@ describe("DeviceDataStreamSocketServer", () => {
     finish.resolve();
     await first;
     expect(h.frames(pane.socket)).toEqual([]);
-    expect(
-      (
-        server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
-      ).liveFrameGenerations.has("device-1"),
-    ).toBe(false);
+    expect(server.liveFrameGenerationsForTest().has("device-1")).toBe(false);
   });
 
   for (const event of frameInvalidations) {

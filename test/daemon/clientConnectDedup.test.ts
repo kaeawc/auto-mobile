@@ -25,7 +25,7 @@ beforeEach(() => {
   createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
     const socket = new DeferredSocket(onConnect!);
     sockets.push(socket);
-    return socket as unknown as net.Socket;
+    return socket;
   });
   sockets.length = 0;
   timer = new FakeTimer();
@@ -70,13 +70,6 @@ async function connectAndReplace() {
   newSocket.completeConnect();
   await reconnect;
   return { oldSocket, newSocket, closedCount: () => closedCount };
-}
-
-function connectionState() {
-  return client as unknown as {
-    readonly socket: net.Socket | null;
-    readonly connected: boolean;
-  };
 }
 
 function responseFrame(id: string, result: string): Buffer {
@@ -193,7 +186,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     }
     expect(sockets[0].destroyed).toBe(true);
     sockets[0].completeConnect();
-    expect(connectionState().connected).toBe(false);
+    expect(client.connected).toBe(false);
     const retry = client.connect();
     sockets.at(-1)!.completeConnect();
     await retry;
@@ -210,8 +203,8 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
       const split = frame.indexOf(Buffer.from("日")) + 1;
       newSocket.emit("data", frame.subarray(0, split));
       oldSocket.emit(event, new Error("late ECONNRESET"));
-      expect(connectionState().socket).toBe(newSocket);
-      expect(connectionState().connected).toBe(true);
+      expect(client.socket).toBe(newSocket);
+      expect(client.connected).toBe(true);
       expect(newSocket.destroyed).toBe(false);
       expect(closedCount()).toBe(1);
       expect(client.hasPendingRequestForTesting(id)).toBe(true);
@@ -242,8 +235,8 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     client.onConnectionClosed(() => closedCount++);
     sockets[0].emit("error", new Error("read ECONNRESET"));
     expect(closedCount).toBe(1);
-    expect(connectionState().socket).toBeNull();
-    expect(connectionState().connected).toBe(false);
+    expect(client.socket).toBeNull();
+    expect(client.connected).toBe(false);
   });
 
   test("a joiner's own deadline releases it without cancelling the shared attempt", async () => {
@@ -270,7 +263,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     sockets[0].completeConnect();
     expect(await initiating).toEqual({ status: "fulfilled", value: undefined });
     expect(sockets).toHaveLength(1);
-    expect(connectionState().connected).toBe(true);
+    expect(client.connected).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 

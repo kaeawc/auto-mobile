@@ -24,11 +24,6 @@ import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerSte
 // aborted and its caller never gets `session_ownership_lost`. The idle-expiry release aborts the
 // same call (`cancelDeviceSessionExecutions`, #10820).
 
-interface DaemonMonitorInternals {
-  heartbeatMonitor: { stop(): Promise<void> } | null;
-  startHeartbeatMonitor(): void;
-}
-
 const DEVICE: BootedDevice = {
   name: "Pixel_8_API_35",
   deviceId: "emulator-5554",
@@ -65,7 +60,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     for (const execution of started) {
       executionTracker.endExecution(execution.id);
     }
-    await (daemon as unknown as DaemonMonitorInternals).heartbeatMonitor?.stop();
+    await daemon.heartbeatMonitor?.stop();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -104,7 +99,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     const sessionManager = daemon.getSessionManager();
     const devicePool = await sessionOnPooledDevice();
     sessionManager.recordHeartbeat(SESSION);
-    (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+    daemon.startHeartbeatMonitor();
 
     const hung = startCall();
     started.push(hung);

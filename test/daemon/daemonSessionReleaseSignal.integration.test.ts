@@ -24,11 +24,6 @@ import { executionTracker } from "../../src/server/executionTracker";
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
 
-interface DaemonHeartbeatMonitorInternals {
-  heartbeatMonitor: { stop(): void } | null;
-  startHeartbeatMonitor(): void;
-}
-
 interface DaemonSessionReleaseInternals {
   cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
 }
@@ -90,7 +85,6 @@ describe("Daemon session-release signal wiring", () => {
     const repository = new DeviceSessionRepository(db);
     const daemon = new Daemon({}, { timer, deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
-    const internals = daemon as unknown as DaemonHeartbeatMonitorInternals;
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       emitted.push({ sessionId, reason });
@@ -102,7 +96,7 @@ describe("Daemon session-release signal wiring", () => {
         heartbeatTimeoutMs: leaseMs,
       });
       sessionManager.recordHeartbeat("heartbeat-expired");
-      internals.startHeartbeatMonitor();
+      daemon.startHeartbeatMonitor();
 
       await timer.advanceTimeAsync(leaseMs + SUSPECT_GRACE_MS - 1);
 
@@ -124,7 +118,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([{ sessionId: "heartbeat-expired", reason: "heartbeat-timeout" }]);
     } finally {
       unsubscribe();
-      internals.heartbeatMonitor?.stop();
+      await daemon.heartbeatMonitor?.stop();
       sessionManager.stopCleanupTimer();
     }
   });

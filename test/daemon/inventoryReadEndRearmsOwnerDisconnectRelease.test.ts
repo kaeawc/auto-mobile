@@ -35,11 +35,6 @@ const OWNER_CONNECTION = "read-end-rearm-owner";
 const INVENTORY_READ = "__inventory_read_probe__";
 
 /** The daemon's own subscription and its teardown, which `start()` and `stop()` run. */
-interface DaemonToolCallEndWiring {
-  subscribeToolCallEndActivity(): void;
-  stopSessionTimers(): void;
-}
-
 describe("an in-flight inventory read never holds owner-disconnect release (#11381)", () => {
   let restoreHermeticServer: () => void;
   let fixture: McpTestFixture;
@@ -87,7 +82,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
     sessionManager.onSessionRelease((_sessionId, _deviceId, reason) => {
       releaseReasons.push(reason);
     });
-    (daemon as unknown as DaemonToolCallEndWiring).subscribeToolCallEndActivity();
+    daemon.subscribeToolCallEndActivity();
     ends = [];
     unsubscribeEnds = executionTracker.onSessionExecutionEnded((uuids, { admitted }) =>
       ends.push({ uuids, admitted }),
@@ -132,7 +127,7 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
   async function dismantle(): Promise<void> {
     await fixture.teardown();
     unsubscribeEnds();
-    (daemon as unknown as DaemonToolCallEndWiring).stopSessionTimers();
+    daemon.stopSessionTimers();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }

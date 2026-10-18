@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { Socket } from "node:net";
 import {
   AppearanceSocketServer,
   type AppearanceDeviceSource,
@@ -7,7 +6,7 @@ import {
 } from "../../src/daemon/appearanceSocketServer";
 import { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer, FakeSocket } from "../fakes/FakeNetServer";
 import {
   SessionScopedStreamAuthenticator,
   STREAM_SOCKET_AUTH_ENV,
@@ -103,12 +102,12 @@ class TestableAppearanceSocketServer extends AppearanceSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
+    this.server = new FakeListeningServer();
   }
 
   async simulateLine(socket: FakeSocket, line: string): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, line);
-    const pending = (this as any).pendingBySocket.get(socket);
+    await this.processLine(socket, line);
+    const pending = this.pendingBySocket.get(socket);
     if (pending) {
       await pending;
     }

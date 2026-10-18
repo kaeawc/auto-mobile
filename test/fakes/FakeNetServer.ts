@@ -1,4 +1,4 @@
-import { Socket } from "node:net";
+import { Server, Socket } from "node:net";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
@@ -175,4 +175,14 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
  */
 export class NonThrowingFakeSocket extends FakeSocket {
   public throwOnWriteAfterDestroy = false;
+}
+
+/**
+ * A `net.Server` that reports `listening` without binding anything, for suites that drive a
+ * socket server's lines through its protected seams instead of a real listener.
+ */
+export class FakeListeningServer extends Server {
+  override get listening(): boolean {
+    return true;
+  }
 }

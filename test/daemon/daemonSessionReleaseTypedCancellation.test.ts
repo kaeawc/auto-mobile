@@ -26,11 +26,6 @@ import { asPlanAllocation } from "../helpers/planLabelAllocation";
 // These drive the daemon's own wiring (the heartbeat reap and the owner-disconnect port built in
 // daemon.ts) against the process execution tracker, rather than a copy of that wiring.
 
-interface DaemonMonitorInternals {
-  heartbeatMonitor: { stop(): Promise<void> } | null;
-  startHeartbeatMonitor(): void;
-}
-
 const DEVICE: BootedDevice = {
   name: "Pixel_8_API_35",
   deviceId: "emulator-5554",
@@ -86,7 +81,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     for (const execution of started) {
       executionTracker.endExecution(execution.id);
     }
-    await (daemon as unknown as DaemonMonitorInternals).heartbeatMonitor?.stop();
+    await daemon.heartbeatMonitor?.stop();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -104,7 +99,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     await sessionManager.createSession(SESSION, DEVICE.deviceId, "android", {
       initialOwnership: "awaiting-owner",
     });
-    (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+    daemon.startHeartbeatMonitor();
     // A read never keeps the session (#11322), so the reap lands while it is still running.
     const read = track(executionTracker.startExecution("observe", undefined, SESSION));
     executionTracker.markDeviceReadCall(read.id, read.toolName);
@@ -301,7 +296,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       );
       sessionManager.setDeviceLabels(BASE, { A: BASE, B: DERIVED });
       sessionManager.recordHeartbeat(BASE);
-      (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+      daemon.startHeartbeatMonitor();
 
       const baseReadOnBaseDevice = startRead(BASE, OWNER_CONNECTION);
       executionTracker.bindDeviceExecution(baseReadOnBaseDevice.id, DEVICE.deviceId);

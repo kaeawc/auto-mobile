@@ -210,8 +210,7 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
       "win32",
     );
 
-    const internals = client as unknown as { socketPathObservable(): boolean };
-    expect(internals.socketPathObservable()).toBe(true);
+    expect(client.socketPathObservable()).toBe(true);
   });
 
   // Asserts the DEFAULT (unoverridden) platform still gates on existsSync, which

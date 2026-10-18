@@ -413,7 +413,7 @@ export interface DaemonMethodCallOptions {
  * - Handle timeouts and errors
  */
 export class DaemonClient {
-  private socket: Socket | Duplex | null = null;
+  socket: Socket | Duplex | null = null;
   private socketPath: string;
   private connectionTimeout: number;
   private timer: Timer;
@@ -452,12 +452,12 @@ export class DaemonClient {
   private framer: LineFramer;
   private inboundClosed = false;
   private readonly closedSockets = new WeakSet<Socket | Duplex>();
-  private connected: boolean = false;
+  connected: boolean = false;
   private connectInFlight: Promise<void> | null = null;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
   private connectionClosedHandlers: Set<() => void> = new Set();
   private recoveryOptions: DaemonClientRecoveryOptions;
-  private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
+  readonly clientIdentity: { version: string; build: BuildIdentity } | null;
   private readonly idGenerator: IdGenerator;
   /**
    * Injected so a test can simulate Windows named-pipe semantics without a real
@@ -740,7 +740,7 @@ export class DaemonClient {
    * regardless (issue #6140) — mirroring {@link DaemonManager}'s identical
    * `socketPathObservable()` helper.
    */
-  private socketPathObservable(): boolean {
+  socketPathObservable(): boolean {
     return this.platform === "win32" || existsSync(this.socketPath);
   }
 
@@ -1194,7 +1194,7 @@ export class DaemonClient {
   /**
    * Handle a response from daemon
    */
-  private handleResponse(response: DaemonResponse): void {
+  handleResponse(response: DaemonResponse): void {
     if (response.id === null) {
       if (this.pendingRequests.size !== 1) {
         logger.warn(

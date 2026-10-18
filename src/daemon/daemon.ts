@@ -671,7 +671,7 @@ export class Daemon {
   private readonly strictPort: boolean;
   private debug: boolean;
   private healthCheck: SingleFlightInterval | null = null;
-  private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
+  heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
   private orphanWatchdog: PrivateDaemonOrphanWatchdog | null = null;
@@ -679,7 +679,7 @@ export class Daemon {
   private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
   private completeIdentityPublished = false;
-  private socketBindCommitted = false;
+  socketBindCommitted = false;
   private readonly boundAuxSocketIdentities = new Map<string, { dev: number; ino: number }>();
   // Preserves a live incumbent daemon's PID record across our own early-owner
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
@@ -765,7 +765,7 @@ export class Daemon {
   /** Identities captured before concurrent shutdown release begins. */
   private shutdownSessionIds: string[] = [];
   /** Exposed for tests only: the in-flight or settled startup provenance warm. */
-  private androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
+  androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
 
   constructor(options: DaemonOptions = {}, dependencies: DaemonDependencies = {}) {
     const {
@@ -1310,7 +1310,7 @@ export class Daemon {
   }
 
   /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
-  private stopSessionTimers(): void {
+  stopSessionTimers(): void {
     // A change in the last debounce window must not notify after the daemon closed (#11413).
     this.deviceStateChangeNotifier.dispose();
     this.sessionManager.stopCleanupTimer();
@@ -1324,7 +1324,7 @@ export class Daemon {
    * end re-arms the owner-disconnect releases it deferred (#10712). Subscribed by `start()` and
    * dropped by {@link stopSessionTimers}; idempotent so a retried start cannot stack listeners.
    */
-  private subscribeToolCallEndActivity(): void {
+  subscribeToolCallEndActivity(): void {
     this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = subscribeToolCallEndActivity(
       executionTracker,
@@ -1865,7 +1865,7 @@ export class Daemon {
    * The acquisition response path remains a synchronous cache-only read and
    * never waits on or fails because of this best-effort scan.
    */
-  private warmAndroidAvdProvenanceCache(): void {
+  warmAndroidAvdProvenanceCache(): void {
     this.androidAvdProvenanceWarmPromise = Promise.resolve()
       .then(() =>
         AndroidAvdProvenanceCache.getInstance().getByName(this.avdManagerFactory(), this.timer),
@@ -2368,7 +2368,7 @@ export class Daemon {
   /**
    * Start periodic heartbeat checks to cancel stale sessions
    */
-  private startHeartbeatMonitor(): void {
+  startHeartbeatMonitor(): void {
     // Owners can reconnect only now that the control socket accepts connections.
     this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
@@ -3688,7 +3688,7 @@ export class Daemon {
    * failures (locked file, temporary disk-full) exit fast so the next launch can
    * retry immediately.
    */
-  private async initializeDatabase(): Promise<void> {
+  async initializeDatabase(): Promise<void> {
     try {
       // getDatabase() + await ensureMigrations(): a failed startup migration
       // rejects here (rather than swallowing on a detached promise).
@@ -3741,7 +3741,7 @@ export class Daemon {
   /**
    * Setup graceful shutdown handlers
    */
-  private setupShutdownHandlers(): void {
+  setupShutdownHandlers(): void {
     if (this.shutdownHandlersRegistered) {
       return;
     }

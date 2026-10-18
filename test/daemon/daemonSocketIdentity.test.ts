@@ -298,7 +298,7 @@ describe("socket-owner daemon preflight", () => {
       const method = spyOn(DaemonClient.prototype, "callDaemonMethod").mockImplementation(
         async function (name) {
           expect(name).toBe("ide/status");
-          declaredIdentity = (this as unknown as { clientIdentity: unknown }).clientIdentity;
+          declaredIdentity = this.clientIdentity;
           return {
             version: "0.0.68",
             ...(structuredSessionNotFound === undefined ? {} : { structuredSessionNotFound }),
@@ -366,26 +366,23 @@ describe("socket-owner daemon preflight", () => {
       client: { clientVersion: "0.0.70" },
     } as const;
     const client = new DaemonClient("/fake.sock", 1000, new FakeTimer());
-    const internals = client as unknown as {
-      connected: boolean;
-      socket: Duplex;
-      handleResponse(response: DaemonResponse): void;
-    };
-    internals.connected = true;
-    internals.socket = new Duplex({
-      read() {},
-      write(chunk, _encoding, done) {
-        const request = JSON.parse(chunk.toString());
-        internals.handleResponse({
-          id: request.id,
-          type: "mcp_response",
-          success: false,
-          error: "daemon=0.0.68, client=0.0.70",
-          handshakeFailure: failure,
-        });
-        done();
-      },
-    });
+    client.attachSocketForTesting(
+      new Duplex({
+        read() {},
+        write(chunk, _encoding, done) {
+          const request = JSON.parse(chunk.toString());
+          const response: DaemonResponse = {
+            id: request.id,
+            type: "mcp_response",
+            success: false,
+            error: "daemon=0.0.68, client=0.0.70",
+            handshakeFailure: failure,
+          };
+          client.simulateIncomingDataForTesting(Buffer.from(JSON.stringify(response) + "\n"));
+          done();
+        },
+      }),
+    );
     try {
       await client.callTool("provisionDevice", {});
       expect.unreachable("Expected rejection");

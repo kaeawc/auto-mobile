@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningServer, FakeSocket } from "../fakes/FakeNetServer";
 import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -1460,20 +1460,17 @@ class ObservationStreamForScenario extends DeviceDataStreamSocketServer {
   }
 
   start(): void {
-    (this as unknown as { server: unknown }).server = { listening: true };
-    (this as unknown as { onServerStarted(): void }).onServerStarted();
+    this.server = new FakeListeningServer();
+    this.onServerStarted();
   }
 
   stopListening(): void {
-    (this as unknown as { onServerClosing(): void }).onServerClosing();
-    (this as unknown as { server: unknown }).server = null;
+    this.onServerClosing();
+    this.server = null;
   }
 
   async viewerSubscribes(socket: FakeSocket, sessionUuid: string): Promise<void> {
-    await (this as unknown as { processLine(s: Socket, line: string): Promise<void> }).processLine(
-      socket as unknown as Socket,
-      JSON.stringify({ command: "subscribe", sessionUuid }),
-    );
+    await this.processLine(socket, JSON.stringify({ command: "subscribe", sessionUuid }));
   }
 }
 

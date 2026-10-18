@@ -16,17 +16,29 @@
 
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
-import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import {
-  DefaultScreenshotBackoffScheduler,
+  type DefaultScreenshotBackoffScheduler,
   type ScreenshotBackoffScheduler,
   type ScreenshotCaptureResult,
 } from "./ScreenshotBackoffScheduler";
+import { ConnectionFailureRecord } from "./ConnectionFailureRecord";
+import { ConnectionLivenessMonitor } from "./ConnectionLivenessMonitor";
+import { discardSocket } from "./discardSocket";
+import {
+  awaitRecoveryOutcome,
+  connectWithRetry,
+  waitForPendingRequestsToDrain,
+} from "./deviceServiceClientWaits";
+import {
+  buildScreenshotBackoffScheduler,
+  forwardHierarchyToObservationStream,
+  type HierarchyForwardingHooks,
+} from "./deviceServiceObservationStream";
+import { openWebSocketHandshake, type WebSocketHandshakeHost } from "./WebSocketHandshake";
 
 import WebSocket from "ws";
 import { toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
-import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -37,12 +49,10 @@ import { getAbortSignal } from "../../utils/AbortContext";
 import { RequestManager, type TimedOutRequest } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
-import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import type { DelegateContext } from "./shared/types";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 import { RealCtrlProxyWebSocketInTestError } from "./RealCtrlProxyWebSocketInTestError";
-import { ObserverPendingRequestTimeoutError } from "./ObserverPendingRequestTimeoutError";
 
 /**
  * Factory function type for creating WebSocket instances.
@@ -136,24 +146,6 @@ const DEFAULT_CONNECTION_CONFIG: ConnectionConfig = {
   connectionTimeoutMs: 5000,
 };
 
-// Liveness probe tuning (issue #7554). `readyState === OPEN` alone cannot
-// distinguish a healthy peer from a half-open connection whose TCP stream
-// stalled without a close reaching the host (a wedged device-side handler, an
-// adb hop that never tears down, a suspended emulator). Both runners already
-// answer protocol-level pings, so the host probes with `ws.ping()` and treats
-// silence past a bounded deadline as a dead connection.
-//
-// The deadline is a multiple of the health-check interval rather than a fixed
-// constant so a client configured with a shorter/longer interval (as tests
-// do) gets a proportionally scaled deadline without new config plumbing.
-const LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER = 2;
-// After this many consecutive RequestManager timeouts with no inbound frame
-// in between, the socket is "suspect": something is still accepting the TCP
-// connection but not answering application requests. Run the same
-// ping-then-terminate probe immediately instead of waiting for the next
-// periodic health-check tick.
-const REQUEST_TIMEOUT_LIVENESS_THRESHOLD = 3;
-
 /**
  * Abstract base class for device service WebSocket clients.
  *
@@ -161,17 +153,8 @@ const REQUEST_TIMEOUT_LIVENESS_THRESHOLD = 3;
  */
 export abstract class DeviceServiceClient {
   /** Queue an observer read behind the owner's already-dispatched requests. */
-  protected async waitForPendingRequests(timeoutMs: number, signal?: AbortSignal): Promise<void> {
-    const deadline = this.timer.now() + timeoutMs;
-    while (this.requestManager.getPendingCount() > 0) {
-      signal?.throwIfAborted();
-      const remaining = deadline - this.timer.now();
-      if (remaining <= 0) {
-        throw new ObserverPendingRequestTimeoutError();
-      }
-      await this.timer.sleep(Math.min(10, remaining));
-    }
-    signal?.throwIfAborted();
+  protected waitForPendingRequests(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    return waitForPendingRequestsToDrain(this.requestManager, this.timer, timeoutMs, signal);
   }
   // Connection state
   protected ws: WebSocket | null = null;
@@ -180,21 +163,8 @@ export abstract class DeviceServiceClient {
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
-  // The most recent connect-attempt failure message (issue #6260), e.g. a
-  // platform-setup error such as "Another AutoMobile process owns CtrlProxy
-  // forwarding...". `waitForConnection` only reports a boolean, so a caller
-  // that needs the actual cause of a connect failure (RunnerReadinessService,
-  // to surface it instead of a generic "runner did not become responsive")
-  // reads this instead of re-deriving it. Cleared on a successful connect.
-  private lastConnectionFailureMessage: string | undefined;
-  // Whether lastConnectionFailureMessage is specifically the CtrlProxy
-  // forwarding-lease conflict (issue #6260 PRRT ft82e), rather than an
-  // ordinary connect failure (ECONNREFUSED, a timeout, ...). Detected via
-  // `instanceof` on the caught error so RunnerReadinessService can scope its
-  // orphan-naming diagnostic to this exact condition instead of any stored
-  // error.
-  private lastConnectionFailureIsForwardingLeaseConflict: boolean = false;
-  private lastConnectionFailureIsTransientLeaseConflict: boolean = false;
+  // The most recent connect-attempt failure (issue #6260), cleared on a successful connect.
+  private readonly lastConnectionFailure = new ConnectionFailureRecord();
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
@@ -222,23 +192,7 @@ export abstract class DeviceServiceClient {
   // Captured synchronously by connectWebSocket(), including subclass overrides.
   private backgroundConnectRequested = false;
 
-  // Health check state
-  protected healthCheckIntervalId: ReturnType<Timer["setInterval"]> | null = null;
-  protected lastHealthCheckTime: number = 0;
-  // Liveness state (issue #7554). Refreshed by any proof of life on the
-  // current socket: a pong reply, a server-initiated ping, or any inbound
-  // frame (a frame proves the peer is alive even if no ping is outstanding).
-  // lastLivenessAt remains for logging/inspection; startLivenessProbe()
-  // compares livenessSeq rather than the timestamp, since a monotonic
-  // counter can't miss a frame that lands in the same millisecond as the
-  // probe's deadline tick (timer resolution is coarser than that).
-  private lastLivenessAt: number = 0;
-  private livenessSeq: number = 0;
-  private livenessDeadlineTimeoutId: ReturnType<Timer["setTimeout"]> | null = null;
-  // Consecutive RequestManager timeouts observed since the last proof of
-  // life. Reset by markLivenessSeen(); read by handleRequestTimeout().
-  private consecutiveRequestTimeouts: number = 0;
-  private stallConfirmationTimeoutId: ReturnType<Timer["setTimeout"]> | null = null;
+  private readonly liveness: ConnectionLivenessMonitor;
 
   // Injected dependencies
   protected readonly timer: Timer;
@@ -280,8 +234,23 @@ export abstract class DeviceServiceClient {
     this.timer = timer;
     this.webSocketFactory = webSocketFactory;
     this.config = { ...DEFAULT_CONNECTION_CONFIG, ...config };
+    this.liveness = new ConnectionLivenessMonitor({
+      timer,
+      healthCheckIntervalMs: this.config.healthCheckIntervalMs,
+      getLogTag: () => this.logTag,
+      getSocket: () => this.ws,
+      reconnectAfterFailedHealthCheck: () => {
+        // Attempt reconnection if auto-reconnect is enabled and not already connecting
+        if (this.autoReconnectEnabled && !this.isConnecting && !this.reconnectTimeoutId) {
+          logger.info(`[${this.logTag}] Health check triggering reconnection...`);
+          this.scheduleReconnect();
+        }
+      },
+      silentTimeoutConfirmationMs: (request) => this.silentTimeoutConfirmationMs(request),
+      onConfirmedRequestStall: (request) => this.onConfirmedRequestStall(request),
+    });
     this.requestManager = new RequestManager(timer, undefined, (request) =>
-      this.handleRequestTimeout(request),
+      this.liveness.handleRequestTimeout(request),
     );
     this.retryExecutor = retryExecutor;
   }
@@ -421,9 +390,7 @@ export abstract class DeviceServiceClient {
     this.connectionAttempts = 0;
     this.backgroundReconnectAttempts = 0;
     this.backgroundReconnectPaused = false;
-    this.lastConnectionFailureMessage = undefined;
-    this.lastConnectionFailureIsForwardingLeaseConflict = false;
-    this.lastConnectionFailureIsTransientLeaseConflict = false;
+    this.lastConnectionFailure.clear();
   }
 
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {
@@ -459,49 +426,14 @@ export abstract class DeviceServiceClient {
     maxAttempts: number = 10,
     delayMs: number = 300,
   ): Promise<boolean> {
-    const signal = getAbortSignal();
-    signal?.throwIfAborted();
-    const result = await this.retryExecutor.execute(
-      async (attempt) => {
-        const connected = await raceWithDeadline(() => this.ensureConnected(), {
-          timer: this.timer,
-          signal,
-          label: "CtrlProxy WebSocket connect",
-        });
-        if (connected) {
-          logger.info(
-            `[${this.logTag}] WebSocket connected after ${attempt} attempt(s) (${(attempt - 1) * delayMs}ms)`,
-          );
-          return true;
-        }
-
-        throw new Error(`Connection attempt ${attempt} failed`);
-      },
-      {
-        maxAttempts,
-        signal,
-        delays: delayMs,
-        shouldRetry: (error) => !(error instanceof RealCtrlProxyWebSocketInTestError),
-        onRetry: (_error, attempt) => {
-          logger.debug(
-            `[${this.logTag}] Connection attempt ${attempt}/${maxAttempts} failed, retrying in ${delayMs}ms`,
-          );
-        },
-      },
-    );
-    signal?.throwIfAborted();
-
-    if (result.error instanceof RealCtrlProxyWebSocketInTestError) {
-      throw result.error;
-    }
-    if (!result.success) {
-      logger.warn(
-        `[${this.logTag}] WebSocket not ready after ${maxAttempts} attempts (${maxAttempts * delayMs}ms)`,
-      );
-      return false;
-    }
-
-    return result.value ?? false;
+    return connectWithRetry({
+      retryExecutor: this.retryExecutor,
+      timer: this.timer,
+      logTag: this.logTag,
+      ensureConnected: () => this.ensureConnected(),
+      maxAttempts,
+      delayMs,
+    });
   }
 
   /**
@@ -630,16 +562,7 @@ export abstract class DeviceServiceClient {
     this.clearLifecycleSocket(socket);
     this.stopHealthCheck();
     this.requestManager.cancelAll(error);
-    socket.removeAllListeners();
-    socket.on("error", (socketError) => {
-      logger.debug(`[${this.logTag}] Ignoring error on retired WebSocket: ${socketError}`);
-    });
-    try {
-      socket.close();
-    } catch (closeError) {
-      // The socket may already be closing; it is being discarded either way.
-      logger.debug(`[${this.logTag}] Error closing retired WebSocket: ${closeError}`);
-    }
+    discardSocket(socket, this.logTag, "retired");
     this.onConnectionClosed();
   }
 
@@ -789,184 +712,66 @@ export abstract class DeviceServiceClient {
         `[${this.logTag}] Connecting to WebSocket at ${wsUrl} (attempt ${this.connectionAttempts}/${this.config.maxConnectionAttempts})`,
       );
 
-      return await perf.track(
-        "wsConnect",
-        () =>
-          new Promise<boolean>((resolve, reject) => {
-            const ws = this.webSocketFactory(wsUrl);
-            let opened = false;
-            this.lifecycleSocket = ws;
-            const connectionTimeout = this.timer.setTimeout(() => {
-              this.clearPendingConnectAbort(ws);
-              this.clearLifecycleSocket(ws);
-              ws.close();
-              reject(new Error("WebSocket connection timeout"));
-            }, this.config.connectionTimeoutMs);
-
-            // Track this in-flight handshake so a generation change
-            // (close()/updatePort()) can abort it eagerly. A socket stuck in
-            // CONNECTING emits neither "open" nor "error", so the generation
-            // guard in the handlers below would never run for it. (#5656)
-            this.pendingConnectAbort = {
-              socket: ws,
-              abort: () => {
-                this.timer.clearTimeout(connectionTimeout);
-                // Detach lifecycle listeners before closing so the aborted
-                // socket's delayed close/error cannot mutate state for the
-                // replacement connect; keep a lone swallowing error listener so a
-                // mid-handshake error cannot throw and crash the daemon.
-                try {
-                  this.clearLifecycleSocket(ws);
-                  ws.removeAllListeners();
-                  ws.on("error", (error) => {
-                    logger.debug(`[${this.logTag}] Ignoring error on aborted WebSocket: ${error}`);
-                  });
-                  ws.close();
-                } catch (error) {
-                  // The socket may already be closing; nothing else to clean up.
-                  logger.debug(`[${this.logTag}] Error closing aborted WebSocket: ${error}`);
-                }
-                this.isConnecting = false;
-                this.onConnectAttemptFailed();
-                resolve(false);
-              },
-            };
-
-            ws.on("open", () => {
-              this.clearPendingConnectAbort(ws);
-              this.timer.clearTimeout(connectionTimeout);
-              if (generation !== this.connectionGeneration) {
-                // close() or updatePort() ran while this connection was mid-handshake.
-                // Detach this socket's listeners BEFORE closing it, then discard it.
-                // A replacement connect (e.g. to a new port after updatePort) may
-                // already be live; without detaching, this socket's still-attached
-                // close/error handlers would fire on its delayed close-handshake and
-                // null out this.ws, stop the replacement's health check, and schedule
-                // a spurious reconnect. Removing the listeners makes that a no-op.
-                logger.info(`[${this.logTag}] Discarding WebSocket opened after close`);
-                try {
-                  this.clearLifecycleSocket(ws);
-                  ws.removeAllListeners();
-                  // Keep a lone error listener: a discarded socket (e.g. dialing a
-                  // dead old port) can still emit "error" during its close
-                  // handshake, and an EventEmitter with no "error" listener THROWS,
-                  // which would crash the daemon. The socket is being torn down, so
-                  // the error is expected and needs no state mutation.
-                  ws.on("error", (error) => {
-                    logger.debug(
-                      `[${this.logTag}] Ignoring error on discarded WebSocket: ${error}`,
-                    );
-                  });
-                  ws.close();
-                } catch (error) {
-                  // The socket may already be closing; nothing else to clean up.
-                  logger.debug(`[${this.logTag}] Error closing post-close WebSocket: ${error}`);
-                }
-                this.isConnecting = false;
-                resolve(false);
-                return;
-              }
-              logger.info(`[${this.logTag}] WebSocket connected successfully`);
-              opened = true;
-              this.ws = ws;
-              this.protectRegisteredRequestSends(ws);
-              this.isConnecting = false;
-              this.connectionAttempts = 0; // Reset on successful connection
-              this.backgroundReconnectAttempts = 0;
-              this.backgroundReconnectPaused = false;
-              this.lastConnectionFailureMessage = undefined;
-              this.lastConnectionFailureIsForwardingLeaseConflict = false;
-              this.lastConnectionFailureIsTransientLeaseConflict = false;
-              this.lastConnectionFailureIsTransientLeaseConflict = false;
-              this.markLivenessSeen();
-
-              // Start health check monitoring
-              this.startHealthCheck();
-
-              // Platform-specific post-connection setup
-              this.onConnectionEstablished();
-
-              resolve(true);
-            });
-
-            ws.on("message", (data: WebSocket.Data) => {
-              if (this.ws !== ws) {
-                return;
-              }
-              // Any inbound frame proves the peer is alive, independent of
-              // whether it happens to be a pong reply (#7554).
-              this.markLivenessSeen();
-              void this.handleMessage(data);
-            });
-
-            ws.on("pong", () => {
-              if (this.ws === ws) {
-                this.markLivenessSeen();
-              }
-            });
-
-            // The Android Ktor CtrlProxy server pings the host every 15s
-            // (WebSocketServer.kt `pingPeriod`); `ws` auto-pongs those but
-            // still surfaces them as a "ping" event on this side. That is a
-            // free proof of life independent of the host's own probe (#7554).
-            ws.on("ping", () => {
-              if (this.ws === ws) {
-                this.markLivenessSeen();
-              }
-            });
-
-            ws.on("error", (error) => {
-              if (opened || this.lifecycleSocket !== ws) {
-                logger.warn(`[${this.logTag}] WebSocket error: ${error.message}`);
-                return;
-              }
-              this.clearPendingConnectAbort(ws);
-              this.clearLifecycleSocket(ws);
-              this.timer.clearTimeout(connectionTimeout);
-              logger.warn(`[${this.logTag}] WebSocket error: ${error.message}`);
-              this.isConnecting = false;
-              reject(error);
-            });
-
-            ws.on("close", () => {
-              if (this.lifecycleSocket !== ws) {
-                logger.debug(`[${this.logTag}] Ignoring close from stale WebSocket`);
-                return;
-              }
-              this.clearPendingConnectAbort(ws);
-              this.lifecycleSocket = null;
-              if (!opened) {
-                this.timer.clearTimeout(connectionTimeout);
-                this.isConnecting = false;
-                reject(new Error("WebSocket closed before opening"));
-                return;
-              }
-              logger.info(`[${this.logTag}] WebSocket connection closed`);
-              this.finishEstablishedConnection(ws);
-            });
-          }),
+      return await perf.track("wsConnect", () =>
+        openWebSocketHandshake(this.handshakeHost(), wsUrl, generation),
       );
     } catch (error) {
       return this.failConnectAttempt(error, background);
     }
   }
 
+  private handshakeHost(): WebSocketHandshakeHost {
+    return {
+      timer: this.timer,
+      connectionTimeoutMs: this.config.connectionTimeoutMs,
+      logTag: this.logTag,
+      createSocket: (url) => this.webSocketFactory(url),
+      getLifecycleSocket: () => this.lifecycleSocket,
+      setLifecycleSocket: (socket) => {
+        this.lifecycleSocket = socket;
+      },
+      clearLifecycleSocket: (socket) => this.clearLifecycleSocket(socket),
+      getSocket: () => this.ws,
+      getConnectionGeneration: () => this.connectionGeneration,
+      setPendingConnectAbort: (pending) => {
+        this.pendingConnectAbort = pending;
+      },
+      clearPendingConnectAbort: (socket) => this.clearPendingConnectAbort(socket),
+      setConnecting: (connecting) => {
+        this.isConnecting = connecting;
+      },
+      onConnectAttemptFailed: () => this.onConnectAttemptFailed(),
+      onSocketOpened: (socket) => this.installOpenedSocket(socket),
+      markLivenessSeen: () => this.liveness.markLivenessSeen(),
+      handleMessage: (data) => this.handleMessage(data),
+      finishEstablishedConnection: (socket) => this.finishEstablishedConnection(socket),
+    };
+  }
+
+  private installOpenedSocket(ws: WebSocket): void {
+    this.ws = ws;
+    this.protectRegisteredRequestSends(ws);
+    this.isConnecting = false;
+    this.connectionAttempts = 0; // Reset on successful connection
+    this.backgroundReconnectAttempts = 0;
+    this.backgroundReconnectPaused = false;
+    this.lastConnectionFailure.clear();
+    this.liveness.markLivenessSeen();
+
+    // Start health check monitoring
+    this.startHealthCheck();
+
+    // Platform-specific post-connection setup
+    this.onConnectionEstablished();
+  }
+
   private cleanUpStaleSocket(staleSocket: WebSocket): void {
     this.finishEstablishedConnection(staleSocket);
     this.clearLifecycleSocket(staleSocket);
-    try {
-      // This socket may emit close/error after a replacement is installed.
-      // Detach its stateful lifecycle handlers before closing so those late
-      // events cannot tear down the replacement connection.
-      staleSocket.removeAllListeners();
-      staleSocket.on("error", (error) => {
-        logger.debug(`[${this.logTag}] Ignoring error on stale WebSocket: ${error}`);
-      });
-      staleSocket.close();
-    } catch (error) {
-      // The stale socket may already be closing; nothing else to clean up.
-      logger.debug(`[${this.logTag}] Error closing stale WebSocket: ${error}`);
-    }
+    // This socket may emit close/error after a replacement is installed. Detach
+    // its stateful lifecycle handlers before closing so those late events cannot
+    // tear down the replacement connection.
+    discardSocket(staleSocket, this.logTag, "stale");
   }
 
   private recordConnectAttempt(background: boolean): void {
@@ -998,11 +803,7 @@ export abstract class DeviceServiceClient {
     if (!background) {
       this.lastConnectionAttempt = this.timer.now();
     }
-    this.lastConnectionFailureMessage = errorMessage(error);
-    this.lastConnectionFailureIsForwardingLeaseConflict =
-      error instanceof CtrlProxyForwardingLeaseConflictError;
-    this.lastConnectionFailureIsTransientLeaseConflict =
-      error instanceof CtrlProxyForwardingLeaseConflictError && error.transient;
+    this.lastConnectionFailure.record(error);
     logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
     this.onConnectAttemptFailed();
   }
@@ -1038,7 +839,7 @@ export abstract class DeviceServiceClient {
    * See {@link lastConnectionFailureMessage}.
    */
   public getLastConnectionFailureMessage(): string | undefined {
-    return this.lastConnectionFailureMessage;
+    return this.lastConnectionFailure.getMessage();
   }
 
   /**
@@ -1048,7 +849,7 @@ export abstract class DeviceServiceClient {
    * {@link lastConnectionFailureIsForwardingLeaseConflict}.
    */
   public isLastConnectionFailureForwardingLeaseConflict(): boolean {
-    return this.lastConnectionFailureIsForwardingLeaseConflict;
+    return this.lastConnectionFailure.isForwardingLeaseConflict();
   }
 
   /**
@@ -1056,7 +857,7 @@ export abstract class DeviceServiceClient {
    * an owner too busy to answer) that a readiness wait should retry (#10485).
    */
   public isLastConnectionFailureTransientLeaseConflict(): boolean {
-    return this.lastConnectionFailureIsTransientLeaseConflict;
+    return this.lastConnectionFailure.isTransientLeaseConflict();
   }
 
   private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {
@@ -1171,153 +972,14 @@ export abstract class DeviceServiceClient {
    * Start periodic health check to ensure WebSocket stays connected.
    */
   protected startHealthCheck(): void {
-    // Clear any existing health check
-    this.stopHealthCheck();
-
-    logger.debug(
-      `[${this.logTag}] Starting health check (interval: ${this.config.healthCheckIntervalMs}ms)`,
-    );
-    this.lastHealthCheckTime = this.timer.now();
-
-    this.healthCheckIntervalId = this.timer.setInterval(() => {
-      const now = this.timer.now();
-      const timeSinceLastCheck = now - this.lastHealthCheckTime;
-      this.lastHealthCheckTime = now;
-
-      // Check if WebSocket is still connected
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        logger.warn(`[${this.logTag}] Health check failed: WebSocket not connected`);
-        this.stopHealthCheck();
-
-        // Attempt reconnection if auto-reconnect is enabled and not already connecting
-        if (this.autoReconnectEnabled && !this.isConnecting && !this.reconnectTimeoutId) {
-          logger.info(`[${this.logTag}] Health check triggering reconnection...`);
-          this.scheduleReconnect();
-        }
-      } else {
-        logger.debug(
-          `[${this.logTag}] Health check passed (time since last: ${timeSinceLastCheck}ms)`,
-        );
-        // readyState alone only proves the socket hasn't been torn down; it
-        // says nothing about whether the peer is still answering (#7554).
-        // Probe with a protocol-level ping on the injected timer.
-        this.startLivenessProbe(this.ws);
-      }
-    }, this.config.healthCheckIntervalMs);
+    this.liveness.startHealthCheck();
   }
 
   /**
    * Stop the health check interval.
    */
   protected stopHealthCheck(): void {
-    if (this.healthCheckIntervalId !== null) {
-      logger.debug(`[${this.logTag}] Stopping health check`);
-      this.timer.clearInterval(this.healthCheckIntervalId);
-      this.healthCheckIntervalId = null;
-    }
-    if (this.livenessDeadlineTimeoutId !== null) {
-      this.timer.clearTimeout(this.livenessDeadlineTimeoutId);
-      this.livenessDeadlineTimeoutId = null;
-    }
-    if (this.stallConfirmationTimeoutId !== null) {
-      this.timer.clearTimeout(this.stallConfirmationTimeoutId);
-      this.stallConfirmationTimeoutId = null;
-    }
-  }
-
-  /**
-   * Record proof that the current connection's peer is alive: a pong reply,
-   * a server-initiated ping, or any inbound frame (a frame proves liveness
-   * even without an outstanding ping). Also clears the consecutive-timeout
-   * counter used by {@link handleRequestTimeout}, since a live peer means
-   * those earlier timeouts were not evidence of a wedged socket after all.
-   *
-   * Bumps {@link livenessSeq} rather than relying solely on the
-   * {@link lastLivenessAt} timestamp: {@link startLivenessProbe}'s deadline
-   * check compares the sequence number, which can't miss a frame that lands
-   * in the same millisecond as the check (timer/`Date.now()` resolution is
-   * coarser than that).
-   */
-  private markLivenessSeen(): void {
-    if (this.livenessDeadlineTimeoutId !== null) {
-      this.timer.clearTimeout(this.livenessDeadlineTimeoutId);
-      this.livenessDeadlineTimeoutId = null;
-    }
-    this.lastLivenessAt = this.timer.now();
-    this.livenessSeq++;
-    this.consecutiveRequestTimeouts = 0;
-  }
-
-  /**
-   * Send a protocol-level ping and, unless a probe is already in flight,
-   * arm a bounded deadline on the injected {@link Timer}. If neither a pong
-   * nor any other inbound frame refreshes {@link livenessSeq} before the
-   * deadline, the socket is presumed dead and torn down with
-   * `ws.terminate()`. That firing is what drives the normal was-open close
-   * path (`onConnectionClosed()` → `scheduleReconnect()`) — this method
-   * never calls either directly, so a liveness failure is counted as exactly
-   * one lost connection, the same as any other close (#7554).
-   *
-   * Safe to call from both the periodic health check and
-   * {@link handleRequestTimeout}: a probe already in flight is left alone
-   * rather than restarted, so back-to-back callers cannot pile up deadlines
-   * or double-count a single failure.
-   */
-  private startLivenessProbe(ws: WebSocket): void {
-    if (this.livenessDeadlineTimeoutId !== null) {
-      return;
-    }
-    const checkStartedAtSeq = this.livenessSeq;
-    try {
-      ws.ping();
-    } catch (error) {
-      // Best-effort: a ping send failure on a socket that still reports OPEN
-      // is itself evidence of trouble, so still arm the deadline below rather
-      // than returning early.
-      logger.debug(`[${this.logTag}] Failed to send liveness ping: ${error}`);
-    }
-    if (this.livenessSeq !== checkStartedAtSeq) {
-      return;
-    }
-    const livenessTimeoutMs =
-      this.config.healthCheckIntervalMs * LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER;
-    this.livenessDeadlineTimeoutId = this.timer.setTimeout(() => {
-      this.livenessDeadlineTimeoutId = null;
-      if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) {
-        // Already replaced or torn down through some other path; nothing to do.
-        return;
-      }
-      if (this.livenessSeq > checkStartedAtSeq) {
-        // A pong or another frame arrived since this probe started.
-        return;
-      }
-      logger.warn(
-        `[${this.logTag}] Liveness probe failed: no pong or frame received within ${livenessTimeoutMs}ms, terminating stale connection`,
-      );
-      ws.terminate();
-    }, livenessTimeoutMs);
-  }
-
-  /**
-   * Feed RequestManager timeouts back into connection state (#7554). A
-   * wedged device-side handler can still answer protocol pings while never
-   * responding to application requests, so consecutive request timeouts with
-   * no proof of life in between are treated as "suspect" and trigger the same
-   * ping-then-terminate probe immediately, instead of waiting out the rest of
-   * the current health-check interval.
-   */
-  private handleRequestTimeout(request: TimedOutRequest): void {
-    this.confirmSilentRequestStall(request);
-    this.consecutiveRequestTimeouts++;
-    if (this.consecutiveRequestTimeouts < REQUEST_TIMEOUT_LIVENESS_THRESHOLD) {
-      return;
-    }
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      logger.warn(
-        `[${this.logTag}] ${this.consecutiveRequestTimeouts} consecutive request timeouts with no inbound frame; probing connection liveness`,
-      );
-      this.startLivenessProbe(this.ws);
-    }
+    this.liveness.stopHealthCheck();
   }
 
   /**
@@ -1331,48 +993,6 @@ export abstract class DeviceServiceClient {
 
   /** A silent request timeout whose confirmation ping also went unanswered. */
   protected onConfirmedRequestStall(_request: TimedOutRequest): void {}
-
-  /**
-   * A command that times out while the peer sent nothing at all may be a
-   * stopped runner rather than a slow one. Ping it once on a short deadline:
-   * a peer that answers is merely busy; silence is reported to the subclass,
-   * which owns recovery (#11247). Unlike {@link startLivenessProbe} this never
-   * terminates the socket itself.
-   */
-  private confirmSilentRequestStall(request: TimedOutRequest): void {
-    const ws = this.ws;
-    if (
-      !ws ||
-      ws.readyState !== WebSocket.OPEN ||
-      this.stallConfirmationTimeoutId !== null ||
-      // Same-millisecond proof of life is ambiguous; treat it as life.
-      this.lastLivenessAt >= request.createdAt
-    ) {
-      return;
-    }
-    const confirmationMs = this.silentTimeoutConfirmationMs(request);
-    if (confirmationMs === undefined) {
-      return;
-    }
-    const startedAtSeq = this.livenessSeq;
-    try {
-      ws.ping();
-    } catch (error) {
-      // A failed send is itself stall evidence; the deadline below decides.
-      logger.debug(`[${this.logTag}] Failed to send stall-confirmation ping: ${error}`);
-    }
-    this.stallConfirmationTimeoutId = this.timer.setTimeout(() => {
-      this.stallConfirmationTimeoutId = null;
-      if (this.ws !== ws || ws.readyState !== WebSocket.OPEN || this.livenessSeq !== startedAtSeq) {
-        return;
-      }
-      logger.warn(
-        `[${this.logTag}] ${request.type} request timed out after ${request.timeoutMs}ms and a ` +
-          `ping went unanswered for ${confirmationMs}ms; treating the runner as stalled`,
-      );
-      this.onConfirmedRequestStall(request);
-    }, confirmationMs);
-  }
 
   // ===========================================================================
   // Utility methods for subclasses
@@ -1471,26 +1091,7 @@ export abstract class DeviceServiceClient {
     if (signal?.aborted) {
       return "timed_out";
     }
-    const timedOut = new Error("Recovery wait timed out");
-    try {
-      return await raceWithDeadline(
-        recovery.then(
-          (connected) => (connected ? "recovered" : "failed") as "recovered" | "failed",
-        ),
-        {
-          timer: this.timer,
-          timeoutMs: budgetMs,
-          signal,
-          label: "Recovery wait",
-          timeoutError: () => timedOut,
-        },
-      );
-    } catch (error) {
-      if (error === timedOut || signal?.aborted) {
-        return "timed_out";
-      }
-      throw error;
-    }
+    return awaitRecoveryOutcome(recovery, this.timer, budgetMs, signal);
   }
 
   /**
@@ -1621,31 +1222,9 @@ export abstract class DeviceServiceClient {
   protected forwardHierarchyToObservationStream(
     hierarchy: ViewHierarchyResult,
     frameContext: string | undefined,
-    hooks: {
-      logTag: string;
-      prepare?: () => void;
-      recordForwarded: (captureSequence: number) => void;
-    },
+    hooks: HierarchyForwardingHooks,
   ): void {
-    const server = getDeviceDataStreamServer();
-    if (!server) {
-      return;
-    }
-    try {
-      hooks.prepare?.();
-      const captureSequence = server.pushHierarchyUpdate(
-        this.device.deviceId,
-        hierarchy,
-        frameContext,
-      );
-      // A missing identity leaves geometry untracked so control clients fail closed.
-      if (captureSequence !== null) {
-        hierarchy.captureSequence = captureSequence;
-        hooks.recordForwarded(captureSequence);
-      }
-    } catch (error) {
-      logger.warn(`[${hooks.logTag}] Failed to push hierarchy to observation stream: ${error}`);
-    }
+    forwardHierarchyToObservationStream(this.device.deviceId, hierarchy, frameContext, hooks);
   }
 
   protected createScreenshotBackoffScheduler(
@@ -1654,21 +1233,12 @@ export abstract class DeviceServiceClient {
     options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
   ): ScreenshotBackoffScheduler {
     if (!this.screenshotBackoffScheduler) {
-      this.screenshotBackoffScheduler = new DefaultScreenshotBackoffScheduler(
+      this.screenshotBackoffScheduler = buildScreenshotBackoffScheduler(
+        this.device.deviceId,
+        this.timer,
         capture,
         emit,
-        {
-          ...options,
-          getKeepAliveIntervalMs: () => {
-            const server = getDeviceDataStreamServer();
-            return server?.getScreenshotIntervalMsForDevice(this.device.deviceId) ?? 3000;
-          },
-        },
-        this.timer,
-        () => {
-          const server = getDeviceDataStreamServer();
-          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
-        },
+        options,
       );
     }
     return this.screenshotBackoffScheduler;

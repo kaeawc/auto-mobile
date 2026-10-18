@@ -2586,7 +2586,10 @@ describe("provisionDevice handler", () => {
         .getExecutedOperations()
         .filter((operation) => operation.startsWith("destroyDevice:")),
     ).toEqual([]);
-    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+    // The configured boot step starts the committed device, so it lists as running.
+    expect(await deviceManager.listDeviceImages("android")).toEqual([
+      { ...created.device, isRunning: true },
+    ]);
   });
 
   test.each(["android", "ios"] as const)(

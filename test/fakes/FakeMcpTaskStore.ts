@@ -12,6 +12,10 @@ import type { Timer } from "../../src/utils/SystemTimer";
 /** In-memory {@link McpTaskStore} with the repository's status fences, on an injected clock. */
 export class FakeMcpTaskStore implements McpTaskStore {
   readonly rows = new Map<string, McpTaskRecord>();
+  /** The next N `settle` writes reject, as a busy, full or failing SQLite would. */
+  settleFailures = 0;
+  /** The next N `updateRunning` writes reject, as a busy, full or failing SQLite would. */
+  updateRunningFailures = 0;
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
@@ -47,6 +51,10 @@ export class FakeMcpTaskStore implements McpTaskStore {
   }
 
   async updateRunning(taskId: string, update: McpTaskRunningUpdate): Promise<boolean> {
+    if (this.updateRunningFailures > 0) {
+      this.updateRunningFailures--;
+      throw new Error("SQLITE_BUSY: database is locked (updateRunning)");
+    }
     const row = this.rows.get(taskId);
     if (!row || isTerminalTaskStatus(row.status)) {
       return false;
@@ -62,6 +70,10 @@ export class FakeMcpTaskStore implements McpTaskStore {
   }
 
   async settle(taskId: string, settlement: McpTaskSettlement): Promise<boolean> {
+    if (this.settleFailures > 0) {
+      this.settleFailures--;
+      throw new Error("SQLITE_BUSY: database is locked (settle)");
+    }
     const row = this.rows.get(taskId);
     if (!row || isTerminalTaskStatus(row.status)) {
       return false;

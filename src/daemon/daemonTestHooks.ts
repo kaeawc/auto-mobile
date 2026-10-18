@@ -9,7 +9,8 @@ import type { NavigationGraphPushTarget, StorageSubscriptionRequest } from "./da
 import type { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import type { ObservationStreamHealth } from "./ObservationStreamHealth";
 import type { ObserverSessionRegistry } from "./observerSessionRegistry";
-import type { SessionManager } from "./sessionManager";
+import type { DevicePool, PooledDevice } from "./devicePool";
+import type { Session, SessionManager } from "./sessionManager";
 import type { SingleFlightInterval } from "./SingleFlightInterval";
 
 /**
@@ -23,6 +24,17 @@ export interface DaemonTestHooks {
   readonly httpIngress: DaemonHttpIngressTestHooks;
   /** Replace the session manager the HTTP ingress and handlers read. */
   setSessionManager(manager: SessionManager): void;
+  /** Replace the device pool the disconnect handling reads. */
+  setDevicePool(pool: DevicePool): void;
+  recordAndTryRecoverCapturedDisconnect(
+    deviceId: string,
+    pooledDevice: PooledDevice | null,
+    assignmentCount: number,
+    sessionId: string | null | undefined,
+    session: Session | null,
+    forceGeneration: number | undefined,
+  ): Promise<{ incidentId: string | undefined; handled: boolean }>;
+  hasDeferredSessionRecoverySweep(sweep: Promise<void>): boolean;
   setObserverSessionRegistry(registry: ObserverSessionRegistry): void;
   setObservationStreamHealth(health: ObservationStreamHealth): void;
   setSessionBrokerConfigPath(path: string | undefined): void;

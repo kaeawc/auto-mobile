@@ -2,14 +2,18 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
-import type { StatelessMcpHttpEndpoint } from "../../src/daemon/statelessMcpHttpEndpoint";
+import type { DaemonHttpIngressTestHooks } from "../../src/daemon/daemonHttpIngress";
+import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { executionTracker } from "../../src/server/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-class FakeMcpRequest {
+class FakeMcpRequest extends EventEmitter {
   readonly method = "POST";
   readonly headers = {};
+  destroy(): this {
+    return this;
+  }
 }
 
 class FakeResponse extends EventEmitter {
@@ -30,33 +34,25 @@ class FakeResponse extends EventEmitter {
 }
 
 /** One request's transport: its response stays open until the response closes. */
-class FakeTransport {
+class FakeTransport extends StreamableHTTPServerTransport {
   closed = 0;
   private markStarted!: () => void;
   readonly started = new Promise<void>((resolve) => {
     this.markStarted = resolve;
   });
 
-  async handleRequest(): Promise<void> {
+  override async handleRequest(): Promise<void> {
     this.markStarted();
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     this.closed += 1;
   }
 }
 
-interface CallbackInternals {
-  httpIngress: {
-    mcpHttpEndpoint: StatelessMcpHttpEndpoint<FakeMcpRequest, FakeResponse, FakeTransport>;
-    mcpHttpTransportFactory: () => FakeTransport;
-    mcpRequestServerFactory: () => { connect(): Promise<void>; close(): Promise<void> };
-  };
-}
-
 describe("daemon stateless MCP request close rejection ownership", () => {
   let timer: FakeTimer;
-  let internals: CallbackInternals;
+  let internals: DaemonHttpIngressTestHooks;
   let transport: FakeTransport;
   let warnings: ReturnType<typeof spyOn<typeof logger, "warn">>;
   const unhandled: unknown[] = [];
@@ -67,13 +63,13 @@ describe("daemon stateless MCP request close rejection ownership", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     // Construct only: no daemon startup, sockets, devices, or real timers.
-    internals = new Daemon({}, { timer }) as unknown as CallbackInternals;
+    internals = new Daemon({}, { timer }).testHooks.httpIngress;
     transport = new FakeTransport();
-    internals.httpIngress.mcpHttpTransportFactory = () => transport;
-    internals.httpIngress.mcpRequestServerFactory = () => ({
+    internals.setMcpHttpTransportFactory(() => transport);
+    internals.setMcpRequestServerFactory(() => ({
       connect: async () => {},
       close: async () => {},
-    });
+    }));
     warnings = spyOn(logger, "warn").mockImplementation(() => {});
     unhandled.length = 0;
     process.on("unhandledRejection", onUnhandled);
@@ -92,12 +88,7 @@ describe("daemon stateless MCP request close rejection ownership", () => {
 
   async function openRequest(): Promise<FakeResponse> {
     const res = new FakeResponse();
-    await internals.httpIngress.mcpHttpEndpoint.handle(
-      new FakeMcpRequest(),
-      res,
-      undefined,
-      () => {},
-    );
+    await internals.handleEndpointRequest(new FakeMcpRequest(), res, undefined);
     await transport.started;
     return res;
   }
@@ -116,7 +107,7 @@ describe("daemon stateless MCP request close rejection ownership", () => {
         error,
       );
       // The request is untracked and its transport closed even though cancellation failed.
-      expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
+      expect(internals.endpointInFlightCount()).toBe(0);
       expect(transport.closed).toBe(1);
     } finally {
       cancel.mockRestore();
@@ -141,7 +132,7 @@ describe("daemon stateless MCP request close rejection ownership", () => {
         await timer.advanceTimersByTimeAsync(0);
       }
       expect(transport.closed).toBe(1);
-      expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
+      expect(internals.endpointInFlightCount()).toBe(0);
     } finally {
       cancel.mockRestore();
     }

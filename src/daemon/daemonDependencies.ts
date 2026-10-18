@@ -20,6 +20,10 @@ import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
+import {
+  defaultDaemonExitRecordFileSystem,
+  type DaemonExitRecordFileSystem,
+} from "./daemonExitRecord";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLifecycle";
@@ -63,6 +67,8 @@ export interface DaemonDependencies {
   iosDeviceVerifier?: () => Pick<DeviceReadiness, "verifyIosDevice">;
   /** Device discovery and boot for the pool; defaults to the multi-platform manager. */
   deviceManager?: PlatformDeviceManager;
+  /** Where the daemon records why it exited; defaults to the real filesystem. */
+  exitRecordFileSystem?: DaemonExitRecordFileSystem;
 }
 
 /** {@link DaemonDependencies} with every default applied; the three optional ones stay optional. */
@@ -126,6 +132,7 @@ function resolveFactories(dependencies: DaemonDependencies) {
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
     bindingExclusionFactory: dependencies.bindingExclusionFactory ?? createDefaultBindingExclusion,
     iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => DeviceReadiness.getInstance()),
+    exitRecordFileSystem: dependencies.exitRecordFileSystem ?? defaultDaemonExitRecordFileSystem,
   };
 }
 

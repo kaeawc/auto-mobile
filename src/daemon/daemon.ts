@@ -132,7 +132,6 @@ import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
 import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
 import {
   DaemonSelfExitRecorder,
-  defaultDaemonExitRecordFileSystem,
   writeDaemonExitRecord,
   type DaemonExitRecordFileSystem,
 } from "./daemonExitRecord";
@@ -520,7 +519,7 @@ export class Daemon {
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
   private socketServer: UnixSocketServer | null = null;
-  private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
+  private readonly exitRecordFileSystem: DaemonExitRecordFileSystem;
   private enteredDaemonProcess = false;
   /** The machine-touching start steps; `startOn()` replaces the process's own. */
   private startHost: DaemonStartHost = this.processStartHost();
@@ -683,6 +682,7 @@ export class Daemon {
     this.foreignCtrlProxyForwardEvidence = retained.foreignCtrlProxyForwardEvidence;
     this.deviceManager = retained.deviceManager;
     this.iosDeviceVerifier = retained.iosDeviceVerifier;
+    this.exitRecordFileSystem = retained.exitRecordFileSystem;
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
       this.resolveStartupCompletion = resolve;
@@ -3673,6 +3673,12 @@ export class Daemon {
       setSessionManager: (manager) => {
         this.sessionManager = manager;
       },
+      setDevicePool: (pool) => {
+        this.devicePool = pool;
+      },
+      recordAndTryRecoverCapturedDisconnect: (...args) =>
+        this.recordAndTryRecoverCapturedDisconnect(...args),
+      hasDeferredSessionRecoverySweep: (sweep) => this.deferredSessionRecoverySweeps.has(sweep),
       setObserverSessionRegistry: (registry) => {
         this.observerSessionRegistry = registry;
       },

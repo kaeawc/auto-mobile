@@ -486,7 +486,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       expect(manager.hasSession("release-session")).toBe(false);
       // Model a replacement publishing after removal without waiting on the
       // old incarnation's in-flight release promise from createSession().
-      (manager as unknown as { sessions: Map<string, Session> }).sessions.set("release-session", {
+      manager.testHooks.sessions.set("release-session", {
         ...original,
       });
       throw new Error("old incarnation persistence failed");

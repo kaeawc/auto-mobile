@@ -14,12 +14,6 @@ import { FakeDaemonExitRecordFileSystem } from "../fakes/SafeDaemonManager";
 // for sessions rehydrated before the bind. start() must await a bounded stop()
 // before rethrowing.
 
-interface DaemonStartPhases {
-  exitRecordFileSystem: FakeDaemonExitRecordFileSystem;
-  startThroughSocketBind(): Promise<void>;
-  startAfterSocketBind(): Promise<void>;
-}
-
 class PostBindFailure extends Error {}
 
 describe("Daemon post-bind startup failure (#11156)", () => {
@@ -35,35 +29,35 @@ describe("Daemon post-bind startup failure (#11156)", () => {
   });
 
   function startableDaemon(timer: FakeTimer, failure: { prebind?: Error; postbind?: Error }) {
+    const exitFiles = new FakeDaemonExitRecordFileSystem();
     const daemon = new Daemon(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
         timer,
         deviceSessionRepository: new FakeDeviceSessionRepository(),
+        exitRecordFileSystem: exitFiles,
       },
     );
-    const phases = daemon as unknown as DaemonStartPhases;
-    const exitFiles = new FakeDaemonExitRecordFileSystem();
-    phases.exitRecordFileSystem = exitFiles;
     const events: string[] = [];
-    const spies = [
-      spyOn(logger, "error").mockImplementation(() => {}),
-      spyOn(logger, "warn").mockImplementation(() => {}),
-      spyOn(phases, "startThroughSocketBind").mockImplementation(async () => {
+    daemon.testHooks.setStartSteps({
+      startThroughSocketBind: async () => {
         events.push("bind");
         if (failure.prebind) {
           throw failure.prebind;
         }
-      }),
-      spyOn(phases, "startAfterSocketBind").mockImplementation(async () => {
+      },
+      startAfterSocketBind: async () => {
         events.push("post-bind");
         if (failure.postbind) {
           throw failure.postbind;
         }
-      }),
-    ];
-    for (const spy of spies) {
+      },
+    });
+    for (const spy of [
+      spyOn(logger, "error").mockImplementation(() => {}),
+      spyOn(logger, "warn").mockImplementation(() => {}),
+    ]) {
       restores.push(() => spy.mockRestore());
     }
     return { daemon, events, exitFiles };

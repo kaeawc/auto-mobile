@@ -2,12 +2,12 @@ import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryI
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
 } from "../../src/daemon/emulatorLossIncident";
-import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -262,28 +262,6 @@ export async function setupAwaitingOwner(manager: LaggingShutdownManager) {
   await sessions.rehydratePersistedSessions(pool);
   const captured = pool.getDevice(original.deviceId)!;
   return { timer, sessions, manager, pool, captured, persistence };
-}
-
-export interface DaemonDisconnectInternals {
-  devicePool: DevicePool;
-  sessionManager: SessionManager;
-  recordAndTryRecoverCapturedDisconnect(
-    deviceId: string,
-    pooledDevice: PooledDevice | null,
-    assignmentCount: number,
-    sessionId: string | null | undefined,
-    session: Session | null,
-    forceGeneration: number | undefined,
-  ): Promise<{ incidentId: string | undefined; handled: boolean }>;
-}
-
-export interface DaemonDeferredRecoverySweepInternals {
-  deferredSessionRecoverySweeps: Set<Promise<void>>;
-  trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
-}
-
-export interface DevicePoolProcessExitInternals {
-  trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
 }
 
 export function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {

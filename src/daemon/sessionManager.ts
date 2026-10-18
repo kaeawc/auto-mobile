@@ -173,6 +173,12 @@ import {
   SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
+import { DaemonSessionCreationRejectedError } from "./daemonSessionCreationRejectedError";
+export { DaemonSessionCreationRejectedError } from "./daemonSessionCreationRejectedError";
+import { TerminalSessionError } from "./terminalSessionError";
+export { TerminalSessionError } from "./terminalSessionError";
+
 import { DAEMON_SESSION_NOT_ACTIVE_CODE, DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
@@ -189,7 +195,6 @@ import {
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   NoopTerminalReleaseJournal,
   type TerminalReleaseIntent,
@@ -707,24 +712,6 @@ export class SessionHeldByRecoveryError extends ActionableError {
   }
 }
 
-const TERMINAL_RELEASE_IN_PROGRESS_DETAIL =
-  "is being terminally released from its device; use a new session UUID";
-
-export class TerminalSessionError extends Error {
-  constructor(
-    readonly sessionUuid: string,
-    readonly release: SessionReleaseSnapshot,
-  ) {
-    super(
-      (release.releaseReason === "explicit-release"
-        ? `Session ${sessionUuid} was released and cannot be reused. `
-        : `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. `) +
-        "Acquire a new device with getAndroid or getApple.",
-    );
-    this.name = "TerminalSessionError";
-  }
-}
-
 /**
  * A tool call reached a session whose owner's lease expired and that is held
  * inside its suspect window (#10051). Nothing runs against it until its owner
@@ -748,16 +735,8 @@ export class SessionSuspectError extends ActionableError {
   }
 }
 
-/** A new session cannot be published after the daemon has begun shutdown. */
-export class DaemonSessionCreationRejectedError extends ActionableError {
-  constructor(
-    readonly sessionUuid: string,
-    readonly release?: SessionReleaseSnapshot,
-  ) {
-    super(`Cannot create device session ${sessionUuid}: the daemon is shutting down.`);
-    this.name = "DaemonSessionCreationRejectedError";
-  }
-}
+const TERMINAL_RELEASE_IN_PROGRESS_DETAIL =
+  "is being terminally released from its device; use a new session UUID";
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
@@ -10700,6 +10679,11 @@ export class SessionManager {
       expiredSessions,
       assignedDevices: this.getAssignedDevices().size,
     };
+  }
+
+  /** Typed view of the internals unit tests drive; production code never reads it. */
+  get testHooks() {
+    return { sessions: this.sessions };
   }
 }
 

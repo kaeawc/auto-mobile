@@ -1,7 +1,7 @@
 src/daemon/AppearanceSyncScheduler.ts	1
 src/daemon/appearanceSocketServer.ts	3
 src/daemon/daemon.ts	6
-src/daemon/daemonContext.ts	3
+src/daemon/daemonContext.ts	1
 src/daemon/deviceGestureRecordingSocketServer.ts	2
 src/daemon/deviceGestureRecordingStartAdmission.ts	1
 src/daemon/discoveryReconcile.ts	1
@@ -10,7 +10,7 @@ src/daemon/socketServer.ts	1
 src/daemon/streamSocketAuth.ts	2
 src/daemon/videoStreamSocketServer.ts	1
 src/daemon/webrtcStreamSocketServer.ts	1
-src/features/deviceLifecycle/deviceLifecycleCore.ts	17
+src/features/deviceLifecycle/deviceLifecycleCore.ts	2
 src/features/observe/ObserveScreenWiring.ts	1
 src/server/bootedDeviceResources.ts	1
 src/server/brokerConnectionToolGate.ts	1
@@ -33,13 +33,10 @@ src/server/pipeline/ingress/bindSession.ts	3
 src/server/pipeline/ingress/executeToolCall.ts	3
 src/server/pipeline/ingress/routing.ts	1
 src/server/pipeline/ingress/shapeResult.ts	1
-src/server/pipeline/planLifecycle.ts	10
-src/server/pipeline/readTarget.ts	12
 src/server/planExecutionOrchestrator.ts	7
 src/server/prototypeTools.ts	2
 src/server/resourceDeviceResolver.ts	1
 src/server/sessionBrokerToolGate.ts	1
 src/server/setActiveDevice.ts	3
-src/server/undeliveredAcquisition.ts	1
 src/server/videoRecordingTools.ts	4
 src/utils/plan/PlanExecutor.ts	2

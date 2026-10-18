@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import os from "node:os";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { DeviceUnreachableError } from "../../../src/models/DeviceUnreachableError";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -29,8 +29,9 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
   let timer: FakeTimer;
   let backend: PlatformVideoCaptureBackend;
 
+  const scratch = useScratchRoot("platform-video-pid-");
   beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-pid-"));
+    tempDir = scratch.next();
     factory = new FakeAdbClientFactory();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -39,10 +40,6 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
         return "h264";
       },
     });
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
   });
 
   async function startRecording(launchStdout?: string): Promise<RecordingHandle> {

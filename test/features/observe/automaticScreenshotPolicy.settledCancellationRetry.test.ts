@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../../helpers/scratchRoot";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveScreenshotMode } from "../../../src/features/observe/automaticScreenshotPolicy";
 import {
@@ -62,16 +62,16 @@ describe("settled cancellation retry", () => {
   const timer = new FakeTimer();
   let directory: string;
 
+  const scratch = useScratchRoot("settled-shot-");
   beforeEach(() => {
     ScreenshotJobTracker.clear();
     ScreenshotJobTracker.setTimer(timer);
-    directory = mkdtempSync(join(tmpdir(), "settled-shot-"));
+    directory = scratch.next();
   });
 
   afterEach(() => {
     ScreenshotJobTracker.clear();
     ScreenshotJobTracker.resetTimer();
-    rmSync(directory, { recursive: true, force: true });
   });
 
   function recorderWithCancelledFirstAttempt(secondResult: ScreenshotResult) {

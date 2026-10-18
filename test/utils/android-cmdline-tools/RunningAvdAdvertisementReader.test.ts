@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import {
   TmpdirRunningAvdAdvertisementReader,
   runningAvdAdvertisementDirs,
@@ -9,23 +9,16 @@ import {
 
 const AVD = "am-api36-ga-arm64";
 
-const tempDirs: string[] = [];
+const scratch = useScratchRoot("avd-advertisements-");
 
 function createRunningDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "avd-advertisements-"));
-  tempDirs.push(dir);
+  const dir = scratch.next();
   return dir;
 }
 
 function writeAdvertisement(dir: string, pid: number, avdName: string): void {
   writeFileSync(join(dir, `pid_${pid}.ini`), `port.serial=5554\navd.id=${avdName}\n`, "utf-8");
 }
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 describe("TmpdirRunningAvdAdvertisementReader", () => {
   test("reports a live advertisement for the AVD", async () => {

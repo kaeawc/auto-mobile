@@ -248,10 +248,8 @@
 1	test/features/element-resolution/hierarchyScreenSize.test.ts
 1	test/features/element-resolution/testTagResourceIdFallback.test.ts
 1	test/features/iosSimFleet/iosBootCapacityGate.test.ts
-1	test/features/navigation/DefaultPathOptimizer.test.ts
-1	test/features/navigation/DefaultScreenTransitionWaiter.test.ts
 15	test/features/navigation/DefaultUIStateSetup.test.ts
-11	test/features/navigation/Explore.test.ts
+10	test/features/navigation/Explore.test.ts
 19	test/features/navigation/ExploreBlockerDetection.test.ts
 1	test/features/navigation/NavigateTo.test.ts
 1	test/features/navigation/NavigationGraphManager.integration.test.ts
@@ -413,7 +411,7 @@
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
 6	test/server/inventorySurfaceParity.test.ts
-15	test/server/navigationTools.test.ts
+4	test/server/navigationTools.test.ts
 1	test/server/networkGraph.test.ts
 1	test/server/networkMockRules.property.test.ts
 1	test/server/observeAppResource.integration.test.ts

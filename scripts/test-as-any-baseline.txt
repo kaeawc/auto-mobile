@@ -85,15 +85,12 @@
 8	test/features/observe/ObservePoll.test.ts
 4	test/features/observe/SettleObserve.test.ts
 8	test/features/observe/TakeScreenshot.AndroidAdbFilePull.test.ts
-1	test/features/observe/TakeScreenshot.AndroidCtrlProxy.test.ts
 2	test/features/observe/TakeScreenshot.iOS.test.ts
 1	test/features/observe/ViewHierarchy.filter.test.ts
 11	test/features/observe/ViewHierarchy.test.ts
 1	test/features/observe/WaitForCondition.test.ts
-7	test/features/observe/android/AndroidCtrlProxyClientCapabilities.test.ts
-7	test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
 1	test/features/observe/android/CtrlProxyGestures.test.ts
-3	test/features/observe/android/CtrlProxyPackages.test.ts
+1	test/features/observe/android/CtrlProxyPackages.test.ts
 4	test/features/observe/android/CtrlProxyText.test.ts
 1	test/features/observe/freshnessRegressionRepro.test.ts
 2	test/features/observe/ios/CtrlProxyClientRestartThreshold.test.ts

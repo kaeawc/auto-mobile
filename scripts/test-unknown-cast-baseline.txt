@@ -244,7 +244,6 @@
 1	test/features/iosSimFleet/iosBootCapacityGate.test.ts
 10	test/features/navigation/Explore.test.ts
 1	test/features/navigation/NavigateTo.test.ts
-6	test/features/observe/CtrlProxyClient.test.ts
 2	test/features/observe/DisplayGeneration.test.ts
 2	test/features/observe/IdentifyInteractions.test.ts
 1	test/features/observe/InspectPackageSigning.test.ts
@@ -260,12 +259,7 @@
 2	test/features/observe/TakeScreenshot.AndroidCleanup.test.ts
 4	test/features/observe/WaitForCondition.test.ts
 4	test/features/observe/Window.deadlineAbort.test.ts
-4	test/features/observe/android/AndroidCtrlProxyClientCloseSuppressesAdbFallback.test.ts
-1	test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
-1	test/features/observe/android/AndroidCtrlProxyClientShutdownRelease.test.ts
-1	test/features/observe/android/AndroidCtrlProxyMessageDispatch.test.ts
 1	test/features/observe/android/AndroidScreenIdentity.test.ts
-2	test/features/observe/android/CtrlProxyText.test.ts
 5	test/features/observe/freshnessRegressionRepro.test.ts
 9	test/features/observe/ios/CtrlProxyClientAutoSetup.test.ts
 3	test/features/observe/ios/CtrlProxyClientCloseSingleCycle.test.ts

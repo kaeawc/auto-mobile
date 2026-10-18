@@ -531,7 +531,7 @@ describe("Android CtrlProxyText", () => {
       }
       await waitForSocketOpen(socket);
 
-      const textDelegate = (client as unknown as { text: CtrlProxyText }).text;
+      const textDelegate = client.testHooks.text();
       const resultPromise = textDelegate.commitViaIme("value", "prior-ime");
       const request = await waitForRequest(socket, "request_commit_text");
       expect(request).toMatchObject({
@@ -1133,7 +1133,7 @@ test("Android client forwards appended transport controls for insert and IME", a
       timer,
     },
   );
-  const text = (client as unknown as { text: CtrlProxyText }).text;
+  const text = client.testHooks.text();
   const insert = spyOn(text, "requestInsertText").mockResolvedValue({
     success: true,
     totalTimeMs: 1,

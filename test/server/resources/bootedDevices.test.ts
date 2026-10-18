@@ -2307,8 +2307,8 @@ describe("ResourceRegistry Template Matching", () => {
 
     // The compiled RegExp is stored on the template and the SAME instance is
     // returned on every read — proof it is not recompiled per request.
-    const firstRegex = (first!.template as unknown as { regex: RegExp }).regex;
-    const secondRegex = (second!.template as unknown as { regex: RegExp }).regex;
+    const firstRegex = first!.template.regex;
+    const secondRegex = second!.template.regex;
     expect(firstRegex).toBeInstanceOf(RegExp);
     expect(firstRegex).toBe(secondRegex);
   });

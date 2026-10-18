@@ -18,8 +18,7 @@ import type {
   AppleDeviceRuntime,
   AppleDeviceType,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
-import type { AvdManager } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
-import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/devices/deviceUtils";
+import type { DeviceImageDiscovery } from "../../../src/devices/deviceUtils";
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { spyOn } from "bun:test";
@@ -790,7 +789,7 @@ describe("Device Image Resources with Fakes", () => {
       const lateDiscovery = Promise.withResolvers<DeviceImageDiscovery>();
       const deviceManager = {
         getDeviceImagesDetailed: async () => await lateDiscovery.promise,
-      } as unknown as PlatformDeviceManager;
+      };
       const handler = createDeviceImageResourcesHandler({
         deviceManager,
         avdManager: fakeAvdManager,
@@ -851,7 +850,7 @@ describe("Device Image Resources with Fakes", () => {
         },
         listInstalledSystemImages: async () => [],
         listDevices: async () => [],
-      } as unknown as AvdManager;
+      };
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
         avdManager,

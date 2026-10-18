@@ -358,7 +358,7 @@ data class SwipeResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -370,7 +370,7 @@ data class TapCoordinatesResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -382,7 +382,7 @@ data class DragResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -394,7 +394,7 @@ data class PinchResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -717,7 +717,7 @@ data class CurrentFocusResult(
   val focusedElement: String? = null, // JSON string of focused element
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -728,7 +728,7 @@ data class TraversalOrderResult(
   val result: TraversalOrderData? = null,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable

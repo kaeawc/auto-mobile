@@ -987,17 +987,16 @@ internal class TextInputController(
 
     resultBroadcaster.guard(requestId, "insert_text_result") {
       responseSender.broadcastWithPerfSync("insert_text_result", requestId) {
-        put("success", success)
-        put("totalTimeMs", totalTimeMs)
-        if (error != null) {
-          put("error", error)
-        }
-        if (warning != null) put("warning", warning)
-        if (caretPlaced != null) put("caretPlaced", caretPlaced)
-        if (resultingTextLength != null) put("resultingTextLength", resultingTextLength)
-        if (partialApplication) {
-          put("partialApplication", true)
-        }
+        InsertTextResultBody(
+            success = success,
+            totalTimeMs = totalTimeMs,
+            error = error,
+            warning = warning,
+            caretPlaced = caretPlaced,
+            resultingTextLength = resultingTextLength,
+            partialApplication = partialApplication,
+          )
+          .putInto(this)
       }
     }
   }

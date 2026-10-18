@@ -1075,7 +1075,6 @@ export class UnixSocketServer {
 
   constructor(
     socketPath: string = SOCKET_PATH,
-    mcpEndpoint: string,
     daemonState: SocketDaemonStateAccess = DaemonState.getInstance(),
     timer: Timer = defaultTimer,
     featureFlagService: FeatureFlagService | null = null,
@@ -1163,9 +1162,8 @@ export class UnixSocketServer {
       onRestartAccepted: this.onRestartAccepted,
       liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
     });
-    // Forwards run in process (#11820); the HTTP endpoint serves the desktop app and external
-    // clients, and is named here only so the daemon log shows both ingresses together.
-    logger.info(`UnixSocketServer initialized beside the MCP HTTP endpoint "${mcpEndpoint}"`);
+    // Forwards run in process (#11820) through the MCP dispatcher; no HTTP loopback is involved.
+    logger.info(`UnixSocketServer initialized with in-process MCP dispatcher: "${socketPath}"`);
   }
 
   private observeStartupCompletion(): void {

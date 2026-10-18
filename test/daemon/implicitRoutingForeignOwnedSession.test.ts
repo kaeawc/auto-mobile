@@ -187,7 +187,6 @@ describe("the implicit routing session of a call that names none", () => {
     registerToolSelectionTools();
     server = createTestUnixSocketServer(
       "/fake/implicit-routing.sock",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       timer,
     );

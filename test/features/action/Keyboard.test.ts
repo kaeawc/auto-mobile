@@ -6,7 +6,6 @@ import {
   selectKeyboardHierarchyCache,
   type KeyboardHierarchyReadOptions,
 } from "../../../src/features/action/Keyboard";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { decodeCtrlProxyMessage } from "../../../src/features/observe/ios/decodeCtrlProxyMessage";
 import type {
   CtrlProxyKeyboardResult,
@@ -22,6 +21,7 @@ import {
 } from "../../fixtures/observe/iosKeyboardStates";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeKeyboardOpenClient } from "../../fakes/FakeKeyboardOpenClient";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("Keyboard", () => {
   let fakeAdb: FakeAdbExecutor;
@@ -989,7 +989,7 @@ describe("Keyboard", () => {
   });
 
   test("ios detect delegates to CtrlProxy keyboard request", async () => {
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async (action: string) => ({
         success: true,
         open: action === "detect",
@@ -1036,9 +1036,9 @@ describe("Keyboard", () => {
     ],
   ] as const)("ios detect cross-checks %s", async (_name, hierarchy, open) => {
     fakeHierarchy.setDefaultResult(hierarchy);
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     try {
       const result = await new Keyboard(
         iosDevice,
@@ -1058,9 +1058,9 @@ describe("Keyboard", () => {
 
   test("ios open with the real visible capture preserves the existing result", async () => {
     fakeHierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     try {
       expect(
         await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("open"),
@@ -1072,9 +1072,9 @@ describe("Keyboard", () => {
 
   test("ios open fails clearly for the real minimized capture", async () => {
     fakeHierarchy.setDefaultResult(iosKeyboardMinimizedHierarchy);
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     try {
       const result = await new Keyboard(
         iosDevice,
@@ -1095,9 +1095,9 @@ describe("Keyboard", () => {
   test.each(["detect", "open"] as const)(
     "ios %s trusts closed runner without reading hierarchy",
     async (action) => {
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const spy = spyOnIosClientInstance({
         requestKeyboard: async () => ({ success: true, open: false, totalTimeMs: 1 }),
-      } as IOSCtrlProxyClient);
+      });
       try {
         const result = await new Keyboard(
           iosDevice,
@@ -1116,9 +1116,9 @@ describe("Keyboard", () => {
   test.each(["detect", "open"] as const)(
     "ios %s bounds a hanging visibility read and falls back to runner",
     async (action) => {
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const spy = spyOnIosClientInstance({
         requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-      } as IOSCtrlProxyClient);
+      });
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       const options: Array<KeyboardHierarchyReadOptions | undefined> = [];
       const provider = {
@@ -1150,9 +1150,9 @@ describe("Keyboard", () => {
   test("ios visibility read propagates caller cancellation without falling back", async () => {
     const controller = new AbortController();
     const reason = new Error("caller cancelled visibility read");
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     const provider = {
       getViewHierarchy: (signal?: AbortSignal) => {
@@ -1220,9 +1220,9 @@ describe("Keyboard", () => {
   test("ios visibility forces past a pre-action cached minimized keyboard", async () => {
     fakeHierarchy.setCachedResult(iosKeyboardMinimizedHierarchy);
     fakeHierarchy.setDefaultResult(iosKeyboardVisibleHierarchy);
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     try {
       expect(
         await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("open"),
@@ -1235,9 +1235,9 @@ describe("Keyboard", () => {
 
   test("ios stale fallback cannot override the runner's keyboard state", async () => {
     fakeHierarchy.setDefaultResult({ ...iosKeyboardMinimizedHierarchy, fresh: false });
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect(
@@ -1253,9 +1253,9 @@ describe("Keyboard", () => {
   });
 
   test("ios hierarchy exception warns and falls back to runner", async () => {
-    const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const spy = spyOnIosClientInstance({
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
-    } as IOSCtrlProxyClient);
+    });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       const provider = {
@@ -1275,7 +1275,7 @@ describe("Keyboard", () => {
   });
 
   test("ios close returns CtrlProxy failure", async () => {
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async () => ({
         success: false,
         open: true,
@@ -1312,9 +1312,9 @@ describe("Keyboard", () => {
       }),
     ) as WebSocketMessage;
     const decoded = decodeCtrlProxyMessage(wire);
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async () => decoded?.result as CtrlProxyKeyboardResult,
-    } as IOSCtrlProxyClient);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1333,14 +1333,14 @@ describe("Keyboard", () => {
       "Keyboard closed with Return; the field may have submitted or committed autocorrect",
     ],
   ] as const)("ios close passes through %s", async (method, message) => {
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async () => ({
         success: true,
         open: false,
         totalTimeMs: 5,
         method,
       }),
-    } as IOSCtrlProxyClient);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1367,9 +1367,9 @@ describe("Keyboard", () => {
     ) as WebSocketMessage;
     const decoded = decodeCtrlProxyMessage(wire);
     expect(decoded?.requestId).toBe("keyboard-1");
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async () => decoded?.result as CtrlProxyKeyboardResult,
-    } as IOSCtrlProxyClient);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1388,7 +1388,7 @@ describe("Keyboard", () => {
 
   test("ios close timeout succeeds if one bounded detect confirms closed", async () => {
     const calls: Array<{ action: string; timeoutMs?: number }> = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async (action: string, timeoutMs?: number) => {
         calls.push({ action, timeoutMs });
         return action === "close"
@@ -1400,7 +1400,7 @@ describe("Keyboard", () => {
             }
           : { success: true, open: false, totalTimeMs: 10 };
       },
-    } as IOSCtrlProxyClient);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1419,7 +1419,7 @@ describe("Keyboard", () => {
 
   test("ios close timeout makes one detect and returns the original error after a 2s probe cap", async () => {
     const calls: string[] = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async (action: string) => {
         calls.push(action);
         if (action === "close") {
@@ -1432,7 +1432,7 @@ describe("Keyboard", () => {
         }
         return new Promise<CtrlProxyKeyboardResult>(() => {});
       },
-    } as IOSCtrlProxyClient);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1446,7 +1446,7 @@ describe("Keyboard", () => {
   });
 
   test("ios open fails when keyboard remains closed", async () => {
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestKeyboard: async () => ({
         success: true,
         open: false,

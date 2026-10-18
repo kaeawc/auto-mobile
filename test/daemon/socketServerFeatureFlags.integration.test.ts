@@ -60,7 +60,6 @@ describe("UnixSocketServer feature flag handlers", () => {
 
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(),
       fakeTimer,
       featureFlagService,
@@ -137,7 +136,6 @@ describe("UnixSocketServer feature flag handlers", () => {
     await server.close();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(),
       fakeTimer,
       featureFlagService,

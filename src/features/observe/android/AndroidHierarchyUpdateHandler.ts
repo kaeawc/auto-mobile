@@ -40,7 +40,7 @@ export interface AndroidHierarchyUpdateContext {
   updateCachedScreenDimensions(hierarchy: AccessibilityHierarchy): void;
   pushHierarchyToObservationStream(hierarchy: AccessibilityHierarchy, frameContext?: string): void;
   startScreenshotBackoff(): void;
-  getNavigationGraphManager(): NavigationGraphManager;
+  getNavigationGraphManager(): Pick<NavigationGraphManager, "recordAppForeground">;
   ensureBuildContext(packageName: string): void;
   getHierarchyNavigationDetector(): HierarchyNavigationDetector;
 }

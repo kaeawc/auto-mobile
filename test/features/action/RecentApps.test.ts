@@ -7,7 +7,6 @@ const testDevice: BootedDevice = {
   platform: "android",
   deviceId: "emulator-5554",
 };
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -16,6 +15,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("RecentApps", () => {
   let recentApps: RecentApps;
@@ -210,9 +210,7 @@ describe("RecentApps", () => {
       (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
     });
 
     afterEach(() => {

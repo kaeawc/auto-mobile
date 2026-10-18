@@ -102,7 +102,7 @@ export interface ObserveScreen {
   ): Promise<boolean | void>;
 
   /** Capture the cache generation at poll start for the deferred write's stale-write fence. */
-  captureCacheGeneration?(): number;
+  captureCacheGeneration?(): number | undefined;
 
   /** Persist the selected poll result with its observation-start generation and host time. */
   cacheObserveResult?(

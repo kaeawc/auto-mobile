@@ -113,7 +113,9 @@ export class FakeObserveScreen implements ObserveScreen {
         ...result,
         viewHierarchy: {
           ...result.viewHierarchy,
-          hierarchy: { ...result.viewHierarchy.hierarchy, _fakeCallId: this.callCounter },
+          hierarchy: Object.assign({}, result.viewHierarchy.hierarchy, {
+            _fakeCallId: this.callCounter,
+          }),
         },
       };
     }

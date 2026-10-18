@@ -1,7 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { Element, ObserveResult } from "../../../src/models";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -10,6 +9,10 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
+import {
+  spyOnIosClientInstance,
+  spyOnIosExistingInstance,
+} from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("tapOn semantic link outcomes", () => {
   for (const platform of ["android", "ios"] as const) {
@@ -24,16 +27,12 @@ describe("tapOn semantic link outcomes", () => {
           const androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
             android,
           );
-          const iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-            ios as unknown as IOSCtrlProxyClient,
-          );
+          const iosInstance = spyOnIosClientInstance(ios);
           const androidExisting = spyOn(
             AndroidCtrlProxyClient,
             "getExistingInstance",
           ).mockReturnValue(android);
-          const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-            ios as unknown as IOSCtrlProxyClient,
-          );
+          const iosExisting = spyOnIosExistingInstance(ios);
           const client = platform === "android" ? android : ios;
           const unconfirmed = mode === "timeout" || mode === "transport";
           const error =
@@ -155,12 +154,8 @@ describe("tapOn semantic link runner warning (#10082)", () => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
         const ios = new FakeIOSCtrlProxy();
-        const iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-          ios as unknown as IOSCtrlProxyClient,
-        );
-        const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-          ios as unknown as IOSCtrlProxyClient,
-        );
+        const iosInstance = spyOnIosClientInstance(ios);
+        const iosExisting = spyOnIosExistingInstance(ios);
         const activate = spyOn(ios, "requestActivateAccessibilityLink").mockResolvedValue({
           success: true,
           action: "activate_accessibility_link",

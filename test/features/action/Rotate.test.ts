@@ -13,12 +13,12 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { WINDOW_MANAGER_ROTATION_TIMEOUT_MS } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const mirrorLandscape = readFileSync(
   join(__dirname, "..", "observe", "windowDumps", "dumpsys-window-displays-mirror-landscape.txt"),
@@ -2130,9 +2130,7 @@ describe("Rotate", () => {
       };
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
     });
 
     test("should use CtrlProxy to rotate to landscape on iOS", async () => {

@@ -39,7 +39,6 @@ function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
   };
   return createTestUnixSocketServer(
     "/tmp/never-listened.sock",
-    "http://localhost:0/mcp",
     { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
     new FakeTimer(),
   );
@@ -58,7 +57,6 @@ describe("refused owned-session restore", () => {
     let poolReads = 0;
     const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => false,
         getDevicePool: () => {
@@ -124,7 +122,6 @@ describe("refused owned-session restore", () => {
     };
     const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getDevicePool: () => pool,

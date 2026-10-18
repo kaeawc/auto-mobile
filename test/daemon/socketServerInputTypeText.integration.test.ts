@@ -204,12 +204,7 @@ describe("UnixSocketServer input/typeText", () => {
       throw new Error("input/typeText should not create an MCP client");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -261,12 +256,7 @@ describe("UnixSocketServer input/typeText", () => {
     const sessions = new Map([
       [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
     await server.start();
 
     const response = sendRequest(socketPath, "input/typeText", {
@@ -321,12 +311,7 @@ describe("UnixSocketServer input/typeText", () => {
     const sessions = new Map([
       [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
     await server.start();
 
     const response = sendRequest(socketPath, "input/typeText", {
@@ -372,12 +357,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ScriptedAdbExecutor(fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -410,12 +390,7 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("failed multi-character append reports the landed prefix on the error envelope", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({
         success: false,
@@ -450,12 +425,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({ success: true, charsSent: 2 }),
     });
@@ -491,12 +461,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({ success: true, charsSent: 2 }),
     });
@@ -538,12 +503,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = () => ({
       appendText: async () => ({ success: true, charsSent: 2 }),
     });
@@ -595,12 +555,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     // Models a real adb subprocess: it runs until its own timeout kills it, and
     // runs FOREVER when it was handed no timeout.
     const adb = new ScriptedAdbExecutor(fakeTimer, "input keyevent");
@@ -659,12 +614,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ScriptedAdbExecutor(fakeTimer, "KEYCODE_B");
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -709,12 +659,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer, { stallProbe: true });
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -784,12 +729,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -834,12 +774,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -870,12 +805,7 @@ describe("UnixSocketServer input/typeText", () => {
     const sessions = new Map([
       ["session-a", createFakeSession("session-a", androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(sessions), fakeTimer);
     let factoryCalls = 0;
     let releaseAppend: () => void = () => {};
     let signalAppendStarted: () => void = () => {};
@@ -954,12 +884,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -1020,12 +945,7 @@ describe("UnixSocketServer input/typeText", () => {
         };
       },
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -1076,12 +996,7 @@ describe("UnixSocketServer input/typeText", () => {
         };
       },
     } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     let releaseFirstAppend: (() => void) | undefined;
     const firstAppendReleased = new Promise<void>((resolve) => {
       releaseFirstAppend = resolve;
@@ -1143,12 +1058,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ProductionShapedAdbExecutor(fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = (device) => {
@@ -1191,12 +1101,7 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     let factoryCalls = 0;
     server.appendTextFactory = () => {
       factoryCalls++;
@@ -1250,12 +1155,7 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     // What the device's focused field would hold after these appends.
     let deviceField = "";
     const textsReceived: string[] = [];
@@ -1324,12 +1224,7 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
     let deviceField = "";
@@ -1404,12 +1299,7 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
     let deviceField = "";
@@ -1487,12 +1377,7 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
     let deviceField = "";
@@ -1565,12 +1450,7 @@ describe("UnixSocketServer input/typeText", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     setDeviceIncarnationResolver(() => 7);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const textsReceived: string[] = [];
     let factoryCalls = 0;
     server.appendTextFactory = () => {
@@ -1620,12 +1500,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     const adb = new ScriptedAdbExecutor(fakeTimer, undefined, "30");
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     await server.start();
@@ -1658,12 +1533,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -1705,12 +1575,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestSetText,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     for (const text of ["a", "b", "c"]) {
@@ -1735,12 +1600,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestAppendText,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
     await server.start();
@@ -1773,7 +1633,6 @@ describe("UnixSocketServer input/typeText", () => {
     const mcpAutolockSessions = new Map<string, string>();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1820,12 +1679,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
     await server.start();
@@ -1857,12 +1711,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
@@ -1894,12 +1743,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
@@ -1931,12 +1775,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.appendTextFactory = (device) => createAppendTextInput(device, adb, fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
@@ -1979,12 +1818,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const firstPromise = sendRequest(socketPath, "input/typeText", {
@@ -2029,12 +1863,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const responsePromise = sendRequest(
@@ -2091,12 +1920,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const firstPromise = sendRequest(
@@ -2153,12 +1977,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/typeText", {
@@ -2199,12 +2018,7 @@ describe("UnixSocketServer input/typeText", () => {
       requestImeAction,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const responsePromise = sendRequest(
@@ -2249,12 +2063,7 @@ describe("UnixSocketServer input/typeText", () => {
 
   test("rejects missing, empty, and non-string text with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/typeText", {

@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
@@ -156,7 +156,6 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     nextSwipe = [];
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       { isInitialized: () => false } as DaemonStateAccess,
       timer,
     );

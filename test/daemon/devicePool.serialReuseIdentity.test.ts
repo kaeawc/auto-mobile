@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { logger, LogLevel } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
@@ -12,7 +13,6 @@ import { SessionManager, SessionRecoveryIdentityLossError } from "../../src/daem
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { warmedTests } from "../helpers/warmedTests";
@@ -50,16 +50,13 @@ async function setup(
   const sessions = new SessionManager(timer, persistence);
   sessions.stopCleanupTimer();
   const manager = new FakeDeviceManager([], [device]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon-test", {
-      timer,
-      deviceManager: manager,
-      emulatorLossIncidentStore: incidents,
-      cancelDeviceSessionExecutions,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      ...overrides,
-    }),
-  );
+  const pool = makePool(sessions, "daemon-test", {
+    timer,
+    deviceManager: manager,
+    emulatorLossIncidentStore: incidents,
+    cancelDeviceSessionExecutions,
+    ...overrides,
+  });
   if (knownAvd) {
     await pool.addDevice(device, { ...device, source: "local", isRunning: true });
   } else {

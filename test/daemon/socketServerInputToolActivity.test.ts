@@ -41,7 +41,6 @@ function useServer(ownerDevice: string): void {
   const session = createFakeSession(OWNER, ownerDevice, "android");
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     createFakeDaemonState(new Map([[OWNER, session]])),
     new FakeTimer(),
   );

@@ -33,7 +33,6 @@ describe("UnixSocketServer session id comes from the injected IdGenerator", () =
     const idGenerator = new CountingIdGenerator("session");
     const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      "http://localhost:0/mcp",
       createFakeDaemonState(),
       new FakeTimer(),
       null,

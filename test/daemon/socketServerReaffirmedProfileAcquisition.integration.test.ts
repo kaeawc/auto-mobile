@@ -49,7 +49,6 @@ function createFakeDaemonState() {
 function createServer(): UnixSocketServer {
   return new UnixSocketServer(
     join(tmpdir(), `avd-lifecycle-consistency-eae282-r2-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
   );

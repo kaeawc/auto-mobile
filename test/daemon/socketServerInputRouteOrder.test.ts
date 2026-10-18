@@ -21,7 +21,6 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
   const events: Events = [];
   const server = createTestUnixSocketServer(
     "/fake/order.sock",
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
   );

@@ -1682,7 +1682,6 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     const socketPath = join(tmpdir(), `matrix-same-tick-${randomUUID()}.sock`);
     const server = createTestUnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       scenario.daemon.state as never,
       scenario.timer,
     );

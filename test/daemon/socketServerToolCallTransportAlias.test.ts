@@ -90,7 +90,6 @@ async function startServer(options: { poolFolds: boolean } = { poolFolds: true }
   const forwards: Forward[] = [];
   const server = createTestUnixSocketServer(
     socketPath,
-    "http://localhost:0/mcp",
     fakeDaemonState(options),
     new FakeTimer(),
     null,

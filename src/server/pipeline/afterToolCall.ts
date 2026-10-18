@@ -1,5 +1,5 @@
 import { classifyToolResult } from "../../utils/toolEnvelopePayload";
-import { BootedDevice, type ViewHierarchyResult } from "../../models";
+import { BootedDevice, isViewHierarchyResult, type ViewHierarchyResult } from "../../models";
 import { NavigationGraphManager } from "../../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../../features/observe/ObserveScreen";
@@ -76,10 +76,6 @@ export function isToolResponseFailure(response: unknown): boolean {
     return false;
   }
   return isMarkedToolFailure(response);
-}
-
-function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
-  return isRecord(value) && isRecord(value.hierarchy);
 }
 
 /**

@@ -243,7 +243,6 @@
 1	test/features/element-resolution/testTagResourceIdFallback.test.ts
 1	test/features/iosSimFleet/iosBootCapacityGate.test.ts
 10	test/features/navigation/Explore.test.ts
-1	test/features/navigation/NavigateTo.test.ts
 2	test/features/observe/DisplayGeneration.test.ts
 2	test/features/observe/IdentifyInteractions.test.ts
 1	test/features/observe/InspectPackageSigning.test.ts

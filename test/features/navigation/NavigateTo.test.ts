@@ -1,5 +1,5 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
-import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
+import { NavigateTo, type UIStateSetupContext } from "../../../src/features/navigation/NavigateTo";
 import { SmartNavigationHelper } from "../../../src/features/navigation/SmartNavigationHelper";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
@@ -151,7 +151,23 @@ describe("NavigateTo", () => {
     }
 
     test("creates the default UI-state setup after resolving an options session", async () => {
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      const created: UIStateSetupContext[] = [];
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        null,
+        null,
+        fakeGraph,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (context) => {
+          created.push(context);
+          return { setupUIState: async () => [], setupScrollPosition: async () => null };
+        },
+      );
 
       await navigateTo.execute({
         targetScreen: "HomeScreen",
@@ -159,12 +175,7 @@ describe("NavigateTo", () => {
         sessionUuid: "options-session",
       });
 
-      const uiStateSetup = (
-        navigateTo as unknown as {
-          uiStateSetup: { sessionUuid?: string } | null;
-        }
-      ).uiStateSetup;
-      expect(uiStateSetup?.sessionUuid).toBe("options-session");
+      expect(created.map((context) => context.sessionUuid)).toEqual(["options-session"]);
     });
 
     test("should return error when no current screen", async () => {

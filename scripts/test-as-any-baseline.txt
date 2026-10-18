@@ -72,7 +72,6 @@
 9	test/features/action/swipeon/TalkBackSwipeExecutor.test.ts
 27	test/features/action/swipeon/VoiceOverSwipeExecutor.test.ts
 1	test/features/action/swipeon/swipeOnUtils.test.ts
-1	test/features/element-resolution/DeviceHierarchyCapture.test.ts
 2	test/features/element-resolution/ElementResolver.review.test.ts
 1	test/features/element-resolution/ElementResolver.test.ts
 1	test/features/element-resolution/HierarchyCapture.test.ts

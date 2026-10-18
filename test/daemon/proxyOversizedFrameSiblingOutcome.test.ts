@@ -10,6 +10,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 const LIMIT = 512;
 const SESSION = "android-session";
@@ -33,7 +34,7 @@ function makeWire(): Wire {
     "in-memory://oversized-siblings",
     1_000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(),
     "darwin",

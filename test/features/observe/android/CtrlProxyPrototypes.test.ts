@@ -539,9 +539,9 @@ describe("CtrlProxy prototypes", () => {
       "full_command_set_v1",
       "request_id_echo_v1",
       "show_prototype",
-      "prototype_display_id_v1",
+      "prototype_display_id_v2",
     ];
-    const withoutFlag = withDisplay.filter((command) => command !== "prototype_display_id_v1");
+    const withoutFlag = withDisplay.filter((command) => command !== "prototype_display_id_v2");
 
     async function sendShow(
       commands: string[] | null,
@@ -590,7 +590,7 @@ describe("CtrlProxy prototypes", () => {
           ActionableError,
         );
         await expect(client.requestShowPrototype(spec, 5000, undefined, 2)).rejects.toThrow(
-          "prototype_display_id_v1",
+          "prototype_display_id_v2",
         );
         expect(send).not.toHaveBeenCalled();
       } finally {

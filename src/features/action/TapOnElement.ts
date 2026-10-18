@@ -366,7 +366,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
-  private accessibilityService: AndroidCtrlProxyClient;
+  private accessibilityService: import("./tapHierarchyRead").TapOnCtrlProxy;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;

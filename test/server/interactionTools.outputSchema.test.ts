@@ -446,6 +446,13 @@ function auditHandler(
       ts.isIdentifier(node) &&
       (node === handler ||
         (ts.isCallExpression(node.parent) && node.parent.expression === node) ||
+        // `{ hook: handlers.prepareDevice }` passed into a factory: follow the object that built
+        // the handler set, since a hook injected at construction (#11827) is no longer defined
+        // inside the factory body the audit walks.
+        (ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.expression === node &&
+          ts.isPropertyAssignment(node.parent.parent) &&
+          node.parent.parent.initializer === node.parent) ||
         (ts.isVariableDeclaration(node.parent) && node.parent.initializer === node) ||
         (ts.isShorthandPropertyAssignment(node.parent) &&
           ts.isObjectLiteralExpression(node.parent.parent) &&
@@ -593,6 +600,34 @@ export function createMixedHandlers() { return { mixed }; }`,
     { name: "bad", structured: false, offenders: [`${handlerFile}:2`] },
     { name: "mixed", structured: true, offenders: [`${handlerFile}:2`] },
   ]);
+});
+
+test("follows a hook injected into a handler factory from a sibling handler set (#11827)", () => {
+  const registrationFile = path.join(serverDirectory, "injectedRegistrations.ts");
+  const handlerFile = path.join(serverDirectory, "injectedHandlers.ts");
+  const registrationIndex = indexSource(
+    registrationFile,
+    `import { createBase, createStart } from "./injectedHandlers";
+const base = createBase();
+const { start } = createStart({ prepare: base.prepare });
+ToolRegistry.register("start", "", schema, (args) => start(args), { outputSchema: schema });`,
+  );
+  const handlerIndex = indexSource(
+    handlerFile,
+    `function ready() { return createStructuredToolResponse({ success: true }); }
+export function createBase() { return { prepare: () => ready() }; }
+export function createStart(hooks) { const start = (args) => hooks.prepare(args); return { start }; }`,
+  );
+  const indexes = new Map([
+    [sourceKey(registrationFile), registrationIndex],
+    [sourceKey(handlerFile), handlerIndex],
+  ]);
+  expect(
+    registrationIndex.registrations.map(({ name, handler }) => ({
+      name,
+      ...auditHandler(indexes, registrationFile, handler),
+    })),
+  ).toEqual([{ name: "start", structured: true, offenders: [] }]);
 });
 
 test("source paths use Windows containment and canonical keys", () => {

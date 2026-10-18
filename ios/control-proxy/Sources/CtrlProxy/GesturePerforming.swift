@@ -296,6 +296,8 @@ public enum SwipeRoute: String, Equatable, Sendable {
     case unpinnedSynthesized
     /// Private event synthesis for the lock screen (`lockScreen: true`).
     case lockScreenSynthesized
+    /// Display-targeted private event synthesis (inner panel of a foldable); honors the duration.
+    case displayTargetedSynthesized
 }
 
 /// Route plus the stroke duration that route really dispatched, so hosts can derive velocity and
@@ -324,6 +326,21 @@ public struct SwipeDispatchReport: Equatable, Sendable {
             route: .unpinnedSynthesized,
             effectiveDurationMs: milliseconds(max(duration, synthesizedMinimumDuration))
         )
+    }
+
+    /// The report for the route a `DisplayGestureFactory` delivery really took (#13319).
+    static func forDelivery(
+        route: TapDiagnostics.Route, distance: Double, duration: TimeInterval
+    )
+        -> SwipeDispatchReport
+    {
+        switch route {
+        case .xcuiCoordinate:
+            return xcuiCoordinate(distance: distance, duration: duration)
+        case .displayTargetedRecord:
+            // The touch's move phase is the requested duration; no velocity clamp applies.
+            return SwipeDispatchReport(route: .displayTargetedSynthesized, effectiveDurationMs: milliseconds(duration))
+        }
     }
 
     static func lockScreenSynthesized(duration: TimeInterval) -> SwipeDispatchReport {

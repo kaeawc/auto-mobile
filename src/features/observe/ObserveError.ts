@@ -1,28 +1,8 @@
 import type { ObserveResult } from "../../models";
 
-export type ObservePhase =
-  | "screenSize"
-  | "systemInsets"
-  | "rotation"
-  | "wakefulness"
-  | "backStack"
-  | "viewHierarchy"
-  | "rawViewHierarchy"
-  | "intentChooser"
-  | "activeWindow"
-  | "screenshot"
-  | "performanceAudit"
-  | "accessibilityAudit"
-  | "accessibilityState"
-  | "predictiveUI"
-  | "cache"
-  | "critical";
+import type { ObserveError, ObservePhase } from "../../models/ObserveError";
 
-export interface ObserveError {
-  phase: ObservePhase;
-  message: string;
-  cause?: string;
-}
+export type { ObserveError, ObservePhase };
 
 export function appendObserveError(result: ObserveResult, err: ObserveError): void {
   if (!result.errors) {

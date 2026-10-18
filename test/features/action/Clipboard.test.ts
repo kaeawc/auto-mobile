@@ -21,10 +21,8 @@ import { spyOn } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
 import { wrapCommandError } from "../../../src/utils/CommandError";
 import { errorMessage } from "../../../src/utils/describeUnknownError";
-import {
-  IosRunnerBusyError,
-  IosRunnerStalledError,
-} from "../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerBusyError } from "../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerStalledError } from "../../../src/features/observe/ios/IosRunnerStalledError";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Synthetic focused-value variants of the representative iOS forms fixture, not captures.

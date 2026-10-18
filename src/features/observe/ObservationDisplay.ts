@@ -19,7 +19,7 @@ import {
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError } from "../../models/ActionableError";
+import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { DisplaySelectionError } from "./DisplaySelection";
 import { selectedDisplayPin } from "./SessionDisplayContext";
 import type { Timer } from "../../utils/SystemTimer";
@@ -49,8 +49,6 @@ export interface ObservedAndroidDisplay {
   logicalId: number;
   panelKeysByLogicalId?: Readonly<Record<number, string>>;
 }
-
-export class AndroidDisplayReadError extends ActionableError {}
 
 function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
   return panels.length === 1 ? panels[0].key : "0";

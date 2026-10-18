@@ -63,6 +63,7 @@
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { sql, type Kysely } from "kysely";
 import type { Database } from "./types";
+import { ENV, type EnvVarSpec } from "../config/env";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
 /**
@@ -173,11 +174,8 @@ function sanitizePositiveInt(
  * are rejected and fall back to the default rather than becoming a 1ms interval.
  * The parsed value is then bounded by `max`.
  */
-function readPositiveIntEnv(
-  name: string,
-  max: number = Number.MAX_SAFE_INTEGER,
-): number | undefined {
-  return sanitizePositiveInt(readOptionalEnvPositiveInteger(name, undefined), max);
+function readPositiveIntEnv(spec: EnvVarSpec, max = Number.MAX_SAFE_INTEGER): number | undefined {
+  return sanitizePositiveInt(readOptionalEnvPositiveInteger(spec.name, spec.legacyName), max);
 }
 
 /**
@@ -191,30 +189,30 @@ export function resolveNavigationRetentionConfig(
 ): NavigationRetentionConfig {
   const resolve = (
     override: number | undefined,
-    envName: string,
+    envSpec: EnvVarSpec,
     def: number,
     max: number = Number.MAX_SAFE_INTEGER,
-  ): number => sanitizePositiveInt(override, max) ?? readPositiveIntEnv(envName, max) ?? def;
+  ): number => sanitizePositiveInt(override, max) ?? readPositiveIntEnv(envSpec, max) ?? def;
 
   return {
     screenshotTtlMs: resolve(
       overrides.screenshotTtlMs,
-      "AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS",
+      ENV.NAV_RETENTION_SCREENSHOT_TTL_MS,
       DEFAULT_SCREENSHOT_TTL_MS,
     ),
     structureTtlMs: resolve(
       overrides.structureTtlMs,
-      "AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS",
+      ENV.NAV_RETENTION_STRUCTURE_TTL_MS,
       DEFAULT_STRUCTURE_TTL_MS,
     ),
     perAppMaxObservations: resolve(
       overrides.perAppMaxObservations,
-      "AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS",
+      ENV.NAV_RETENTION_PER_APP_MAX_OBSERVATIONS,
       DEFAULT_PER_APP_MAX_OBSERVATIONS,
     ),
     globalMaxObservations: resolve(
       overrides.globalMaxObservations,
-      "AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS",
+      ENV.NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS,
       DEFAULT_GLOBAL_MAX_OBSERVATIONS,
     ),
     // Resolve as a positive integer, then clamp to the hard batch ceiling so any
@@ -222,7 +220,7 @@ export function resolveNavigationRetentionConfig(
     evictionChunkSize: Math.min(
       resolve(
         overrides.evictionChunkSize,
-        "AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE",
+        ENV.NAV_RETENTION_EVICTION_CHUNK_SIZE,
         DEFAULT_EVICTION_CHUNK_SIZE,
       ),
       MAX_EVICTION_CHUNK_SIZE,
@@ -241,7 +239,7 @@ export function resolveNavigationRetentionConfig(
 export function resolveNavigationRetentionIntervalMs(override?: number): number {
   return (
     sanitizePositiveInt(override, MAX_INTERVAL_MS) ??
-    readPositiveIntEnv("AUTOMOBILE_NAV_RETENTION_INTERVAL_MS", MAX_INTERVAL_MS) ??
+    readPositiveIntEnv(ENV.NAV_RETENTION_INTERVAL_MS, MAX_INTERVAL_MS) ??
     DEFAULT_NAV_RETENTION_INTERVAL_MS
   );
 }

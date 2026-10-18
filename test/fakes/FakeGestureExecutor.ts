@@ -1,6 +1,6 @@
 import { GestureOptions } from "../../src/models";
 import { SwipeResult } from "../../src/models/SwipeResult";
-import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
+import type { ActionCall } from "../../src/features/action/ActionCall";
 import { GestureExecutor } from "../../src/features/action/swipeon";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 
@@ -28,10 +28,9 @@ export class FakeGestureExecutor implements GestureExecutor {
     x2: number,
     y2: number,
     options: GestureOptions = {},
-    ...rest: [perf?: PerformanceTracker, signal?: AbortSignal]
+    call: ActionCall | undefined = undefined,
   ): Promise<SwipeResult> {
-    const signal = rest[1];
-    throwIfAborted(signal);
+    throwIfAborted(call?.signal);
     const duration = options.duration ?? DEFAULT_SWIPE_DURATION_MS;
     if (this.failure !== undefined) {
       return { success: false, x1, y1, x2, y2, duration, error: this.failure };

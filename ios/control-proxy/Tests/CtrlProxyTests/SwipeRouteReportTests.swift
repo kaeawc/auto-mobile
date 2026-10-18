@@ -31,7 +31,21 @@ final class SwipeRouteReportTests: XCTestCase {
         )
     }
 
+    func testDeliveryRouteDecidesTheReport() {
+        // 100 pt over 3 s: the XCUICoordinate route clamps to 1000 ms, a display-targeted
+        // synthesized delivery runs the requested 3000 ms (#13319).
+        XCTAssertEqual(
+            SwipeDispatchReport.forDelivery(route: .xcuiCoordinate, distance: 100, duration: 3),
+            SwipeDispatchReport(route: .xcuiCoordinate, effectiveDurationMs: 1000)
+        )
+        XCTAssertEqual(
+            SwipeDispatchReport.forDelivery(route: .displayTargetedRecord, distance: 100, duration: 3),
+            SwipeDispatchReport(route: .displayTargetedSynthesized, effectiveDurationMs: 3000)
+        )
+    }
+
     func testWireStringsAreStable() {
+        XCTAssertEqual(SwipeRoute.displayTargetedSynthesized.rawValue, "displayTargetedSynthesized")
         XCTAssertEqual(SwipeRoute.xcuiCoordinate.rawValue, "xcuiCoordinate")
         XCTAssertEqual(SwipeRoute.unpinnedSynthesized.rawValue, "unpinnedSynthesized")
         XCTAssertEqual(SwipeRoute.lockScreenSynthesized.rawValue, "lockScreenSynthesized")

@@ -24,11 +24,8 @@ import {
   type PhotosAuthorizationVerifier,
   type TccPermissionReader,
 } from "./IosSimulatorPermissions";
-import {
-  CtrlProxyIosPhysicalPrivacyClient,
-  IosPhysicalPermissions,
-  type IosPhysicalPrivacyClient,
-} from "./IosPhysicalPermissions";
+import { IosPhysicalPermissions, type IosPhysicalPrivacyClient } from "./IosPhysicalPermissions";
+import { CtrlProxyIosPhysicalPrivacyClient } from "./CtrlProxyIosPhysicalPrivacyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";

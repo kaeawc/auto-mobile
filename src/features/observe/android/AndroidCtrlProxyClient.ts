@@ -59,9 +59,10 @@ import type { ScreenIdentity } from "../../../models/ObserveResult";
 
 import {
   HostForwardClientConnectionProbe,
-  NoForwardClientConnectionProbe,
   type ForwardClientConnectionProbe,
 } from "./CtrlProxyForwardClientProbe";
+import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe";
+import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
 import {
   BootedDevice,
   ImeAction,
@@ -194,11 +195,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator
 import { errorMessage } from "../../../utils/describeUnknownError";
 import {} from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
-import {
-  FileCtrlProxyForwardLease,
-  NoOpCtrlProxyForwardLease,
-  type CtrlProxyForwardLease,
-} from "./CtrlProxyForwardLease";
+import { FileCtrlProxyForwardLease, type CtrlProxyForwardLease } from "./CtrlProxyForwardLease";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";

@@ -1,6 +1,8 @@
 import { ActionableError } from "../../models/ActionableError";
 
-export type PrototypeHiddenReason = "app_layer_window_hidden" | "device_blocked";
+import type { PrototypeHiddenReason } from "../../models/PrototypeHiddenReason";
+
+export type { PrototypeHiddenReason };
 
 /** Unknown reasons from a newer device remain absent on this host. */
 export function parsePrototypeHiddenReason(value: unknown): PrototypeHiddenReason | undefined {

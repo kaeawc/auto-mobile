@@ -152,6 +152,7 @@ test/db/telemetryRepositories.integration.test.ts | safe | createTestDatabase; e
 test/db/tempDbDir.integration.test.ts | safe | injected fake rm/timer; only real dir is mkdtemp under tmpdir L139
 test/db/testCoverageRepository.integration.test.ts | safe | createTestDatabase; singleton redirected to :memory: L468
 test/db/testExecutionRepository.integration.test.ts | safe | createTestDatabase and :memory: L45/L708
+test/db/thresholdRepository.integration.test.ts | safe | createTestDatabase in-memory
 test/db/toolCallRepository.integration.test.ts | safe | createTestDatabase in-memory L12
 test/db/toolSelectionProfileProvenanceMigration.integration.test.ts | safe | :memory: dialect L16
 test/db/toolSelectionProfileProvenanceRestart.integration.test.ts | safe | withFileBackedDb harness binds AUTOMOBILE_DB_DIR to a fresh tmpdir L18

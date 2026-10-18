@@ -79,7 +79,11 @@ class SnapshotAdb extends FakeAdbExecutor {
 }
 
 function clientWith(adb: SnapshotAdb, timer: FakeTimer): AndroidEmulatorClient {
-  return new AndroidEmulatorClient(async () => result(), null, timer, { create: () => adb });
+  return new AndroidEmulatorClient({
+    execAsync: async () => result(),
+    timer,
+    adbFactory: { create: () => adb },
+  });
 }
 
 describe("emulator readiness ADB work budget", () => {
@@ -237,9 +241,13 @@ describe("emulator readiness ADB work budget", () => {
     target.setCommandResponse("shell pm list packages", result("package:android\n"));
     target.setCommandResponse("shell getprop sys.boot_completed", result("1\n"));
     target.setCommandResponse("shell getprop init.svc.bootanim", result("stopped\n"));
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: (device) =>
-        device?.deviceId === "emulator-5562" ? target : device ? other : discovery,
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: (device) =>
+          device?.deviceId === "emulator-5562" ? target : device ? other : discovery,
+      },
     });
 
     const device = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
@@ -273,8 +281,12 @@ describe("emulator readiness ADB work budget", () => {
       adb.setCommandResponse("shell getprop init.svc.bootanim", result("stopped\n"));
       clients.set(state.deviceId, adb);
     }
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: (device) => (device ? clients.get(device.deviceId)! : discovery),
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: (device) => (device ? clients.get(device.deviceId)! : discovery),
+      },
     });
 
     const device = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
@@ -312,8 +324,12 @@ describe("emulator readiness ADB work budget", () => {
     target.setCommandResponse("shell pm list packages", result("package:android\n"));
     target.setCommandResponse("shell getprop sys.boot_completed", result("1\n"));
     target.setCommandResponse("shell getprop init.svc.bootanim", result("stopped\n"));
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: (device) => (device ? clients.get(device.deviceId)! : discovery),
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: (device) => (device ? clients.get(device.deviceId)! : discovery),
+      },
     });
 
     const device = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
@@ -340,9 +356,13 @@ describe("emulator readiness ADB work budget", () => {
     target.setCommandResponse("shell getprop init.svc.bootanim", result("stopped\n"));
     const other = new FakeAdbExecutor();
     other.setCommandResponse("emu avd name", result("Other_AVD\n"));
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: (device) =>
-        device?.deviceId === "emulator-5554" ? target : device ? other : discovery,
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: (device) =>
+          device?.deviceId === "emulator-5554" ? target : device ? other : discovery,
+      },
     });
 
     const device = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);

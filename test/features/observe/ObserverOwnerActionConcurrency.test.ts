@@ -186,7 +186,7 @@ test.each(ownerCommands)(
                     [],
                     { signal: owner.signal },
                   )
-                : adb.executeCommand(command, undefined, undefined, undefined, owner.signal);
+                : adb.executeCommand(command, { signal: owner.signal });
       await adb.started;
       const ownerIndex = adb.getExecutedCommands().indexOf(command);
       const revision = displayTransitions.revision(device.deviceId);

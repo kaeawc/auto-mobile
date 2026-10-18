@@ -10,7 +10,10 @@ import {
 
 /** Refresh CtrlProxy, supplement incomplete captures within the same caller budget. */
 export async function refreshAndroidViewHierarchy(
-  accessibilityService: AndroidCtrlProxy,
+  accessibilityService: Pick<
+    AndroidCtrlProxy,
+    "requestHierarchySync" | "convertToViewHierarchyResult"
+  >,
   timeoutMs: number,
   signal?: AbortSignal,
   fallback?: AndroidHierarchyFallbackDeps,

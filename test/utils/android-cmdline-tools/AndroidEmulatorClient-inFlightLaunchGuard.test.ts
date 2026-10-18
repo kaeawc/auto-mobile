@@ -116,17 +116,15 @@ function createHarness(): Harness {
     return child;
   }) as never;
 
-  const client = new AndroidEmulatorClient(
-    async () => execResult(),
+  const client = new AndroidEmulatorClient({
+    execAsync: async () => execResult(),
     spawnFn,
-    new FakeTimer(),
+    timer: new FakeTimer(),
     adbFactory,
-    new FakeAvdConfigReader(),
-    undefined,
-    undefined,
-    { isPortAvailable: () => true },
-    advertisements,
-  );
+    avdConfigReader: new FakeAvdConfigReader(),
+    hostPortAvailabilityChecker: { isPortAvailable: () => true },
+    runningAvdAdvertisementReader: advertisements,
+  });
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [

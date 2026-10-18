@@ -92,9 +92,11 @@
         // Ratcheted rules with pre-existing baselined violations. oxlint has no
         // count-based bulk-suppressions file (ESLint's eslint-suppressions.json),
         // so these are WARN and gated by scripts/oxlint-baseline.sh (CLAUDE.md).
-        // The two type-aware promise rules require `--type-aware` (tsgolint), so
-        // the ratchet script runs oxlint in that mode; the main `oxlint --fix`
-        // stays fast and CI type-checks only once.
+        // The two type-aware promise rules are burned down and are "error", but
+        // they only run under `--type-aware` (tsgolint). The main `oxlint --fix`
+        // stays fast and does NOT run them, so the ratchet script (which runs
+        // `oxlint --type-aware`) keeps them in RATCHET_CODES at a zero baseline:
+        // any diagnostic there is a new violation and fails the gate.
         "complexity": ["warn", 12],
         "max-depth": ["warn", 3],
         "max-params": ["warn", 6],
@@ -106,8 +108,8 @@
         "auto-mobile/max-class-lines": ["warn", { "max": 1000 }],
         "auto-mobile/catch-convention": "warn",
         "auto-mobile/no-unknown-cast": "error",
-        "typescript/no-floating-promises": "warn",
-        "typescript/no-misused-promises": "warn",
+        "typescript/no-floating-promises": "error",
+        "typescript/no-misused-promises": "error",
         "auto-mobile/no-raw-env-number-parse": "error"
       }
     },

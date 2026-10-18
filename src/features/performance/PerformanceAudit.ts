@@ -132,6 +132,14 @@ interface CollectMetricsOptions {
   skipTouchLatency?: boolean;
 }
 
+// Max time a single touch-latency measurement waits for its frame.
+const TOUCH_LATENCY_MAX_WAIT_MS = 200;
+// Time-to-interactive: how often frame stats are sampled, how long they must stay
+// quiet to count as interactive, and the overall bound before giving up.
+const TTI_STABILITY_CHECK_INTERVAL_MS = 100;
+const TTI_STABILITY_THRESHOLD_MS = 500;
+const TTI_MAX_WAIT_MS = 5000;
+
 /**
  * Performance audit class for collecting and validating performance metrics
  */
@@ -481,7 +489,7 @@ export class PerformanceAudit {
           screenSize,
           {
             sampleCount: 3,
-            maxWaitMs: 200,
+            maxWaitMs: TOUCH_LATENCY_MAX_WAIT_MS,
             windowBounds,
             touchPoint,
           },
@@ -638,9 +646,9 @@ export class PerformanceAudit {
     perf: PerformanceTracker,
   ): Promise<number | null> {
     try {
-      const stabilityCheckIntervalMs = 100;
-      const stabilityThresholdMs = 500;
-      const maxWaitMs = 5000;
+      const stabilityCheckIntervalMs = TTI_STABILITY_CHECK_INTERVAL_MS;
+      const stabilityThresholdMs = TTI_STABILITY_THRESHOLD_MS;
+      const maxWaitMs = TTI_MAX_WAIT_MS;
 
       let stableStartTime: number | null = null;
       let elapsedMs = 0;

@@ -24,9 +24,7 @@ export function installFakeDeviceToolProviders(): () => void {
 
 /** The client constructor creates a manager independently of its injected ADB executor. */
 export function installFakeCtrlProxyManagers(): () => void {
-  const previousInstances = new Map<string, AndroidCtrlProxyManager>(
-    Reflect.get(AndroidCtrlProxyManager, "instances"),
-  );
+  const previousInstances = AndroidCtrlProxyManager.registry.entries();
   const factory = new FakeAdbClientFactory(new FakeAdbExecutor());
   const getInstance = AndroidCtrlProxyManager.getInstance.bind(AndroidCtrlProxyManager);
   const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
@@ -34,6 +32,9 @@ export function installFakeCtrlProxyManagers(): () => void {
   );
   return () => {
     managerSpy.mockRestore();
-    Reflect.set(AndroidCtrlProxyManager, "instances", previousInstances);
+    AndroidCtrlProxyManager.registry.closeAll();
+    for (const [deviceId, manager] of previousInstances) {
+      AndroidCtrlProxyManager.registry.get(deviceId, () => manager);
+    }
   };
 }

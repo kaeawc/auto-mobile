@@ -39,13 +39,12 @@ function fixture() {
   );
   const clients = Array.from({ length: 4 }, () =>
     hermetic(
-      new AndroidEmulatorClient(
-        async () => createExecResult("Pixel_9"),
-        null,
+      new AndroidEmulatorClient({
+        execAsync: async () => createExecResult("Pixel_9"),
         timer,
-        new FakeAdbClientFactory(adb),
-        new FakeAvdConfigReader(),
-      ),
+        adbFactory: new FakeAdbClientFactory(adb),
+        avdConfigReader: new FakeAvdConfigReader(),
+      }),
     ),
   );
   return { timer, adb, clients };
@@ -145,7 +144,13 @@ describe("inventory-only Android enrichment", () => {
       return createExecResult("Pixel_9");
     };
     const clients = Array.from({ length: 4 }, () =>
-      hermetic(new AndroidEmulatorClient(exec, null, timer, undefined, new FakeAvdConfigReader())),
+      hermetic(
+        new AndroidEmulatorClient({
+          execAsync: exec,
+          timer,
+          avdConfigReader: new FakeAvdConfigReader(),
+        }),
+      ),
     );
     const options = { coalesceInventoryEnrichment: true, timeoutMs: 2000 };
     await Promise.all(clients.map((client) => client.listAvds(options)));
@@ -168,7 +173,11 @@ describe("inventory-only Android enrichment", () => {
       return createExecResult("Pixel_9");
     };
     const client = hermetic(
-      new AndroidEmulatorClient(exec, null, timer, undefined, new FakeAvdConfigReader()),
+      new AndroidEmulatorClient({
+        execAsync: exec,
+        timer,
+        avdConfigReader: new FakeAvdConfigReader(),
+      }),
     );
     const leader = new AbortController();
     const options = { coalesceInventoryEnrichment: true, timeoutMs: 2000 };
@@ -191,17 +200,15 @@ describe("inventory-only Android enrichment", () => {
     const timer = new FakeTimer();
     let calls = 0;
     const client = hermetic(
-      new AndroidEmulatorClient(
-        async () => {
+      new AndroidEmulatorClient({
+        execAsync: async () => {
           calls++;
           await timer.sleep(5_000);
           return createExecResult("Pixel_9");
         },
-        null,
         timer,
-        undefined,
-        new FakeAvdConfigReader(),
-      ),
+        avdConfigReader: new FakeAvdConfigReader(),
+      }),
     );
     const short = client.listAvds({ coalesceInventoryEnrichment: true, timeoutMs: 2_000 }).then(
       () => "resolved",

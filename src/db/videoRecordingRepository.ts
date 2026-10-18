@@ -2,19 +2,19 @@ import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { z } from "zod";
 import { getDatabase } from "./database";
 import type {
+  VideoCaptureTeardownDescriptor,
   VideoContainerFormat,
   VideoRecordingConfig,
   VideoRecordingHighlightEntry,
   VideoRecordingMetadata,
 } from "../models";
-import { parseVideoRecordingConfig } from "../features/video";
+import { parseVideoRecordingConfig } from "../models/VideoRecordingConfigParsing";
 import type {
   Database,
   NewVideoRecording,
   VideoRecordingUpdate,
   VideoRecording as DbVideoRecording,
 } from "./types";
-import type { VideoCaptureTeardownDescriptor } from "../features/video/VideoRecorderService";
 import { logger } from "../utils/logger";
 
 /**

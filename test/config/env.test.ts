@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AMBIENT_ENV,
   ENV,
   readEnvBool,
   readEnvEnum,
   readEnvList,
+  readEnvRaw,
   readEnvNumber,
   type EnvVarSpec,
 } from "../../src/config/env";
@@ -116,5 +118,38 @@ describe("webrtc and video-server registry names", () => {
         AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "5000",
       }),
     ).toBe(5000);
+  });
+});
+
+describe("iOS CtrlProxy and Xcode signing registry names", () => {
+  test("canonical and legacy spellings are pinned", () => {
+    expect(
+      [
+        ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS,
+        ENV.CTRL_PROXY_IOS_RUNNER_SHA256,
+        ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD,
+        ENV.IOS_HELPER_REQUIRE_CODESIGN,
+        ENV.IOS_TEAM_IDS,
+        ENV.IOS_CODE_SIGN_ENTITLEMENTS_PATH,
+      ].map((spec) => spec.name),
+    ).toEqual([
+      "AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
+      "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256",
+      "AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD",
+      "AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN",
+      "AUTOMOBILE_IOS_TEAM_IDS",
+      "AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH",
+    ]);
+    expect(ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.legacyName).toBe(
+      "AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
+    );
+    expect(AMBIENT_ENV.CTRL_PROXY_IOS_BUNDLE_ID.name).toBe("CTRL_PROXY_IOS_BUNDLE_ID");
+    expect(AMBIENT_ENV.CTRL_PROXY_IOS_TIMEOUT.name).toBe("CTRL_PROXY_IOS_TIMEOUT");
+  });
+
+  test("the singular team id is only read through its own spec", () => {
+    const env = { AUTOMOBILE_IOS_TEAM_ID: "ABC, DEF" };
+    expect(readEnvRaw(ENV.IOS_TEAM_IDS, env)).toBeUndefined();
+    expect(readEnvList(ENV.IOS_TEAM_ID, env)).toEqual(["ABC", "DEF"]);
   });
 });

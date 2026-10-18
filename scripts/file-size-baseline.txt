@@ -1,11 +1,12 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
+1055	src/config/env.ts
 2881	src/ctrlProxy/CtrlProxyManager.ts
-4134	src/ctrlProxy/IOSCtrlProxyManager.ts
-1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
+4130	src/ctrlProxy/IOSCtrlProxyManager.ts
+1789	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1588	src/daemon/client.ts
-5219	src/daemon/daemon.ts
+5217	src/daemon/daemon.ts
 6203	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
@@ -65,7 +66,7 @@
 1399	src/features/utility/ElementResolver.ts
 1733	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
-2322	src/features/webrtc/IosH264Source.ts
+2318	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
@@ -92,4 +93,4 @@
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
 3180	src/utils/ios-cmdline-tools/SimCtlClient.ts
-1263	src/utils/logger.ts
+1262	src/utils/logger.ts

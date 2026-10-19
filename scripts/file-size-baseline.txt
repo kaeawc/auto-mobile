@@ -19,7 +19,7 @@
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
 1210	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
-2339	src/daemon/sessionDeviceStateRestore.ts
+1048	src/daemon/sessionDeviceStateRestore.ts
 9809	src/daemon/sessionManager.ts
 5800	src/daemon/socketServer.ts
 1805	src/daemon/videoStreamSocketServer.ts

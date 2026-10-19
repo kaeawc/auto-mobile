@@ -9,7 +9,6 @@ const device: BootedDevice = {
   deviceId: "emulator-12220",
   name: "Foreign forward test",
   platform: "android",
-  isEmulator: true,
 };
 
 function commandResult(stdout: string): ExecResult {

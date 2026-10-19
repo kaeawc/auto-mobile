@@ -344,7 +344,7 @@ describe("NavigationGraphManager provenance write path", () => {
     await manager.setCurrentApp(APP);
     await manager.recordNavigationEvent(navEvent("Home", 100)); // sets currentScreen
     const old = await ageUpdatedAt();
-    await manager.recordBackStack({ depth: 1, currentTaskId: 1, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth: 1, currentTaskId: 1 });
     expect(await updatedAt()).not.toBe(old);
   });
 

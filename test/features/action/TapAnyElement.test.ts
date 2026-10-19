@@ -72,6 +72,8 @@ describe("TapAnyElement", () => {
         buildObserveResult({
           viewHierarchy: { hierarchy: { node: {} } },
           screenSize: { width: 500, height: 500 },
+          updatedAt: 0,
+          systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
         }),
       ),
     );
@@ -242,7 +244,12 @@ describe("TapAnyElement", () => {
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
       tapAny.observedInteraction = runBlockWith(() =>
         recordObservationRead(
-          buildObserveResult({ viewHierarchy, screenSize: { width: 10, height: 10 } }),
+          buildObserveResult({
+            viewHierarchy,
+            screenSize: { width: 10, height: 10 },
+            updatedAt: 0,
+            systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+          }),
         ),
       );
       tapAny.testHooks.setRefreshViewHierarchy(async () => null);
@@ -687,6 +694,8 @@ describe("TapAnyElement node long press fallbacks", () => {
         buildObserveResult({
           viewHierarchy: { hierarchy: { node: {} } },
           screenSize: { width: 500, height: 500 },
+          updatedAt: 0,
+          systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
         }),
       ),
     );

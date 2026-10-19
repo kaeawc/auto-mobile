@@ -10,7 +10,7 @@ import type { TapCoordinatesRequest } from "./TapCoordinatesRequest";
 import type { PerformanceTracker } from "../PerformanceTracker";
 import type { DragRequest } from "./DragRequest";
 import type { SwipeRequest } from "./SwipeRequest";
-import type { ViewHierarchyResult } from "../../models";
+import type { CurrentFocusResult, TraversalOrderResult, ViewHierarchyResult } from "../../models";
 import type { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 
 // =============================================================================
@@ -181,27 +181,8 @@ export interface DeviceService {
    */
   requestDrag(request: DragRequest): Promise<GestureResult>;
 
-  /**
-   * Perform a pinch gesture (zoom in/out).
-   * @param centerX Center X coordinate
-   * @param centerY Center Y coordinate
-   * @param distanceStart Starting distance between fingers
-   * @param distanceEnd Ending distance between fingers
-   * @param rotationDegrees Rotation during pinch (optional)
-   * @param duration Gesture duration in milliseconds
-   * @param timeoutMs Operation timeout in milliseconds
-   * @param perf Optional performance tracker
-   */
-  requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees?: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  // requestPinch is deliberately not part of this shared surface: Android takes a PinchRequest and
+  // iOS takes positional arguments, so each platform client declares its own signature.
 
   // ---------------------------------------------------------------------------
   // Text Input
@@ -284,13 +265,13 @@ export interface AndroidDeviceService extends DeviceService {
    * Get current accessibility focus information.
    * @param timeoutMs Operation timeout in milliseconds
    */
-  requestCurrentFocus(timeoutMs?: number): Promise<FocusResult>;
+  requestCurrentFocus(timeoutMs?: number): Promise<CurrentFocusResult>;
 
   /**
    * Get accessibility traversal order.
    * @param timeoutMs Operation timeout in milliseconds
    */
-  requestTraversalOrder(timeoutMs?: number): Promise<TraversalResult>;
+  requestTraversalOrder(timeoutMs?: number): Promise<TraversalOrderResult>;
 }
 
 // =============================================================================
@@ -315,28 +296,6 @@ interface ActionResult extends DeviceOperationResult {
   totalTimeMs: number;
   /** The action that was performed */
   action?: string;
-}
-
-/**
- * Result for focus query (Android).
- */
-interface FocusResult extends DeviceOperationResult {
-  totalTimeMs: number;
-  /** JSON string of focused element */
-  focusedElement?: string;
-}
-
-/**
- * Result for traversal order query (Android).
- */
-interface TraversalResult extends DeviceOperationResult {
-  totalTimeMs: number;
-  /** Traversal order data */
-  result?: {
-    elements: string[];
-    focusedIndex?: number;
-    totalCount: number;
-  };
 }
 
 /**

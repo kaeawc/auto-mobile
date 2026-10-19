@@ -57,7 +57,7 @@ class TestableAppearanceSocketServer extends AppearanceSocketServer {
       pendingBySocket: Map<unknown, Promise<void>>;
     };
     internals.server = { listening: true };
-    await internals.processLine(socket as unknown as Socket, JSON.stringify(line));
+    await internals.processLine(socket, JSON.stringify(line));
     await internals.pendingBySocket.get(socket);
     const written = socket.getWrittenData();
     return JSON.parse(written[written.length - 1]!) as AppearanceSocketResponse;

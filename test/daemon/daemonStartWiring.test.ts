@@ -244,7 +244,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       };
       await pool.trackStartedDeviceProcess(
         { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
-        new FakeChildProcess() as unknown as ChildProcess,
+        new FakeChildProcess(),
       );
       expect(confirm).toHaveBeenCalledTimes(1);
       expect(confirm).toHaveBeenCalledWith(

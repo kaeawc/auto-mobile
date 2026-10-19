@@ -3,7 +3,6 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import { expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
-import type { ChildProcess } from "node:child_process";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up } from "../../src/db/migrations/2026_04_02_000_device_sessions";
 import { up as addStableDeviceIdentity } from "../../src/db/migrations/2026_09_14_000_device_session_stable_identity";
@@ -331,7 +330,7 @@ test.each(["agent-B", "agent-A"])(
       const device = h.devices.bootedDevices[0];
       const image = { ...device, deviceId: "emulator-5556", isRunning: false };
       const recoveredProcess = new FakeChildProcess(h.timer);
-      deviceUtils.setMockChildProcess(image.name, recoveredProcess as unknown as ChildProcess);
+      deviceUtils.setMockChildProcess(image.name, recoveredProcess);
       deviceUtils.setBootedDevices("android", [device]);
       deviceUtils.setDeviceImages("android", [image]);
       matcher.setBootedResult(device);
@@ -469,7 +468,7 @@ test.each([false, true])(
       const image = { ...device, deviceId: "emulator-5556", isRunning: false };
       const otherDevice = { ...device, deviceId: "emulator-5558", name: "Other AVD" };
       const recoveredProcess = new FakeChildProcess(h.timer);
-      deviceUtils.setMockChildProcess(image.name, recoveredProcess as unknown as ChildProcess);
+      deviceUtils.setMockChildProcess(image.name, recoveredProcess);
       deviceUtils.setBootedDevices("android", [device]);
       deviceUtils.setDeviceImages("android", [image]);
       matcher.setBootedResult(device);

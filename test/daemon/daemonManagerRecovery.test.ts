@@ -73,7 +73,7 @@ class CapturingDaemonSpawner implements DaemonProcessSpawner {
 
   spawn(command: string, args: string[], options: SpawnOptions): ChildProcess {
     this.calls.push({ command, args: [...args], options });
-    return new FakeChildProcess() as unknown as ChildProcess;
+    return new FakeChildProcess();
   }
 }
 

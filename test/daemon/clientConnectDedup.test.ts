@@ -26,7 +26,7 @@ beforeEach(() => {
   createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
     const socket = new DeferredSocket(onConnect!);
     sockets.push(socket);
-    return socket as unknown as net.Socket;
+    return socket;
   });
   sockets.length = 0;
   timer = new FakeTimer();

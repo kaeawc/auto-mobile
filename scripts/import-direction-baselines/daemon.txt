@@ -26,7 +26,7 @@ src/daemon/proxy/SessionBinding.ts -> src/server/deviceSessionResult
 src/daemon/proxy/SessionBinding.ts -> src/server/listChangedBroadcast
 src/daemon/proxy/ToolCallForwarder.ts -> src/server/deviceSessionResult
 src/daemon/proxy/ToolListPoller.ts -> src/server/listChangedBroadcast
-src/daemon/proxy/daemonErrors.ts -> src/server/deviceSessionResult
+src/daemon/proxy/sessionRecoveryPrompt.ts -> src/server/deviceSessionResult
 src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition.ts -> src/server/toolRegistry
 src/daemon/sessionBroker/provisioning/deviceDeleter.ts -> src/server/deviceTools
 src/daemon/socketServer.ts -> src/server/daemonSessionToolBindingStore

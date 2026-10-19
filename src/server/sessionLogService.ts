@@ -22,9 +22,9 @@ import {
   nodeAppFileFileSystem,
   resolveAndroidTarget,
   type AndroidTarget,
-  type AppFileFileSystem,
   type LocalFileListEntry,
-} from "./appFileService";
+} from "./appFileSupport";
+import { type AppFileFileSystem } from "./appFileService";
 import {
   type SessionLogAppGroupRequest,
   type SessionLogAppGroupResult,

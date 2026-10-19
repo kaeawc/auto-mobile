@@ -13,14 +13,10 @@ import {
   errorCodeOf,
   isGatedToolErrorCode,
 } from "../types";
-import {
-  DaemonAssetVersionMismatchError,
-  DaemonBuildMismatchError,
-  DaemonVersionMismatchError,
-  daemonInternalErrors,
-} from "./daemonErrors";
-
-const { DaemonPreflightConnectionError } = daemonInternalErrors;
+import { DaemonAssetVersionMismatchError } from "./DaemonAssetVersionMismatchError";
+import { DaemonBuildMismatchError } from "./DaemonBuildMismatchError";
+import { DaemonVersionMismatchError } from "./DaemonVersionMismatchError";
+import { DaemonPreflightConnectionError } from "./DaemonPreflightConnectionError";
 
 /**
  * Connection facts the classifier reads:

@@ -183,7 +183,11 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
           boundSession: params[DAEMON_BOUND_SESSION_PARAM],
         });
         if (tool === "getAndroid") {
-          await pool.bindOrReuseDeviceSession(SESSION, DEVICE.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: SESSION,
+            deviceId: DEVICE.deviceId,
+            platform: "android",
+          });
           return;
         }
         // A device tool call resolves its session as ToolExecutionContext does. This is the

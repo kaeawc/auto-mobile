@@ -1400,7 +1400,11 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   expect(session.heartbeatTimeoutMs).toBeGreaterThan(worst);
   expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
   await expect(
-    h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android"),
+    h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: android.deviceId,
+      platform: "android",
+    }),
   ).rejects.toBeInstanceOf(DeviceCleanupInProgressError);
   await h.timer.advanceTimeAsync(dueScan - 1 - h.timer.now(), step);
   expect(force).not.toHaveBeenCalled();
@@ -1415,14 +1419,24 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   expect(h.manager.getTerminalReleaseSnapshot("old")?.releaseReason).toBe("explicit-release");
   await h.timer.advanceTimeAsync(cap - 1, step);
   await expect(
-    h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android"),
+    h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: android.deviceId,
+      platform: "android",
+    }),
   ).rejects.toBeInstanceOf(DeviceCleanupInProgressError);
   await h.timer.advanceTimeAsync(1, step);
   expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
   expect(h.timer.now()).toBeLessThanOrEqual(startedAt + worst);
   // Only the replacement row write is unparked; the old rebind remains wedged.
   persistence.gate = undefined;
-  expect(await h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android")).toBe("next");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: android.deviceId,
+      platform: "android",
+    }),
+  ).toBe("next");
   await h.timer.advanceTimeAsync(2 * interval, step);
   expect(reaps).toBe(0);
   expect(force).toHaveBeenCalledTimes(1);

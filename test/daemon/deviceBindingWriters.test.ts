@@ -154,7 +154,12 @@ describe("device binding writers current behavior (#11802)", () => {
   }
 
   async function bindOwner() {
-    await pool.bindOrReuseDeviceSession("owner", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     assertAgreement();
     return pool.getDevice(original.deviceId)!;
   }
@@ -267,15 +272,12 @@ describe("device binding writers current behavior (#11802)", () => {
       name: "recovery rebind to another pooled device",
       run: async () => {
         await bindOwner();
-        await pool.bindOrReuseDeviceSession(
-          "owner",
-          bystander.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "owner",
+          deviceId: bystander.deviceId,
+          platform: "android",
+          allowSessionRebind: true,
+        });
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
@@ -434,7 +436,11 @@ describe("device binding writers current behavior (#11802)", () => {
       pool.recordDeviceError(original.deviceId);
       await manager.releaseSession("owner");
       changes.length = 0;
-      await pool.bindOrReuseDeviceSession("next-owner", original.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "next-owner",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
       const departed = {
         ...owned,
         sessionId: null,

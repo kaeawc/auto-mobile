@@ -192,19 +192,14 @@ export function restartStopHarness() {
       sessions.setDeviceLabels(BASE, { phone: LABEL, tablet: SIBLING });
     }
     const closeMint = labelHolder ? sessions.openPlanLabelMints(BASE, { phone: LABEL }) : () => {};
-    await pool.bindOrReuseDeviceSession(
-      holder,
-      device.deviceId,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: holder,
+      deviceId: device.deviceId,
       platform,
-      undefined,
-      undefined,
-      device,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      connection ?? undefined,
-    );
+      expectedIdentity: device,
+      allowSessionRebind: false,
+      mcpSessionId: connection ?? undefined,
+    });
     closeMint();
     if (publishLabels) {
       sessions.setDeviceLabels(BASE, { phone: LABEL, tablet: SIBLING });

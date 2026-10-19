@@ -861,7 +861,12 @@ describe("deleteDevice handler", () => {
       );
       manager.setBootedDevices("android", [device]);
       await pool.initializeWithDevices([device]);
-      await pool.bindOrReuseDeviceSession("session-1", device.deviceId, "android", image);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       manager.setDeviceImages("android", [image]);
       manager.setBootedDevices("android", []);

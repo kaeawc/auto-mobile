@@ -58,25 +58,18 @@ test("an undelivered rebind is moved back once its own old-device restore settle
   devices.bootedDevices = booted;
   const pool = makePool(sessions, "hunt-daemon", { timer, deviceManager: devices });
   await pool.initializeWithDevices(booted);
-  await pool.bindOrReuseDeviceSession("held", AVD_A, "android");
+  await pool.bindOrReuseDeviceSession({ sessionId: "held", deviceId: AVD_A, platform: "android" });
   sessions.setKeepScreenAwake("held", { applied: true, method: "svc", svcWasEnabled: false });
 
   const receipt: AcquisitionReceipt = {};
-  await pool.bindOrReuseDeviceSession(
-    "held",
-    AVD_B,
-    "android",
-    undefined,
-    undefined,
-    undefined,
-    true,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    false,
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "held",
+    deviceId: AVD_B,
+    platform: "android",
+    allowSessionRebind: true,
+    oneShotCli: false,
     receipt,
-  );
+  });
   // Control: the session moved, and the old device is quarantined only by this rebind's own retry.
   expect(receipt.rebound).toMatchObject({ deviceId: AVD_B, fromDeviceId: AVD_A });
   expect(restoreAttempts).toBe(0);

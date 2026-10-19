@@ -219,11 +219,11 @@ describe("Daemon session-release signal wiring", () => {
       stubPoolDiscovery(devicePool, [original]);
       await devicePool.initializeWithDevices([original]);
       await devicePool.reconcileDiscoveryObservation([original], "test:initial");
-      await devicePool.bindOrReuseDeviceSession(
-        "identity-fenced-session",
-        original.deviceId,
-        "android",
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "identity-fenced-session",
+        deviceId: original.deviceId,
+        platform: "android",
+      });
 
       stubPoolDiscovery(devicePool, [replacement]);
       const refresh = devicePool.refreshDevices();

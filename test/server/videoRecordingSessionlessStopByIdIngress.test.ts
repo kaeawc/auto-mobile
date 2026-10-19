@@ -66,19 +66,13 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
     });
 
   const bind = (sessionUuid: string, device: BootedDevice, connection: string) =>
-    pool.bindOrReuseDeviceSession(
-      sessionUuid,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      connection,
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: sessionUuid,
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: connection,
+    });
 
   const record = async (device: BootedDevice, ownerSessionUuid?: string) => {
     const active = await startVideoRecording({ device, ownerSessionUuid });

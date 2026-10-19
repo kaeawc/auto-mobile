@@ -52,19 +52,13 @@ async function setUp(checkIntervalMs?: number): Promise<Rig> {
   deviceManager.bootedDevices = [DEVICE];
   const devicePool = makePool(sessionManager, "test-daemon-session-id", { timer, deviceManager });
   await devicePool.initializeWithDevices([DEVICE]);
-  await devicePool.bindOrReuseDeviceSession(
-    OWNER_SESSION,
-    DEVICE.deviceId,
-    "android",
-    undefined,
-    undefined,
-    undefined,
-    false,
-    undefined,
-    undefined,
-    undefined,
-    OWNER_CONNECTION,
-  );
+  await devicePool.bindOrReuseDeviceSession({
+    sessionId: OWNER_SESSION,
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+    allowSessionRebind: false,
+    mcpSessionId: OWNER_CONNECTION,
+  });
   await deliverDaemonHeartbeat(sessionManager, OWNER_SESSION);
   const monitor = new SessionHeartbeatMonitor(
     sessionManager,

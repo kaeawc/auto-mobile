@@ -970,19 +970,13 @@ export class LivenessScenario {
         this.minted = await pool.autolockDevice(deviceId, PLATFORM, connection);
       } else {
         this.minted = `scenario-session-${++this.mintCount}`;
-        await pool.bindOrReuseDeviceSession(
-          this.minted,
+        await pool.bindOrReuseDeviceSession({
+          sessionId: this.minted,
           deviceId,
-          PLATFORM,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          connection,
-        );
+          platform: PLATFORM,
+          allowSessionRebind: false,
+          mcpSessionId: connection,
+        });
       }
       // Acquisition prepared the device, as getAndroid's readiness setup records.
       manager.setDeviceReadiness(this.minted, "automationReady");
@@ -1112,19 +1106,13 @@ export class LivenessScenario {
    */
   async acquireTokenless(deviceId: string = this.deviceIds[0]!): Promise<string> {
     const sessionId = `desktop-session-${++this.mintCount}`;
-    await this.daemon.pool.bindOrReuseDeviceSession(
+    await this.daemon.pool.bindOrReuseDeviceSession({
       sessionId,
       deviceId,
-      PLATFORM,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      DESKTOP_CONNECTION,
-    );
+      platform: PLATFORM,
+      allowSessionRebind: false,
+      mcpSessionId: DESKTOP_CONNECTION,
+    });
     return sessionId;
   }
 

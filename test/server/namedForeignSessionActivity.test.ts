@@ -171,21 +171,19 @@ describe("what counts as use of a named session (#11555, #11558)", () => {
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     tools = new RealToolCallPath([held, free, spare]).install();
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     manager.setDeviceReadiness(HOLDER, "automationReady");
-    await pool.bindOrReuseDeviceSession(OWNERLESS, free.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: OWNERLESS,
+      deviceId: free.deviceId,
+      platform: "android",
+    });
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
     // The server registered its real tools. A plain tool's handler is its device work: stub it,

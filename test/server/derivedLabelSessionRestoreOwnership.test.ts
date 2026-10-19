@@ -104,19 +104,13 @@ describe("restoring a derived label session through the owned-sessions selector"
     await pool.initializeWithDevices([primary, labelled]);
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     tools = new RealToolCallPath([primary, labelled]).install();
-    await pool.bindOrReuseDeviceSession(
-      BASE,
-      primary.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: BASE,
+      deviceId: primary.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     const labels = buildDeviceLabelMap(["A", "B"], BASE);
     labelSession = labels.B;
     manager.setDeviceLabels(BASE, labels);

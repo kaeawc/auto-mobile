@@ -63,7 +63,11 @@ async function fixture() {
     forget.mockRestore();
   };
   await pool.initializeWithDevices([original]);
-  await pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "holder",
+    deviceId: original.deviceId,
+    platform: "android",
+  });
   sessions.setKeepScreenAwake("holder", { applied: true, method: "settings" });
   return { pool, sessions, manager, restores, release, cleanup };
 }

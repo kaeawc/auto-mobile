@@ -182,19 +182,13 @@ function registerTools(): void {
       // Autolock off mints an ordinary device session owned by the acquiring connection.
       const sessionUuid =
         (await pool.autolockDevice(deviceId, "android", toolArgs.__mcpSessionId)) ??
-        (await pool.bindOrReuseDeviceSession(
-          `session-${deviceId}`,
+        (await pool.bindOrReuseDeviceSession({
+          sessionId: `session-${deviceId}`,
           deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          toolArgs.__mcpSessionId,
-        ));
+          platform: "android",
+          allowSessionRebind: false,
+          mcpSessionId: toolArgs.__mcpSessionId,
+        }));
       return {
         content: [
           {

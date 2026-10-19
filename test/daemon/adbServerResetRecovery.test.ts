@@ -72,14 +72,14 @@ async function idleTrackedCohort(stopSignals: NodeJS.Signals[], onLoss = true) {
     manager.bootedDevices.push(booted);
     await pool.addDevice(booted, image);
     const sessionId = `session-${index}`;
-    await pool.bindOrReuseDeviceSession(
+    await pool.bindOrReuseDeviceSession({
       sessionId,
-      booted.deviceId,
-      "android",
-      image,
-      process as unknown as ChildProcess,
-      booted,
-    );
+      deviceId: booted.deviceId,
+      platform: "android",
+      sourceImage: image,
+      childProcess: process as unknown as ChildProcess,
+      expectedIdentity: booted,
+    });
     await pool.releaseDevice(booted.deviceId, sessionId);
   }
   const devices = children.map((_, index) => pool.getDevice(`emulator-${5554 + index * 2}`)!);
@@ -170,12 +170,12 @@ describe("ADB server reset session recovery", () => {
         platform: "android",
       };
       h.manager.bootedDevices = [booted];
-      await h.pool.bindOrReuseDeviceSession(
-        "session-recovery",
-        device.id,
-        "android",
-        device.androidImage,
-      );
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "session-recovery",
+        deviceId: device.id,
+        platform: "android",
+        sourceImage: device.androidImage,
+      });
       h.manager.bootedDevices = [];
       await expect(
         h.pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(device.id, device),
@@ -275,14 +275,13 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session-1",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     expect(sessionManager.getDeviceReadiness("session-1")).toBeUndefined();
     const captured = pool.getDevice(original.deviceId);
     if (!captured) {
@@ -392,7 +391,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const captured = pool.getDevice(original.deviceId)!;
     apps.blockNextSessionTrackingWrite();
 
@@ -486,7 +490,12 @@ describe("ADB server reset session recovery", () => {
       original.deviceId,
       "android",
     );
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const capturedDevice = pool.getDevice(original.deviceId)!;
 
     try {
@@ -537,7 +546,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const capturedSession = sessionManager.getSession("session-1")!;
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
 
@@ -578,7 +592,11 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [device];
     await pool.initializeWithDevices([device]);
-    await pool.bindOrReuseDeviceSession("session-1", device.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
 
     try {
       await expect(
@@ -610,7 +628,12 @@ describe("ADB server reset session recovery", () => {
       };
       await pool.addDevice(device, image);
       if (index < 2) {
-        await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
+        await pool.bindOrReuseDeviceSession({
+          sessionId: `session-${index}`,
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        });
       }
     }
     const cohort = devices.map((device) => pool.getDevice(device.deviceId)!);
@@ -717,12 +740,12 @@ describe("ADB server reset session recovery", () => {
     manager.bootedDevices = [active, idle];
     await pool.addDevice(active, image(active));
     await pool.addDevice(idle, image(idle));
-    await pool.bindOrReuseDeviceSession(
-      "session-active",
-      active.deviceId,
-      "android",
-      image(active),
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-active",
+      deviceId: active.deviceId,
+      platform: "android",
+      sourceImage: image(active),
+    });
     const childProcess = {
       pid: 123,
       kill: () => {
@@ -730,14 +753,14 @@ describe("ADB server reset session recovery", () => {
       },
       once: () => childProcess,
     } as ChildProcess;
-    await pool.bindOrReuseDeviceSession(
-      "session-idle",
-      idle.deviceId,
-      "android",
-      image(idle),
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-idle",
+      deviceId: idle.deviceId,
+      platform: "android",
+      sourceImage: image(idle),
       childProcess,
-      idle,
-    );
+      expectedIdentity: idle,
+    });
     await pool.releaseDevice(idle.deviceId, "session-idle");
 
     try {
@@ -801,7 +824,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [device];
     await pool.addDevice(device, image);
-    await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-active",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
 
     try {
       const captured = pool.getDevice(device.deviceId)!;
@@ -862,14 +890,24 @@ describe("ADB server reset session recovery", () => {
       cancelDeviceSessionExecutions: async (sessionId) => {
         await sessionManager.releaseSession(sessionId, "allocation-rollback");
         await pool.releaseDevice(device.deviceId, sessionId);
-        await pool.bindOrReuseDeviceSession(sessionId, device.deviceId, "android", image);
+        await pool.bindOrReuseDeviceSession({
+          sessionId,
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        });
         replacementSession = sessionManager.getSession(sessionId) ?? undefined;
         return 1;
       },
     });
     manager.bootedDevices = [device];
     await pool.addDevice(device, image);
-    await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-active",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const captured = pool.getDevice(device.deviceId)!;
 
     try {
@@ -934,7 +972,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [device];
     await pool.addDevice(device, image);
-    await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-active",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
 
     try {
       const captured = pool.getDevice(device.deviceId)!;
@@ -1007,7 +1050,12 @@ describe("ADB server reset session recovery", () => {
         source: "local",
       };
       await pool.addDevice(device, image);
-      await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: `session-${index}`,
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
     }
     const detached = await pool.detachAdbServerResetCohort(
       originals.map((device) => pool.getDevice(device.deviceId)!),
@@ -1065,7 +1113,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
 
     try {
@@ -1112,11 +1165,20 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
     await pool.addDevice(original, image);
     await sessionManager.createSession("session-2", original.deviceId, "android");
-    await pool.bindOrReuseDeviceSession("session-2", original.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-2",
+      deviceId: original.deviceId,
+      platform: "android",
+    });
     const replacement = pool.getDevice(original.deviceId);
     if (!replacement) {
       throw new Error("expected same-AVD replacement");
@@ -1169,7 +1231,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
 
     try {
@@ -1217,14 +1284,14 @@ describe("ADB server reset session recovery", () => {
     } as ChildProcess;
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session-1",
-      original.deviceId,
-      "android",
-      image,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
       childProcess,
-      original,
-    );
+      expectedIdentity: original,
+    });
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
 
     try {
@@ -1269,14 +1336,14 @@ describe("ADB server reset session recovery", () => {
     } as ChildProcess;
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session-1",
-      original.deviceId,
-      "android",
-      image,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
       childProcess,
-      original,
-    );
+      expectedIdentity: original,
+    });
     await pool.releaseDevice(original.deviceId, "session-1");
 
     try {
@@ -1337,22 +1404,22 @@ describe("ADB server reset session recovery", () => {
     manager.bootedDevices = [active, idle];
     await pool.addDevice(active, activeImage);
     await pool.addDevice(idle, idleImage);
-    await pool.bindOrReuseDeviceSession(
-      "session-1",
-      active.deviceId,
-      "android",
-      activeImage,
-      activeProcess,
-      active,
-    );
-    await pool.bindOrReuseDeviceSession(
-      "idle-seed",
-      idle.deviceId,
-      "android",
-      idleImage,
-      failingIdleProcess,
-      idle,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: active.deviceId,
+      platform: "android",
+      sourceImage: activeImage,
+      childProcess: activeProcess,
+      expectedIdentity: active,
+    });
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "idle-seed",
+      deviceId: idle.deviceId,
+      platform: "android",
+      sourceImage: idleImage,
+      childProcess: failingIdleProcess,
+      expectedIdentity: idle,
+    });
     await sessionManager.releaseSession("idle-seed");
     await pool.releaseDevice(idle.deviceId, "idle-seed");
 
@@ -1403,18 +1470,15 @@ describe("ADB server reset session recovery", () => {
 
     try {
       await expect(
-        pool.bindOrReuseDeviceSession(
-          "session-1",
-          replacement.deviceId,
-          "android",
-          image,
-          undefined,
-          replacement,
-          true,
-          undefined,
-          undefined,
-          "emulator-5554",
-        ),
+        pool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: replacement.deviceId,
+          platform: "android",
+          sourceImage: image,
+          expectedIdentity: replacement,
+          allowSessionRebind: true,
+          expectedExistingSessionDeviceId: "emulator-5554",
+        }),
       ).rejects.toThrow(/changed while device .* was recovering/);
       expect(sessionManager.getSession("session-1")).toBeNull();
     } finally {
@@ -1457,7 +1521,12 @@ describe("ADB server reset session recovery", () => {
         source: "local",
       };
       await pool.addDevice(device, image);
-      await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: `session-${index}`,
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
     }
     const detached = await pool.detachAdbServerResetCohort(
       originals.map((device) => pool.getDevice(device.deviceId)!),
@@ -1558,7 +1627,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     manager.startDevice = async () => {
       throw new Error("emulator launch failed");
     };
@@ -1645,7 +1719,12 @@ describe("ADB server reset session recovery", () => {
     };
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-1",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const captured = pool.getDevice(original.deviceId)!;
     const incidentId = await pool.recordEmulatorLossIncident(
       original.deviceId,
@@ -1718,7 +1797,12 @@ describe("ADB server reset session recovery", () => {
     manager.bootedDevices = [original];
     try {
       await pool.addDevice(original, image);
-      await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: original.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
       const captured = pool.getDevice(original.deviceId)!;
 
       await expect(pool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured)).resolves.toBe(true);

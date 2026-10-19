@@ -307,24 +307,16 @@ async function bindRequestedDevice(input: {
     // the mint (#11593).
     receipt.clientChosenSessionId = args.sessionUuid;
   }
-  const boundSession = await pool.bindOrReuseDeviceSession(
-    args.sessionUuid,
-    args.deviceId,
-    args.platform ?? device.platform,
-    undefined,
-    undefined,
-    undefined,
-    true,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const boundSession = await pool.bindOrReuseDeviceSession({
+    sessionId: args.sessionUuid,
+    deviceId: args.deviceId,
+    platform: args.platform ?? device.platform,
+    allowSessionRebind: true,
     // Records the move (or the mint), so a call cancelled before it answers is undone (#11593).
     receipt,
     // Asked again under the pool's assignment mutex: a start may have reserved the device since.
-    true,
-  );
+    refusePreparedForOtherRequest: true,
+  });
   if (boundSession !== args.sessionUuid) {
     throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, args.sessionUuid);
   }

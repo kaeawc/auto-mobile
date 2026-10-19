@@ -41,19 +41,13 @@ describe("DevicePool", () => {
   }));
 
   const bindAsMcpOwner = (sessionId: string, deviceId: string, mcpSessionId: string) =>
-    devicePool.bindOrReuseDeviceSession(
+    devicePool.bindOrReuseDeviceSession({
       sessionId,
       deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
+      platform: "android",
+      allowSessionRebind: false,
       mcpSessionId,
-    );
+    });
 
   const pixel8Source: DeviceInfo = {
     name: "Pixel 8",
@@ -71,19 +65,14 @@ describe("DevicePool", () => {
   };
 
   const reacquire = (device: BootedDevice, mcpSessionId?: string) =>
-    devicePool.bindOrReuseDeviceSession(
-      "newly-generated-session",
-      device.deviceId,
-      "android",
-      pixel8Source,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
+    devicePool.bindOrReuseDeviceSession({
+      sessionId: "newly-generated-session",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: pixel8Source,
+      allowSessionRebind: false,
       mcpSessionId,
-    );
+    });
 
   /** Runs `body` with reboot-on-death recovery enabled and restores the environment after. */
   const withRebootOnDeath = async (body: () => Promise<void>) => {
@@ -239,7 +228,12 @@ describe("DevicePool", () => {
       const device = createBootedDevice(deviceId, "android", "Pixel 8");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(sessionId, deviceId, "android", pixel8Source);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId,
+        deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
       expect(sessionManager.getSession(sessionId)?.assignedDevice).toBe(deviceId);
     };
 
@@ -314,21 +308,21 @@ describe("DevicePool", () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      const owner = devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        pixel8Source,
-      );
+      const owner = devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
       await persistence.waitForUpsert();
       const controller = new AbortController();
       const lateBinding = runWithAbortSignal(controller.signal, () =>
-        devicePool.bindOrReuseDeviceSession(
-          "expired-session",
-          device.deviceId,
-          "android",
-          pixel8Source,
-        ),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "expired-session",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: pixel8Source,
+        }),
       ).catch((error: unknown) => error);
       const lateReservation = runWithAbortSignal(controller.signal, () =>
         devicePool.reserveDeviceForReadiness(device.deviceId, device),
@@ -351,12 +345,12 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
 
-      const binding = devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        pixel8Source,
-      );
+      const binding = devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
       await persistence.waitForUpsert();
       const reservationPromise = devicePool.reserveDeviceForShutdown(device.deviceId);
       persistence.finishUpsert();
@@ -379,23 +373,23 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [owner, blocker];
       await devicePool.initializeWithDevices([owner, blocker]);
 
-      const ownerBinding = devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        owner.deviceId,
-        "android",
-        pixel8Source,
-      );
+      const ownerBinding = devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: owner.deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
       await persistence.waitForUpsert();
       persistence.finishUpsert();
       await ownerBinding;
 
       persistence.deferNextUpsert();
-      const blockingAssignment = devicePool.bindOrReuseDeviceSession(
-        "blocking-session",
-        blocker.deviceId,
-        "android",
-        pixel8Source,
-      );
+      const blockingAssignment = devicePool.bindOrReuseDeviceSession({
+        sessionId: "blocking-session",
+        deviceId: blocker.deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
       await persistence.waitForUpsert();
 
       const controller = new AbortController();
@@ -440,18 +434,18 @@ describe("DevicePool", () => {
       const other = createBootedDevice("emulator-5556", "android", "Pixel 8");
       fakeDeviceManager.bootedDevices = [owner, other];
       await devicePool.initializeWithDevices([owner, other]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        owner.deviceId,
-        "android",
-        pixel8Source,
-      );
-      await devicePool.bindOrReuseDeviceSession(
-        "other-session",
-        other.deviceId,
-        "android",
-        pixel8Source,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: owner.deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "other-session",
+        deviceId: other.deviceId,
+        platform: "android",
+        sourceImage: pixel8Source,
+      });
 
       const reservation = await devicePool.reserveDeviceForShutdown(owner.deviceId);
       if (!reservation) {
@@ -548,11 +542,19 @@ describe("DevicePool", () => {
       const device = createBootedDevice("emulator-5554");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: device.deviceId,
+        platform: device.platform,
+      });
       const originalAssignmentCount = devicePool.getDevice(device.deviceId)?.assignmentCount;
 
       await sessionManager.releaseSession("session-1", "allocation-rollback");
-      await devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: device.deviceId,
+        platform: device.platform,
+      });
       const replacement = devicePool.getDevice(device.deviceId);
       expect(replacement?.assignmentCount).toBe((originalAssignmentCount ?? 0) + 1);
 

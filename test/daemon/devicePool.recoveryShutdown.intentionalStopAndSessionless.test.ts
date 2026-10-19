@@ -62,14 +62,13 @@ test("a cancelled Android recovery does not spend the crash-loop budget (#7545)"
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     expect(pool.genericAvailability(original.deviceId)).toBe("free");
-    await pool.bindOrReuseDeviceSession(
-      "session-2",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session-2",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const recaptured = pool.getDevice(original.deviceId)!;
 
     const secondKill = manager.nextKillAccepted();
@@ -110,14 +109,13 @@ test("holder stop during detached ADB-reset recovery leaves no restart handoff",
     await pool.addDevice(original, image);
     expect(pool.genericAvailability(original.deviceId)).toBe("free");
     await expect(
-      pool.bindOrReuseDeviceSession(
-        "session-2",
-        original.deviceId,
-        "android",
-        image,
-        undefined,
-        original,
-      ),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "session-2",
+        deviceId: original.deviceId,
+        platform: "android",
+        sourceImage: image,
+        expectedIdentity: original,
+      }),
     ).resolves.toBe("session-2");
   } finally {
     await pool.releaseAdbServerResetCohortReservations(detached.devices);

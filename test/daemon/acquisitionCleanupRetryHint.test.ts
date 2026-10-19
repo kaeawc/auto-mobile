@@ -137,7 +137,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   /** The next acquirer's bind of the device, as the refusal it gets. */
   async function refusedBind(): Promise<DeviceCleanupInProgressError> {
     const refusal = await pool
-      .bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android")
+      .bindOrReuseDeviceSession({
+        sessionId: "next-owner",
+        deviceId: DEVICE.deviceId,
+        platform: "android",
+      })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -153,7 +157,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
 
   test("control: the release-time finalize advertises its remaining cap (#11360)", async () => {
     registerRecordingSessionCleanup(manager, recordings);
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     recordings.active.set("rec-holder", "holder");
 
     await releaseHolder();
@@ -171,7 +179,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     );
     // A sessionless recording is capturing the device when a session acquires it.
     recordings.active.set("rec-ownerless", undefined);
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
     expect(recordings.active.has("rec-ownerless")).toBe(true);
     expect(recordings.active.get("rec-ownerless")).toBe("holder");
@@ -195,7 +207,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
       recordings,
     );
     recordings.active.set("rec-ownerless", undefined);
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
     timer.advanceTime(5_000);
     await releaseHolder();
@@ -207,7 +223,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   });
 
   test("an acquisition cleanup with no cap of its own keeps the default polling hint", async () => {
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     manager.registerAcquisitionDeviceCleanup(DEVICE.deviceId, new Promise<void>(() => {}));
     await releaseHolder();
 
@@ -221,7 +241,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     );
     recordings.active.set("rec-ownerless", undefined);
     recordings.adoptionPersistence = new Promise<void>(() => {});
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     const registerCleanup = spyOn(manager, "registerAcquisitionDeviceCleanup");
     try {
       adoptOwnerlessRecordings(DEVICE.deviceId, "other-session");
@@ -243,11 +267,19 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     );
     recordings.active.set("rec-ownerless", undefined);
     recordings.adoptionPersistence = new Promise<void>(() => {});
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
     expect(recordings.active.get("rec-ownerless")).toBe("holder");
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     recordings.active.delete("rec-ownerless");
 
     await releaseHolder();
@@ -266,7 +298,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("persist adopted recording ownership");
-    await pool.bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "next-owner",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
   });
 
   test("wedged acquisition network push advertises its cap and releases quarantine", async () => {
@@ -277,11 +313,19 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
       state: () => state,
       pusher: { push: () => new Promise<void>(() => {}) },
     });
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     cleanup(DEVICE.deviceId);
     expect(state.getSimulation(DEVICE.deviceId)).toBeNull();
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     await releaseHolder();
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
     expect((await refusedBind()).retryAfterMs).toBe(10_000);
@@ -292,7 +336,11 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("push cleared network state");
-    await pool.bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "next-owner",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
   });
 
   test("wedged acquisition settings reset advertises its cap and releases quarantine", async () => {
@@ -301,10 +349,18 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
       { resetOnAcquisition: () => new Promise<void>(() => {}) },
       timer,
     );
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     cleanup(DEVICE.deviceId, "holder");
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
-    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
     await releaseHolder();
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
     expect((await refusedBind()).retryAfterMs).toBe(15_000);
@@ -315,6 +371,10 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("reset device setting defaults");
-    await pool.bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "next-owner",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
   });
 });

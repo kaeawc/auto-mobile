@@ -28,19 +28,13 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
   let releaseReasons: string[];
 
   const bind = (sessionId: string, mcpSessionId: string) =>
-    devicePool.bindOrReuseDeviceSession(
+    devicePool.bindOrReuseDeviceSession({
       sessionId,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
       mcpSessionId,
-    );
+    });
 
   const ownerSession = (): Session => {
     const session = sessionManager.getSession(OWNER_SESSION);

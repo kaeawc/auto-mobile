@@ -22,7 +22,11 @@ async function createContext() {
     deviceManager,
   });
   await pool.initializeWithDevices([DEVICE, OTHER]);
-  await pool.bindOrReuseDeviceSession(HOLDER, DEVICE.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: HOLDER,
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+  });
   const captures = pool["releasedDeviceCaptures"];
   return { timer, manager, pool, captures };
 }
@@ -117,7 +121,11 @@ test("a capture recorded for a non-holder cannot block that session's later rele
     pool["captureReleasedDevice"]("later-session", DEVICE.deviceId);
     await manager.releaseSession(HOLDER, "explicit-release");
     await pool.releaseDevice(DEVICE.deviceId, HOLDER);
-    await pool.bindOrReuseDeviceSession("later-session", DEVICE.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "later-session",
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+    });
 
     await pool.releaseDevice(DEVICE.deviceId, "later-session");
 

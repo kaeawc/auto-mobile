@@ -1173,7 +1173,11 @@ describe("platform device preparation tools", () => {
     sessionManager = new SessionManager(timer, persistence);
     const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator);
-    await pool.bindOrReuseDeviceSession("existing-session", emulator.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "existing-session",
+      deviceId: emulator.deviceId,
+      platform: "android",
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     persistence.deferActivity = true;
 

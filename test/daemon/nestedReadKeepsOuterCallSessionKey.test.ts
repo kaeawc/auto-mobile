@@ -145,19 +145,13 @@ describe("nested sessionless calls keep the outer control execution's session ke
     await pool.initializeWithDevices([HELD, WATCHED]);
     session = seeded ? await pool.autolockDevice(HELD.deviceId, "android", OWNER) : SESSION;
     if (!seeded) {
-      await pool.bindOrReuseDeviceSession(
-        session,
-        HELD.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        OWNER,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: session,
+        deviceId: HELD.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: OWNER,
+      });
     }
     entered = Promise.withResolvers<void>();
     outcome = Promise.withResolvers<{ success: true }>();

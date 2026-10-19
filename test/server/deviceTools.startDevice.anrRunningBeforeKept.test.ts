@@ -111,7 +111,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
       }),
     );
     await pool.initializeWithDevices([device]);
-    await pool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
     pool.reserveDeviceForReadiness = async (...args) => {
       const release = await reserveReadiness(...args);
@@ -342,7 +347,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async () => {
         if (++readinessCalls === 1) {
-          await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+          await pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+          });
           throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
         }
       },
@@ -373,7 +383,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async () => {
         if (++readinessCalls === 1) {
-          await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+          await pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: device.deviceId,
+            platform: "android",
+            sourceImage: image,
+          });
           throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
         }
       },
@@ -397,7 +412,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async () => {
         readinessCalls++;
-        await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "other-session",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        });
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
       },
     });
@@ -420,7 +440,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async () => {
         readinessCalls++;
-        await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "other-session",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        });
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
       },
     });
@@ -447,7 +472,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     devices.listDeviceImages = async (...args) => {
       if (recoveryStarted) {
         recoveryStarted = false;
-        await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "other-session",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        });
       }
       return await listImages(...args);
     };
@@ -487,7 +517,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async () => {
         readinessCalls++;
-        await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "other-session",
+          deviceId: device.deviceId,
+          platform: "android",
+          sourceImage: image,
+        });
         controller.abort(new Error("caller disconnected after other bind"));
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
       },
@@ -712,7 +747,12 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
     expect(pool.isReservedForReadiness(device.deviceId)).toBe(false);
 
-    await pool.bindOrReuseDeviceSession("other-session", device.deviceId, "android", image);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "other-session",
+      deviceId: device.deviceId,
+      platform: "android",
+      sourceImage: image,
+    });
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("other-session");
   });
 

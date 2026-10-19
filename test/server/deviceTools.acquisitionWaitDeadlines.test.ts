@@ -1026,12 +1026,12 @@ describe("device acquisition wait deadlines", () => {
     });
     deviceUtils.setBootedDevices("android", [android]);
     await pool.initializeWithDevices([android]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      android.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: android.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     deviceUtils.setDeviceImages("android", [recoveryImage]);
     deviceUtils.setMockChildProcess(
       recoveryImage.name,

@@ -107,7 +107,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
           : path === "prune"
             ? internals.pruneStaleIdleIosDevices([original])
             : pool
-                .bindOrReuseDeviceSession("binding", udid, "ios")
+                .bindOrReuseDeviceSession({ sessionId: "binding", deviceId: udid, platform: "ios" })
                 .catch((error: unknown) => error);
       await flushMicrotasks();
       expect(deviceManager.parked).toHaveLength(1);
@@ -349,10 +349,12 @@ describe("idle eviction with a stale discovery snapshot", () => {
     await pool.initializeWithDevices([sim]);
     // Connection B parks its exact-bind liveness snapshot outside the mutex.
     deviceManager.parkNext = "ios";
-    const bind = pool.bindOrReuseDeviceSession("session-b", udid, "ios").then(
-      (sessionId) => ({ ok: true as const, sessionId }),
-      (error: unknown) => ({ ok: false as const, error }),
-    );
+    const bind = pool
+      .bindOrReuseDeviceSession({ sessionId: "session-b", deviceId: udid, platform: "ios" })
+      .then(
+        (sessionId) => ({ ok: true as const, sessionId }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
     await flushMicrotasks();
     expect(deviceManager.parked).toHaveLength(1);
 
@@ -397,7 +399,11 @@ describe("idle eviction with a stale discovery snapshot", () => {
     // Handset is back. Connection B binds it under the mutex, with its own
     // fresher discovery confirming presence.
     deviceManager.bootedDevices = [handset];
-    const sessionId = await pool.bindOrReuseDeviceSession("session-b", serial, "android");
+    const sessionId = await pool.bindOrReuseDeviceSession({
+      sessionId: "session-b",
+      deviceId: serial,
+      platform: "android",
+    });
     expect(sessionId).toBe("session-b");
     const bound = pool.getDevice(serial);
     expect(bound?.sessionId).toBe("session-b");
@@ -470,7 +476,11 @@ describe("idle eviction with a stale discovery snapshot", () => {
 
     let bindAndReleaseSettled = false;
     const bindAndRelease = pool
-      .bindOrReuseDeviceSession("unrelated", handset.deviceId, "android")
+      .bindOrReuseDeviceSession({
+        sessionId: "unrelated",
+        deviceId: handset.deviceId,
+        platform: "android",
+      })
       .then(async (sessionId) => {
         await pool.releaseDevice(handset.deviceId, sessionId);
         bindAndReleaseSettled = true;

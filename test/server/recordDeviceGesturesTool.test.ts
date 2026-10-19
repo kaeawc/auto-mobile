@@ -213,19 +213,13 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     );
     await pool.initializeWithDevices([held, other, binding, unheld]);
     DaemonState.getInstance().initialize(manager, pool);
-    await pool.bindOrReuseDeviceSession(
-      "holder",
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "acquiring-connection",
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "acquiring-connection",
+    });
     await manager.createSession("stranger", other.deviceId, "android");
     manager.setDeviceReadiness("holder", "automationReady");
     tools = new RealToolCallPath([held, other, binding, unheld]).install(false);
@@ -365,7 +359,11 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
       readiness.mockImplementationOnce(
         async (sessionId, _manager, _pool, _options, _execution, admitted) => {
           expect(admitted).toBeUndefined();
-          await pool.bindOrReuseDeviceSession(sessionId!, unheld.deviceId, "android");
+          await pool.bindOrReuseDeviceSession({
+            sessionId: sessionId!,
+            deviceId: unheld.deviceId,
+            platform: "android",
+          });
           return { sessionId, deviceId: unheld.deviceId, devicePlatform: "android" };
         },
       );

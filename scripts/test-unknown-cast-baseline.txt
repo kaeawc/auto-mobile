@@ -10,14 +10,6 @@
 1	test/features/action/TapOnElement.ensureChecked.test.ts
 1	test/features/action/TapOnElement.ensureCheckedClockSkew.test.ts
 1	test/features/action/TapOnElement.toolDispatch.test.ts
-9	test/features/observe/ios/CtrlProxyClientAutoSetup.test.ts
-3	test/features/observe/ios/CtrlProxyClientCloseSingleCycle.test.ts
-1	test/features/observe/ios/CtrlProxyExchangeRecorder.test.ts
-9	test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts
-33	test/features/observe/ios/IOSCtrlProxyClient.test.ts
-2	test/features/observe/ios/IosSdkContractFixtures.contract.test.ts
-1	test/features/observe/ios/iosWindowLayer.test.ts
-1	test/features/observe/ios/tapDiagnostics.test.ts
 1	test/fixtures/observe/observeFixture.ts
 4	test/helpers/devicePoolSuite.ts
 1	test/lint/deviceToolsKillDeviceImportCasing.test.ts

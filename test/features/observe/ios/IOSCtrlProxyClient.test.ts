@@ -1,3 +1,4 @@
+import { createFetchMock } from "../../../helpers/createFetchMock";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import {
@@ -257,43 +258,26 @@ describe("IOSCtrlProxyClient", function () {
     abort: (reason: unknown) => void;
     getListenerCount: () => number;
   } => {
-    let aborted = false;
-    let reason: unknown;
+    const controller = new AbortController();
+    const signal = controller.signal;
     const listeners = new Set<EventListenerOrEventListenerObject>();
-    const signal = {
-      get aborted(): boolean {
-        return aborted;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    spyOn(signal, "addEventListener").mockImplementation(
+      (...args: Parameters<AbortSignal["addEventListener"]>) => {
+        listeners.add(args[1]);
+        add(...args);
       },
-      get reason(): unknown {
-        return reason;
+    );
+    spyOn(signal, "removeEventListener").mockImplementation(
+      (...args: Parameters<AbortSignal["removeEventListener"]>) => {
+        listeners.delete(args[1]);
+        remove(...args);
       },
-      throwIfAborted(): void {
-        if (aborted) {
-          throw reason;
-        }
-      },
-      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
-        listeners.add(listener);
-      },
-      removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
-        listeners.delete(listener);
-      },
-    } as unknown as AbortSignal;
-
+    );
     return {
       signal,
-      abort: (abortReason: unknown) => {
-        aborted = true;
-        reason = abortReason;
-        const event = new Event("abort");
-        for (const listener of [...listeners]) {
-          if (typeof listener === "function") {
-            listener(event);
-          } else {
-            listener.handleEvent(event);
-          }
-        }
-      },
+      abort: (reason: unknown) => controller.abort(reason),
       getListenerCount: () => listeners.size,
     };
   };
@@ -584,16 +568,16 @@ describe("IOSCtrlProxyClient", function () {
       async (reason, recovering) => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
-        const manager = {
-          isRunning: async () => false,
-          setup: async () => ({
-            success: false,
-            message: "Failed to setup CtrlProxy",
-            error: "iOS CtrlProxy runner exited during startup",
-            recoveryInterrupted: true,
-          }),
-          isRecoveryInFlight: () => recovering,
-        } as unknown as CtrlProxyIosManager;
+        class RecoveringManager extends FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
+          isRecoveryInFlight = () => recovering;
+        }
+        const manager = new RecoveringManager(timer);
+        manager.setup = async () => ({
+          success: false,
+          message: "Failed to setup CtrlProxy",
+          error: "iOS CtrlProxy runner exited during startup",
+          recoveryInterrupted: true,
+        });
         const client = IOSCtrlProxyClient.createForTesting(
           testDevice,
           serverPort,
@@ -624,16 +608,16 @@ describe("IOSCtrlProxyClient", function () {
       async (reason, recovering) => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
-        const manager = {
-          isRunning: async () => false,
-          setup: async () => ({
-            success: false,
-            message: "Failed to setup CtrlProxy",
-            error: "iOS CtrlProxy startup was cancelled by stop()",
-            recoveryInterrupted: true,
-          }),
-          isRecoveryInFlight: () => recovering,
-        } as unknown as CtrlProxyIosManager;
+        class RecoveringManager extends FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
+          isRecoveryInFlight = () => recovering;
+        }
+        const manager = new RecoveringManager(timer);
+        manager.setup = async () => ({
+          success: false,
+          message: "Failed to setup CtrlProxy",
+          error: "iOS CtrlProxy startup was cancelled by stop()",
+          recoveryInterrupted: true,
+        });
         const client = IOSCtrlProxyClient.createForTesting(
           testDevice,
           serverPort,
@@ -662,10 +646,8 @@ describe("IOSCtrlProxyClient", function () {
     ] as const)("records %s from failed connection", async (reason, booted, message) => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const manager = {
-        isRunning: async () => false,
-        setup: async () => ({ success: false, message }),
-      } as unknown as CtrlProxyIosManager;
+      const manager = new FakeIOSCtrlProxyManager(timer);
+      manager.setup = async () => ({ success: false, message });
       const client = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
@@ -1693,10 +1675,14 @@ describe("IOSCtrlProxyClient", function () {
           fresh: true,
         };
         client["cachedHierarchy"] = cached;
-        const push = spyOn(client, "pushHierarchyToObservationStream").mockImplementation(() => {});
-        const navigation = spyOn(client, "handleHierarchyUpdateForNavigation").mockImplementation(
-          () => {},
-        );
+        const push = spyOn(
+          client.testHooks.messageEffects,
+          "pushToObservationStream",
+        ).mockImplementation(() => {});
+        const navigation = spyOn(
+          client.testHooks.messageEffects,
+          "recordNavigation",
+        ).mockImplementation(() => {});
         const debug = spyOn(logger, "debug").mockImplementation(() => {});
         const updates: XCTestHierarchy[] = [];
         const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
@@ -4493,9 +4479,9 @@ describe("IOSCtrlProxyClient", function () {
           .processMessage({ type: "hierarchy_update", data });
       push(current);
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
-      const stream = spyOn(ctrlProxyClient, "pushHierarchyToObservationStream");
-      const backoff = spyOn(ctrlProxyClient, "startScreenshotBackoff");
-      const listeners = spyOn(ctrlProxyClient, "notifyPushUpdateListeners");
+      const stream = spyOn(ctrlProxyClient.testHooks.messageEffects, "pushToObservationStream");
+      const backoff = spyOn(ctrlProxyClient.testHooks.messageEffects, "startScreenshotBackoff");
+      const listeners = spyOn(ctrlProxyClient.testHooks.messageEffects, "notifyPushListeners");
       try {
         const stepped = { ...current, updatedAt: 400_000 };
         push(stepped);
@@ -5173,7 +5159,7 @@ describe("IOSCtrlProxyClient", function () {
       );
       await client.close();
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        (client as unknown as { onConnectAttemptFailed(): void }).onConnectAttemptFailed();
+        client.testHooks.onConnectAttemptFailed();
       }
       expect(await client.ensureConnected()).toBe(false);
       expect(await client.connectWithoutSetup()).toBe(false);
@@ -5215,7 +5201,7 @@ describe("IOSCtrlProxyClient", function () {
       IOSCtrlProxyClient.resumeAfterDeviceStart(testDevice.deviceId);
       expect(IOSCtrlProxyClient.getInstance(testDevice, serverPort)).toBe(fresh);
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        (fresh as unknown as { onConnectAttemptFailed(): void }).onConnectAttemptFailed();
+        fresh.testHooks.onConnectAttemptFailed();
       }
       await flushMicrotasks();
       expect(restarts).toBe(1);
@@ -5263,7 +5249,7 @@ describe("IOSCtrlProxyClient", function () {
       factoryCalls.length = 0;
       try {
         for (let attempt = 0; attempt < 3; attempt++) {
-          (client as unknown as { onConnectAttemptFailed(): void }).onConnectAttemptFailed();
+          client.testHooks.onConnectAttemptFailed();
         }
         await flushMicrotasks();
         expect(managerCalls.filter((call) => call.action === "forceRestart")).toEqual([
@@ -5295,7 +5281,7 @@ describe("IOSCtrlProxyClient", function () {
         },
         timer,
       );
-      (client as unknown as { scheduleReconnect(): void }).scheduleReconnect();
+      client.testHooks.scheduleReconnect();
 
       await client.close();
       timer.advanceTime(5_000);
@@ -5408,7 +5394,7 @@ describe("IOSCtrlProxyClient", function () {
       const payload = { url: "https://x.test/a", method: "POST", timestamp: 4242 };
       const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           {
@@ -5416,7 +5402,7 @@ describe("IOSCtrlProxyClient", function () {
             events: [{ eventType: "network_request", payload: encoded }],
           },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.pollSdkEvents();
@@ -5457,12 +5443,12 @@ describe("IOSCtrlProxyClient", function () {
       };
       const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encoded }] },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5501,7 +5487,7 @@ describe("IOSCtrlProxyClient", function () {
       const encode = (destination: string, timestamp: number): string =>
         Buffer.from(JSON.stringify({ destination, timestamp })).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           {
@@ -5512,7 +5498,7 @@ describe("IOSCtrlProxyClient", function () {
             ],
           },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5547,7 +5533,7 @@ describe("IOSCtrlProxyClient", function () {
           }),
         ).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           {
@@ -5558,7 +5544,7 @@ describe("IOSCtrlProxyClient", function () {
             ],
           },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5587,7 +5573,7 @@ describe("IOSCtrlProxyClient", function () {
       const encode = (destination: string): string =>
         Buffer.from(JSON.stringify({ destination, timestamp: 100 })).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           {
@@ -5598,7 +5584,7 @@ describe("IOSCtrlProxyClient", function () {
             ],
           },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         const identity = await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5641,7 +5627,7 @@ describe("IOSCtrlProxyClient", function () {
       };
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
+      globalThis.fetch = createFetchMock(async () => {
         polls += 1;
         return {
           ok: true,
@@ -5652,7 +5638,7 @@ describe("IOSCtrlProxyClient", function () {
             return fakeTimer.now() >= 50 ? [newEvent] : [];
           },
         };
-      }) as unknown as typeof fetch;
+      });
 
       try {
         await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5706,13 +5692,13 @@ describe("IOSCtrlProxyClient", function () {
       };
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
+      globalThis.fetch = createFetchMock(async () => {
         polls += 1;
         return {
           ok: true,
           json: async () => (polls === 1 ? [oldEvent] : polls === 2 ? [telemetry] : [newEvent]),
         };
-      }) as unknown as typeof fetch;
+      });
 
       try {
         await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5750,7 +5736,7 @@ describe("IOSCtrlProxyClient", function () {
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           {
@@ -5767,7 +5753,7 @@ describe("IOSCtrlProxyClient", function () {
             ],
           },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         const identity = testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5799,12 +5785,12 @@ describe("IOSCtrlProxyClient", function () {
         JSON.stringify({ destination: "OldScreen", timestamp: 1 }),
       ).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encoded }] },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -5867,7 +5853,7 @@ describe("IOSCtrlProxyClient", function () {
       };
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
+      globalThis.fetch = createFetchMock(async () => {
         polls += 1;
         return {
           ok: true,
@@ -5880,7 +5866,7 @@ describe("IOSCtrlProxyClient", function () {
                   ? [oldEvent]
                   : [newEvent],
         };
-      }) as unknown as typeof fetch;
+      });
 
       try {
         await testClient.pollSdkEvents();
@@ -5992,10 +5978,10 @@ describe("IOSCtrlProxyClient", function () {
       ];
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => batches[polls++],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.pollSdkEvents();
@@ -6088,10 +6074,10 @@ describe("IOSCtrlProxyClient", function () {
       ];
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => batches[polls++],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.pollSdkEvents();
@@ -6178,10 +6164,10 @@ describe("IOSCtrlProxyClient", function () {
       ];
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => batches[polls++],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.pollSdkEvents();
@@ -6214,7 +6200,7 @@ describe("IOSCtrlProxyClient", function () {
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           {
@@ -6253,7 +6239,7 @@ describe("IOSCtrlProxyClient", function () {
             ],
           },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.pollSdkEvents();
@@ -6282,10 +6268,10 @@ describe("IOSCtrlProxyClient", function () {
         },
       );
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [{ bundleId: "com.example.ios", events: {} }],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         const result = await testClient.pollSdkEvents();
@@ -6312,10 +6298,10 @@ describe("IOSCtrlProxyClient", function () {
         },
       );
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [],
-      })) as unknown as typeof fetch;
+      }));
       const { polling: internals } = testClient.getSdkEventPollingTestHooks();
 
       try {
@@ -6354,10 +6340,10 @@ describe("IOSCtrlProxyClient", function () {
         },
       );
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [],
-      })) as unknown as typeof fetch;
+      }));
       const { polling: internals } = testClient.getSdkEventPollingTestHooks();
 
       try {
@@ -6451,10 +6437,10 @@ describe("IOSCtrlProxyClient", function () {
       ];
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => batches[polls++],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.pollSdkEvents();
@@ -6493,16 +6479,16 @@ describe("IOSCtrlProxyClient", function () {
         JSON.stringify({ destination: "OldScreen", timestamp: 1 }),
       ).toString("base64");
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => ({
+      globalThis.fetch = createFetchMock(async () => ({
         ok: true,
         json: async () => [
           { bundleId: "com.example.ios", events: [{ eventType: "navigation", payload: encoded }] },
         ],
-      })) as unknown as typeof fetch;
+      }));
 
       try {
         await testClient.refreshSdkScreenIdentity("com.example.ios");
-        (testClient as unknown as { onConnectionClosed(): void }).onConnectionClosed();
+        testClient.testHooks.onConnectionClosed();
 
         expect(testClient.getSdkScreenIdentity("com.example.ios")).toBeUndefined();
       } finally {
@@ -6532,10 +6518,12 @@ describe("IOSCtrlProxyClient", function () {
         | ((response: { ok: boolean; json: () => Promise<unknown> }) => void)
         | undefined;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (() =>
-        new Promise((resolve) => {
-          releaseFetch = resolve;
-        })) as unknown as typeof fetch;
+      globalThis.fetch = createFetchMock(
+        () =>
+          new Promise((resolve) => {
+            releaseFetch = resolve;
+          }),
+      );
 
       try {
         const poll = testClient.pollSdkEvents();
@@ -6577,7 +6565,7 @@ describe("IOSCtrlProxyClient", function () {
         Buffer.from(JSON.stringify(payload)).toString("base64");
       let polls = 0;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => {
+      globalThis.fetch = createFetchMock(async () => {
         polls += 1;
         return {
           ok: true,
@@ -6597,7 +6585,7 @@ describe("IOSCtrlProxyClient", function () {
             },
           ],
         };
-      }) as unknown as typeof fetch;
+      });
 
       try {
         await testClient.refreshSdkScreenIdentity("com.example.ios");
@@ -6631,15 +6619,17 @@ describe("IOSCtrlProxyClient", function () {
         | ((response: { ok: boolean; json: () => Promise<unknown> }) => void)
         | undefined;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (() =>
-        new Promise((resolve) => {
-          releaseFetch = resolve;
-        })) as unknown as typeof fetch;
+      globalThis.fetch = createFetchMock(
+        () =>
+          new Promise((resolve) => {
+            releaseFetch = resolve;
+          }),
+      );
 
       try {
         const poll = testClient.pollSdkEvents();
         await flushPromises();
-        (testClient as unknown as { onConnectionClosed(): void }).onConnectionClosed();
+        testClient.testHooks.onConnectionClosed();
         releaseFetch?.({
           ok: true,
           json: async () => [
@@ -6677,10 +6667,12 @@ describe("IOSCtrlProxyClient", function () {
         | ((response: { ok: boolean; json: () => Promise<unknown> }) => void)
         | undefined;
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = (() =>
-        new Promise((resolve) => {
-          releaseFetch = resolve;
-        })) as unknown as typeof fetch;
+      globalThis.fetch = createFetchMock(
+        () =>
+          new Promise((resolve) => {
+            releaseFetch = resolve;
+          }),
+      );
 
       try {
         const identity = testClient.refreshSdkScreenIdentity("com.example.ios");

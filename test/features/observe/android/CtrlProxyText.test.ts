@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { createExecResult } from "../../../../src/utils/execResult";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 import {
@@ -327,7 +328,9 @@ describe("Android CtrlProxyText", () => {
     const sent: Record<string, unknown>[] = [];
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+        new FakeOpenSocket((data) => {
+          sent.push(JSON.parse(data));
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -355,7 +358,9 @@ describe("Android CtrlProxyText", () => {
     const manager = new RequestManager(timer);
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+        new FakeOpenSocket((data) => {
+          sent.push(JSON.parse(data));
+        }),
       requestManager: manager,
       timer,
       ensureConnected: async () => true,
@@ -444,10 +449,9 @@ describe("Android CtrlProxyText", () => {
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({
-          readyState: 1,
-          send: (data: string) => sent.push(data),
-        }) as any,
+        new FakeOpenSocket((data) => {
+          sent.push(data);
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -474,7 +478,10 @@ describe("Android CtrlProxyText", () => {
     const sent: string[] = [];
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
-      getWebSocket: () => ({ readyState: 1, send: (data: string) => sent.push(data) }) as any,
+      getWebSocket: () =>
+        new FakeOpenSocket((data) => {
+          sent.push(data);
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,

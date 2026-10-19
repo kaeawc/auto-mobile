@@ -1,3 +1,4 @@
+import type { SwipeGestureRequest } from "../../../src/features/action/swipeon/types";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
@@ -109,7 +110,7 @@ describe("IosLockScreenUnlocker", () => {
         skipCallerDisplayFence: true,
         stopAfterIosGestureFailure: true,
         voiceOverExecutor: {
-          async executeSwipeGesture(x1, y1, x2, y2) {
+          async executeSwipeGesture({ x1, y1, x2, y2 }: SwipeGestureRequest) {
             coordinates.push([x1, y1, x2, y2]);
             return { success: false, x1, y1, x2, y2, duration: 300, error: "swipe failed" };
           },
@@ -152,7 +153,7 @@ describe("IosLockScreenUnlocker", () => {
           ...dependencies,
           observeScreen: observe,
           voiceOverExecutor: {
-            async executeSwipeGesture(x1, y1, x2, y2) {
+            async executeSwipeGesture({ x1, y1, x2, y2 }: SwipeGestureRequest) {
               gestures++;
               return { success: false, x1, y1, x2, y2, duration: 300 };
             },
@@ -188,7 +189,13 @@ describe("IosLockScreenUnlocker", () => {
         skipCallerDisplayFence: true,
         stopAfterIosGestureFailure: true,
         voiceOverExecutor: {
-          async executeSwipeGesture(x1, y1, x2, y2, _direction, _container, options) {
+          async executeSwipeGesture({
+            x1,
+            y1,
+            x2,
+            y2,
+            gestureOptions: options,
+          }: SwipeGestureRequest) {
             captured = options;
             return { success: false, x1, y1, x2, y2, duration: 300, error: "bounded" };
           },

@@ -26,6 +26,28 @@ export type SwipeInterval = { start: number; end: number; length: number };
 
 export type BoomerangConfig = { apexPauseMs: number; returnSpeed: number };
 
+export type SwipeGestureRequest = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  direction: SwipeDirection;
+  containerElement: Element | null;
+  gestureOptions?: FencedGestureOptions;
+  perf?: PerformanceTracker;
+  boomerang?: BoomerangConfig;
+  signal?: AbortSignal;
+};
+
+export type BoomerangGestureRequest = Omit<
+  SwipeGestureRequest,
+  "direction" | "containerElement" | "boomerang"
+> & { boomerang: BoomerangConfig };
+
+export type AnnounceSwipeableRequest = Omit<SwipeGestureRequest, "direction" | "boomerang">;
+
+export type AndroidAccessibilitySwipeRequest = Omit<SwipeGestureRequest, "boomerang">;
+
 export type OverlayCandidate = {
   bounds: Element["bounds"];
   overlapBounds: Element["bounds"];
@@ -34,18 +56,7 @@ export type OverlayCandidate = {
 };
 
 export interface VoiceOverSwipeRunner {
-  executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult>;
+  executeSwipeGesture(request: SwipeGestureRequest): Promise<SwipeResult>;
 }
 
 export interface AutoTargetSelectorService {
@@ -66,18 +77,7 @@ export interface AutoTargetSelectorService {
 }
 
 export interface TalkBackSwipeRunner {
-  executeSwipeGesture(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    direction: SwipeDirection,
-    containerElement: Element | null,
-    gestureOptions?: FencedGestureOptions,
-    perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult>;
+  executeSwipeGesture(request: SwipeGestureRequest): Promise<SwipeResult>;
 }
 
 export interface OverlayAnalyzer {

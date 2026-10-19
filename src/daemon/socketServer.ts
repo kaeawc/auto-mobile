@@ -893,7 +893,7 @@ export class UnixSocketServer {
   private closing = false;
   protected acceptingRequests = false;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
-  private readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
+  protected readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private readonly adbClientFactory: AdbClientFactory;
@@ -927,9 +927,9 @@ export class UnixSocketServer {
    * device session. Follow-up requests can omit their session UUID, so reuse
    * this client to preserve the selected tool-selection profile.
    */
-  private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
+  protected boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP forwards only within the same execution target. */
-  private mcpForwardTails: Map<string, Promise<void>> = new Map();
+  protected mcpForwardTails: Map<string, Promise<void>> = new Map();
   /** Direct device forwards that need cleanup after every successor tail has settled. */
   private mcpForwardIdleCloseKeys: Map<string, Set<string>> = new Map();
   /** Execution keys whose chain drained, timed for the append-helper idle eviction. */
@@ -1033,7 +1033,7 @@ export class UnixSocketServer {
    * registry entry live indefinitely; {@link GestureOwnershipRegistry} issues a cancelling end for
    * each on socket teardown, and for a start acked after its socket already closed (#10005).
    */
-  private readonly ownedGestures = new GestureOwnershipRegistry({
+  protected readonly ownedGestures = new GestureOwnershipRegistry({
     isSocketLive: (socketSessionId) => this.clientSockets.has(socketSessionId),
     cancelGesture: (targetDevice, gestureId) => this.cancelGestureOnDevice(targetDevice, gestureId),
   });
@@ -1603,7 +1603,7 @@ export class UnixSocketServer {
     );
   }
 
-  private abortMcpRequests(sessionId: string): void {
+  protected abortMcpRequests(sessionId: string): void {
     this.abortRequestControllers(
       sessionId,
       this.mcpRequestAbortControllers,
@@ -1626,7 +1626,7 @@ export class UnixSocketServer {
     }
   }
 
-  private mcpRequestSignal(
+  protected mcpRequestSignal(
     sessionId: string,
     ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
     cancelSignal?: AbortSignal,
@@ -1720,7 +1720,7 @@ export class UnixSocketServer {
   }
 
   /** Pushes one progress tick to the single socket that requested it (#6205); see the fan-out. */
-  private pushProgressNotification(
+  protected pushProgressNotification(
     sessionId: string,
     requestId: string,
     progressToken: string | number,
@@ -2264,7 +2264,7 @@ export class UnixSocketServer {
       : { id: request.id, type: "mcp_response", success: true, result: outcome };
   }
 
-  private mcpForwardFailureResponse({
+  protected mcpForwardFailureResponse({
     error,
     request,
     sessionId,
@@ -2388,7 +2388,7 @@ export class UnixSocketServer {
     return { id: request.id, type: "mcp_response", success: true, result: { cancelled: true } };
   }
 
-  private requireRemainingMcpForwardBudget(
+  protected requireRemainingMcpForwardBudget(
     request: DaemonRequest,
     totalTimeoutMs: number,
     deadline: ProgressExtendableDeadline,
@@ -2592,7 +2592,7 @@ export class UnixSocketServer {
     };
   }
 
-  private getMcpForwardRoute(
+  protected getMcpForwardRoute(
     request: DaemonRequest,
     socketSessionId: string,
   ): McpForwardRoute | Promise<McpForwardRoute> {
@@ -2848,7 +2848,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
+  protected async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
     const token = this.ownedSessionsOwnerToken(args);
     // A queued call must not recreate its closed connection's identity (#11999).
     if (token !== undefined && this.clientSockets.has(socketSessionId)) {
@@ -3219,7 +3219,7 @@ export class UnixSocketServer {
     };
   }
 
-  private recordBoundMcpClientKey(
+  protected recordBoundMcpClientKey(
     request: DaemonRequest,
     socketSessionId: string,
     route: McpForwardRoute,
@@ -3431,7 +3431,7 @@ export class UnixSocketServer {
     return toolSelectionProfileUuidFromResponse(response);
   }
 
-  private clearBoundMcpClientKey(socketSessionId: string): void {
+  protected clearBoundMcpClientKey(socketSessionId: string): void {
     const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
     if (!boundClient) {
       return;
@@ -3461,7 +3461,7 @@ export class UnixSocketServer {
    * the socket session as its MCP session key, closed (cancelling what it left running) when the
    * forward ends.
    */
-  private async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
+  protected async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
     const mcpClient = await runWithForwardSessionKey(
       context.socketSessionId,
@@ -3529,7 +3529,7 @@ export class UnixSocketServer {
     }
   }
 
-  private remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {
+  protected remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {
     return input.deadline.value - this.timer.now();
   }
 
@@ -4012,7 +4012,7 @@ export class UnixSocketServer {
    * The `ide/*` and acceptance routes. `ideMutation` is set for the routes that mutate a device
    * ({@link IDE_DEVICE_MUTATION_METHODS}): their ownership gate tracks the call under it.
    */
-  private async handleIdeSocketRequest(
+  protected async handleIdeSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
     ideMutation?: IdeMutationCall,
@@ -4586,7 +4586,7 @@ export class UnixSocketServer {
    * fallback abort check before direct-file work. Connecting alone never stamps.
    * Returns the SDK resolution and whether the fallback ran, for store and warning reporting.
    */
-  private async runIdeKeyValueMutation(
+  protected async runIdeKeyValueMutation(
     platform: "android" | "ios",
     device: BootedDevice,
     appId: string,
@@ -4722,7 +4722,7 @@ export class UnixSocketServer {
     return remaining;
   }
 
-  private async toIosRunnerCoordinates(
+  protected async toIosRunnerCoordinates(
     client: IOSCtrlProxyClient,
     deviceId: string,
     coordinates: number[],
@@ -4896,7 +4896,7 @@ export class UnixSocketServer {
     return { targetDevice, result };
   }
 
-  private async handleInputTap(
+  protected async handleInputTap(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -4999,7 +4999,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async handleInputSwipe(
+  protected async handleInputSwipe(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5110,7 +5110,7 @@ export class UnixSocketServer {
    * mid-drag cannot reject an in-flight gesture as stale. Each frame is serialized through the same
    * per-device keyed forward as taps/swipes, so gesture ordering is preserved.
    */
-  private async handleInputGesture(
+  protected async handleInputGesture(
     request: DaemonRequest,
     kind: GestureFrameKind,
     socketSessionId?: string,
@@ -5257,7 +5257,7 @@ export class UnixSocketServer {
    * incarnation (a released session re-created under the same id is a different holder), or no
    * holder for a start on a device no session held.
    */
-  private captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
+  protected captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
     const executionId = getToolSelectionContext()?.execution?.executionId;
     const holderSessionId = executionId
       ? executionTracker.getAdmittedSessionUse(executionId)
@@ -5276,7 +5276,7 @@ export class UnixSocketServer {
    * has the same holder incarnation, or still none. Synchronous, so a caller that records the
    * stroke in the same turn cannot be overtaken by a release or an acquisition.
    */
-  private strokeAdmissionStillHolds(admission: StrokeAdmission): boolean {
+  protected strokeAdmissionStillHolds(admission: StrokeAdmission): boolean {
     if (admission.signal?.aborted) {
       return false;
     }
@@ -5343,7 +5343,7 @@ export class UnixSocketServer {
    * gesture are separate control calls, so a release between two of them cuts no call and nothing
    * else would lift the pointer until the pane's socket closed. Best-effort; never throws.
    */
-  private liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
+  protected liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
     return this.ownedGestures.cancelAllHeldBy(releasedSessionId);
   }
 
@@ -5380,7 +5380,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async handleInputTypeText(
+  protected async handleInputTypeText(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5482,7 +5482,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async handleInputPressButton(
+  protected async handleInputPressButton(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5547,7 +5547,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async handleInputKey(
+  protected async handleInputKey(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -6165,7 +6165,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async resolveInputTargetDevice(
+  protected async resolveInputTargetDevice(
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
@@ -6241,7 +6241,7 @@ export class UnixSocketServer {
     }
   }
 
-  private captureInputTargetOwner(targetDevice: BootedDevice): void {
+  protected captureInputTargetOwner(targetDevice: BootedDevice): void {
     if (!this.daemonState.isInitialized()) {
       return;
     }
@@ -6298,7 +6298,7 @@ export class UnixSocketServer {
     throw new Error(`${action} requires deviceId when multiple ${platform} devices are booted`);
   }
 
-  private async runTrackedKeyedDeviceInput<T>(
+  protected async runTrackedKeyedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
@@ -6393,7 +6393,7 @@ export class UnixSocketServer {
     }
   }
 
-  private dispatchFencedInput<T>(
+  protected dispatchFencedInput<T>(
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
@@ -6462,7 +6462,7 @@ export class UnixSocketServer {
     });
   }
 
-  private async runTrackedDeviceInput<T>(
+  protected async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
@@ -6580,7 +6580,7 @@ export class UnixSocketServer {
    * cancelled it, answer the typed terminal refusal the MCP path gives, whatever the interrupted
    * operation threw (#11381). The thrown release carries its wire fields to the failure frame.
    */
-  private async answeringSessionRelease<T>(
+  protected async answeringSessionRelease<T>(
     execution: Pick<ActiveExecution, "cancelReason"> & Partial<Pick<ActiveExecution, "toolName">>,
     run: () => Promise<T>,
   ): Promise<T> {
@@ -6666,7 +6666,7 @@ export class UnixSocketServer {
     return ownerSignal ? AbortSignal.any([ownerSignal, timeoutSignal]) : timeoutSignal;
   }
 
-  private async handleIdeRequest(
+  protected async handleIdeRequest(
     mcpClient: Client,
     request: DaemonRequest,
     timeoutMs: number,
@@ -6885,7 +6885,7 @@ export class UnixSocketServer {
     };
   }
 
-  private withSocketSessionAutolockKey(
+  protected withSocketSessionAutolockKey(
     args: unknown,
     socketSessionId: string,
     timeoutMs: number,
@@ -6972,7 +6972,7 @@ export class UnixSocketServer {
     });
   }
 
-  private scheduleForwardKeyIdle(key: string): void {
+  protected scheduleForwardKeyIdle(key: string): void {
     this.clearForwardKeyIdleTimer(key);
     const timer = this.timer.setTimeout(() => {
       this.onForwardKeyIdle(key);
@@ -6980,7 +6980,7 @@ export class UnixSocketServer {
     this.forwardKeyIdleTimers.set(key, timer);
   }
 
-  private clearForwardKeyIdleTimer(key: string): void {
+  protected clearForwardKeyIdleTimer(key: string): void {
     const timer = this.forwardKeyIdleTimers.get(key);
     if (!timer) {
       return;

@@ -1,4 +1,7 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { describe, expect, test } from "bun:test";
 import {
   DAEMON_OWNED_SESSIONS_PARAM,
@@ -6,8 +9,8 @@ import {
 } from "../../src/daemon/constants";
 import type { RefusedOwnedSessionRestore } from "../../src/daemon/devicePool";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { FakeSocket } from "../fakes/FakeNetServer";
 
 // #11107: a refused owned-session restore skips that session instead of failing an unrelated
@@ -21,31 +24,37 @@ const REFUSED: RefusedOwnedSessionRestore = {
   reason: "owned-by-other-connection",
 };
 
-/** The socket server's private restore step, the only seam this test drives. */
-interface RestoreSeam {
-  restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
+/** A daemon state that only serves the given device pool. */
+function stateWithPool(pool: ReturnType<DaemonStateAccess["getDevicePool"]>): DaemonStateAccess {
+  return {
+    isInitialized: () => true,
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
+    getDevicePool: () => pool,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+  };
 }
 
-function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
+function serverRefusing(autolockRestores: string[][]): UnixSocketServerHarness {
   const pool = {
     refreshDevices: async () => 0,
     getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
     releaseDevice: async () => {},
     restoreOwnedDeviceSessionsForMcpSession: async () => [REFUSED],
-    restoreAutolockSessionsForMcpSession: async (ids: string[]) => {
-      autolockRestores.push(ids);
+    restoreAutolockSessionsForMcpSession: async (ids: readonly string[]) => {
+      autolockRestores.push([...ids]);
     },
     releaseMcpSessionBindings: () => {},
   };
-  return createTestUnixSocketServer(
-    "/tmp/never-listened.sock",
-    { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
-    new FakeTimer(),
-  );
+  return createHarnessServer("/tmp/never-listened.sock", stateWithPool(pool), new FakeTimer());
 }
 
-function restore(server: UnixSocketServer, args: Record<string, unknown>): Promise<void> {
-  return (server as unknown as RestoreSeam).restoreSelectorSessions(
+function restore(server: UnixSocketServerHarness, args: Record<string, unknown>): Promise<void> {
+  return server.restoreSessions(
     { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: [OTHER_SESSION, MINE] },
     "client",
   );
@@ -55,44 +64,53 @@ describe("refused owned-session restore", () => {
   test("forwards a token-only call while uninitialized without resolving the pool or declaring ownership", async () => {
     const declarations: string[] = [];
     let poolReads = 0;
-    const server = createTestUnixSocketServer(
+    const pool = {
+      refreshDevices: async () => 0,
+      getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+      releaseDevice: async () => {},
+      declareMcpSessionLivenessOwnerToken: (_id: string, token: string) => {
+        declarations.push(token);
+      },
+    };
+    const server = createHarnessServer(
       "/tmp/never-listened.sock",
       {
+        ...stateWithPool(pool),
         isInitialized: () => false,
         getDevicePool: () => {
           poolReads += 1;
-          return {
-            refreshDevices: async () => 0,
-            getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-            declareMcpSessionLivenessOwnerToken: (_id: string, token: string) => {
-              declarations.push(token);
-            },
-          };
+          return pool;
         },
       },
       new FakeTimer(),
     );
     const forwarded: Record<string, unknown>[] = [];
-    server.mcpClientFactory = async () => ({
-      callTool: async ({ arguments: args }) => {
-        forwarded.push(args ?? {});
-        return { content: [{ type: "text", text: "forwarded" }] };
-      },
-    });
-    server["acceptingRequests"] = true;
-    const socket = new FakeSocket();
-    server["handleConnection"](socket);
-    const socketId = [...server["sessions"].keys()][0]!;
-    try {
-      const response = await server["handleRequest"](socketId, socket, {
-        id: "token-only",
-        type: "mcp_request",
-        method: "tools/call",
-        params: {
-          name: "listDevices",
-          arguments: { platform: "android", [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async ({ arguments: args }) => {
+          forwarded.push(args ?? {});
+          return { content: [{ type: "text", text: "forwarded" }] };
         },
       });
+    server.allowRequests();
+    const socket = new FakeSocket();
+    server.connect(socket);
+    const socketId = server.sessionIds[0]!;
+    try {
+      const response = await server.dispatchRequest(
+        socketId,
+        socket,
+        {
+          id: "token-only",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name: "listDevices",
+            arguments: { platform: "android", [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },
+          },
+        },
+        Date.now(),
+      );
       expect(response).toMatchObject({
         success: true,
         result: { content: [{ type: "text", text: "forwarded" }] },
@@ -112,6 +130,7 @@ describe("refused owned-session restore", () => {
     const pool = {
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+      releaseDevice: async () => {},
       declareMcpSessionLivenessOwnerToken: (id: string, token: string) => {
         events.push(`${id}:${token}`);
       },
@@ -120,19 +139,16 @@ describe("refused owned-session restore", () => {
         return [];
       },
     };
-    const server = createTestUnixSocketServer(
+    const server = createHarnessServer(
       "/tmp/never-listened.sock",
-      {
-        isInitialized: () => true,
-        getDevicePool: () => pool,
-      } as unknown as DaemonStateAccess,
+      stateWithPool(pool),
       new FakeTimer(),
     );
-    server["acceptingRequests"] = true;
+    server.allowRequests();
     const socket = new FakeSocket();
-    server["handleConnection"](socket);
-    const socketId = [...server["sessions"].keys()][0]!;
-    const seam = server as unknown as RestoreSeam;
+    server.connect(socket);
+    const socketId = server.sessionIds[0]!;
+    const seam = { restoreSelectorSessions: server.restoreSessions.bind(server) };
     try {
       for (const args of [
         undefined,
@@ -158,7 +174,7 @@ describe("refused owned-session restore", () => {
       expect(events).toEqual([`${socketId}:owner`, "restore"]);
 
       socket.destroy();
-      expect(server["clientSockets"].has(socketId)).toBe(false);
+      expect(server.state.clientSockets.has(socketId)).toBe(false);
       events.length = 0;
       await seam.restoreSelectorSessions(
         { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },

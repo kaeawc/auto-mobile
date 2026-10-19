@@ -675,7 +675,7 @@ export class Daemon {
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
   private orphanWatchdog: PrivateDaemonOrphanWatchdog | null = null;
-  private deviceDisconnectMonitor: SingleFlightInterval | null = null;
+  protected deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
   private completeIdentityPublished = false;
@@ -685,16 +685,16 @@ export class Daemon {
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
   // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
   private readonly incumbentOwnerGuard: IncumbentOwnerGuard;
-  private deviceDisconnectMisses: Map<string, number> = new Map();
-  private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
-  private confirmedDisconnectedDeviceIds: Set<string> = new Set();
-  private forceDisconnectedDeviceIds: Set<string> = new Set();
-  private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
+  protected deviceDisconnectMisses: Map<string, number> = new Map();
+  protected deviceDisconnectMissIncarnations = new Map<string, DisconnectCandidateIncarnation>();
+  protected confirmedDisconnectedDeviceIds: Set<string> = new Set();
+  protected forceDisconnectedDeviceIds: Set<string> = new Set();
+  protected forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
   // Serials that already had one bounded 'adb -s <serial> reconnect' this offline
   // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
   // a later episode for the same serial gets a fresh attempt.
-  private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
-  private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
+  protected offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
+  protected offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
   // Start of each candidate's current transitional-state episode (#11090, #11592):
   // adb offline/unauthorized and simctl Booting/Shutting Down sweeps run against
   // OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
@@ -746,7 +746,7 @@ export class Daemon {
     defaultManager: () => NavigationGraphManager.getInstance(),
     managerForSession: (sessionId) => NavigationGraphManager.getInstanceForSession(sessionId),
   });
-  private unsubscribeAdbMissingDevice: (() => void) | null = null;
+  protected unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
   private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
   private options: DaemonOptions;
@@ -2565,7 +2565,7 @@ export class Daemon {
     return true;
   }
 
-  private async recordAndTryRecoverCapturedDisconnect(
+  protected async recordAndTryRecoverCapturedDisconnect(
     deviceId: string,
     pooledDevice: PooledDevice | null,
     assignmentCount: number,
@@ -2626,7 +2626,7 @@ export class Daemon {
     }
   }
 
-  private startDeviceDisconnectMonitor(
+  protected startDeviceDisconnectMonitor(
     deviceManager: Pick<
       MultiPlatformDeviceManager,
       | "getBootedDevicesDetailed"
@@ -3169,7 +3169,7 @@ export class Daemon {
     }
   }
 
-  private stopRecordingAfterDeviceDisconnect(
+  protected stopRecordingAfterDeviceDisconnect(
     recordingId: string,
     deviceId: string,
   ): Promise<boolean> {
@@ -3180,7 +3180,7 @@ export class Daemon {
     );
   }
 
-  private async shouldSkipStaleDisconnectCleanup(
+  protected async shouldSkipStaleDisconnectCleanup(
     pooledDeviceAtDisconnect: PooledDevice | null,
     deviceId: string,
     forceGenerationAtDisconnect: number | undefined = this.forceDisconnectedDeviceGenerations.get(
@@ -3227,7 +3227,7 @@ export class Daemon {
     return true;
   }
 
-  private isCapturedDisconnectTargetCurrent(
+  protected isCapturedDisconnectTargetCurrent(
     deviceId: string,
     pooledDeviceAtDisconnect: PooledDevice | null,
     assignmentCountAtDisconnect: number | undefined,
@@ -3254,7 +3254,7 @@ export class Daemon {
     );
   }
 
-  private startAdbMissingDeviceListener(): void {
+  protected startAdbMissingDeviceListener(): void {
     if (this.unsubscribeAdbMissingDevice) {
       return;
     }

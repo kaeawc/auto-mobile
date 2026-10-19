@@ -182,10 +182,11 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     expect(pending.has("racing-session")).toBe(true);
 
     persistence.failure = null;
-    persistence.upsertActiveSession = async (record) => {
-      await upsert(record);
+    persistence.upsertActiveSession = async (record, nowMs, options) => {
+      const version = await upsert(record, nowMs, options);
       upsertStarted.resolve();
       await finishUpsert.promise;
+      return version;
     };
     const resume = manager.createSession("racing-session", "emulator-new", "android");
     await upsertStarted.promise;

@@ -48,12 +48,20 @@ async function harness() {
     restore: async () => {
       await behavior.gate;
       writes.push(kind);
-      return { status: "restored" as const };
     },
   });
+  const recordKeepAwake = (kind: string) => () => {
+    const restorer = record(kind)();
+    return {
+      restore: async () => {
+        await restorer.restore();
+        return { status: "restored" as const };
+      },
+    };
+  };
   const manager = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorer: record("keep-awake"),
+    keepScreenAwakeRestorer: recordKeepAwake("keep-awake"),
     biometricEnrollmentRestorer: record("biometric"),
     restorers: {
       networkCondition: record("network"),
@@ -98,6 +106,7 @@ describe("session release device ownership hold", () => {
       registry,
       mockLocationClears: {
         markSet: () => {},
+        abandonClear: () => {},
         clearLateSet: () => null,
         retireDevice: (device) => {
           retired.push(device);

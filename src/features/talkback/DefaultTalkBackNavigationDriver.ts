@@ -32,14 +32,10 @@ export class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver
   }
 
   async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
-    const { x, y, duration: durationMs = 10, onDispatch } = request;
+    // Pass the duration through untouched: the client owns the default for an omitted value.
+    const { x, y, duration, onDispatch } = request;
 
-    return this.accessibilityService.requestTapCoordinates({
-      x,
-      y,
-      duration: durationMs,
-      onDispatch,
-    });
+    return this.accessibilityService.requestTapCoordinates({ x, y, duration, onDispatch });
   }
 
   async requestDoubleTapCoordinates(

@@ -10,7 +10,7 @@ final class WireDtoGoldenTests: XCTestCase {
     private func json(_ value: some Encodable) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return try String(decoding: encoder.encode(value), as: UTF8.self)
+        return try XCTUnwrap(String(data: encoder.encode(value), encoding: .utf8))
     }
 
     private func assertGolden(_ value: some Encodable, _ golden: String, line: UInt = #line) throws {

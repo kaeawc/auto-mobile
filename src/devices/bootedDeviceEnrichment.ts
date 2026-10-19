@@ -1,4 +1,5 @@
 import type { BootedDevice, DeviceInfo } from "../models";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 
 /** Fills a booted device's missing facts from its configured image; the booted value always wins. */
 export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
@@ -30,4 +31,18 @@ function enrichHardwareFacts(device: BootedDevice, image: DeviceInfo) {
     model: device.model ?? image.model,
     architecture: device.architecture ?? image.architecture,
   };
+}
+
+export function findImageForBootedDevice(
+  device: BootedDevice,
+  images: readonly DeviceInfo[],
+): DeviceInfo | undefined {
+  return images.find(
+    (image) =>
+      image.platform === device.platform &&
+      (image.deviceId === device.deviceId ||
+        (device.platform === "android" &&
+          isAndroidEmulatorSerial(device.deviceId) &&
+          image.name === device.name)),
+  );
 }

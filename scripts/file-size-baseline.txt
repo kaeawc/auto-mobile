@@ -25,8 +25,8 @@
 1082	src/db/failureAnalyticsRepository.ts
 1456	src/db/navigationRepository.ts
 1403	src/db/navigationRetention.ts
-2518	src/devices/DeviceReadiness.ts
-1855	src/devices/deviceBootService.ts
+1286	src/devices/DeviceReadiness.ts
+1416	src/devices/deviceBootService.ts
 1354	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1634	src/features/accessibility/ContrastChecker.ts
@@ -41,7 +41,7 @@
 3783	src/features/action/TapOnElement.ts
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
 1234	src/features/device/SetPosture.ts
-5861	src/features/deviceLifecycle/deviceLifecycleCore.ts
+5790	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1392	src/features/navigation/Explore.ts
 2499	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts

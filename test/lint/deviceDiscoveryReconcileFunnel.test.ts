@@ -207,19 +207,28 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
 
     // --- Consult no pooled identity -----------------------------------------
     "src/devices/DeviceReadiness.ts": {
-      calls: 4,
+      calls: 1,
       reason:
-        "Tracks adb-level connection state; owns no pooled identity and runs below the pool. The " +
-        "fourth call (resolveAndroidReadinessIdentity) re-reads the AVD-name-aware listing for one " +
-        "serial so the provided/current readiness paths key the Window cache on the runtime (#7031).",
+        "Android readiness verifies the adb-level connection state below the pool and owns no pooled identity.",
     },
-    "src/devices/deviceBootService.ts": {
+    "src/devices/ReadinessSelection.ts": {
       calls: 3,
       reason:
-        "Boot-progress polling and fresh exact-name Android identity checks for a device being " +
-        "created, plus the cache-bypassing iOS simulator re-check once its UDID lifecycle lease " +
-        "settles (#9902); there is no pooled entry yet, and the caller (deviceTools) reconciles " +
-        "its own post-boot discovery.",
+        "Readiness discovery and selection moved from DeviceReadiness; tracks connection state " +
+        "below the pool. resolveAndroidReadinessIdentity re-reads the AVD-name-aware listing so " +
+        "provided/current readiness paths key the Window cache on the runtime (#7031).",
+    },
+    "src/devices/deviceBootService.ts": {
+      calls: 1,
+      reason:
+        "Cache-bypassing iOS simulator re-check once its UDID lifecycle lease settles (#9902); " +
+        "there is no pooled entry yet, and the caller reconciles its post-boot discovery.",
+    },
+    "src/devices/DeviceBootExecution.ts": {
+      calls: 2,
+      reason:
+        "Boot-progress polling and fresh exact-name Android identity discovery moved from " +
+        "deviceBootService; the caller reconciles its post-boot discovery before reading pooled identity.",
     },
     "src/utils/android-cmdline-tools/AvdSnapshotService.ts": {
       calls: 1,

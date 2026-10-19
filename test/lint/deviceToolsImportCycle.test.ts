@@ -18,6 +18,7 @@ const SERVER_DIR = join(ROOT, "src", "server");
 
 const EXTRA_NODES = [
   "src/features/deviceLifecycle/deviceLifecycleCore.ts",
+  "src/features/deviceLifecycle/deviceLifecycleDependencyOverrides.ts",
   "src/server/lifecycleDeviceOwnership.ts",
   "src/daemon/sessionBroker/provisioning/deviceDeleter.ts",
   "src/server/deviceResourceTools.ts",

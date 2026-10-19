@@ -5,7 +5,11 @@
  * deviceTools.ts registers the tools and the sibling modules import only from here. The code
  * moved verbatim.
  */
-import { deviceReservedForRestartRecoveryError } from "../../daemon/inputDeviceOwnership";
+import {
+  deviceReservedForRestartRecoveryError,
+  heldDeviceBindRefusal,
+  isSameHolderSession,
+} from "../../daemon/inputDeviceOwnership";
 import { type BindingFields, holderOf } from "../../daemon/deviceBinding";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../models";
 import {
@@ -89,10 +93,10 @@ import {
   deviceListRefreshFailureMessage,
 } from "../../daemon/devicePoolRefresh";
 import { releasePoolDevice, releaseSessionAndDevice } from "../../daemon/releaseSessionAndDevice";
-import { heldDeviceBindRefusal, isSameHolderSession } from "../../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "./lifecycleRequester";
 import { deviceLossCancellationReason as utilDeviceLossCancellationReason } from "../../utils/deviceLossCancellationReason";
 import { terminateColdBootProcess } from "../../devices/coldBootProcessTermination";
+
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { enableToolsSchemaField } from "../../server/toolSelectionTools";
@@ -213,7 +217,6 @@ import {
 import { type ProvisionDeviceLifecycleOutcome } from "../../devices/provisionDeviceLifecycle";
 import {
   getVirtualDeviceLifecycleCoordinator,
-  InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
   type VirtualDeviceLifecycleLease,
@@ -224,6 +227,12 @@ import {
   androidProvisionDeviceSpecSchema,
   iosProvisionDeviceSpecSchema,
 } from "../../server/provisionDeviceSpecSchemas";
+import { mergeDeviceToolsDependencies } from "./deviceLifecycleDependencyOverrides";
+export {
+  provisionDeviceDependencyOverrides,
+  resolveDeviceToolsLifecycleCoordinator,
+  resourceNotificationDependencyOverrides,
+} from "./deviceLifecycleDependencyOverrides";
 export { PooledAvdIdentityError } from "./PooledAvdIdentityError";
 
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
@@ -4100,90 +4109,8 @@ export async function verifyTeardownAbsence(
   }
 }
 
-export function provisionDeviceDependencyOverrides(
-  deps: Partial<DeviceToolsDependencies>,
-  currentDeps: DeviceToolsDependencies,
-): Pick<DeviceToolsDependencies, "exactDeviceProvisionerFactory" | "checkBootCapacity"> {
-  return {
-    exactDeviceProvisionerFactory:
-      deps.exactDeviceProvisionerFactory ?? currentDeps.exactDeviceProvisionerFactory,
-    checkBootCapacity: deps.checkBootCapacity ?? currentDeps.checkBootCapacity,
-  };
-}
-
-export function resourceNotificationDependencyOverrides(
-  deps: Partial<DeviceToolsDependencies>,
-  currentDeps: DeviceToolsDependencies,
-): Pick<
-  DeviceToolsDependencies,
-  | "appResourceDependencies"
-  | "notifyResourcesChanged"
-  | "notifyDeviceInventoryResourcesChanged"
-  | "syncInstalledAppResourceRegistry"
-> {
-  return {
-    appResourceDependencies: deps.appResourceDependencies ?? currentDeps.appResourceDependencies,
-    notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
-    notifyDeviceInventoryResourcesChanged:
-      deps.notifyDeviceInventoryResourcesChanged ??
-      currentDeps.notifyDeviceInventoryResourcesChanged,
-    syncInstalledAppResourceRegistry:
-      deps.syncInstalledAppResourceRegistry ?? currentDeps.syncInstalledAppResourceRegistry,
-  };
-}
-
-export function resolveDeviceToolsLifecycleCoordinator(
-  deps: Partial<DeviceToolsDependencies>,
-  currentDeps: DeviceToolsDependencies,
-): VirtualDeviceLifecycleCoordinator {
-  if (deps.lifecycleCoordinator) {
-    return deps.lifecycleCoordinator;
-  }
-  return deps.timer
-    ? new InMemoryVirtualDeviceLifecycleCoordinator(deps.timer)
-    : currentDeps.lifecycleCoordinator;
-}
-
-// The override merger intentionally keeps all dependency seams in one place.
-// oxlint-disable-next-line complexity
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
-  const currentDeps = getDeviceToolsDependencies();
-  moduleDependencies = {
-    androidAdbFactory: deps.androidAdbFactory ?? currentDeps.androidAdbFactory,
-    cameraPosterQrWriter: deps.cameraPosterQrWriter ?? currentDeps.cameraPosterQrWriter,
-    env: deps.env ?? currentDeps.env,
-    deviceResourceObserverFactory:
-      deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
-    deviceResourceControllerFactory:
-      deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
-    deviceResourceReconcilerFactory:
-      deps.deviceResourceReconcilerFactory ?? currentDeps.deviceResourceReconcilerFactory,
-    deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
-    avdManagerFactory: deps.avdManagerFactory ?? currentDeps.avdManagerFactory,
-    deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
-    displayInventory: deps.displayInventory ?? currentDeps.displayInventory,
-    ...resourceNotificationDependencyOverrides(deps, currentDeps),
-    ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
-    deviceCreationGateFactory:
-      deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
-    deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
-    bootCapacityReporters: deps.bootCapacityReporters ?? currentDeps.bootCapacityReporters,
-    ...provisionDeviceDependencyOverrides(deps, currentDeps),
-    clearInstalledAppsForDevice:
-      deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
-    stopPerformanceMonitoring:
-      deps.stopPerformanceMonitoring ?? currentDeps.stopPerformanceMonitoring,
-    stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,
-    idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
-    timer: deps.timer ?? currentDeps.timer,
-    daemonState: deps.daemonState ?? currentDeps.daemonState,
-    lifecycleCoordinator: resolveDeviceToolsLifecycleCoordinator(deps, currentDeps),
-    get androidEmulatorProcessStopper() {
-      return deps.androidEmulatorProcessStopper ?? currentDeps.androidEmulatorProcessStopper;
-    },
-    resolveRunningAndroidAvdName:
-      deps.resolveRunningAndroidAvdName ?? currentDeps.resolveRunningAndroidAvdName,
-  };
+  moduleDependencies = mergeDeviceToolsDependencies(deps, getDeviceToolsDependencies());
 }
 
 export function resetDeviceToolsDependencies(): void {

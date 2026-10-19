@@ -38,6 +38,7 @@ import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
 import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
 import * as sessionManager from "../../src/daemon/sessionManager";
+import * as sessionErrors from "../../src/daemon/sessionErrors";
 import * as sessionOwnership from "../../src/models/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
 import * as provisioning from "../../src/devices/exactDeviceProvisioning";
@@ -143,6 +144,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/daemonMcpProxy": daemonProxy,
   "daemon/proxy/daemonErrors": daemonErrors,
   "daemon/sessionManager": sessionManager,
+  "daemon/sessionErrors/SessionHeldByRecoveryError": sessionErrors,
+  "daemon/sessionErrors/SessionRebindingError": sessionErrors,
+  "daemon/sessionErrors/SessionSuspectError": sessionErrors,
+  "daemon/sessionErrors/SessionTerminalReleaseInProgressError": sessionErrors,
   "models/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
   "devices/exactDeviceProvisioning": provisioning,

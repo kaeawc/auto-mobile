@@ -36,7 +36,7 @@
 2033	src/features/action/Rotate.ts
 1887	src/features/action/TapAnyElement.ts
 1468	src/features/action/TapAtCoordinate.ts
-3765	src/features/action/TapOnElement.ts
+3515	src/features/action/TapOnElement.ts
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
 1234	src/features/device/SetPosture.ts
 5790	src/features/deviceLifecycle/deviceLifecycleCore.ts

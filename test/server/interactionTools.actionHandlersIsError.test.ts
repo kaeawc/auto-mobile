@@ -118,7 +118,7 @@ type ToolResponse = { isError?: true; content: Array<{ type: string; text: strin
 const parsePayload = (response: ToolResponse): { message: string; success: boolean } =>
   JSON.parse(response.content[0].text) as { message: string; success: boolean };
 
-const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
 
 describe("tapAnyHandler (registered handler wiring)", () => {
   const args: TapAnyArgs = { action: "tap", platform: "android" };

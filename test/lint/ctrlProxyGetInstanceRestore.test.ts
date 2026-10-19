@@ -651,7 +651,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "test/features/observe/TakeScreenshot.Encoding.test.ts",
     "test/features/observe/TakeScreenshot.iOS.test.ts",
     "test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts",
-    "test/server/databaseResourcesPagination.test.ts",
     "test/server/deviceTools.killDevice.test.ts",
   ];
 

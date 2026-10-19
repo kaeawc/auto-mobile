@@ -12,6 +12,8 @@ import type {
   DelegateContext,
   GestureTimingResult,
   BaseResult,
+  DragRequest,
+  SwipeRequest,
   SwipeRequestOptions,
 } from "./types";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
@@ -190,20 +192,10 @@ export class SharedGestureDelegate {
     return sendCommand<GestureTimingResult>(this.context, options);
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    contextOptions?: string | SwipeRequestOptions,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<GestureTimingResult> {
+  async requestSwipe(request: SwipeRequest): Promise<GestureTimingResult> {
+    const { x1, y1, x2, y2, perf, contextOptions, onDispatch, signal, displayId, beforeSend } =
+      request;
+    const { duration = 300, timeoutMs = 5000 } = request;
     const displayParams = this.gestureDisplayParams(displayId);
     const result = await this.sendSwipeCommand({
       idPrefix: "swipe",
@@ -234,21 +226,9 @@ export class SharedGestureDelegate {
     return result;
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<GestureTimingResult> {
+  async requestDrag(request: DragRequest): Promise<GestureTimingResult> {
+    const { x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs } = request;
+    const { frameContext, signal, displayId, beforeSend, onDispatch } = request;
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "drag",

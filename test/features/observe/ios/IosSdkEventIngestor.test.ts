@@ -874,13 +874,12 @@ describe("DefaultIosSdkEventIngestor", () => {
   });
 
   describe("recordLayoutTelemetryEvent", () => {
-    const hierarchy = (): ViewHierarchyResult =>
-      ({
-        hierarchy: { node: [{ $: { text: "a" } }, { $: { text: "b" } }] },
-        packageName: "com.app",
-        windows: [],
-        updatedAt: 123,
-      }) as unknown as ViewHierarchyResult;
+    const hierarchy = (): ViewHierarchyResult => ({
+      hierarchy: { node: { node: [{ $: { text: "a" } }, { $: { text: "b" } }] } },
+      packageName: "com.app",
+      windows: [],
+      updatedAt: 123,
+    });
 
     test("timestamps layout telemetry with the advanced injected timer", () => {
       const timer = new FakeTimer();
@@ -901,8 +900,8 @@ describe("DefaultIosSdkEventIngestor", () => {
         applicationId: "com.app",
         screenName: "com.app",
       });
-      // Fixture is root ({ node: [...] }) + 2 leaves (each has $), so
-      // countViewHierarchyNodes returns 3 (1 for the root's `node`, +1 per leaf `$`).
+      // Fixture is a root node (it has children) + 2 leaves (each has $), so
+      // countViewHierarchyNodes returns 3.
       expect((recorder.layout[0].event as { recompositionCount: number }).recompositionCount).toBe(
         3,
       );

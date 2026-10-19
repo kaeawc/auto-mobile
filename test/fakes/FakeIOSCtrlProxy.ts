@@ -33,7 +33,11 @@ import type {
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
-import type { BaseResult, SwipeRequestOptions } from "../../src/features/observe/shared/types";
+import type {
+  BaseResult,
+  DragRequest,
+  SwipeRequest,
+} from "../../src/features/observe/shared/types";
 import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
@@ -829,18 +833,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     );
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    contextOptions?: string | SwipeRequestOptions,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+  async requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    const { x1, y1, x2, y2, signal, onDispatch } = request;
+    const { duration = 300 } = request;
     signal?.throwIfAborted();
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
@@ -859,16 +854,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     );
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-  ): Promise<CtrlProxyDragResult> {
+  async requestDrag(request: DragRequest): Promise<CtrlProxyDragResult> {
+    const { x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs } = request;
     await this.applyDelay("drag");
     this.checkFailure("drag");
 

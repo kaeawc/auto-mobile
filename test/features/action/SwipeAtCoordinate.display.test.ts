@@ -187,8 +187,8 @@ describe("swipeAt display", () => {
 
   test("a non-stale rejection after dispatch becomes a structured failure", async () => {
     const { swipeAt, ctrl } = setup();
-    ctrl.requestSwipe = async (...args) => {
-      args[8]?.();
+    ctrl.requestSwipe = async (request) => {
+      request.onDispatch?.();
       throw new Error("socket closed");
     };
 

@@ -32,17 +32,7 @@ export function createNotificationUIDetector(
       requestSwipe: (x1, y1, x2, y2, duration) => {
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(
-          getIosClient(device, getDependencies).requestSwipe(
-            x1,
-            y1,
-            x2,
-            y2,
-            duration,
-            undefined,
-            undefined,
-            undefined,
-            signal,
-          ),
+          getIosClient(device, getDependencies).requestSwipe({ x1, y1, x2, y2, duration, signal }),
           signal,
         );
       },

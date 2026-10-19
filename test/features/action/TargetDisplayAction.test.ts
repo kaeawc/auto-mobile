@@ -1,4 +1,6 @@
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
+import type { DragRequest } from "../../../src/utils/interfaces/DragRequest";
+import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
@@ -176,6 +178,43 @@ function adb(): FakeAdbExecutor {
 // keep these unit tests in memory so file IO is not charged to them.
 beforeEach(() => setObserveCacheStore(new FakeObserveCacheStore()));
 afterEach(() => resetObserveCacheStore());
+
+/** A swipe request laid out like the tap and drag calls, so shared tail assertions line up. */
+function swipeCallTails(calls: ReadonlyArray<readonly [SwipeRequest]>): unknown[][] {
+  return calls.map(([request]) => [
+    request.x1,
+    request.y1,
+    request.x2,
+    request.y2,
+    request.duration,
+    request.timeoutMs,
+    request.perf,
+    request.contextOptions,
+    request.onDispatch,
+    request.signal,
+    request.displayId,
+    request.beforeSend,
+  ]);
+}
+
+/** A drag request laid out like the tap calls, so shared tail assertions line up. */
+function dragCallTails(calls: ReadonlyArray<readonly [DragRequest]>): unknown[][] {
+  return calls.map(([request]) => [
+    request.x1,
+    request.y1,
+    request.x2,
+    request.y2,
+    request.pressDurationMs,
+    request.dragDurationMs,
+    request.holdDurationMs,
+    request.timeoutMs,
+    request.frameContext,
+    request.signal,
+    request.displayId,
+    request.beforeSend,
+    request.onDispatch,
+  ]);
+}
 
 describe("explicit action display", () => {
   let capabilitySpy: ReturnType<typeof spyOn>;
@@ -758,10 +797,10 @@ describe("explicit action display", () => {
     const fakeAdb = new FakeAdbClient();
     const timer = autoTimer();
     timer.enableAutoAdvance();
-    const drags: number[][] = [];
+    const drags: Array<[number, number, number, number]> = [];
     const client = {
-      requestDrag: async (...coordinates: number[]) => {
-        drags.push(coordinates);
+      requestDrag: async ({ x1, y1, x2, y2 }: DragRequest) => {
+        drags.push([x1, y1, x2, y2]);
         return { success: true };
       },
     };
@@ -1727,7 +1766,11 @@ describe("CtrlProxy display-targeted action routing", () => {
         );
         expect(result.effect?.screenChanged).toBe(true);
         expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
-        const requests = [...tap.mock.calls, ...swipe.mock.calls, ...drag.mock.calls];
+        const requests = [
+          ...tap.mock.calls,
+          ...swipeCallTails(swipe.mock.calls),
+          ...dragCallTails(drag.mock.calls),
+        ];
         expect(requests).toHaveLength(1);
         expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
         expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
@@ -1889,8 +1932,8 @@ describe("CtrlProxy display-targeted action routing", () => {
               }
               const calls = [
                 ...tap.mock.calls,
-                ...swipe.mock.calls,
-                ...drag.mock.calls,
+                ...swipeCallTails(swipe.mock.calls),
+                ...dragCallTails(drag.mock.calls),
                 ...pinch.mock.calls,
               ];
               const inputs = executor

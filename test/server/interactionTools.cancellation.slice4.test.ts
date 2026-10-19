@@ -309,17 +309,7 @@ test.each(["tap", "dismiss"])(
           await finish.promise;
           return { success: true };
         },
-        requestSwipe: async (
-          _x1,
-          _y1,
-          _x2,
-          _y2,
-          _duration,
-          _timeout?: number,
-          _perf?: unknown,
-          _frame?: string,
-          signal?: AbortSignal,
-        ) => {
+        requestSwipe: async ({ signal }) => {
           received = signal;
           dispatches++;
           started.resolve();

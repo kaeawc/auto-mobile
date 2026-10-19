@@ -153,8 +153,8 @@ for (const throws of [false, true]) {
       totalTimeMs: 0,
     });
     const drag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag").mockImplementation(
-      async (...args) => {
-        args[12]?.();
+      async (request) => {
+        request.onDispatch?.();
         if (throws) {
           throw new Error("timed out");
         }
@@ -202,7 +202,16 @@ test("Android search uses the existing continuous drag, zero press and 100ms end
   expect(
     await gesture.swipe(540, 2114, 540, 590, { duration: 600, searchScroll: true }),
   ).toMatchObject({ success: true });
-  expect(drag.mock.calls[0]?.slice(0, 8)).toEqual([540, 2114, 540, 590, 0, 600, 100, 5000]);
+  expect(drag.mock.calls[0]?.[0]).toMatchObject({
+    x1: 540,
+    y1: 2114,
+    x2: 540,
+    y2: 590,
+    pressDurationMs: 0,
+    dragDurationMs: 600,
+    holdDurationMs: 100,
+    timeoutMs: 5000,
+  });
   expect(adb.getExecutedCommands()).toEqual([]);
 });
 
@@ -245,8 +254,8 @@ test("dispatched drag rejection reports an indeterminate outcome for the loop", 
   const result = await executeAndroidSearchDrag({
     client: {
       requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
-      requestDrag: async (...args) => {
-        args[12]?.();
+      requestDrag: async (request) => {
+        request.onDispatch?.();
         return { success: false, error: "ack lost", totalTimeMs: 0 };
       },
     },
@@ -270,8 +279,8 @@ test("a drag that loses its display after dispatch carries typed guidance and de
   const result = await executeAndroidSearchDrag({
     client: {
       requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
-      requestDrag: async (...args) => {
-        args[12]?.();
+      requestDrag: async (request) => {
+        request.onDispatch?.();
         throw new StaleDisplayError(details);
       },
     },

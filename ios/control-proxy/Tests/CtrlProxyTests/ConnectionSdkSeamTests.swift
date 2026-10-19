@@ -39,7 +39,7 @@ final class ConnectionSdkSeamTests: XCTestCase {
         XCTAssertEqual(cache.latest?.bundleId, "com.example.app")
         XCTAssertEqual(cache.latest?.timestamp, 11)
         // The endpoint still returns its 200 acknowledgement.
-        let response = recorder.sends.map { String(decoding: $0, as: UTF8.self) }.joined()
+        let response = recorder.sends.map { String(data: $0, encoding: .utf8) ?? "" }.joined()
         XCTAssertTrue(response.contains("200 OK"), "POST /sdk-events should acknowledge with 200")
         XCTAssertTrue(response.contains(#"{"ok":true}"#))
     }
@@ -55,7 +55,7 @@ final class ConnectionSdkSeamTests: XCTestCase {
             drainLogEvents: { [logEvent] }
         )
 
-        let response = recorder.sends.map { String(decoding: $0, as: UTF8.self) }.joined()
+        let response = recorder.sends.map { String(data: $0, encoding: .utf8) ?? "" }.joined()
         XCTAssertTrue(
             response.contains(#"{"eventType":"log","level":2,"message":"hi"}"#),
             "GET /sdk-events must include the drainLogEvents output; got:\n\(response)"

@@ -59,8 +59,8 @@ enum Framing {
 
     static func frameAction(opcode: UInt8, unmaskedPayload: Data) -> (tag: String, data: Data?) {
         switch WebSocketFraming.frameAction(opcode: opcode, unmaskedPayload: unmaskedPayload) {
-        case let .deliver(d): return ("deliver", d)
-        case let .pong(d): return ("pong", d)
+        case let .deliver(data): return ("deliver", data)
+        case let .pong(data): return ("pong", data)
         case .ignore: return ("ignore", nil)
         }
     }
@@ -86,7 +86,7 @@ enum Framing {
             inProgressOpcode: &inProg
         )
         switch result {
-        case let .deliver(d): return ("deliver", d, nil, buf, inProg)
+        case let .deliver(data): return ("deliver", data, nil, buf, inProg)
         case .buffered: return ("buffered", nil, nil, buf, inProg)
         case let .protocolError(reason): return ("protocolError", nil, reason, buf, inProg)
         }

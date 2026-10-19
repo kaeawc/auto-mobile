@@ -17,9 +17,10 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -52,13 +53,15 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class WebSocketServerIntegrationTest {
 
+  private val workerDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+
   private lateinit var server: WebSocketServer
   private lateinit var testScope: CoroutineScope
   private val json = Json { ignoreUnknownKeys = true }
 
   @Before
   fun setUp() {
-    testScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    testScope = CoroutineScope(workerDispatcher + SupervisorJob())
     // Use port 0 to let OS assign an available port, avoiding conflicts when tests run in parallel
     server =
       WebSocketServer(
@@ -98,6 +101,7 @@ class WebSocketServerIntegrationTest {
       server.stop()
     }
     testScope.cancel()
+    workerDispatcher.close()
   }
 
   /**
@@ -903,7 +907,7 @@ class WebSocketServerIntegrationTest {
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
               override suspend fun requestScreenshot(request: RequestScreenshot) {
-                throw RuntimeException("kaboom")
+                throw IllegalStateException("kaboom")
               }
             },
           ),
@@ -947,7 +951,7 @@ class WebSocketServerIntegrationTest {
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
               override suspend fun requestScreenshot(request: RequestScreenshot) {
-                throw RuntimeException("kaboom")
+                throw IllegalStateException("kaboom")
               }
             },
           ),
@@ -1368,7 +1372,7 @@ class WebSocketServerIntegrationTest {
                 // after
                 // this method (and handleMessage) has already returned.
                 runnerHolder[0]!!.launch(requestId, "screenshot") {
-                  throw RuntimeException("async boom")
+                  throw IllegalStateException("async boom")
                 }
               }
             },
@@ -1454,7 +1458,7 @@ class WebSocketServerIntegrationTest {
                 val requestId = request.requestId
 
                 runnerHolder[0]!!.launch(requestId, "screenshot") {
-                  throw RuntimeException("async boom")
+                  throw IllegalStateException("async boom")
                 }
               }
             },

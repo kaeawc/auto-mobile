@@ -504,16 +504,13 @@ sealed class PrototypeGridColumns {
 
 object PrototypeGridColumnsSerializer :
   PrototypeJsonValueSerializer<PrototypeGridColumns>("PrototypeGridColumns") {
+  private fun isColumnCount(count: Double): Boolean =
+    count.isFinite() && count in 1.0..Int.MAX_VALUE.toDouble() && count % 1.0 == 0.0
+
   override fun fromJson(value: JsonElement): PrototypeGridColumns {
     if (value is JsonPrimitive && !value.isString) {
       val count = value.doubleOrNull
-      if (
-        count != null &&
-          count.isFinite() &&
-          count >= 1 &&
-          count <= Int.MAX_VALUE &&
-          count % 1.0 == 0.0
-      ) {
+      if (count != null && isColumnCount(count)) {
         return PrototypeGridColumns.Fixed(count.toInt())
       }
     }

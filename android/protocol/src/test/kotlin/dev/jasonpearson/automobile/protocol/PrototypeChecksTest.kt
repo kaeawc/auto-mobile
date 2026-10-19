@@ -284,6 +284,10 @@ class PrototypeChecksTest {
           .getValue("MAX_PROTOTYPE_CHECK_VALUE_LENGTH")
           .jsonPrimitive
           .int
+      warmFixtures()
+    }
+
+    private fun warmFixtures() {
       // Warm serializers, regex compilation and validation outside individually timed tests.
       for (fixture in patterns) PrototypeCheckPattern.matches(
         fixture.text("pattern"),

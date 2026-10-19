@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
@@ -48,7 +48,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     return session;
   };
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     tracker = new ExecutionTracker(timer, new FakeIdGenerator(["running-call"]));
@@ -111,14 +111,26 @@ describe("owner-disconnect release re-arm (#10663)", () => {
       allowSessionRebind: false,
       mcpSessionId: OWNER_CONNECTION,
     });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     unsubscribeExecutionEnded();
     sessionManager.stopCleanupTimer();
   });
 
-  test("a release deferred by a running call fires soon after the call settles", async () => {
+  arranged("a release deferred by a running call fires soon after the call settles", async () => {
     const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
 
@@ -142,30 +154,33 @@ describe("owner-disconnect release re-arm (#10663)", () => {
   // real Daemon in inventoryReadEndRearmsOwnerDisconnectRelease.test.ts and
   // readEndReleaseRearmScenario.test.ts, not through a copy of the daemon's port.
 
-  test("the call end restarting the idle window does not cancel the deferred release", async () => {
-    // As in the daemon: a call's end restarts the session's idle window and activity clock.
-    const unsubscribe = tracker.onSessionExecutionEnded((sessionUuids) => {
-      for (const sessionUuid of sessionUuids) {
-        sessionManager.recordToolCallEnded(sessionUuid);
+  arranged(
+    "the call end restarting the idle window does not cancel the deferred release",
+    async () => {
+      // As in the daemon: a call's end restarts the session's idle window and activity clock.
+      const unsubscribe = tracker.onSessionExecutionEnded((sessionUuids) => {
+        for (const sessionUuid of sessionUuids) {
+          sessionManager.recordToolCallEnded(sessionUuid);
+        }
+      });
+      try {
+        const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
+        devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+        await settle(OWNER_DISCONNECT_GRACE_MS + 10_000);
+        expect(releaseReasons).toEqual([]);
+
+        tracker.endExecution(call.id);
+        await settle(0);
+
+        expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+        expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
+      } finally {
+        unsubscribe();
       }
-    });
-    try {
-      const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
-      devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
-      await settle(OWNER_DISCONNECT_GRACE_MS + 10_000);
-      expect(releaseReasons).toEqual([]);
+    },
+  );
 
-      tracker.endExecution(call.id);
-      await settle(0);
-
-      expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
-      expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
-    } finally {
-      unsubscribe();
-    }
-  });
-
-  test("an owner that reconnects while the release is deferred keeps its session", async () => {
+  arranged("an owner that reconnects while the release is deferred keeps its session", async () => {
     const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
     await settle(OWNER_DISCONNECT_GRACE_MS + 10_000);
@@ -179,7 +194,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     expect(devicePool["ownerDisconnectRelease"].isPending(OWNER_SESSION)).toBe(false);
   });
 
-  test("a call that never settles keeps the session only up to the veto ceiling", async () => {
+  arranged("a call that never settles keeps the session only up to the veto ceiling", async () => {
     tracker.startExecution("tapOn", undefined, OWNER_SESSION);
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
     await settle(OWNER_DISCONNECT_GRACE_MS);
@@ -196,20 +211,23 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     expect(tracker.hasActiveSessionUuidExecutions(OWNER_SESSION)).toBe(true);
   });
 
-  test("a call that never settles keeps the session only until its request deadline plus grace (#10712)", async () => {
-    const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
-    const deadlineMs = OWNER_DISCONNECT_GRACE_MS + 60_000;
-    tracker.setExecutionDeadline(call.id, () => deadlineMs);
-    devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
-    await settle(OWNER_DISCONNECT_GRACE_MS);
+  arranged(
+    "a call that never settles keeps the session only until its request deadline plus grace (#10712)",
+    async () => {
+      const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
+      const deadlineMs = OWNER_DISCONNECT_GRACE_MS + 60_000;
+      tracker.setExecutionDeadline(call.id, () => deadlineMs);
+      devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+      await settle(OWNER_DISCONNECT_GRACE_MS);
 
-    await settle(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1 - timer.now());
-    expect(releaseReasons).toEqual([]);
+      await settle(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1 - timer.now());
+      expect(releaseReasons).toEqual([]);
 
-    await settle(1);
-    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
-    expect(tracker.hasActiveSessionUuidExecutions(OWNER_SESSION)).toBe(true);
-  });
+      await settle(1);
+      expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+      expect(tracker.hasActiveSessionUuidExecutions(OWNER_SESSION)).toBe(true);
+    },
+  );
 });
 
 describe("OwnerDisconnectExecutionVeto (#10663)", () => {

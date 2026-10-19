@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -159,7 +159,19 @@ describe("a failed start does not stop the device it booted once another session
     PlatformDeviceManagerFactory.reset();
     timer.reset();
   };
-  beforeEach(arrange);
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table)(
+        name,
+        async (row: T) => {
+          await arrange();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(dispose);
 
   /** Give deferred cleanup and its grace timers room to run. */
@@ -220,7 +232,7 @@ describe("a failed start does not stop the device it booted once another session
     expect(await gates.admitsOneMoreBoot(platform)).toBe(false);
   };
 
-  test.each(TARGETS)(
+  arrangedEach(TARGETS)(
     "$platform: runner readiness fails after another session selected the device",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
@@ -237,7 +249,7 @@ describe("a failed start does not stop the device it booted once another session
     },
   );
 
-  test.each(TARGETS)(
+  arrangedEach(TARGETS)(
     "$platform: the booting call loses its bind to another session's selection",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => await otherSessionSelects(deviceId, platform);
@@ -250,7 +262,7 @@ describe("a failed start does not stop the device it booted once another session
     },
   );
 
-  test.each(TARGETS)(
+  arrangedEach(TARGETS)(
     "$platform: a device the other session let go again is stopped with the failed start",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
@@ -271,7 +283,7 @@ describe("a failed start does not stop the device it booted once another session
   );
 
   // Same serial is not provenance: only a recovery of this call's cold boot owns its replacement.
-  test.each([false, true])(
+  arrangedEach([false, true])(
     "android: failed ANR handoff respects running-before provenance (%s)",
     async (runningBefore) => {
       let held = "owner-session";

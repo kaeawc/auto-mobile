@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -71,7 +71,7 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
 
   const tool = (name: string) => ToolRegistry.getTool(name)!.handler;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     ToolRegistry.clearTools();
     foreignPid = undefined;
     registryReadable = true;
@@ -113,7 +113,19 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     ToolRegistry.clearTools();
@@ -137,41 +149,47 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
     return JSON.parse(response.content[0].text) as Body;
   }
 
-  test("a device another daemon holds is refused as retryable with retryAfterMs by both tools", async () => {
-    foreignPid = 4242;
-    const killed = await killWire();
-    expect(killed).toMatchObject({
-      code: "device_owned_by_other_daemon",
-      retryable: true,
-      retryAfterMs: expect.any(Number),
-    });
+  arranged(
+    "a device another daemon holds is refused as retryable with retryAfterMs by both tools",
+    async () => {
+      foreignPid = 4242;
+      const killed = await killWire();
+      expect(killed).toMatchObject({
+        code: "device_owned_by_other_daemon",
+        retryable: true,
+        retryAfterMs: expect.any(Number),
+      });
 
-    const deleted = await deleteBody();
-    expect(deleted.failure).toMatchObject({
-      code: "device_owned_by_other_daemon",
-      phase: "precondition",
-    });
-    // killDevice reports retryable: true; deleteDevice drops the field entirely.
-    expect(deleted.failure).toMatchObject({ retryable: true, retryAfterMs: killed.retryAfterMs });
-    expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
-  });
+      const deleted = await deleteBody();
+      expect(deleted.failure).toMatchObject({
+        code: "device_owned_by_other_daemon",
+        phase: "precondition",
+      });
+      // killDevice reports retryable: true; deleteDevice drops the field entirely.
+      expect(deleted.failure).toMatchObject({ retryable: true, retryAfterMs: killed.retryAfterMs });
+      expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
+    },
+  );
 
-  test("an unreadable binding registry is a typed retryable refusal, not operation_failed", async () => {
-    registryReadable = false;
-    const killed = await killWire();
-    expect(killed).toMatchObject({
-      code: BINDING_DISCOVERY_INCOMPLETE_CODE,
-      retryable: true,
-    });
+  arranged(
+    "an unreadable binding registry is a typed retryable refusal, not operation_failed",
+    async () => {
+      registryReadable = false;
+      const killed = await killWire();
+      expect(killed).toMatchObject({
+        code: BINDING_DISCOVERY_INCOMPLETE_CODE,
+        retryable: true,
+      });
 
-    const deleted = await deleteBody();
-    // Fails closed (nothing is destroyed) but loses its type: code is "operation_failed".
-    expect(deleted.failure).toMatchObject({
-      code: BINDING_DISCOVERY_INCOMPLETE_CODE,
-      retryable: true,
-    });
-    expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
-  });
+      const deleted = await deleteBody();
+      // Fails closed (nothing is destroyed) but loses its type: code is "operation_failed".
+      expect(deleted.failure).toMatchObject({
+        code: BINDING_DISCOVERY_INCOMPLETE_CODE,
+        retryable: true,
+      });
+      expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
+    },
+  );
 });
 
 describe("deleteDevice failure mapping agrees with killDevice's wire shaping", () => {

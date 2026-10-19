@@ -12,6 +12,7 @@ import { executionTracker } from "../../src/daemon/executionTracker";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { androidDevice } from "./helpers/inputSocketHarness";
 import {
@@ -36,6 +37,34 @@ const SESSION = "ide-mid-call-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
 const IDLE_MS = 60_000;
+
+// Every device write reports its dispatch, then waits on the test's gated device call.
+class GatedCtrlProxy extends FakeCtrlProxy {
+  constructor(private readonly deviceCall: () => Promise<unknown>) {
+    super();
+  }
+
+  override getScreenScaleMetadata(): ReturnType<FakeCtrlProxy["getScreenScaleMetadata"]> {
+    return null;
+  }
+
+  override async requestTapCoordinates(
+    ...args: Parameters<FakeCtrlProxy["requestTapCoordinates"]>
+  ): ReturnType<FakeCtrlProxy["requestTapCoordinates"]> {
+    args[0].onDispatch?.();
+    await this.deviceCall();
+    return { success: true, totalTimeMs: 0 };
+  }
+
+  override async setPreference(
+    ...args: Parameters<FakeCtrlProxy["setPreference"]>
+  ): ReturnType<FakeCtrlProxy["setPreference"]> {
+    if (typeof args[5] === "object") {
+      args[5].onDispatch?.();
+    }
+    await this.deviceCall();
+  }
+}
 
 describe("idle release while the holder's device call is in flight", () => {
   let timer: FakeTimer;
@@ -136,21 +165,9 @@ describe("idle release while the holder's device call is in flight", () => {
       return { success: true };
     };
     useBootedAndroidDevice(androidDevice);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      getScreenScaleMetadata: () => null,
-      requestTapCoordinates: (
-        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-      ) => {
-        args[0].onDispatch?.();
-        return deviceCall();
-      },
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        await deviceCall();
-      },
-    }));
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+      () => new GatedCtrlProxy(deviceCall),
+    );
     restoreCtrlProxyManager = stubAndroidCtrlProxyManager(androidDevice, deviceCall);
     server = createIdeMutationServer(sessionManager);
     socket = new FakeSocket();

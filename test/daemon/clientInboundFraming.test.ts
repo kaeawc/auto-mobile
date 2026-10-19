@@ -11,6 +11,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
 
 class RecordingDaemonClient extends DaemonClient {
   readonly received: DaemonResponse[] = [];
@@ -163,7 +164,7 @@ test("valid response preserves unknown and unchecked additive fields", async () 
   try {
     feed(frame);
     expect(await result).toBe("ok");
-    expect(client.received[0]).toEqual(frame);
+    expect(client.received[0]).toEqual<unknown>(frame);
   } finally {
     await client.close();
     await result;
@@ -187,7 +188,7 @@ test("notification preserves extras and split UTF-8, and a replacement connectio
   const { client, socket } = setup(128);
   const received: DaemonNotification[] = [];
   client.onNotification((frame) => received.push(frame));
-  const frame = { type: "daemon_notification", method: "notice", extra: "😀" };
+  const frame = { type: "daemon_notification" as const, method: "notice", extra: "😀" };
   const bytes = Buffer.from(JSON.stringify(frame) + "\n");
   const split = bytes.indexOf(Buffer.from("😀")) + 1;
   try {
@@ -217,10 +218,10 @@ async function withSocketConnection(
   const timer = new FakeTimer();
   const sockets: FakeSocket[] = [];
   const callbacks: Array<() => void> = [];
-  const create = spyOn(net, "createConnection").mockImplementation((_path, callback) => {
+  const create = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
     const socket = new FakeSocket();
     sockets.push(socket);
-    callbacks.push(callback!);
+    callbacks.push(connectionListenerOf(args)!);
     return socket;
   });
   const client = new DaemonClient(

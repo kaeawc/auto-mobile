@@ -13,7 +13,7 @@ import {
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import { type AppearanceConfig, type BootedDevice } from "../../src/models";
+import type { AppearanceConfig, AppearanceSyncMode, BootedDevice } from "../../src/models";
 
 /**
  * Drives requests through the real inherited processLine dispatch (queue +
@@ -173,14 +173,15 @@ describe("AppearanceSocketServer", () => {
     });
   }
 
-  for (const { mode, syncEnabled } of [
+  const modeCases: Array<{ mode: AppearanceSyncMode; syncEnabled: boolean }> = [
     { mode: "auto", syncEnabled: true },
     { mode: "auto", syncEnabled: false },
     { mode: "light", syncEnabled: false },
     { mode: "light", syncEnabled: true },
     { mode: "dark", syncEnabled: false },
     { mode: "dark", syncEnabled: true },
-  ]) {
+  ];
+  for (const { mode, syncEnabled } of modeCases) {
     it(`set_appearance(${mode}) reports the automatic sync decision (${syncEnabled})`, async () => {
       const applied: string[] = [];
       const dependencies = fakeDependencies(applied);
@@ -681,7 +682,7 @@ describe("AppearanceSocketServer", () => {
           enabled: true,
         }),
       );
-      const expectedConfig =
+      const expectedConfig: AppearanceConfig =
         command === "set_appearance"
           ? { ...initialConfig, defaultMode: "dark", syncWithHost: false }
           : { ...initialConfig, syncWithHost: true };

@@ -183,6 +183,7 @@ describe("Daemon.initializeDatabase fatality", () => {
       readPidFile: () => incumbentRecord,
       persistPidFile: () => {},
       isProcessRunning: (pid) => pid === incumbentRecord.pid,
+      readProcessGenerationToken: () => undefined,
       selfPid: 4242,
     };
     const incumbentOwnerGuard = new IncumbentOwnerGuard(guardDependencies);

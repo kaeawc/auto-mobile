@@ -21,6 +21,7 @@ import type { BootedDevice } from "../../src/models";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import { fakeDaemonShutdownIo } from "../helpers/daemonShutdownIoFakes";
 import { settlesOnMicrotasksAlone } from "../helpers/shutdownStageHarness";
+import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
@@ -281,7 +282,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         );
         await new Promise<void>((resolve) => setImmediate(resolve));
         expect(timer.getPendingSleeps()).toEqual([1000]);
-        const pooled = pool.getDevice(device.deviceId)!;
+        const pooled: MutablePooledDevice = pool.getDevice(device.deviceId)!;
         pooled.sessionId = owner === "idle" ? null : owner;
         pooled.status = owner === "idle" ? "idle" : "busy";
         pooled.assignmentCount++;
@@ -1064,7 +1065,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
 
     try {
       await sessionManager.createSession("in-flight-session", "in-flight-device", "android");
-      const release = sessionManager.releaseSession("in-flight-session", "heartbeat");
+      const release = sessionManager.releaseSession("in-flight-session", "heartbeat-timeout");
       await persistenceStartedPromise;
 
       const stop = daemon.stop();
@@ -1375,9 +1376,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push("closeDatabase");
     });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
-    const cleanupFilesSpy = spyOn(daemonFilesModule, "cleanupDaemonFiles").mockResolvedValue(
-      undefined,
-    );
+    const cleanupFilesSpy = spyOn(daemonFilesModule, "cleanupDaemonFiles").mockResolvedValue(true);
     try {
       await daemon.stop();
 

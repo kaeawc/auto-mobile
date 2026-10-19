@@ -296,7 +296,7 @@ describe("socket-owner daemon preflight", () => {
       const closed = spyOn(DaemonClient.prototype, "close").mockResolvedValue();
       let declaredIdentity: unknown = "unset";
       const method = spyOn(DaemonClient.prototype, "callDaemonMethod").mockImplementation(
-        async function (name) {
+        async function (this: DaemonClient, name: string) {
           expect(name).toBe("ide/status");
           declaredIdentity = this.testHooks.declaredIdentity();
           return {

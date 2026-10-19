@@ -10,6 +10,7 @@ import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { androidDevice } from "./helpers/inputSocketHarness";
 import {
@@ -32,6 +33,40 @@ const SESSION = "ide-mutation-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
 const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+
+// Each device write reports its dispatch, then lands in the shared write log.
+class WriteRecordingCtrlProxy extends FakeCtrlProxy {
+  constructor(private readonly writes: string[]) {
+    super();
+  }
+
+  override async setPreference(
+    ...args: Parameters<FakeCtrlProxy["setPreference"]>
+  ): ReturnType<FakeCtrlProxy["setPreference"]> {
+    if (typeof args[5] === "object") {
+      args[5].onDispatch?.();
+    }
+    this.writes.push("setPreference");
+  }
+
+  override async removePreference(
+    ...args: Parameters<FakeCtrlProxy["removePreference"]>
+  ): ReturnType<FakeCtrlProxy["removePreference"]> {
+    if (typeof args[3] === "object") {
+      args[3].onDispatch?.();
+    }
+    this.writes.push("removePreference");
+  }
+
+  override async clearPreferenceStore(
+    ...args: Parameters<FakeCtrlProxy["clearPreferenceStore"]>
+  ): ReturnType<FakeCtrlProxy["clearPreferenceStore"]> {
+    if (typeof args[2] === "object") {
+      args[2].onDispatch?.();
+    }
+    this.writes.push("clearPreferenceStore");
+  }
+}
 
 describe("mutating ide/* frames against a session that may not take a control call", () => {
   let timer: FakeTimer;
@@ -103,28 +138,9 @@ describe("mutating ide/* frames against a session that may not take a control ca
     await heartbeat(true);
 
     useBootedAndroidDevice(androidDevice);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        writes.push("setPreference");
-      },
-      removePreference: async (...args: Parameters<AndroidCtrlProxyClient["removePreference"]>) => {
-        if (typeof args[3] === "object") {
-          args[3].onDispatch?.();
-        }
-        writes.push("removePreference");
-      },
-      clearPreferenceStore: async (
-        ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
-      ) => {
-        if (typeof args[2] === "object") {
-          args[2].onDispatch?.();
-        }
-        writes.push("clearPreferenceStore");
-      },
-    }));
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+      () => new WriteRecordingCtrlProxy(writes),
+    );
     restoreCtrlProxyManager = stubAndroidCtrlProxyManager(androidDevice, async () => {
       writes.push("ensureCompatibleVersion");
     });

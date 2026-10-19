@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
-import { applyAppearanceOnConnect } from "../../src/server/applyAppearanceOnConnect";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
+import { applyAppearanceOnConnect } from "../../src/daemon/applyAppearanceOnConnect";
 import { isAppearanceSyncEnabled } from "../../src/utils/appearance/appearanceSyncPolicy";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";

@@ -4,7 +4,10 @@ import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
 
 import { type ToolTransportRecovery } from "./toolTransportRecovery";
 
-import { DeviceSessionManager, type DeviceReadinessLevel } from "../devices/DeviceSessionManager";
+import {
+  DeviceSessionManager,
+  type DeviceReadinessLevel,
+} from "../daemon/readiness/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
 
 import { type DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";

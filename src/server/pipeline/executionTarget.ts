@@ -3,7 +3,7 @@ import {
   DeviceReadiness,
   type ConnectedPlatformScan,
   isScanAuthoritativeFor,
-} from "../../devices/DeviceReadiness";
+} from "../../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform } from "../../models";
 import { serverConfig } from "../../utils/ServerConfig";
 import {

@@ -10,7 +10,7 @@ import {
 } from "../../src/daemon/constants";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import type { BootedDevice } from "../../src/models";
-import { resolveAppearanceMode } from "../../src/server/appearanceManager";
+import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";
 import {
   LIST_CHANGED_NOTIFICATION_METHODS,
   ListChangedBroadcaster,

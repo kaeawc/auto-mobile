@@ -211,12 +211,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
 
     // --- Consult no pooled identity -----------------------------------------
-    "src/devices/DeviceReadiness.ts": {
+    "src/daemon/readiness/DeviceReadiness.ts": {
       calls: 1,
       reason:
         "Android readiness verifies the adb-level connection state below the pool and owns no pooled identity.",
     },
-    "src/devices/ReadinessSelection.ts": {
+    "src/daemon/readiness/ReadinessSelection.ts": {
       calls: 3,
       reason:
         "Readiness discovery and selection moved from DeviceReadiness; tracks connection state " +

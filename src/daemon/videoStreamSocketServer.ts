@@ -25,7 +25,7 @@ import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";

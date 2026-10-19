@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import type {
   IosPhysicalDeviceLister,
   PhysicalIosDeviceDiscovery,

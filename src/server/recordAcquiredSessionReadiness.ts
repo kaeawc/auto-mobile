@@ -1,5 +1,5 @@
 import type { DaemonStateLike } from "../daemon/daemonState";
-import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import type { DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 
 /**
  * Record the readiness level actually ACHIEVED by acquisition for a session

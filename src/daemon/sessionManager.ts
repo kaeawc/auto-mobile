@@ -121,7 +121,7 @@ import {
   type BiometricEnrollment,
   type NetworkConditionProfile,
 } from "../features/utility/DeviceState";
-import { deviceReadinessRank, type DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import { deviceReadinessRank, type DeviceReadinessLevel } from "./readiness/DeviceReadiness";
 import {
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,

@@ -36,10 +36,13 @@ export interface DeviceLifecycleServerHost {
 
 let registered: DeviceLifecycleServerHost | undefined;
 
+/** Returns the previously registered host so callers (tests) can restore it. */
 export function registerDeviceLifecycleServerHost(
   host: DeviceLifecycleServerHost | undefined,
-): void {
+): DeviceLifecycleServerHost | undefined {
+  const previous = registered;
   registered = host;
+  return previous;
 }
 
 function current(): DeviceLifecycleServerHost {

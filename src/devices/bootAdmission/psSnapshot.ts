@@ -1,4 +1,4 @@
-import type { HostProcessRow, SimulatorProcessCost } from "./types";
+import type { HostProcessRow, SimulatorProcessCost } from "../../models/HostProcessRow";
 
 const KIB = 1024;
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:[.,]\d+)?)\s+(\S.*)$/;

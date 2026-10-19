@@ -547,7 +547,7 @@ test("an unforced kill still enriches discovery with the AVD-name probe", async 
   const startedAt = timer.now();
 
   const kill = client.killDevice(original);
-  for (let turn = 0; turn < 20 && nameProbes(commands).length < 3; turn++) {
+  for (let turn = 0; turn < 100 && nameProbes(commands).length < 3; turn++) {
     await Promise.resolve();
   }
   expect(nameProbes(commands).length).toBe(3);

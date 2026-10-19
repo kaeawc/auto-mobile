@@ -77,6 +77,7 @@ import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSession
 import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
 import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
 import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
+import * as adbTransportUnavailable from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
 import * as daemonConstants from "../../src/daemon/constants";
@@ -211,6 +212,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
   "server/planExecutionInProgressRefusal": planLockRefusal,
   "server/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
+  "utils/android-cmdline-tools/AdbDeviceTransportUnavailableError": adbTransportUnavailable,
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,

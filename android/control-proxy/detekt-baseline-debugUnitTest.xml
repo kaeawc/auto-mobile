@@ -8,6 +8,8 @@
     <ID>CyclomaticComplexMethod:KotlinSourceScan.kt:KotlinSourceScan$fun maskLiteralsAndComments: String</ID>
     <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun blankNestedGroups: String</ID>
     <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun swallowingCatchOffsets: List&lt;Int&gt;</ID>
+    <ID>CyclomaticComplexMethod:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `commit text and cancel ime commit frames match the hand-built bytes`</ID>
+    <ID>CyclomaticComplexMethod:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `screenshot error and display transition frames match the hand-built bytes`</ID>
     <ID>EmptyFunctionBlock:CtrlProxyActionsFakes.kt:NoOpCtrlProxyActions${}</ID>
     <ID>EmptyFunctionBlock:SdkAnrBroadcastHandlerTest.kt:SdkAnrBroadcastHandlerTest.Fixture.&lt;no name provided&gt;${}</ID>
     <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:CtrlProxyEventBatchReceiverTest.&lt;no name provided&gt;${}</ID>
@@ -70,6 +72,7 @@
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `observerSessionGeneration is stable within a session and advances after it empties`</ID>
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `raw async response drops later orphaned correlated frames`</ID>
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `typed async response drops later orphaned correlated frames`</ID>
+    <ID>LongParameterList:PackageEventWireTest.kt:PackageEventWireTest$private fun packageEvent: JsonObject</ID>
     <ID>LongParameterList:PrototypeScreenshotComparator.kt:PrototypeScreenshotComparator$fun compare: Result</ID>
     <ID>LongParameterList:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$private fun legacyGesture</ID>
     <ID>LongParameterList:RetrofitPrototypeHttpClientTest.kt:RetrofitPrototypeHttpClientTest$private fun request</ID>
@@ -78,7 +81,9 @@
     <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun elementWithBounds: UIElementInfo</ID>
     <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeNode: android.view.accessibility.AccessibilityNodeInfo</ID>
     <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeWindow: AccessibilityWindowInfo</ID>
-    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `insert text body matches the hand-built content in every optional combination`</ID>
+    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `commit text and cancel ime commit frames match the hand-built bytes`</ID>
+    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `insert text frame matches the hand-built content in every optional combination`</ID>
+    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `keyboard profiles frame matches the hand-built bytes`</ID>
     <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `swipe drag and pinch frames match the hand-built bytes`</ID>
     <ID>SwallowedException:ResultBroadcasterTest.kt:ResultBroadcasterTest$e: CancellationException</ID>
     <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("boom")</ID>

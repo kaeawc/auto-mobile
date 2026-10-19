@@ -97,10 +97,6 @@ struct FilePrototypeStorageStore: PrototypeStorageStore {
 
     let directory: URL
 
-    init(directory: URL) {
-        self.directory = directory
-    }
-
     static func defaultDirectory(fileManager: FileManager = .default) -> URL? {
         fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent(directoryName, isDirectory: true)

@@ -20,7 +20,8 @@ import XCTest
         }
 
         private func flexible(_ name: String, _ frames: Frames) -> some View {
-            Color.clear.onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.byName[name] = $0 }
+            Color.clear
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.byName[name] = $0 }
         }
 
         @discardableResult
@@ -106,7 +107,10 @@ import XCTest
                 Color.clear.frame(width: 9, height: 10)
                 Color.clear.frame(width: 4, height: 10)
             }
-            XCTAssertEqual(layOut(plain.frame(width: 200, height: 200, alignment: .topLeading)), CGSize(width: 200, height: 200))
+            XCTAssertEqual(
+                layOut(plain.frame(width: 200, height: 200, alignment: .topLeading)),
+                CGSize(width: 200, height: 200)
+            )
             XCTAssertEqual(layOut(plain), CGSize(width: 9, height: 23))
         }
 
@@ -129,8 +133,10 @@ import XCTest
             rtl: Bool = false,
             _ frames: Frames,
             content: CGSize = CGSize(width: 80, height: 20)
-        ) throws -> some View {
-            PrototypeSizedLayout(rules: try rules(json), alignment: alignment) {
+        )
+            throws -> some View
+        {
+            try PrototypeSizedLayout(rules: rules(json), alignment: alignment) {
                 probe("c", frames, width: content.width, height: content.height)
             }
             .environment(\.layoutDirection, rtl ? .rightToLeft : .leftToRight)
@@ -138,44 +144,44 @@ import XCTest
 
         func testAMinWidthCentresWrappedContentLikeAndroidsWrapContentWidth() throws {
             let frames = Frames()
-            let size = layOut(try sized(#"{"minWidth": 200}"#, frames))
+            let size = try layOut(sized(#"{"minWidth": 200}"#, frames))
             XCTAssertEqual(size, CGSize(width: 200, height: 20))
             XCTAssertEqual(frames.byName["c"], CGRect(x: 60, y: 0, width: 80, height: 20))
         }
 
         func testAMinHeightCentresWrappedContentVertically() throws {
             let frames = Frames()
-            let size = layOut(try sized(#"{"minHeight": 60}"#, frames))
+            let size = try layOut(sized(#"{"minHeight": 60}"#, frames))
             XCTAssertEqual(size, CGSize(width: 80, height: 60))
             XCTAssertEqual(frames.byName["c"], CGRect(x: 0, y: 20, width: 80, height: 20))
         }
 
         func testAnExplicitWidthKeepsTheContentAlignment() throws {
             let frames = Frames()
-            layOut(try sized(#"{"width": {"dp": 200}}"#, frames))
+            try layOut(sized(#"{"width": {"dp": 200}}"#, frames))
             XCTAssertEqual(frames.byName["c"]?.minX, 0)
             let trailing = Frames()
             // The explicit width keeps the trailing alignment; the unset height wraps and centres.
-            layOut(try sized(#"{"width": {"dp": 200}, "minHeight": 60}"#, alignment: .bottomTrailing, trailing))
+            try layOut(sized(#"{"width": {"dp": 200}, "minHeight": 60}"#, alignment: .bottomTrailing, trailing))
             XCTAssertEqual(trailing.byName["c"], CGRect(x: 120, y: 20, width: 80, height: 20))
         }
 
         func testAWrapWidthCentresLikeAnUnsetOne() throws {
             let frames = Frames()
-            layOut(try sized(#"{"width": "wrap", "minWidth": 200}"#, frames))
+            try layOut(sized(#"{"width": "wrap", "minWidth": 200}"#, frames))
             XCTAssertEqual(frames.byName["c"]?.minX, 60)
         }
 
         func testASizedLayoutRespectsMaxAgainstAnInfiniteProposal() throws {
             let frames = Frames()
-            let size = layOut(try sized(#"{"maxWidth": 50}"#, frames, content: CGSize(width: 80, height: 20)))
+            let size = try layOut(sized(#"{"maxWidth": 50}"#, frames, content: CGSize(width: 80, height: 20)))
             XCTAssertEqual(size.width, 50)
         }
 
         func testAZeroProposalCollapsesAMinBoundToZero() throws {
             let frames = Frames()
-            let size = layOut(try sized(#"{"minWidth": 200}"#, frames).frame(width: 0, height: 0))
-            XCTAssertEqual(size, CGSize(width: 0, height: 0))
+            let size = try layOut(sized(#"{"minWidth": 200}"#, frames).frame(width: 0, height: 0))
+            XCTAssertEqual(size, .zero)
         }
     }
 #endif

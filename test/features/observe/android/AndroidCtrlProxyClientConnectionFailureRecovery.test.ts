@@ -677,7 +677,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
         return successSocket(url);
       },
       timer,
-      idGenerator: () => manager,
+      serviceManagerFactory: () => manager,
     });
     const internals = client.testHooks;
     internals.connectionAttempts = 3;
@@ -686,7 +686,9 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
 
     client.ensureRecoveryStarted();
-    expect(await client.awaitRecovery(10_000)).toBe("timed_out");
+    // The service is already bound, so recovery is "healthy" and does not reset the
+    // connection budget: the background reconnect stays gated by the cooldown.
+    expect(await client.awaitRecovery(10_000)).toBe("failed");
     expect(dialTimes).toEqual([]);
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
     expect(setupCalls).toBe(0);

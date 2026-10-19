@@ -34,7 +34,7 @@ function clientWithCapturedFrames(supportedCommands?: readonly string[]) {
     screenshotBackoffScheduler: new FakeScreenshotBackoffScheduler(),
   });
   const frames: Record<string, unknown>[] = [];
-  client["ws"] = new FakeOpenSocket((data) => {
+  client.connectionTestHooks.socket = new FakeOpenSocket((data) => {
     frames.push(JSON.parse(data) as Record<string, unknown>);
   });
   // The handshake itself sends set_hierarchy_interval; only screenshot frames matter here.

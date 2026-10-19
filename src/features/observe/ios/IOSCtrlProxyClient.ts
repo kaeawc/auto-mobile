@@ -3,6 +3,7 @@ import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispat
 import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
+import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -184,6 +185,8 @@ interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
   retryExecutor?: RetryExecutor;
+  /** Replaces the side effects `processMessage` runs for hierarchy messages; tests observe their order. */
+  messageEffects?: IosHierarchyMessageEffects;
 }
 
 interface ScreenshotObservationStreamOptions {
@@ -857,6 +860,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
+  private readonly messageEffects: IosHierarchyMessageEffects;
   private readonly sdkScreenIdentitiesByApplicationId = new Map<string, ScreenIdentity>();
   private readonly sdkScreenIdentityOrdersByApplicationId = new Map<
     string,
@@ -931,6 +935,31 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         getNavigationGraphManager: () => this.getNavigationGraphManager(),
         captureScreenshot: (timeoutMs: number) => this.requestScreenshot(timeoutMs),
       });
+    this.messageEffects = this.createMessageEffects(options.messageEffects);
+  }
+
+  /** Delegates each effect to this client's own member at call time, so per-instance overrides still apply. */
+  private createMessageEffects(override?: IosHierarchyMessageEffects): IosHierarchyMessageEffects {
+    return (
+      override ?? {
+        ignoreOlderPush: (message) => this.ignoreOlderHierarchyPush(message),
+        retainScaleMetadata: (hierarchy) => this.retainScaleMetadataFrom(hierarchy),
+        recordNavigation: (hierarchy, perfTiming) =>
+          this.handleHierarchyUpdateForNavigation(hierarchy, perfTiming),
+        convert: (hierarchy) => this.convertToViewHierarchyResult(hierarchy),
+        recordLayoutTelemetry: (converted) =>
+          this.sdkEventIngestor.recordLayoutTelemetryEvent(converted),
+        consumeStreamSuppression: (requestId) =>
+          this.consumeHierarchyObservationStreamSuppression(requestId),
+        pushToObservationStream: (converted, source, frameContext) =>
+          this.pushHierarchyToObservationStream(converted, source, frameContext),
+        startScreenshotBackoff: () => this.startScreenshotBackoff(),
+        notifyPushListeners: (hierarchy) => this.notifyPushUpdateListeners(hierarchy),
+        resolveRequest: (requestId, result) => {
+          this.requestManager.resolve(requestId, result);
+        },
+      }
+    );
   }
 
   /**
@@ -3351,7 +3380,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return false;
     }
     // Reject out-of-order pushes before they can affect cache or observation state.
-    if (this.ignoreOlderHierarchyPush(message)) {
+    if (this.messageEffects.ignoreOlderPush(message)) {
       return false;
     }
     // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first
@@ -3361,13 +3390,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // getScreenScaleMetadata() null on exactly the paths #4549 must still be able to read.
     const observerResponse = requestId ? this.observerHierarchyRequestIds.delete(requestId) : false;
     if (!observerResponse) {
-      this.retainScaleMetadataFrom(message.data! as XCTestHierarchy);
-      this.handleHierarchyUpdateForNavigation(message.data!, message.perfTiming);
+      this.messageEffects.retainScaleMetadata(message.data! as XCTestHierarchy);
+      this.messageEffects.recordNavigation(message.data!, message.perfTiming);
     }
     // Record layout telemetry event using converted hierarchy (same format as observation stream)
-    const converted = this.convertToViewHierarchyResult(message.data!);
+    const converted = this.messageEffects.convert(message.data!);
     if (!observerResponse) {
-      this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
+      this.messageEffects.recordLayoutTelemetry(converted);
     }
     // Only push to observation stream for request-response updates (with requestId).
     // Push messages (no requestId) are handled in the dedicated push-message branch below
@@ -3383,10 +3412,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     observerResponse: boolean,
   ): void {
     if (requestId) {
-      const suppressObservationStreamPush =
-        this.consumeHierarchyObservationStreamSuppression(requestId);
+      const suppressObservationStreamPush = this.messageEffects.consumeStreamSuppression(requestId);
       if (!suppressObservationStreamPush && !observerResponse) {
-        this.pushHierarchyToObservationStream(
+        this.messageEffects.pushToObservationStream(
           converted,
           message.data as XCTestHierarchy,
           message.frameContext,
@@ -3442,7 +3470,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         );
         return true;
       }
-      this.requestManager.resolve(decoded.requestId, decoded.result);
+      this.messageEffects.resolveRequest(decoded.requestId, decoded.result);
       return true;
     }
     return false;
@@ -3471,21 +3499,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
 
     // Convert and push to observation stream for IDE plugins
-    const viewHierarchyResult = this.convertToViewHierarchyResult(message.data!);
-    this.pushHierarchyToObservationStream(
+    const viewHierarchyResult = this.messageEffects.convert(message.data!);
+    this.messageEffects.pushToObservationStream(
       viewHierarchyResult,
       message.data! as XCTestHierarchy,
       message.frameContext,
     );
 
     // Start screenshot backoff sequence for real-time screenshot streaming
-    this.startScreenshotBackoff();
+    this.messageEffects.startScreenshotBackoff();
 
     // Performance monitoring is handled in handleHierarchyUpdateForNavigation
     // which runs for ALL hierarchy_update messages (both push and request-response)
 
     // Notify listeners (e.g., ObserveScreen to clear its cache)
-    this.notifyPushUpdateListeners(message.data!);
+    this.messageEffects.notifyPushListeners(message.data!);
     return;
   }
 

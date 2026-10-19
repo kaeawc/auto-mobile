@@ -297,7 +297,7 @@ export class TakeScreenshot implements ScreenshotService {
    * follows `AUTOMOBILE_DATA_DIR`, so a cached path would keep pointing at a
    * data dir that a test (or a reconfigured process) has since removed.
    */
-  private static getCacheDir(): string {
+  static getCacheDir(): string {
     return ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
   }
 

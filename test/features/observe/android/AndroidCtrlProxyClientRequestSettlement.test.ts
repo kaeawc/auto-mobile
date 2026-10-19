@@ -40,7 +40,7 @@ async function harness() {
     },
   );
   await Promise.resolve();
-  client["ws"] = socket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "full_command_set_v1",
     "request_id_echo_v1",

@@ -1,10 +1,10 @@
 import { AndroidEmulatorUnavailableError } from "../../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { describe, expect, test } from "bun:test";
+import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
+import { GateBindingBootCapacity } from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
+import { PoolBindingDeviceClaims } from "../../../../src/daemon/sessionBroker/provisioning/PoolBindingDeviceClaims";
 import {
-  DeviceManagerBindingInventory,
-  GateBindingBootCapacity,
-  PoolBindingDeviceClaims,
   ToolBindingProvisioner,
   type BindingToolInvoker,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";

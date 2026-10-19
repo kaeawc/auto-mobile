@@ -19,7 +19,7 @@ import {
   PinnedDisplayUnavailableError,
 } from "../models/PinnedDisplayError";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
+import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
 import { displayInventoryOutcome } from "../models/DeviceInfo";
 import { selectablePanels } from "../models/DisplayPanel";
 

@@ -8,7 +8,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { executionTracker } from "./executionTracker";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import type { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { MCP_STREAMABLE_PATH } from "./constants";
 import {
@@ -132,7 +132,7 @@ export class DaemonHttpIngress {
     createServer: (req, scope) => this.mcpRequestServerFactory(req, scope),
     cancelScopeExecutions: (requestScopeId, reason) =>
       executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    forgetScopeBindings: (requestScopeId) => forgetDaemonSessionBindingScope(requestScopeId),
     closeReason: () =>
       this.deps.isShutdownInProgress()
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)

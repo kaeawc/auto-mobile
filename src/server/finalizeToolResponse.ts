@@ -28,11 +28,11 @@ import {
 } from "../features/action/observationActionClass";
 import { serverConfig } from "../utils/ServerConfig";
 import { observationOfPayload, stringifyToolResponse } from "../utils/toolUtils";
-import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
+import { readToolEnvelopePayload, writeToolEnvelopePayload } from "../daemon/toolEnvelopePayload";
 import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
+import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 import {
   collectWindowTruncations,
   isHostOutputTruncationReason,

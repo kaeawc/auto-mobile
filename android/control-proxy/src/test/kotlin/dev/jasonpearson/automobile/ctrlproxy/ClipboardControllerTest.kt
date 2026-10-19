@@ -7,10 +7,11 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,12 +34,14 @@ class ClipboardControllerTest {
 
     override fun isRunning() = running
 
-    override suspend fun broadcastWithPerf(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
-      frames += Triple(type, requestId, buildJsonObject(buildContent))
+    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
+      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
+      frames +=
+        Triple(
+          frame.getValue("type").jsonPrimitive.content,
+          frame["requestId"]?.jsonPrimitive?.content,
+          JsonObject(frame - setOf("type", "timestamp", "requestId", "perfTiming")),
+        )
     }
 
     override fun connectionCount() = 1

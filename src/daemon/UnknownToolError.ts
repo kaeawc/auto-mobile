@@ -1,5 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
-import { DAEMON_UNKNOWN_TOOL_CODE } from "../daemon/types";
+import { DAEMON_UNKNOWN_TOOL_CODE } from "./types";
 
 /**
  * A tool this server does not register at all. Same message as ever; `data` lets the daemon

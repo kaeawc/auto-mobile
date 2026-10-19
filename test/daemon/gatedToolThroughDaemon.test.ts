@@ -12,7 +12,7 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DaemonMcpProxy, DaemonToolUnavailableError } from "../../src/daemon/daemonMcpProxy";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
-import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError } from "../../src/daemon/toolUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

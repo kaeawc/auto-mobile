@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { registerStorageTools, type StorageToolsDependencies } from "../../src/server/storageTools";
 import {
-  registerStorageTools,
   preferenceSetWarning,
   validateTypeForPlatform,
-  type StorageToolsDependencies,
-} from "../../src/server/storageTools";
+} from "../../src/features/storage/storageChecks";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { ActionableError } from "../../src/models";

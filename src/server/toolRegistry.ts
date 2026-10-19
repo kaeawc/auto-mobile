@@ -28,7 +28,10 @@ import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
 import { markInternalToolCall } from "../daemon/internalToolCall";
-import { ListChangedBroadcaster, type ServerRegistrationOptions } from "./listChangedBroadcast";
+import {
+  ListChangedBroadcaster,
+  type ServerRegistrationOptions,
+} from "../daemon/listChangedBroadcast";
 import { StructuredToolResponse } from "../utils/toolUtils";
 import {
   InternalToolName,
@@ -84,24 +87,21 @@ import {
   invokeResolvedDeviceHandler,
 } from "./pipeline/deviceCallDispatch";
 
-export type { AuditRunnerInput } from "./pipeline/audit";
 export { stripNavigationInternalParams } from "./pipeline/navigationRecording";
 export {
   AUTOMATIC_TOOL_OUTPUT_RETENTION,
   DefaultAfterToolCallHandler,
 } from "./pipeline/afterToolCall";
-export type {
-  SessionBindingReleaseHandler,
-  PlanLifecycleInput,
-  PlanCleanupFailure,
-  PlanCleanupOutcome,
-} from "./pipeline/planLifecycle";
-export { DefaultAuditRunner } from "./pipeline/audit";
+export { DefaultAuditRunner, type AuditRunnerInput } from "./pipeline/audit";
 export type { SettleObserveFactory } from "./pipeline/afterToolCall";
 export {
   PLAN_APP_CLEANUP_CAP_MS,
   PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
   DefaultPlanLifecycleManager,
+  type SessionBindingReleaseHandler,
+  type PlanLifecycleInput,
+  type PlanCleanupFailure,
+  type PlanCleanupOutcome,
 } from "./pipeline/planLifecycle";
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 
@@ -126,6 +126,7 @@ import {
   withItemsEnum,
 } from "./toolRegistryTypes";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
+import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
 export type {
   ProgressCallback,
   DeviceAwareToolHandler,
@@ -1179,7 +1180,7 @@ export class ToolRegistryClass {
 }
 
 // Export a singleton instance
-export const ToolRegistry = new ToolRegistryClass();
+export const ToolRegistry = installDaemonToolRegistryPort(new ToolRegistryClass());
 
 // --- Compile-time enforcement of AC1 (issue #3222) ---
 // AC1 is a *type* guarantee: `callInternalTyped(name, …)` must thread the concrete

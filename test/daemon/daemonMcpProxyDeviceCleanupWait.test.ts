@@ -7,7 +7,7 @@ import {
   DeviceShuttingDownError,
 } from "../../src/models/deviceAcquisitionRefusals";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import type { BackoffInput } from "../../src/utils/Backoff";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

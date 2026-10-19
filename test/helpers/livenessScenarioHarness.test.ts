@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
 import {
   DEFAULT_SOCKET_PATH,
@@ -14,7 +14,8 @@ import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";
 import {
   LIST_CHANGED_NOTIFICATION_METHODS,
   ListChangedBroadcaster,
-} from "../../src/server/listChangedBroadcast";
+  type ListChangedKind,
+} from "../../src/daemon/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { applyAppearanceToDevice } from "../../src/utils/deviceAppearance";
@@ -201,14 +202,13 @@ describe("the harness's control socket is opened by the socket server's own star
       ]);
 
       // A dead process's server is off the process-wide broadcasters: nothing is written for it.
-      const dead = scenario.daemon.socket.server as unknown as {
-        broadcastListChanged(kind: string): void;
-      };
+      const dead = scenario.daemon.socket.server.testHooks;
       await scenario.daemonRestart();
-      const deadFanOut = spyOn(dead, "broadcastListChanged");
+      const deadFanOut = mock<(kind: ListChangedKind) => void>();
+      const restore = dead.broadcastListChanged.intercept(() => deadFanOut);
       ListChangedBroadcaster.emit("tools");
       expect(deadFanOut).not.toHaveBeenCalled();
-      deadFanOut.mockRestore();
+      restore();
     },
   );
 });

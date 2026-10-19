@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import plugin from "../../oxlint-plugins/auto-mobile.mjs";
+import plugin, { type PluginRuleName } from "../../oxlint-plugins/auto-mobile.mjs";
 import { runRule } from "./oxlintRuleHarness";
 
 // Coverage for the custom rules that do not have a dedicated backstop file, so
 // that a typo or an incompatible AST shape in oxlint-plugins/auto-mobile.mjs
 // fails a test rather than silently disabling the ported enforcement.
 
-function fires(rule: string, code: string): boolean {
+function fires(rule: PluginRuleName, code: string): boolean {
   return runRule(plugin.rules[rule], code).length > 0;
 }
 

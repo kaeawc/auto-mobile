@@ -18,7 +18,7 @@ import {
   isHomebrewToolsPath,
 } from "../../utils/android-cmdline-tools/detection";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { readSdkManagerVersion } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { logger } from "../../utils/logger";
@@ -96,7 +96,7 @@ export interface AndroidDoctorDependencies {
   getBestAndroidToolsLocation: typeof getBestAndroidToolsLocation;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;
   logger: typeof logger;
-  adbFactory?: AdbClientFactory;
+  adbFactory?: DoctorAdbFactory;
   getCmdlineToolsVersion?: CmdlineToolsVersionReader;
   listAvds?: (probe?: DoctorProbeOptions) => Promise<Array<{ name: string }>>;
   readAvdConfig?: AvdConfigReader;
@@ -339,8 +339,23 @@ export async function checkJavaHome(): Promise<CheckResult> {
 /**
  * Check ADB installation and get path
  */
+/** Every adb executor method the doctor checks drive. */
+type DoctorAdbMethod =
+  | "getAdbPathOnly"
+  | "executeCommand"
+  | "getBootedAndroidDevices"
+  | "getDeviceStates";
+
+/**
+ * Factory for the slice of the adb executor a check drives; the full `AdbClientFactory`
+ * satisfies every instantiation, and fakes implement just the methods their check calls.
+ */
+export interface DoctorAdbFactory<Method extends DoctorAdbMethod = DoctorAdbMethod> {
+  create(): Pick<AdbExecutor, Method>;
+}
+
 export async function checkAdbInstallation(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adbFactory: DoctorAdbFactory<"getAdbPathOnly"> = defaultAdbClientFactory,
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
@@ -371,7 +386,7 @@ export async function checkAdbInstallation(
  * Check ADB version
  */
 export async function checkAdbVersion(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adbFactory: DoctorAdbFactory<"executeCommand"> = defaultAdbClientFactory,
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {
@@ -459,7 +474,9 @@ export async function checkEmulator(
  * Check connected Android devices
  */
 export async function checkConnectedDevices(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  adbFactory: DoctorAdbFactory<
+    "getBootedAndroidDevices" | "getDeviceStates"
+  > = defaultAdbClientFactory,
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
   try {

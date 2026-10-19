@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from "bun:test";
-import type { AndroidDoctorDependencies } from "../../src/doctor/checks/android";
+import type { AndroidDoctorDependencies, DoctorAdbFactory } from "../../src/doctor/checks/android";
 import {
   checkAndroidCommandLineTools,
   checkAndroidHome,
@@ -16,8 +16,8 @@ import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { LogLevel } from "../../src/utils/logger";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
 import { createDoctorDeadline } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -126,7 +126,9 @@ const baseDependencies: AndroidDoctorDependencies = {
     error: () => {},
     debug: () => {},
     setLogLevel: () => {},
-    getLogLevel: () => "info",
+    getLogLevel: () => LogLevel.INFO,
+    flush: async () => {},
+    closeAfterFlush: async () => {},
     enableStdoutLogging: () => {},
     disableStdoutLogging: () => {},
     close: () => {},
@@ -490,7 +492,9 @@ describe("checkJavaHome", () => {
 
 describe("checkAdbInstallation", () => {
   test("passes when ADB is available", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getAdbPathOnly" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getAdbPathOnly: async () => "/usr/local/bin/adb",
         executeCommand: async () => ({
@@ -501,10 +505,6 @@ describe("checkAdbInstallation", () => {
           includes: () => false,
         }),
         getBootedAndroidDevices: async () => [],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -516,7 +516,9 @@ describe("checkAdbInstallation", () => {
   });
 
   test("fails when ADB is not found", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getAdbPathOnly" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getAdbPathOnly: async () => {
           throw new Error("adb not found in PATH");
@@ -529,10 +531,6 @@ describe("checkAdbInstallation", () => {
           includes: () => false,
         }),
         getBootedAndroidDevices: async () => [],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -545,7 +543,9 @@ describe("checkAdbInstallation", () => {
   });
 
   test("fails with non-Error thrown values", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getAdbPathOnly" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getAdbPathOnly: async () => {
           throw "string error";
@@ -558,10 +558,6 @@ describe("checkAdbInstallation", () => {
           includes: () => false,
         }),
         getBootedAndroidDevices: async () => [],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -655,16 +651,12 @@ describe("checkAdbVersion", () => {
 
   test("warns with non-Error thrown values", async () => {
     // Use a custom factory that throws a non-Error
-    const throwingFactory: AdbClientFactory = {
+    const throwingFactory: DoctorAdbFactory<"executeCommand" | "getBootedAndroidDevices"> = {
       create: () => ({
         executeCommand: async () => {
           throw "raw string error";
         },
         getBootedAndroidDevices: async () => [],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -709,7 +701,7 @@ describe("Android doctor cancellation", () => {
         observedSignal = probe?.signal;
         observedTimeoutMs = probe?.timeoutMs;
         await new Promise<void>((resolve) => {
-          probe?.signal?.addEventListener("abort", resolve, { once: true });
+          probe?.signal?.addEventListener("abort", () => resolve(), { once: true });
         });
         try {
           probe?.signal?.throwIfAborted();
@@ -907,7 +899,7 @@ describe("checkConnectedDevices", () => {
 
   test("warns when getBootedAndroidDevices throws an error", async () => {
     // Use a custom factory that throws on getBootedAndroidDevices
-    const throwingFactory: AdbClientFactory = {
+    const throwingFactory: DoctorAdbFactory<"executeCommand" | "getBootedAndroidDevices"> = {
       create: () => ({
         executeCommand: async () => ({
           stdout: "",
@@ -919,10 +911,6 @@ describe("checkConnectedDevices", () => {
         getBootedAndroidDevices: async () => {
           throw new Error("adb server not running");
         },
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -935,7 +923,7 @@ describe("checkConnectedDevices", () => {
   });
 
   test("warns with non-Error thrown values", async () => {
-    const throwingFactory: AdbClientFactory = {
+    const throwingFactory: DoctorAdbFactory<"executeCommand" | "getBootedAndroidDevices"> = {
       create: () => ({
         executeCommand: async () => ({
           stdout: "",
@@ -947,10 +935,6 @@ describe("checkConnectedDevices", () => {
         getBootedAndroidDevices: async () => {
           throw "unexpected failure";
         },
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -961,7 +945,9 @@ describe("checkConnectedDevices", () => {
   });
 
   test("warns when adb reports an offline device", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getDeviceStates" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getDeviceStates: async () => [{ deviceId: "emulator-5554", state: "offline" }],
         executeCommand: async () => ({
@@ -972,10 +958,6 @@ describe("checkConnectedDevices", () => {
           includes: () => false,
         }),
         getBootedAndroidDevices: async () => [],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -986,7 +968,9 @@ describe("checkConnectedDevices", () => {
   });
 
   test("gives physical offline devices USB recovery guidance", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getDeviceStates" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getDeviceStates: async () => [{ deviceId: "R5CT12345", state: "offline" }],
         executeCommand: async () => ({
@@ -997,10 +981,6 @@ describe("checkConnectedDevices", () => {
           includes: () => false,
         }),
         getBootedAndroidDevices: async () => [],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -1009,7 +989,9 @@ describe("checkConnectedDevices", () => {
   });
 
   test("passes healthy devices even when adb also reports a stale offline device", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getDeviceStates" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getDeviceStates: async () => [{ deviceId: "emulator-5554", state: "offline" }],
         executeCommand: async () => ({
@@ -1022,10 +1004,6 @@ describe("checkConnectedDevices", () => {
         getBootedAndroidDevices: async () => [
           { name: "Pixel", platform: "android", deviceId: "emulator-5556" },
         ],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 
@@ -1036,7 +1014,9 @@ describe("checkConnectedDevices", () => {
   });
 
   test("keeps healthy devices when the auxiliary offline-state probe fails", async () => {
-    const fakeFactory: AdbClientFactory = {
+    const fakeFactory: DoctorAdbFactory<
+      "getDeviceStates" | "executeCommand" | "getBootedAndroidDevices"
+    > = {
       create: () => ({
         getDeviceStates: async () => {
           throw new Error("adb state probe unavailable");
@@ -1051,10 +1031,6 @@ describe("checkConnectedDevices", () => {
         getBootedAndroidDevices: async () => [
           { name: "Pixel", platform: "android", deviceId: "emulator-5556" },
         ],
-        isScreenOn: async () => true,
-        getWakefulness: async () => "Awake" as const,
-        listUsers: async () => [],
-        getForegroundApp: async () => null,
       }),
     };
 

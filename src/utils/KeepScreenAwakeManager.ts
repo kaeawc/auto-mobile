@@ -66,11 +66,15 @@ const DEFAULT_SCREEN_OFF_TIMEOUT_MS = "60000";
 
 export class KeepScreenAwakeManager {
   private device: BootedDevice;
-  private adb: AdbExecutor;
+  private adb: Pick<AdbExecutor, "executeCommand">;
 
   constructor(
     device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    adbFactory: {
+      create: (
+        ...args: Parameters<AdbClientFactory["create"]>
+      ) => Pick<AdbExecutor, "executeCommand">;
+    } = defaultAdbClientFactory,
     private readonly settingsClientProvider: (
       device: BootedDevice,
     ) => KeepScreenAwakeSettingsClient,

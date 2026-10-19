@@ -151,9 +151,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     const sameClient = IOSCtrlProxyClient.getInstance(testDevice, 8767);
 
     expect(sameClient).toBe(client);
-    expect((sameClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
-      "ws://127.0.0.1:8767/ws",
-    );
+    expect(sameClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
 
     await client.close();
   });
@@ -174,7 +172,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
     expect(await client.ensureConnected()).toBe(true);
 
-    (client as unknown as { updatePort: (port: number) => void }).updatePort(8767);
+    client.testHooks.updatePort(8767);
 
     expect(await client.ensureConnected()).toBe(true);
     expect(urls).toEqual(["ws://127.0.0.1:8765/ws", "ws://127.0.0.1:8767/ws"]);
@@ -200,11 +198,8 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // Exercise the base-class connect directly so the assertion targets the
     // generation guard without the iOS auto-setup wrapper reacting to a failed
     // handshake.
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
-    const updatePort = (
-      client as unknown as { updatePort: (port: number) => void }
-    ).updatePort.bind(client);
+    const connect = client.testHooks.connectWebSocket;
+    const updatePort = client.testHooks.updatePort.bind(client);
     try {
       // Start a connect and let it reach the in-flight state: socket CONNECTING,
       // this.ws still null, isConnecting true. The URL was built from the old port.
@@ -270,8 +265,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       manualTimer,
       { serviceManagerFactory: createManagerFactory() },
     );
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
+    const connect = client.testHooks.connectWebSocket;
     try {
       const first = connect.call(client);
       await flushPromises(8);
@@ -312,11 +306,8 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, wsFactory, manualTimer, {
       serviceManagerFactory: createManagerFactory(),
     });
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
-    const updatePort = (
-      client as unknown as { updatePort: (port: number) => void }
-    ).updatePort.bind(client);
+    const connect = client.testHooks.connectWebSocket;
+    const updatePort = client.testHooks.updatePort.bind(client);
     try {
       // Start a connect and let it reach the in-flight state: socket CONNECTING,
       // this.ws still null, isConnecting true, emitting nothing.
@@ -370,11 +361,8 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, wsFactory, manualTimer, {
       serviceManagerFactory: createManagerFactory(),
     });
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
-    const updatePort = (
-      client as unknown as { updatePort: (port: number) => void }
-    ).updatePort.bind(client);
+    const connect = client.testHooks.connectWebSocket;
+    const updatePort = client.testHooks.updatePort.bind(client);
     try {
       // Exhaust the attempt budget against the old port (default max is 3).
       for (let i = 0; i < 3; i += 1) {

@@ -1,4 +1,3 @@
-// swiftlint:disable force_unwrapping - fail-fast on bad fixtures is idiomatic in tests.
 import Foundation
 import os
 import XCTest
@@ -269,12 +268,15 @@ final class AsyncFakeHTTPPerformer: HTTPRequestPerforming, Sendable {
     @discardableResult
     func reply(_ index: Int, data: Data, status: Int = 200, headers: [String: String]) -> Bool {
         let exchange = captured[index]
-        return exchange.cell.resume(returning: HTTPExchange(
-            data: data,
-            response: HTTPURLResponse(
-                url: exchange.request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
-            )!
-        ))
+        do {
+            let url = try XCTUnwrap(exchange.request.url)
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
+            ))
+            return exchange.cell.resume(returning: HTTPExchange(data: data, response: response))
+        } catch {
+            return exchange.cell.resume(throwing: error)
+        }
     }
 
     @discardableResult
@@ -345,8 +347,6 @@ func assertTransportFailure<Value: Sendable>(
     case let .failure(error): XCTAssertEqual(error as? MCPClientError, expected, file: file, line: line)
     }
 }
-
-// swiftlint:enable force_unwrapping
 
 /// Async equivalent of XCTAssertThrowsError, preserving existing error-specific assertions.
 @MainActor

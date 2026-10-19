@@ -450,8 +450,8 @@ describe("iOS Simulator user_files", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const result = await new IosSimulatorUserFilesProvider(container, verifier).putFile(request());
     expect(fs.files.get(join(namespaceRoot, "nested/input.txt"))?.toString()).toBe("fixture");
-    expect(result.effects[0]).toEqual({ type: "host_stage", status: "completed" });
-    expect(result.effects[1]).toEqual({
+    expect(result.effects?.[0]).toEqual({ type: "host_stage", status: "completed" });
+    expect(result.effects?.[1]).toEqual({
       type: "document_picker",
       status: "unavailable",
       reason: expect.stringContaining("picker disconnected"),

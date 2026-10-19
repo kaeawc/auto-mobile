@@ -184,7 +184,9 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, false);
+      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, {
+        isVoiceOverEnabled: false,
+      });
 
       expect(fakeIosClient.getTapHistory()).toEqual([{ x: 50, y: 50, duration: 50 }]);
       expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
@@ -194,7 +196,9 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, undefined, false);
+      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, undefined, {
+        isVoiceOverEnabled: false,
+      });
 
       expect(fakeIosClient.getTapHistory()).toHaveLength(1);
       expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
@@ -204,7 +208,9 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, true);
+      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, {
+        isVoiceOverEnabled: true,
+      });
 
       expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
         { label: "Settings", action: "activate", bounds: element.bounds, duration: undefined },
@@ -216,7 +222,9 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, undefined, true);
+      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, undefined, {
+        isVoiceOverEnabled: true,
+      });
 
       expect(fakeIosClient.getTapHistory()).toHaveLength(1);
       expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);

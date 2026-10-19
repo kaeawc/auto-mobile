@@ -49,6 +49,7 @@ describe("invalid tool params use the SDK invalid-params code", () => {
     onCallTool: () => {
       throw daemonResponseError({
         id: "invalid-params-response",
+        type: "mcp_response",
         success: false,
         code: ErrorCode.InvalidParams,
         error: daemonMessage,
@@ -179,6 +180,7 @@ describe("validation message hygiene", () => {
     const error = new z.ZodError([
       {
         code: "custom",
+        input: undefined,
         path: ["layer"],
         message: "layer requires a selector naming the field to focus",
       },
@@ -190,7 +192,7 @@ describe("validation message hygiene", () => {
 
   test("a similar word does not suppress the path", () => {
     const error = new z.ZodError([
-      { code: "custom", path: ["layer"], message: "layers are invalid" },
+      { code: "custom", input: undefined, path: ["layer"], message: "layers are invalid" },
     ]);
     expect(formatToolParamError("sendKeys", error)).toBe("layer layers are invalid");
   });

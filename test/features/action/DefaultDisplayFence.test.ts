@@ -1013,24 +1013,16 @@ describe("display fence options preserve public call shapes", () => {
                     70,
                     50,
                     element,
-                    undefined,
-                    undefined,
-                    false,
+                    { isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
                 ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
                 : () =>
-                    tap.executeAndroidTap(
-                      "tap",
-                      50,
-                      70,
-                      50,
-                      element,
-                      undefined,
-                      { action: "tap", ...options },
-                      false,
-                    );
+                    tap.executeAndroidTap("tap", 50, 70, 50, element, {
+                      options: { action: "tap", ...options },
+                      isTalkBackEnabled: false,
+                    });
           break;
         case "retry": {
           const args: Parameters<TapOnElement["retryTapIfNoChange"]> = [
@@ -1039,14 +1031,15 @@ describe("display fence options preserve public call shapes", () => {
             "tap",
             50,
             element,
-            { action: "tap", ...options },
-            false,
-            h.screen.screenSize,
+            {
+              options: { action: "tap", ...options },
+              isTalkBackEnabled: false,
+              screenSize: h.screen.screenSize,
+            },
           ];
           invoke =
             shape === "extra"
-              ? () =>
-                  Reflect.apply(tap.retryTapIfNoChange, tap, [...args, undefined, undefined, []])
+              ? () => Reflect.apply(tap.retryTapIfNoChange, tap, [...args, []])
               : () => tap.retryTapIfNoChange(...args);
           break;
         }

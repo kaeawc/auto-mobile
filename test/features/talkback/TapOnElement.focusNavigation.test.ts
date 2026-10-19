@@ -43,10 +43,12 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     const { driver, tap } = harness();
     const warnings: string[] = [];
 
-    await tap.executeAndroidTap("tap", 50, 345, 500, rows[3], undefined, {
-      action: "tap",
-      screenReaderNavigation: true,
-      onActivationWarning: (warning) => warnings.push(warning),
+    await tap.executeAndroidTap("tap", 50, 345, 500, rows[3], {
+      options: {
+        action: "tap",
+        screenReaderNavigation: true,
+        onActivationWarning: (warning) => warnings.push(warning),
+      },
     });
 
     expect(driver.doubleTapHistory).toHaveLength(1);
@@ -57,9 +59,11 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
   test("moves the cursor with one focus action, then activates with exactly one double tap (#10209, #10144)", async () => {
     const { driver, tap } = harness();
 
-    await tap.executeAndroidTap("tap", 50, 1045, 500, rows[10], undefined, {
-      action: "tap",
-      screenReaderNavigation: true,
+    await tap.executeAndroidTap("tap", 50, 1045, 500, rows[10], {
+      options: {
+        action: "tap",
+        screenReaderNavigation: true,
+      },
     });
 
     expect(driver.focusHistory).toEqual([
@@ -79,9 +83,11 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     }));
     driver.setElements(tagged, 0);
 
-    await tap.executeAndroidTap("tap", 50, 345, 500, tagged[3], undefined, {
-      action: "tap",
-      screenReaderNavigation: true,
+    await tap.executeAndroidTap("tap", 50, 345, 500, tagged[3], {
+      options: {
+        action: "tap",
+        screenReaderNavigation: true,
+      },
     });
 
     expect(driver.focusHistory).toEqual([]);
@@ -101,9 +107,11 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     };
 
     await expect(
-      tap.executeAndroidTap("tap", 50, 345, 500, rows[3], undefined, {
-        action: "tap",
-        screenReaderNavigation: true,
+      tap.executeAndroidTap("tap", 50, 345, 500, rows[3], {
+        options: {
+          action: "tap",
+          screenReaderNavigation: true,
+        },
       }),
     ).rejects.toThrow("Accessibility action is unavailable: focus");
 
@@ -117,9 +125,11 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     driver.onFocusAction = () => driver.setElements(rows.slice(4), 0);
 
     await expect(
-      tap.executeAndroidTap("tap", 50, 345, 500, rows[3], undefined, {
-        action: "tap",
-        screenReaderNavigation: true,
+      tap.executeAndroidTap("tap", 50, 345, 500, rows[3], {
+        options: {
+          action: "tap",
+          screenReaderNavigation: true,
+        },
       }),
     ).rejects.toThrow("The screen changed while moving the TalkBack cursor");
 
@@ -132,10 +142,12 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     driver.doubleTapCapabilitySupported = false;
     const warnings: string[] = [];
 
-    await tap.executeAndroidTap("tap", 50, 345, 500, rows[3], undefined, {
-      action: "tap",
-      screenReaderNavigation: true,
-      onActivationWarning: (warning) => warnings.push(warning),
+    await tap.executeAndroidTap("tap", 50, 345, 500, rows[3], {
+      options: {
+        action: "tap",
+        screenReaderNavigation: true,
+        onActivationWarning: (warning) => warnings.push(warning),
+      },
     });
 
     expect(driver.actionHistory).toEqual([{ action: "click", resourceId: "test:id/row3" }]);
@@ -148,9 +160,12 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     driver.onFocusAction = () => controller.abort();
 
     await expect(
-      tap.executeAndroidTap("tap", 50, 1045, 500, rows[10], controller.signal, {
-        action: "tap",
-        screenReaderNavigation: true,
+      tap.executeAndroidTap("tap", 50, 1045, 500, rows[10], {
+        signal: controller.signal,
+        options: {
+          action: "tap",
+          screenReaderNavigation: true,
+        },
       }),
     ).rejects.toThrow(
       "Focus navigation partially applied: 1 accessibility-focus request already moved",

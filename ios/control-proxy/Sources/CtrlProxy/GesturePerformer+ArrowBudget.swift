@@ -150,22 +150,9 @@ extension GesturePerformer {
             _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
         }
         _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
-        let caretBefore: Int?
-        let baselineIsMemo: Bool
-        let lastStep: String
-        if let original, let known = knownCaret(original) {
-            caretBefore = known
-            baselineIsMemo = true
-            lastStep = "focus check"
-        } else if let element {
-            caretBefore = try probeCaret(element, original)
-            baselineIsMemo = false
-            lastStep = "caret probe"
-        } else {
-            caretBefore = nil
-            baselineIsMemo = false
-            lastStep = "focus check"
-        }
+        let (caretBefore, baselineIsMemo, lastStep) = try horizontalArrowBaseline(
+            element: element, original: original, knownCaret: knownCaret, probeCaret: probeCaret
+        )
         _ = try budget.check(step: .appKey, consumedBy: lastStep)
         try sendKey()
         guard let element, let original else { return false }
@@ -193,6 +180,21 @@ extension GesturePerformer {
             try retryKey(element)
         }
         return false
+    }
+
+    private nonisolated static func horizontalArrowBaseline<Element>(
+        element: Element?, original: String?, knownCaret: (String) -> Int?,
+        probeCaret: (Element, String?) throws -> Int?
+    )
+        throws -> (caret: Int?, isMemo: Bool, lastStep: String)
+    {
+        if let original, let known = knownCaret(original) {
+            return (known, true, "focus check")
+        }
+        if let element {
+            return try (probeCaret(element, original), false, "caret probe")
+        }
+        return (nil, false, "focus check")
     }
 
     /// A memo baseline may be stale, so a mismatch cannot justify a retry or a caret verdict.

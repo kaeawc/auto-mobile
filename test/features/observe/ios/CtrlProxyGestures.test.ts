@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, expect, it } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import type { DelegateContext } from "../../../../src/features/observe/ios/types";
@@ -30,12 +31,9 @@ function createFakeContext(): {
   const requestManager = new CapturingRequestManager(timer);
   const context: DelegateContext = {
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,

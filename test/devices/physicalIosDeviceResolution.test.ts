@@ -3,7 +3,7 @@ import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
 import type { BootedDevice } from "../../src/models";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -35,7 +35,7 @@ describe("physical iOS device resolution reaches ListInstalledApps", () => {
         isAvailable: async () => true,
         getBootedSimulators: async () => [],
       }),
-      { getBootedDevices: async () => [] } as unknown as AndroidEmulatorClient,
+      createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
       undefined,
       undefined,
       { listConnectedDevices: async () => ({ devices: [physical], complete: true }) },

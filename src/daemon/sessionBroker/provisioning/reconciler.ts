@@ -1,39 +1,17 @@
 import { BROKER_DEVICE_NAME_PREFIX, isProductBrokerDevice } from "../persistedIdentity";
 import { BindingJournalRemovalRegistryTimeout } from "../registry/bindingJournal";
-import { createHash } from "node:crypto";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import {
-  evaluateIosPairCompatibility,
-  iosDeviceSpecificationMismatch,
-  matchesAndroidDeviceSpecification,
-  resolveDisplayCutoutPreference,
-} from "../../../devices/deviceSpecMatching";
-import {
   ProvisionDeviceError,
   type AndroidDeviceSpecification,
-  type ExactDeviceSpecification,
-  type ExactIosRuntimeCatalog,
-  type IosDeviceSpecification,
   type ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
 import type { BindingResourceBudget, BindingResourceAdmission } from "./resourceBudget";
 import { budgetRefusal } from "./resourceBudget";
 import type { DeviceInfo } from "../../../models/index";
-import type { BindingBudgetEvidence } from "./acquisitionResult";
-import type { FormFactor } from "../../../models/DeviceMatchCriteria";
-import { androidProfileFormFactor } from "../../../models/formFactor";
-import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
-import { inferIosFormFactor } from "../../../utils/ios-cmdline-tools/iosDeviceType";
-import { evaluateRuntimeCompatibility } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
-import type {
-  AppleDeviceRuntime,
-  AppleDeviceType,
-} from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import { OCCUPYING_SIMULATOR_STATES } from "../../../features/iosSimFleet/FleetCostCollector";
 import { BootCapacityExhaustedError } from "../../../models/BootCapacityExhaustedError";
-import type { AvdConfigReader } from "../../../utils/android-cmdline-tools/AvdConfigReader";
-import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import {
@@ -66,65 +44,23 @@ import {
   type BindingPlatform,
   type BindingRegistry,
 } from "../registry/bindingRegistry";
-
-/**
- * Declarative spec reconciler for one managed device binding (#11175, epic #11172).
- *
- * Given a scoped binding, a requested spec, the host-wide binding registry and the device inventory, it
- * decides between four dispositions and carries the decision out:
- *
- * - `reused`: the binding's assigned device satisfies the spec; it gets a fresh session.
- * - `adopted`: an empty binding takes a matching device that no valid binding holds (the free pool of
- *   invalidated scopes, or this binding's own uncommitted leftover from an interrupted create).
- * - `created`: no eligible device; a new one is provisioned under a generated name.
- * - `replaced`: the assigned device does not satisfy the spec; it is deleted, its absence is
- *   verified, a new one is created, and the result is committed into the same binding.
- *
- * Safety rules:
- * - Omitted spec fields are unconstrained (owner decision Q4); the resolved spec is recorded.
- * - Only this binding's own assigned device is ever deleted, and only after the spec is resolved,
- *   discovery is complete, no live owner or claim holds it and the binding binding still holds.
- * - Partial inventory or an unreadable device configuration is never authoritative absence or
- *   mismatch; it fails retryable `discovery_incomplete` without destructive work.
- * - Every registry mutation compare-and-sets `(generation, stableDeviceId)`, so a lost race never
- *   overwrites a newer binding. A deletion that fails leaves the old binding as `cleanup_pending`;
- *   a replacement creation that fails after verified deletion leaves the binding empty (`provisioning`).
- *   A failed fresh creation removes its never-bound row only after journal rollback proves absence;
- *   an open journal retains the row for redrive.
- * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
- *   reconciler never waits for capacity, never creates a device it could not boot, and checks
- *   before it deletes the device a replacement would not be able to boot.
- * - Every create and replace is journaled (`slot_journal`, #11179) with its exact devices, and each
- *   acquisition first redrives the binding's unfinished work of a dead owner (see `bindingJournal.ts`),
- *   so a retry after an interruption converges instead of repeating destructive work.
- *
- * Not yet wired into the acquire RPC (step 5 of the epic); callers inject the ports below.
- */
-
-export const BINDING_SPEC_FINGERPRINT_VERSION = 1;
-/** Generated device names start with this; a prefix alone is never deletion authority. */
-
-export interface BindingSpecFingerprint {
-  version: typeof BINDING_SPEC_FINGERPRINT_VERSION;
-  hash: string;
-}
+import {
+  type BindingRequestedSpec,
+  type ManagedSpecMatcher,
+  type ManagedSpecMatch,
+} from "./DefaultManagedSpecMatcher";
+import {
+  provisionableSpec,
+  type ManagedSpecResolver,
+  type BindingSpecFingerprint,
+} from "./DefaultManagedSpecResolver";
+import {
+  ReconcileAbort,
+  type BindingReconcileFailureCode,
+  type BindingReconcileFailure,
+} from "./ReconcileAbort";
 
 export type BindingDisposition = "reused" | "adopted" | "created" | "replaced";
-
-type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
-  deviceType?: string;
-  deviceFamily?: BindingDeviceFamily;
-};
-
-/**
- * A binding's requested spec: an exact spec whose `deviceType` (the model or hardware
- * profile) may be omitted. Omitted means "any model" (owner decision Q4), constrained only by an
- * optional `deviceFamily`: matching retains the requested constraints, and a device that must be
- * created gets a compatible model the resolver picks and records in the resolved spec.
- */
-export type BindingRequestedSpec =
-  | WithOptionalDeviceType<AndroidDeviceSpecification>
-  | WithOptionalDeviceType<IosDeviceSpecification>;
 
 /** Known device metadata; an Android AVD may have no configured hardware profile. */
 export interface BindingResolvedSpec {
@@ -133,18 +69,6 @@ export interface BindingResolvedSpec {
   displayCutout?: ResolvedExactDeviceSpecification["displayCutout"];
   configuration?: AndroidDeviceSpecification["configuration"];
 }
-
-/**
- * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
- * known cutout class). Override per resolver.
- */
-export const BINDING_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
-
-export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
-  phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
-  tablet: "pixel_tablet",
-  foldable: "pixel_fold",
-} as const satisfies Record<BindingDeviceFamily, string>;
 
 // ---------------------------------------------------------------------------------------------
 // Ports
@@ -168,43 +92,6 @@ export interface BindingInventory {
     platform: BindingPlatform,
     options: { signal?: AbortSignal },
   ): Promise<BindingInventorySnapshot>;
-}
-
-/** `unknown` means the device's configuration could not be read; it never justifies deletion. */
-export type ManagedSpecMatch = "match" | "mismatch" | "unknown";
-
-export interface ManagedSpecMatcher {
-  matches(device: DeviceInfo, spec: BindingRequestedSpec): Promise<ManagedSpecMatch>;
-}
-
-export type ManagedSpecResolution =
-  | {
-      kind: "resolved";
-      resolvedSpec: ResolvedExactDeviceSpecification;
-      fingerprint: BindingSpecFingerprint;
-    }
-  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
-  /** The spec could not be resolved yet (an unreadable catalog); retryable, nothing changed. */
-  | { kind: "unresolved"; message: string };
-
-export type ManagedSpecCreatability =
-  | { kind: "creatable" }
-  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
-  | { kind: "unresolved"; message: string };
-
-/** Validates and resolves a spec before any destructive work. */
-export interface ManagedSpecResolver {
-  resolve(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecResolution>;
-  /** Checks creation-only prerequisites without blocking reuse or adoption. */
-  checkCreatable?(
-    platform: BindingPlatform,
-    resolvedSpec: ResolvedExactDeviceSpecification,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecCreatability>;
 }
 
 export interface BindingProvisionRequest {
@@ -400,25 +287,6 @@ export interface BindingReconcileRequest {
   owner?: Omit<BindingExecOwner, "sessionUuid">;
 }
 
-export type BindingReconcileFailureCode =
-  | "spec_unsupported"
-  | "runtime_incompatible"
-  | "scope_not_valid"
-  | "discovery_incomplete"
-  | "binding_in_use"
-  | "binding_settling"
-  | "device_busy"
-  | "reconcile_in_progress"
-  | "cleanup_pending"
-  | "capacity_exhausted"
-  | "binding_budget_exhausted"
-  | "concurrent_modification"
-  | "readiness_incomplete"
-  | "stale_session"
-  | "provision_failed"
-  | "timeout"
-  | "cancelled";
-
 const FAILURE_RETRYABILITY: Readonly<Record<BindingReconcileFailureCode, boolean>> = {
   spec_unsupported: false,
   runtime_incompatible: false,
@@ -460,25 +328,6 @@ const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>>
   timeout: "Retry with a longer preparation timeout.",
   cancelled: "The preparation was cancelled; retry when needed.",
 };
-
-export interface BindingReconcileFailure {
-  code: BindingReconcileFailureCode;
-  retryable: boolean;
-  message: string;
-  nextAction: string;
-  /** Underlying provision failure, when the provision path refused. */
-  provision?: { code: string; retryable: boolean };
-  capacity?: BindingFailureCapacity;
-  budget?: BindingBudgetEvidence;
-}
-
-/** Same `externalDevices` name and shape as the non-binding `capacity_exhausted` refusal (#11390). */
-export interface BindingFailureCapacity {
-  limit: number;
-  booted: number;
-  retryAfterMs: number;
-  externalDevices?: string[];
-}
 
 export interface BindingReconcileEvidence {
   /** Assignment as read before any mutation (null when the scope was not valid). */
@@ -552,505 +401,12 @@ function bindingDeviceNameSuffix(key: BindingKey): string {
   return `${key.scopeKey.slice(0, 8)}-${key.bindingIndex}-g`;
 }
 
-export function computeManagedSpecFingerprint(
-  platform: BindingPlatform,
-  resolvedSpec: ResolvedExactDeviceSpecification,
-): BindingSpecFingerprint {
-  const hash = createHash("sha256")
-    .update(stableStringify({ version: BINDING_SPEC_FINGERPRINT_VERSION, platform, resolvedSpec }))
-    .digest("hex");
-  return { version: BINDING_SPEC_FINGERPRINT_VERSION, hash };
-}
-
 /** The registry column form of a fingerprint: `v<version>:<hash>`. */
 export function encodeManagedSpecFingerprint(fingerprint: BindingSpecFingerprint): string {
   return `v${fingerprint.version}:${fingerprint.hash}`;
 }
 
 export { deviceStableId };
-
-/** Matches with the shared exact-provisioning matchers (#11100) — one definition of "matches". */
-export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
-  constructor(private readonly androidConfigReader: Pick<AvdConfigReader, "readConfig">) {}
-
-  async matches(device: DeviceInfo, spec: BindingRequestedSpec): Promise<ManagedSpecMatch> {
-    if (device.platform === "android") {
-      let config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>;
-      try {
-        config = await this.androidConfigReader.readConfig(device.name);
-      } catch (error) {
-        logger.warn(
-          `[Bindings] cannot read AVD config for '${device.name}': ${errorMessage(error)}`,
-          error,
-        );
-        return "unknown";
-      }
-      if (!config) {
-        return "unknown";
-      }
-      // An omitted hardware profile is unconstrained: the AVD's own profile (even an unset one)
-      // satisfies it.
-      const constraints = {
-        ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
-        deviceType: (spec.deviceType ?? config.deviceName) as string,
-      };
-      if (!matchesAndroidDeviceSpecification(constraints, config)) {
-        return "mismatch";
-      }
-      return matchDeviceFamily(spec.deviceFamily, () =>
-        androidProfileFormFactor({
-          profileId: config.deviceName,
-          width: config.screenWidth,
-          height: config.screenHeight,
-          density: config.screenDensity,
-        }),
-      );
-    }
-    // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
-    // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
-    if (
-      device.isAvailable === false ||
-      device.runtime === undefined ||
-      (spec.deviceType !== undefined && device.deviceType === undefined)
-    ) {
-      return "unknown";
-    }
-    // An omitted model is unconstrained: the simulator's own model satisfies it.
-    const constraints = {
-      runtime: spec.runtime,
-      deviceType: spec.deviceType ?? device.deviceType!,
-    };
-    return iosDeviceSpecificationMismatch(constraints, device) === undefined
-      ? matchDeviceFamily(spec.deviceFamily, () => inferIosFormFactor(device.deviceType))
-      : "mismatch";
-  }
-}
-
-function matchDeviceFamily(
-  requested: BindingDeviceFamily | undefined,
-  infer: () => FormFactor | undefined,
-): ManagedSpecMatch {
-  if (requested === undefined) {
-    return "match";
-  }
-  const actual = infer();
-  if (actual === undefined || actual === "unknown") {
-    return "unknown";
-  }
-  return actual === requested ? "match" : "mismatch";
-}
-
-/** Request-only constraints must not enter provisionDevice or configuration fingerprints. */
-function provisionableSpec(spec: BindingRequestedSpec): BindingRequestedSpec {
-  const configuration = { ...spec };
-  delete configuration.deviceFamily;
-  return configuration;
-}
-
-function unsupportedModelFamily(
-  platform: BindingPlatform,
-  spec: BindingRequestedSpec,
-): string | undefined {
-  if (spec.deviceType === undefined || spec.deviceFamily === undefined) {
-    return undefined;
-  }
-  const actual =
-    platform === "ios"
-      ? inferIosFormFactor(spec.deviceType)
-      : androidProfileFormFactor({ profileId: spec.deviceType });
-  if (actual === undefined || actual === "unknown") {
-    return `The family of deviceType '${spec.deviceType}' cannot be verified before creation for deviceFamily '${spec.deviceFamily}'. Request either deviceType or deviceFamily, not both.`;
-  }
-  return actual === spec.deviceFamily
-    ? undefined
-    : `deviceType '${spec.deviceType}' is a ${actual}; it conflicts with deviceFamily '${spec.deviceFamily}'.`;
-}
-
-function unsupportedFamilyScreenOverrides(
-  platform: BindingPlatform,
-  spec: BindingRequestedSpec,
-): string | undefined {
-  if (platform !== "android" || spec.deviceFamily === undefined || !("configuration" in spec)) {
-    return undefined;
-  }
-  const overridden = (["screenWidth", "screenHeight", "screenDensity"] as const).some(
-    (field) => spec.configuration?.[field] !== undefined,
-  );
-  return overridden
-    ? "The family is classified from screen geometry, so it cannot be verified before creation when the geometry is overridden. Request deviceFamily without screen overrides, or an explicit deviceType without deviceFamily."
-    : undefined;
-}
-
-const IOS_RUNTIME_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.SimRuntime.";
-
-/** The Android system-image packages installed in the SDK, as `system-images;...` identifiers. */
-export interface ManagedAndroidImageCatalog {
-  listInstalledPackages(signal?: AbortSignal): Promise<string[]>;
-}
-
-export interface ManagedAndroidProfileCatalog {
-  listProfileIds(signal?: AbortSignal): Promise<string[]>;
-}
-
-export interface DefaultManagedSpecResolverOptions {
-  /** Profile created for an Android spec that omits `deviceType`. */
-  androidDefaultDeviceType?: string;
-  androidDefaultDeviceTypesByFamily?: Partial<Record<BindingDeviceFamily, string>>;
-  /**
-   * With a catalog, an Android spec whose system image is not installed is refused as
-   * `spec_unsupported` before anything is created, instead of surfacing avdmanager's raw text.
-   */
-  androidImageCatalog?: ManagedAndroidImageCatalog;
-  androidProfileCatalog?: ManagedAndroidProfileCatalog;
-}
-
-/**
- * Resolves a spec with the shared exact-provisioning checks. Codes are aligned across platforms:
- * `spec_unsupported` for a malformed spec (an Android runtime that is not a system-image id, an iOS
- * runtime that is not a CoreSimulator id) or one naming what this host has not installed (an
- * Android image, an iOS runtime or device type, with a catalog); `runtime_incompatible` only for an
- * installed iOS model/runtime pair the catalog proves incompatible. Unreadable catalogs are
- * unknown, not unsupported, matching the provisioner.
- *
- * An omitted `deviceType` ("any model") resolves to the model a creation would use: on iOS the
- * newest iPhone the catalog lists as supporting the runtime (so a catalog is required), on Android
- * {@link BINDING_DEFAULT_ANDROID_DEVICE_TYPE} unless overridden. Matching still accepts any
- * model within an optional requested family; only creation uses the resolved one. Android family
- * defaults can be overridden individually. A cutout preference needs an explicit model.
- */
-export class DefaultManagedSpecResolver implements ManagedSpecResolver {
-  private readonly androidDefaultDeviceType: string;
-  private readonly androidDefaultDeviceTypesByFamily: Record<BindingDeviceFamily, string>;
-  private readonly androidImageCatalog?: ManagedAndroidImageCatalog;
-  private readonly androidProfileCatalog?: ManagedAndroidProfileCatalog;
-
-  constructor(
-    private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
-    options: DefaultManagedSpecResolverOptions = {},
-  ) {
-    this.androidDefaultDeviceType =
-      options.androidDefaultDeviceType ?? BINDING_DEFAULT_ANDROID_DEVICE_TYPE;
-    this.androidDefaultDeviceTypesByFamily = {
-      ...BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY,
-      phone: this.androidDefaultDeviceType,
-      ...options.androidDefaultDeviceTypesByFamily,
-    };
-    this.androidImageCatalog = options.androidImageCatalog;
-    this.androidProfileCatalog = options.androidProfileCatalog;
-  }
-
-  async checkCreatable(
-    platform: BindingPlatform,
-    resolvedSpec: ResolvedExactDeviceSpecification,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecCreatability> {
-    if (platform !== "android" || !this.androidProfileCatalog) {
-      return { kind: "creatable" };
-    }
-    let profileIds: string[];
-    try {
-      profileIds = await this.androidProfileCatalog.listProfileIds(options.signal);
-    } catch (error) {
-      logger.warn(`[Bindings] Android profile catalog unreadable: ${errorMessage(error)}`, error);
-      return {
-        kind: "unresolved",
-        message: `The Android hardware profile catalog could not be read: ${errorMessage(error)}`,
-      };
-    }
-    if (profileIds.includes(resolvedSpec.deviceType)) {
-      return { kind: "creatable" };
-    }
-    return {
-      kind: "unsupported",
-      code: "spec_unsupported",
-      message: `Android hardware profile '${resolvedSpec.deviceType}' is not available on this host. List valid profile IDs with avdmanager list device.`,
-    };
-  }
-
-  async resolve(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    options: { signal?: AbortSignal },
-  ): Promise<ManagedSpecResolution> {
-    const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal);
-    if (unsupported) {
-      return { kind: "unsupported", code: "spec_unsupported", message: unsupported };
-    }
-    const model = await this.resolveDeviceType(platform, spec, options.signal);
-    if (model.kind !== "resolved") {
-      return model.resolution;
-    }
-    const exact = {
-      ...provisionableSpec(spec),
-      deviceType: model.deviceType,
-    } as ExactDeviceSpecification;
-    const cutout = resolveDisplayCutoutPreference(platform, exact);
-    if (cutout.kind !== "resolved") {
-      return { kind: "unsupported", code: "spec_unsupported", message: cutout.message };
-    }
-    if (platform === "ios" && this.iosRuntimeCatalog && spec.deviceType !== undefined) {
-      const incompatible = await this.findIosIncompatibility(exact, options.signal);
-      if (incompatible) {
-        return { kind: "unsupported", code: "runtime_incompatible", message: incompatible };
-      }
-    }
-    const resolvedSpec = {
-      ...exact,
-      displayCutout: cutout.displayCutout,
-    } as ResolvedExactDeviceSpecification;
-    return {
-      kind: "resolved",
-      resolvedSpec,
-      fingerprint: computeManagedSpecFingerprint(platform, resolvedSpec),
-    };
-  }
-
-  /**
-   * Why the spec is `spec_unsupported` before any model is chosen: malformed (an Android runtime
-   * that is not a system-image id, an iOS runtime that is not a CoreSimulator id), or naming what
-   * the host has not installed. Undefined when it may proceed.
-   */
-  private async findUnsupportedSpec(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    const familyConflict =
-      unsupportedFamilyScreenOverrides(platform, spec) ?? unsupportedModelFamily(platform, spec);
-    if (familyConflict !== undefined) {
-      return familyConflict;
-    }
-    if (platform === "android") {
-      return parseAndroidSystemImageRuntime(spec.runtime)
-        ? await this.findMissingAndroidImage(spec.runtime, signal)
-        : `Android runtime '${spec.runtime}' is not a system-image identifier.`;
-    }
-    return spec.runtime.startsWith(IOS_RUNTIME_IDENTIFIER_PREFIX)
-      ? await this.findMissingIosCatalogEntry(spec, signal)
-      : `iOS runtime '${spec.runtime}' is not a CoreSimulator runtime identifier (${IOS_RUNTIME_IDENTIFIER_PREFIX}...).`;
-  }
-
-  private async resolveDeviceType(
-    platform: BindingPlatform,
-    spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
-  ): Promise<
-    | { kind: "resolved"; deviceType: string }
-    | { kind: "refused"; resolution: ManagedSpecResolution }
-  > {
-    if (spec.deviceType !== undefined) {
-      return { kind: "resolved", deviceType: spec.deviceType };
-    }
-    if (spec.displayCutout !== undefined && spec.displayCutout !== "any") {
-      return refused(
-        "spec_unsupported",
-        `A display cutout preference ('${spec.displayCutout}') needs an explicit deviceType.`,
-      );
-    }
-    if (platform === "android") {
-      return {
-        kind: "resolved",
-        deviceType:
-          spec.deviceFamily === undefined
-            ? this.androidDefaultDeviceType
-            : this.androidDefaultDeviceTypesByFamily[spec.deviceFamily],
-      };
-    }
-    if (!this.iosRuntimeCatalog) {
-      return refused(
-        "spec_unsupported",
-        "An iOS spec without deviceType needs the simulator catalog to choose a model.",
-      );
-    }
-    let runtimes: AppleDeviceRuntime[];
-    let deviceTypes: AppleDeviceType[];
-    try {
-      [runtimes, deviceTypes] = await Promise.all([
-        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
-        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
-      ]);
-    } catch (error) {
-      logger.warn(
-        `[Bindings] iOS catalog unreadable; cannot choose a model: ${errorMessage(error)}`,
-        error,
-      );
-      return {
-        kind: "refused",
-        resolution: {
-          kind: "unresolved",
-          message: `The simulator catalog could not be read to choose a model: ${errorMessage(error)}`,
-        },
-      };
-    }
-    const deviceType = chooseIosDeviceType(spec.runtime, runtimes, deviceTypes, spec.deviceFamily);
-    return deviceType
-      ? { kind: "resolved", deviceType }
-      : refused(
-          "runtime_incompatible",
-          `No installed ${spec.deviceFamily ?? "iPhone"} model supports runtime '${spec.runtime}', or the runtime is not available.`,
-        );
-  }
-
-  private async findMissingAndroidImage(
-    runtime: string,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    if (!this.androidImageCatalog) {
-      return undefined;
-    }
-    let installed: string[];
-    try {
-      installed = await this.androidImageCatalog.listInstalledPackages(signal);
-    } catch (error) {
-      // An unreadable SDK listing is not proof the image is missing; avdmanager stays the authority.
-      logger.warn(`[Bindings] Android image check skipped: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-    if (installed.includes(runtime)) {
-      return undefined;
-    }
-    return `Android system image '${runtime}' is not installed. Install it with sdkmanager, or request an installed image (${installed.join(", ") || "none installed"}).`;
-  }
-
-  /**
-   * The refusal for an iOS runtime or device type the simulator catalog does not list (#11271),
-   * checked before anything is created instead of surfacing simctl's raw "Invalid device type" text
-   * or reporting a missing runtime as a model/runtime mismatch. Not installed is spec_unsupported,
-   * as for Android's uninstalled image (#11269); `runtime_incompatible` stays for an installed
-   * runtime that is unavailable or outside the model's range. No catalog, or an unreadable one, is
-   * not proof; simctl stays the authority.
-   */
-  private async findMissingIosCatalogEntry(
-    spec: BindingRequestedSpec,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    if (!this.iosRuntimeCatalog) {
-      return undefined;
-    }
-    let runtimes: AppleDeviceRuntime[];
-    let deviceTypes: AppleDeviceType[];
-    try {
-      [runtimes, deviceTypes] = await Promise.all([
-        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
-        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
-      ]);
-    } catch (error) {
-      logger.warn(`[Bindings] iOS catalog check skipped: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-    if (!runtimes.some((entry) => entry.identifier === spec.runtime)) {
-      const installed = runtimes.map((entry) => entry.identifier);
-      return (
-        `iOS runtime '${spec.runtime}' is not installed on this host. Install it with Xcode, or ` +
-        `request an installed runtime (${installed.join(", ") || "none installed"}).`
-      );
-    }
-    if (
-      spec.deviceType === undefined ||
-      deviceTypes.some((entry) => entry.identifier === spec.deviceType)
-    ) {
-      return undefined;
-    }
-    const iphones = deviceTypes
-      .filter((entry) => entry.productFamily === "iPhone")
-      .map((entry) => entry.identifier);
-    return (
-      `iOS device type '${spec.deviceType}' is not installed on this host. Request an installed ` +
-      `device type (iPhone types: ${iphones.join(", ") || "none installed"}; all types: ` +
-      "xcrun simctl list devicetypes)."
-    );
-  }
-
-  private async findIosIncompatibility(
-    spec: ExactDeviceSpecification,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
-    const catalog = this.iosRuntimeCatalog!;
-    let runtimes: Awaited<ReturnType<ExactIosRuntimeCatalog["getRuntimesChecked"]>>;
-    let deviceTypes: Awaited<ReturnType<ExactIosRuntimeCatalog["getDeviceTypesChecked"]>>;
-    try {
-      [runtimes, deviceTypes] = await Promise.all([
-        catalog.getRuntimesChecked(undefined, signal),
-        catalog.getDeviceTypesChecked(signal),
-      ]);
-    } catch (error) {
-      // An unreadable catalog is not proof of incompatibility; creation keeps simctl as authority.
-      logger.warn(`[Bindings] iOS catalog check skipped: ${errorMessage(error)}`, error);
-      return undefined;
-    }
-    const incompatibility = evaluateIosPairCompatibility(spec, runtimes, deviceTypes);
-    if (!incompatibility) {
-      return undefined;
-    }
-    const alternatives =
-      incompatibility.compatibleRuntimes.map((entry) => entry.id).join(", ") || "none installed";
-    return incompatibility.unavailable
-      ? `Runtime '${spec.runtime}' is not available. Compatible installed runtimes: ${alternatives}.`
-      : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}'. Compatible installed runtimes: ${alternatives}.`;
-  }
-}
-
-function refused(
-  code: "spec_unsupported" | "runtime_incompatible",
-  message: string,
-): { kind: "refused"; resolution: ManagedSpecResolution } {
-  return { kind: "refused", resolution: { kind: "unsupported", code, message } };
-}
-
-/**
- * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods),
- * else one with unknown runtime compatibility (simctl stays the authority). An explicit family
- * selects that family's types instead. Within each tier, parseable iPhone/iPad model identifiers
- * outrank unparseable ones: highest major generation, then lowest minor variant, then shortest
- * name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
- * Undefined when the runtime is missing or unavailable, or no selected-family type fits.
- */
-export function chooseIosDeviceType(
-  runtimeId: string,
-  runtimes: readonly AppleDeviceRuntime[],
-  deviceTypes: readonly AppleDeviceType[],
-  family?: BindingDeviceFamily,
-): string | undefined {
-  const runtime = runtimes.find((entry) => entry.identifier === runtimeId);
-  if (!runtime?.isAvailable) {
-    return undefined;
-  }
-  const candidates = deviceTypes.filter((entry) =>
-    family === undefined
-      ? entry.productFamily === "iPhone" && !entry.modelIdentifier?.startsWith("iPod")
-      : inferIosFormFactor(entry.identifier) === family,
-  );
-  const statusOf = (entry: AppleDeviceType) =>
-    evaluateRuntimeCompatibility(entry, runtime.version).status;
-  const supported = candidates.filter((entry) => statusOf(entry) === "supported");
-  const unknown = candidates.filter((entry) => statusOf(entry) === "unknown");
-  return (
-    supported.toSorted(compareNewestDeviceType).at(-1) ??
-    unknown.toSorted(compareNewestDeviceType).at(-1)
-  )?.identifier;
-}
-
-/** Positive means preferred; stable sorting retains catalog order for unparseable models. */
-function compareNewestDeviceType(a: AppleDeviceType, b: AppleDeviceType): number {
-  const aModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(a.modelIdentifier ?? "");
-  const bModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(b.modelIdentifier ?? "");
-  if (!aModel || !bModel) {
-    return Number(Boolean(aModel)) - Number(Boolean(bModel));
-  }
-  return (
-    Number(aModel[2]) - Number(bModel[2]) ||
-    Number(bModel[3]) - Number(aModel[3]) ||
-    b.name.length - a.name.length ||
-    (a.identifier < b.identifier ? 1 : a.identifier > b.identifier ? -1 : 0)
-  );
-}
-
-class ReconcileAbort extends Error {
-  constructor(readonly failure: BindingReconcileFailure) {
-    super(failure.message);
-    this.name = "ReconcileAbort";
-  }
-}
 
 export function failure(
   code: BindingReconcileFailureCode,
@@ -2691,3 +2047,43 @@ export class BindingReconciler {
     };
   }
 }
+
+export { DefaultManagedSpecMatcher } from "./DefaultManagedSpecMatcher";
+
+export { DefaultManagedSpecResolver } from "./DefaultManagedSpecResolver";
+
+export { type ManagedSpecMatcher } from "./DefaultManagedSpecMatcher";
+
+export { type BindingRequestedSpec } from "./DefaultManagedSpecMatcher";
+
+export { type ManagedSpecMatch } from "./DefaultManagedSpecMatcher";
+
+export { type ManagedSpecResolver } from "./DefaultManagedSpecResolver";
+
+export { type ManagedAndroidImageCatalog } from "./DefaultManagedSpecResolver";
+
+export { type ManagedAndroidProfileCatalog } from "./DefaultManagedSpecResolver";
+
+export { type DefaultManagedSpecResolverOptions } from "./DefaultManagedSpecResolver";
+
+export { BINDING_DEFAULT_ANDROID_DEVICE_TYPE } from "./DefaultManagedSpecResolver";
+
+export { BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY } from "./DefaultManagedSpecResolver";
+
+export { type ManagedSpecCreatability } from "./DefaultManagedSpecResolver";
+
+export { type ManagedSpecResolution } from "./DefaultManagedSpecResolver";
+
+export { computeManagedSpecFingerprint } from "./DefaultManagedSpecResolver";
+
+export { chooseIosDeviceType } from "./DefaultManagedSpecResolver";
+
+export { type BindingReconcileFailure } from "./ReconcileAbort";
+
+export { type BindingSpecFingerprint } from "./DefaultManagedSpecResolver";
+
+export { BINDING_SPEC_FINGERPRINT_VERSION } from "./DefaultManagedSpecResolver";
+
+export { type BindingReconcileFailureCode } from "./ReconcileAbort";
+
+export { type BindingFailureCapacity } from "./ReconcileAbort";

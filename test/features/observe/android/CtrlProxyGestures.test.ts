@@ -78,7 +78,17 @@ describe("Android gesture duration wire", () => {
         () => gestures.requestTapCoordinates(10, 20, duration),
         () => gestures.requestSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration }),
         () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
-        () => gestures.requestDrag(10, 20, 30, 40, duration, duration, duration, 5000),
+        () =>
+          gestures.requestDrag({
+            x1: 10,
+            y1: 20,
+            x2: 30,
+            y2: 40,
+            pressDurationMs: duration,
+            dragDurationMs: duration,
+            holdDurationMs: duration,
+            timeoutMs: 5000,
+          }),
         () => gestures.requestPinch(10, 20, 30, 40, 15.5, duration),
       ];
       for (const send of requests) {
@@ -510,7 +520,17 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_drag","requestId":"request","x1":10,"y1":20,"x2":30,"y2":40,"pressDurationMs":600,"dragDurationMs":300,"holdDurationMs":100}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestDrag(10, 20, 30, 40, 600, 300, 100, 5000, undefined, undefined, id),
+        g.requestDrag({
+          x1: 10,
+          y1: 20,
+          x2: 30,
+          y2: 40,
+          pressDurationMs: 600,
+          dragDurationMs: 300,
+          holdDurationMs: 100,
+          timeoutMs: 5000,
+          displayId: id,
+        }),
     },
     {
       name: "pinch",
@@ -656,7 +676,17 @@ describe("Android client forwards gesture displayId", () => {
     {
       name: "drag",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestDrag(1, 2, 3, 4, 600, 300, 100, 5000, undefined, undefined, 2),
+        c.requestDrag({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          pressDurationMs: 600,
+          dragDurationMs: 300,
+          holdDurationMs: 100,
+          timeoutMs: 5000,
+          displayId: 2,
+        }),
     },
     {
       name: "pinch",
@@ -704,7 +734,18 @@ describe("Android display gesture cancellation", () => {
     {
       name: "drag",
       send: (c: AndroidCtrlProxyClient, signal: AbortSignal) =>
-        c.requestDrag(1, 2, 3, 4, 600, 300, 100, 5000, undefined, signal, 2),
+        c.requestDrag({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          pressDurationMs: 600,
+          dragDurationMs: 300,
+          holdDurationMs: 100,
+          timeoutMs: 5000,
+          signal,
+          displayId: 2,
+        }),
     },
     {
       name: "pinch",
@@ -777,7 +818,19 @@ describe("gesture pre-send display fence during reconnect", () => {
     {
       name: "drag",
       send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
-        c.requestDrag(1, 2, 3, 4, 600, 300, 100, 5000, undefined, signal, 2, guard),
+        c.requestDrag({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          pressDurationMs: 600,
+          dragDurationMs: 300,
+          holdDurationMs: 100,
+          timeoutMs: 5000,
+          signal,
+          displayId: 2,
+          beforeSend: guard,
+        }),
     },
     {
       name: "pinch",
@@ -1034,27 +1087,26 @@ describe("Android client drag dispatch hook", () => {
     client["_gestures"] = new CtrlProxyGestures(context);
     const controller = new AbortController();
     const phases: string[] = [];
-    const pending = client.requestDrag(
-      1,
-      2,
-      3,
-      4,
-      600,
-      300,
-      100,
-      5000,
-      undefined,
-      controller.signal,
-      2,
-      () => {
+    const pending = client.requestDrag({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      pressDurationMs: 600,
+      dragDurationMs: 300,
+      holdDurationMs: 100,
+      timeoutMs: 5000,
+      signal: controller.signal,
+      displayId: 2,
+      beforeSend: () => {
         expect(sent).toHaveLength(0);
         phases.push("beforeSend");
       },
-      () => {
+      onDispatch: () => {
         expect(sent).toHaveLength(1);
         phases.push("dispatched");
       },
-    );
+    });
     await flush();
     const message = JSON.parse(sent[0]) as { type: string; displayId: number };
     expect(message.type).toBe("request_drag");

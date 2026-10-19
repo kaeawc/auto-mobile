@@ -136,25 +136,22 @@ describe("SharedGestureDelegate", () => {
     });
     const sentCounts: number[] = [];
     await callAndResolve(sent, context.requestManager, () =>
-      delegate.requestDrag(
-        1,
-        2,
-        3,
-        4,
-        600,
-        300,
-        100,
-        5000,
-        undefined,
-        undefined,
-        undefined,
-        () => {
+      delegate.requestDrag({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        pressDurationMs: 600,
+        dragDurationMs: 300,
+        holdDurationMs: 100,
+        timeoutMs: 5000,
+        beforeSend: () => {
           sentCounts.push(sent.length);
         },
-        () => {
+        onDispatch: () => {
           sentCounts.push(sent.length);
         },
-      ),
+      }),
     );
     expect(sentCounts).toEqual([0, 1]);
   });
@@ -303,7 +300,16 @@ describe("SharedGestureDelegate", () => {
       expect(cancelCalls()).toBe(2);
 
       await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestDrag(0, 0, 100, 100, 200, 300, 100, 5000),
+        delegate.requestDrag({
+          x1: 0,
+          y1: 0,
+          x2: 100,
+          y2: 100,
+          pressDurationMs: 200,
+          dragDurationMs: 300,
+          holdDurationMs: 100,
+          timeoutMs: 5000,
+        }),
       );
       expect(cancelCalls()).toBe(3);
 
@@ -360,7 +366,16 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestDrag(10, 20, 30, 40, 100, 200, 50, 5000),
+        delegate.requestDrag({
+          x1: 10,
+          y1: 20,
+          x2: 30,
+          y2: 40,
+          pressDurationMs: 100,
+          dragDurationMs: 200,
+          holdDurationMs: 50,
+          timeoutMs: 5000,
+        }),
       );
 
       expect(sentMsg.type).toBe("request_drag");
@@ -406,7 +421,16 @@ describe("SharedGestureDelegate", () => {
       expect(swipe.success).toBe(false);
       expect(swipe.error).toBe("Not connected");
 
-      const drag = await delegate.requestDrag(0, 0, 100, 100, 200, 300, 100, 5000);
+      const drag = await delegate.requestDrag({
+        x1: 0,
+        y1: 0,
+        x2: 100,
+        y2: 100,
+        pressDurationMs: 200,
+        dragDurationMs: 300,
+        holdDurationMs: 100,
+        timeoutMs: 5000,
+      });
       expect(drag.success).toBe(false);
       expect(drag.error).toBe("Not connected");
 

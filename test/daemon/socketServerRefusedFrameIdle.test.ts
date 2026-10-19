@@ -284,7 +284,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       createIosTestClient(device, {
         getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
         requestTapCoordinates: record("tap", 7),
-        requestDrag: record("swipe", 10),
+        requestDrag: record("swipe", 0),
         requestSetText: record("setText", 1),
         requestAppendText: record("appendText", 4),
         requestImeAction: recordIme(4),

@@ -1,4 +1,5 @@
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
+import type { DragRequest } from "../../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
@@ -193,6 +194,25 @@ function swipeCallTails(calls: ReadonlyArray<readonly [SwipeRequest]>): unknown[
     request.signal,
     request.displayId,
     request.beforeSend,
+  ]);
+}
+
+/** A drag request laid out like the tap calls, so shared tail assertions line up. */
+function dragCallTails(calls: ReadonlyArray<readonly [DragRequest]>): unknown[][] {
+  return calls.map(([request]) => [
+    request.x1,
+    request.y1,
+    request.x2,
+    request.y2,
+    request.pressDurationMs,
+    request.dragDurationMs,
+    request.holdDurationMs,
+    request.timeoutMs,
+    request.frameContext,
+    request.signal,
+    request.displayId,
+    request.beforeSend,
+    request.onDispatch,
   ]);
 }
 
@@ -777,10 +797,10 @@ describe("explicit action display", () => {
     const fakeAdb = new FakeAdbClient();
     const timer = autoTimer();
     timer.enableAutoAdvance();
-    const drags: number[][] = [];
+    const drags: Array<[number, number, number, number]> = [];
     const client = {
-      requestDrag: async (...coordinates: number[]) => {
-        drags.push(coordinates);
+      requestDrag: async ({ x1, y1, x2, y2 }: DragRequest) => {
+        drags.push([x1, y1, x2, y2]);
         return { success: true };
       },
     };
@@ -1749,7 +1769,7 @@ describe("CtrlProxy display-targeted action routing", () => {
         const requests = [
           ...tap.mock.calls,
           ...swipeCallTails(swipe.mock.calls),
-          ...drag.mock.calls,
+          ...dragCallTails(drag.mock.calls),
         ];
         expect(requests).toHaveLength(1);
         expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
@@ -1913,7 +1933,7 @@ describe("CtrlProxy display-targeted action routing", () => {
               const calls = [
                 ...tap.mock.calls,
                 ...swipeCallTails(swipe.mock.calls),
-                ...drag.mock.calls,
+                ...dragCallTails(drag.mock.calls),
                 ...pinch.mock.calls,
               ];
               const inputs = executor

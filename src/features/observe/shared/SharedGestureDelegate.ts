@@ -12,6 +12,7 @@ import type {
   DelegateContext,
   GestureTimingResult,
   BaseResult,
+  DragRequest,
   SwipeRequest,
   SwipeRequestOptions,
 } from "./types";
@@ -225,21 +226,9 @@ export class SharedGestureDelegate {
     return result;
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<GestureTimingResult> {
+  async requestDrag(request: DragRequest): Promise<GestureTimingResult> {
+    const { x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs } = request;
+    const { frameContext, signal, displayId, beforeSend, onDispatch } = request;
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "drag",

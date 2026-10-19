@@ -112,9 +112,8 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
   spyOn(ios, "requestTapCoordinates").mockImplementation(
     (_x, _y, _duration, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),
   );
-  spyOn(ios, "requestDrag").mockImplementation(
-    (_x, _y, _ex, _ey, _press, _drag, _hold, _timeout, _context, signal, dispatch) =>
-      send(signal, dispatch),
+  spyOn(ios, "requestDrag").mockImplementation(({ signal, onDispatch }) =>
+    send(signal, onDispatch),
   );
   spyOn(android, "requestGlobalAction").mockImplementation(
     (_button, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),

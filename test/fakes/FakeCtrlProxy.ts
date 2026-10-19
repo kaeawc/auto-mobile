@@ -33,6 +33,7 @@ import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
+import type { DragRequest } from "../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
 import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
@@ -906,21 +907,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<A11yDragResult> {
+  async requestDrag(request: DragRequest): Promise<A11yDragResult> {
+    const { x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs } = request;
+    const { signal, displayId, beforeSend, onDispatch } = request;
     await this.applyDelay("drag");
     beforeSend?.();
     this.checkFailure("drag");

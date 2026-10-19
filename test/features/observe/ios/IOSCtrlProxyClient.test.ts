@@ -4239,7 +4239,16 @@ describe("IOSCtrlProxyClient", function () {
         // it pending so it can only settle via the port-change cancellation, never
         // by timing out during the test.
         // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
-        const inFlight = testClient.requestDrag(0, 0, 10, 10, 0, 300, 0, 60000);
+        const inFlight = testClient.requestDrag({
+          x1: 0,
+          y1: 0,
+          x2: 10,
+          y2: 10,
+          pressDurationMs: 0,
+          dragDurationMs: 300,
+          holdDurationMs: 0,
+          timeoutMs: 60000,
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);

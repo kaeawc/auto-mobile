@@ -7,6 +7,7 @@
  */
 
 import type { PerformanceTracker } from "../PerformanceTracker";
+import type { DragRequest } from "./DragRequest";
 import type { SwipeRequest } from "./SwipeRequest";
 import type { ViewHierarchyResult } from "../../models";
 import type { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
@@ -181,26 +182,9 @@ export interface DeviceService {
   requestSwipe(request: SwipeRequest): Promise<GestureResult>;
 
   /**
-   * Perform a drag gesture (press, move, release).
-   * @param x1 Start X coordinate
-   * @param y1 Start Y coordinate
-   * @param x2 End X coordinate
-   * @param y2 End Y coordinate
-   * @param pressDurationMs Duration to hold before dragging
-   * @param dragDurationMs Duration of the drag motion
-   * @param holdDurationMs Duration to hold at destination before release
-   * @param timeoutMs Operation timeout in milliseconds
+   * Perform a drag gesture (press, move, release); see {@link DragRequest} for the fields.
    */
-  requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-  ): Promise<GestureResult>;
+  requestDrag(request: DragRequest): Promise<GestureResult>;
 
   /**
    * Perform a pinch gesture (zoom in/out).

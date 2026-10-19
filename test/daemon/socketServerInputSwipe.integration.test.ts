@@ -17,6 +17,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import type { DragRequest } from "../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
 import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
 import {
@@ -121,8 +122,8 @@ describe("UnixSocketServer input/swipe", () => {
   });
 
   test("LEGACY iOS swipe (no runner scale metadata) passes coordinates through unchanged", async () => {
-    const requestDrag = mock(async (...args: Parameters<IOSCtrlProxyClient["requestDrag"]>) => {
-      args[10]?.();
+    const requestDrag = mock(async (request: DragRequest) => {
+      request.onDispatch?.();
       return { success: true };
     });
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
@@ -157,25 +158,25 @@ describe("UnixSocketServer input/swipe", () => {
       end: { x: 80, y: 90 },
       durationMs: 750,
     });
-    expect(requestDrag).toHaveBeenCalledWith(
-      20,
-      30,
-      80,
-      90,
-      0,
-      750,
-      0,
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestDrag).toHaveBeenCalledWith({
+      x1: 20,
+      y1: 30,
+      x2: 80,
+      y2: 90,
+      pressDurationMs: 0,
+      dragDurationMs: 750,
+      holdDurationMs: 0,
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("canonical-pixel iOS swipe divides each endpoint by nativeScale before dispatch", async () => {
     // px frame (#4549): endpoints arrive in pixels, divided by nativeScale=3 to runner points.
-    const requestDrag = mock(async (...args: Parameters<IOSCtrlProxyClient["requestDrag"]>) => {
-      args[10]?.();
+    const requestDrag = mock(async (request: DragRequest) => {
+      request.onDispatch?.();
       return { success: true };
     });
     spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
@@ -201,19 +202,19 @@ describe("UnixSocketServer input/swipe", () => {
     expect(response.success).toBe(true);
     // Echoed endpoints stay in the client's px space; only the runner dispatch is converted.
     expect(response.result).toMatchObject({ start: { x: 300, y: 600 }, end: { x: 900, y: 1500 } });
-    expect(requestDrag).toHaveBeenCalledWith(
-      100,
-      200,
-      300,
-      500,
-      0,
-      750,
-      0,
-      30_000,
-      undefined,
-      expect.any(AbortSignal),
-      expect.any(Function),
-    );
+    expect(requestDrag).toHaveBeenCalledWith({
+      x1: 100,
+      y1: 200,
+      x2: 300,
+      y2: 500,
+      pressDurationMs: 0,
+      dragDurationMs: 750,
+      holdDurationMs: 0,
+      timeoutMs: 30_000,
+      frameContext: undefined,
+      signal: expect.any(AbortSignal),
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {

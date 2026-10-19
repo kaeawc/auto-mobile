@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { DragRequest } from "../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
 
 /**
@@ -48,16 +49,7 @@ export interface AndroidGestureSurface {
   requestSwipe(
     request: Pick<SwipeRequest, "x1" | "y1" | "x2" | "y2" | "duration">,
   ): Promise<ContractResult>;
-  requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-  ): Promise<ContractResult>;
+  requestDrag(request: DragRequest): Promise<ContractResult>;
 }
 
 interface ContractResult {
@@ -152,7 +144,20 @@ const SCENARIOS: Scenario[] = [
   {
     name: "a drag is sent with its endpoints and three phase durations",
     replies: { request_drag: capturedResponse("drag_result") },
-    run: async (proxy) => [observed(await proxy.requestDrag(1, 2, 3, 4, 100, 600, 200, 5000))],
+    run: async (proxy) => [
+      observed(
+        await proxy.requestDrag({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          pressDurationMs: 100,
+          dragDurationMs: 600,
+          holdDurationMs: 200,
+          timeoutMs: 5000,
+        }),
+      ),
+    ],
     expectedRequests: [
       {
         type: "request_drag",

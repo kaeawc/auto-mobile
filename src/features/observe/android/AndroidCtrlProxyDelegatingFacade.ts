@@ -58,7 +58,7 @@ import type { CtrlProxyCertificates } from "./CtrlProxyCertificates";
 import type { CtrlProxyStorage } from "./CtrlProxyStorage";
 import type { CtrlProxyFocus } from "./CtrlProxyFocus";
 import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
-import type { SwipeRequest } from "../shared/types";
+import type { DragRequest, SwipeRequest } from "../shared/types";
 import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 
 export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClient {
@@ -158,36 +158,8 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestMultiFingerSwipe(request);
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<A11yDragResult> {
-    return this.gestures.requestDrag(
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      timeoutMs,
-      frameContext,
-      signal,
-      displayId,
-      beforeSend,
-      onDispatch,
-    );
+  async requestDrag(request: DragRequest): Promise<A11yDragResult> {
+    return this.gestures.requestDrag(request);
   }
 
   async requestPinch(

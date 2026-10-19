@@ -644,8 +644,11 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
 
     expect(h.rawScans() - listingsBefore).toBe(2);
     expect(identity).toHaveBeenCalledWith(listed, generic);
+    const mapped: unknown = mapping.mock.results.at(-1)?.value;
     expect(identity.mock.calls.at(-1)?.[0]).toBe(
-      mapping.mock.results.at(-1)?.value.find((row) => row.deviceId === WIRELESS),
+      Array.isArray(mapped)
+        ? mapped.find((row: BootedDevice) => row.deviceId === WIRELESS)
+        : undefined,
     );
     expect(h.reads).toEqual([WIRELESS]);
     expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);

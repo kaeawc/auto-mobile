@@ -1,7 +1,6 @@
-import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
-import { createSetActiveDeviceHandler } from "./setActiveDevice";
+import { createSetActiveDeviceHandler, type SetActiveDeviceSeams } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
@@ -927,14 +926,14 @@ const createGetDeviceStateHandler =
 
 // Register tools
 export function registerUtilityTools(
-  options: {
-    displayInventory?: DisplayInventoryProvider;
+  options: SetActiveDeviceSeams & {
     /** iOS Simulator network-extension controller; defaults to the installed one. */
     networkFilterBridge?: NetworkFilterBridge;
   } = {},
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
+    legacyDeviceSelection: options.legacyDeviceSelection,
     resumeCtrlProxy: resumeCtrlProxyIfCurrentlyBooted,
   });
 

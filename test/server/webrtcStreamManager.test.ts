@@ -26,6 +26,7 @@ import type {
   WebRtcPublisherLifecycleEvent,
   WebRtcStreamDescriptor,
 } from "../../src/features/webrtc";
+import type { WebRtcStreamingOverrides } from "../../src/features/webrtc/webrtcStreamingConfig";
 
 const ANDROID: BootedDevice = {
   deviceId: "emulator-5554",
@@ -2054,7 +2055,7 @@ describe("WebRTC own-lease and owner control regressions", () => {
     await stopping;
     expect(settled).toBe(true);
   });
-  test.each([
+  test.each<WebRtcStreamingOverrides>([
     { whipEndpoint: "https://elsewhere.example/private" },
     { bearerToken: "secret" },
     { iceServers: [{ urls: "turn:private", credential: "secret" }] },

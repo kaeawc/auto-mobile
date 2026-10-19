@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
 import { z } from "zod/v4";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
@@ -105,7 +104,7 @@ describe("startDevice as an MCP task (#4668)", () => {
     devices.setBootedDevices("ios", []);
     devices.setDeviceImages("android", [avd]);
     bootHandle = new BootHandle(timer, () => devices.setBootedDevices("android", []));
-    devices.setMockChildProcess(avd.name, bootHandle as ChildProcess);
+    devices.setMockChildProcess(avd.name, bootHandle);
     new RealBootGatesOverFakeFleet(devices, timer, 1);
     const idGenerator = new CountingIdGenerator("start-task");
     const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };

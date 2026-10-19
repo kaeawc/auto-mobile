@@ -65,7 +65,7 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
     throw new Error(`${name} unexpectedly succeeded`);
   }
 
-  test.each(GATED)("$name: gate reason text unchanged, marker on the wire", async (gated) => {
+  test.each([...GATED])("$name: gate reason text unchanged, marker on the wire", async (gated) => {
     const error = await callError(gated.name);
     expect(error.code).toBe(-32603);
     expect(error.message).toBe(`Unknown tool: ${gated.name}. ${gated.reason}`);

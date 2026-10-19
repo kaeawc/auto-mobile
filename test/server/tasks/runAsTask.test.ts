@@ -11,6 +11,13 @@ import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 
 const OK = { content: [{ type: "text" as const, text: "ok" }] };
 
+type RunAsTaskResult = Awaited<ReturnType<typeof runAsTask>>;
+
+/** The task id of a task handle; empty for a synchronous tool result. */
+function taskIdOf(handle: RunAsTaskResult): string {
+  return typeof handle.taskId === "string" ? handle.taskId : "";
+}
+
 async function settled(manager: FakeTaskManager, taskId: string) {
   for (let turn = 0; turn < 50; turn++) {
     const record = await manager.get("k", taskId);
@@ -62,7 +69,7 @@ describe("runAsTask (#4668)", () => {
       },
     );
     expect(handle).toMatchObject({ resultType: "task", status: "working" });
-    const taskId = "taskId" in handle ? handle.taskId : "";
+    const taskId = taskIdOf(handle);
     const record = await settled(manager, taskId);
     expect(seenTaskId).toBe(taskId);
     expect(record.status).toBe("completed");
@@ -91,7 +98,7 @@ describe("runAsTask (#4668)", () => {
         return OK;
       },
     );
-    const taskId = "taskId" in handle ? handle.taskId : "";
+    const taskId = taskIdOf(handle);
     await settled(manager, taskId);
     expect(holds).toEqual([
       { taskId, ownerKey: "k", sessionUuid: "base" },
@@ -111,7 +118,7 @@ describe("runAsTask (#4668)", () => {
           );
         }),
     );
-    const taskId = "taskId" in handle ? handle.taskId : "";
+    const taskId = taskIdOf(handle);
     await manager.cancel("k", taskId);
     expect((await settled(manager, taskId)).status).toBe("cancelled");
   });
@@ -133,7 +140,7 @@ describe("runAsTask (#4668)", () => {
       { declared: true, ownerKey: "k", taskManager: manager, toolName: "t" },
       async () => OK,
     );
-    const record = await settled(manager, "taskId" in handle ? handle.taskId : "");
+    const record = await settled(manager, taskIdOf(handle));
     expect(record.status).toBe("failed");
     expect(String(record.error?.message)).toContain("SQLITE_BUSY");
   });

@@ -6,6 +6,7 @@ import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
+import { isRecord } from "../../src/server/pipeline/isRecord";
 
 /**
  * Tool Registration Regression Tests
@@ -57,7 +58,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
       "pressButtonSchema",
       "systemTraySchema",
       "sendKeysSchema",
-    ];
+    ] as const;
 
     criticalSchemas.forEach((schemaName) => {
       expect(interactionTools).toHaveProperty(schemaName);
@@ -108,7 +109,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
         if (Object.hasOwn(propertySchemas, "appId")) {
           const appId = propertySchemas.appId;
           expect(appId, `${path}.properties.appId`).toBeObject();
-          if (appId && typeof appId === "object" && !Array.isArray(appId)) {
+          if (isRecord(appId)) {
             appIdProperties.push({ path: `${path}.properties.appId`, schema: appId });
           }
         }

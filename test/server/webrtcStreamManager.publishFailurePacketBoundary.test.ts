@@ -11,7 +11,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import type { AndroidH264Source } from "../../src/features/webrtc";
-import type { AndroidH264SourceOptions } from "../../src/features/webrtc/H264CaptureSource";
+import type { AndroidH264SourceOptions } from "../../src/features/webrtc/AndroidH264Source";
 import { FakePublisherPeerConnection } from "../fakes/FakePublisherPeerConnection";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../helpers/capturedH264Stream";
@@ -166,7 +166,7 @@ describe("a publish that fails after packet boundaries were delivered (#10149, #
     expect(() => {
       options.onData(firstP);
       options.onEncodedAccessUnit?.();
-      options.onError(new Error("late encoder error"));
+      options.onError?.(new Error("late encoder error"));
     }).not.toThrow();
     await settle();
 

@@ -10,6 +10,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { ActionableError } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { schemaPropertyDescription, toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -536,11 +537,7 @@ describe("Storage Tools Registration", () => {
         )!;
         const args = tool.schema.parse({ appId: "com.example.app", name: "", ...fields });
         const response = await tool.deviceAwareHandler!(device, args);
-        const content = response.content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected JSON response");
-        }
-        const payload = JSON.parse(content.text);
+        const payload = toolJson(response);
         expect(payload.name).toBe("");
         expect(payload.success).toBe(true);
         if (resolvedStore) {
@@ -594,11 +591,7 @@ describe("Storage Tools Registration", () => {
           device,
           tool.schema.parse({ appId: "com.example.app", name: "", ...fields }),
         );
-        const content = response.content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected JSON response");
-        }
-        const payload = JSON.parse(content.text);
+        const payload = toolJson(response);
         expect(payload.success).toBe(true);
         if (isSet && effectiveValueDiffers === true) {
           expect(payload.effectiveValueDiffers).toBe(true);
@@ -618,7 +611,7 @@ describe("Storage Tools Registration", () => {
     registerStorageTools(deps);
     for (const name of ["setKeyValue", "removeKeyValue", "clearKeyValueFile"]) {
       const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name)!;
-      const description = definition.inputSchema.properties?.name?.description;
+      const description = schemaPropertyDescription(definition.inputSchema.properties, "name");
       expect(description).toContain('"standard"');
       expect(description).toContain("bundle id");
       expect(description).toContain("no leading or trailing whitespace");

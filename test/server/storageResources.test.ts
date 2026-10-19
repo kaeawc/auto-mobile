@@ -11,6 +11,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import type { KeyValueEntry } from "../../src/features/storage/storageTypes";
+import { readTemplateMatch } from "../helpers/resourceTemplate";
 
 let deps: StorageResourceDependencies = {};
 function useStorageResourcesAdbClientFactoryForTesting(
@@ -53,7 +54,7 @@ describe("storageResources", () => {
     if (!match) {
       throw new Error(`no template matched: ${uri}`);
     }
-    return match.template.handler(match.params);
+    return readTemplateMatch(match);
   }
 
   test.each(["files", "prefs.xml/entries"])(

@@ -474,7 +474,7 @@ describe("platform-only calls on a bound daemon connection", () => {
 
   function arrangedEach2<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each<T>([...table])(
         name,
         async (row: T) => {
           await arrangeHarness2();

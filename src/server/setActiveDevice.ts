@@ -83,6 +83,12 @@ interface SetActiveDeviceDependencies {
   legacyDeviceSelection?: () => LegacyDeviceSelection;
 }
 
+/** The collaborators a registrar may inject into the setActiveDevice handler. */
+export type SetActiveDeviceSeams = Pick<
+  SetActiveDeviceDependencies,
+  "displayInventory" | "legacyDeviceSelection"
+>;
+
 // Matches the pool's unexported ANDROID_OFFLINE_PROBE_TIMEOUT_MS.
 const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
 

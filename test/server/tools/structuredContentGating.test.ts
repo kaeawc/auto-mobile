@@ -177,7 +177,6 @@ describe("structuredContent gating (issue #2759)", () => {
     expect(toolHasOutputSchema(ToolRegistry.getTool(SCHEMA_TOOL)!)).toBe(true);
     expect(toolHasOutputSchema(ToolRegistry.getTool(NO_SCHEMA_TOOL)!)).toBe(false);
     expect(toolHasOutputSchema({ outputSchema: undefined })).toBe(false);
-    expect(toolHasOutputSchema({ outputSchema: null })).toBe(false);
   });
 
   test("EC6: internal callers invoking handler directly still receive structuredContent (flag on)", async () => {

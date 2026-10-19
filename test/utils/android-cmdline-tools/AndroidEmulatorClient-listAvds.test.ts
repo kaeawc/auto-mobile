@@ -389,13 +389,13 @@ describe("AndroidEmulatorClient listAvds", () => {
 
   function clientRejecting(error: Error, path: string): AndroidEmulatorClient {
     const client = new AndroidEmulatorClient({
+      emulatorPathLocator: async () => path,
       execAsync: async () => {
         throw error;
       },
       timer: new FakeTimer(),
       avdConfigReader: noAvdConfigReader,
     });
-    Object.assign(client, { emulatorPath: path, ensureEmulatorPath: async () => path });
     return client;
   }
 
@@ -457,6 +457,7 @@ describe("AndroidEmulatorClient listAvds", () => {
   // Node's documented execFile spawn-error shape (not a Bun capture).
   test("missing executable retains the typed unavailable error and existing message", async () => {
     const client = new AndroidEmulatorClient({
+      emulatorPathLocator: async () => "amprobe-emulator-not-on-path",
       execAsync: async () => {
         throw Object.assign(new Error("spawn amprobe-emulator-not-on-path ENOENT"), {
           code: "ENOENT",
@@ -466,10 +467,6 @@ describe("AndroidEmulatorClient listAvds", () => {
       },
       timer: new FakeTimer(),
       avdConfigReader: noAvdConfigReader,
-    });
-    Object.assign(client, {
-      emulatorPath: "amprobe-emulator-not-on-path",
-      ensureEmulatorPath: async () => "amprobe-emulator-not-on-path",
     });
     await expect(client.listAvds()).rejects.toBeInstanceOf(AndroidEmulatorUnavailableError);
     await expect(client.listAvds()).rejects.toThrow("Android emulator not found.");
@@ -481,15 +478,12 @@ describe("AndroidEmulatorClient listAvds", () => {
   ])("an installed executable failure stays untyped: %s", async (message) => {
     // This existing on-disk source file stands in for the resolved executable; it is never run.
     const client = new AndroidEmulatorClient({
+      emulatorPathLocator: async () => import.meta.path,
       execAsync: async () => {
         throw new Error(message);
       },
       timer: new FakeTimer(),
       avdConfigReader: noAvdConfigReader,
-    });
-    Object.assign(client, {
-      emulatorPath: import.meta.path,
-      ensureEmulatorPath: async () => import.meta.path,
     });
     await expect(client.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
     await expect(client.listAvds()).rejects.toThrow(

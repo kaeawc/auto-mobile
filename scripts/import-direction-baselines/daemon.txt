@@ -3,7 +3,6 @@ src/daemon/appearanceConfigStartupSweep.ts -> src/server/appearanceManager
 src/daemon/appearanceSocketServer.ts -> src/server/appearanceManager
 src/daemon/appearanceSocketServer.ts -> src/server/executionTracker
 src/daemon/childProcessCleanup.ts -> src/server/videoRecordingManager
-src/daemon/client.ts -> src/server/tasks/taskRelay
 src/daemon/daemon.ts -> src/server/appearanceManager
 src/daemon/daemon.ts -> src/server/appearanceSessionKey
 src/daemon/daemon.ts -> src/server/bootedDeviceResources
@@ -12,7 +11,6 @@ src/daemon/daemon.ts -> src/server/executionTracker
 src/daemon/daemon.ts -> src/server/networkStateSessionCleanup
 src/daemon/daemon.ts -> src/server/recordingSessionCleanup
 src/daemon/daemon.ts -> src/server/recordingTeardownRedrive
-src/daemon/daemon.ts -> src/server/tasks/daemonTaskManager
 src/daemon/daemon.ts -> src/server/toolSelectionProfileRegistry
 src/daemon/daemon.ts -> src/server/videoRecordingManager
 src/daemon/daemonDependencies.ts -> src/server/toolSelectionProfileRegistry
@@ -21,8 +19,6 @@ src/daemon/daemonHttpIngress.ts -> src/server/executionTracker
 src/daemon/daemonMcpProxy.ts -> src/server/deviceOutsideBoundSessionRefusal
 src/daemon/daemonMcpProxy.ts -> src/server/deviceSessionResult
 src/daemon/daemonMcpProxy.ts -> src/server/listChangedBroadcast
-src/daemon/daemonMcpProxy.ts -> src/server/tasks/mcpTasksExtension
-src/daemon/daemonMcpProxy.ts -> src/server/tasks/taskRelay
 src/daemon/daemonMcpProxy.ts -> src/server/toolEnvelopePayload
 src/daemon/daemonRequestHandlers.ts -> src/server/executionTracker
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/appearanceManager
@@ -51,9 +47,7 @@ src/daemon/proxy/DaemonLifecycleReconciler.ts -> src/server/deviceMatcher
 src/daemon/proxy/HandoverResolution.ts -> src/server/listChangedBroadcast
 src/daemon/proxy/SessionBinding.ts -> src/server/deviceSessionResult
 src/daemon/proxy/SessionBinding.ts -> src/server/listChangedBroadcast
-src/daemon/proxy/TaskSessionBindings.ts -> src/server/tasks/TaskManager
 src/daemon/proxy/ToolCallForwarder.ts -> src/server/deviceSessionResult
-src/daemon/proxy/ToolCallForwarder.ts -> src/server/tasks/taskRelay
 src/daemon/proxy/ToolListPoller.ts -> src/server/listChangedBroadcast
 src/daemon/proxy/daemonErrors.ts -> src/server/deviceSessionResult
 src/daemon/releaseSessionAndDevice.ts -> src/server/executionTracker
@@ -64,7 +58,6 @@ src/daemon/socketServer.ts -> src/server/executionTracker
 src/daemon/socketServer.ts -> src/server/listChangedBroadcast
 src/daemon/socketServer.ts -> src/server/shapeToolCallError
 src/daemon/socketServer.ts -> src/server/storageTools
-src/daemon/socketServer.ts -> src/server/tasks/taskRelay
 src/daemon/socketServer.ts -> src/server/toolCallRecordingManager
 src/daemon/socketServer.ts -> src/server/toolEnvelopePayload
 src/daemon/socketServer.ts -> src/server/toolRegistry
@@ -74,11 +67,8 @@ src/daemon/socketServer/errorFrames.ts -> src/server/toolUnavailableError
 src/daemon/socketServer/ideMutationCall.ts -> src/server/executionTracker
 src/daemon/socketServer/notificationFanOut.ts -> src/server/listChangedBroadcast
 src/daemon/socketServer/restartAdmission.ts -> src/server/executionTracker
-src/daemon/socketServer/taskRelayForward.ts -> src/server/tasks/taskRelay
 src/daemon/statelessMcpHttpEndpoint.ts -> src/server/executionTracker
 src/daemon/statelessMcpServerFactory.ts -> src/server
-src/daemon/statelessMcpServerFactory.ts -> src/server/tasks/daemonTaskManager
 src/daemon/toolCallActivity.ts -> src/server/executionTracker
-src/daemon/types.ts -> src/server/tasks/taskRelay
 src/daemon/videoRecordingSocketServer.ts -> src/server/videoRecordingManager
 src/daemon/webrtcStreamSocketServer.ts -> src/server/webrtcStreamManager

@@ -5,7 +5,7 @@ import { SessionManager } from "../../../src/daemon/sessionManager";
 import {
   HeartbeatTaskLeaseKeepalive,
   type TaskLeaseSessions,
-} from "../../../src/server/tasks/taskLeaseKeepalive";
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../fakes/FakeTimer";

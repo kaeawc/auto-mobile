@@ -16,14 +16,7 @@ export {
   storageTelemetryInputFromWire,
   parseCtrlProxyJson,
 } from "./androidCtrlProxyInboundWire";
-import {} from "./androidCtrlProxyInboundWire";
 
-import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
-
-import {
-  type PrototypePatchRequest,
-  type PrototypePatchReply,
-} from "../../prototype/prototypePatchWire";
 import { resetForeignCtrlProxyForwardEvidenceForTesting } from "./foreignCtrlProxyForwardEvidence";
 import { isProcessRunning } from "../../../utils/processLiveness";
 
@@ -65,11 +58,8 @@ import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe
 import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
 import {
   BootedDevice,
-  ImeAction,
   ViewHierarchyResult,
   ScreenScaleMetadata,
-  HighlightOperationResult,
-  HighlightShape,
   toActionableError,
   ActionableError,
 } from "../../../models";
@@ -135,7 +125,6 @@ import {
   ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
   type ScreenshotMetadata,
 } from "../ScreenshotMetadata";
-import {} from "./screenshotFallbackReason";
 import { AndroidPhysicalDisplayIdResolver } from "./AndroidPhysicalDisplayId";
 import { type SdkAnrPayload, type SdkCrashPayload } from "../crash/sdkCrashIngestion";
 import {
@@ -157,7 +146,6 @@ import {
   registerDeviceIncarnationListener,
 } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../models/failureAnalytics";
-import {} from "../../../utils/NetworkState";
 import {
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   type NetworkMockPushResult,
@@ -185,38 +173,25 @@ import {
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
 import { daemonDeviceAdmissionGate } from "../../../utils/deviceAdmissionGate";
-import type { SetTextOptions } from "../DeviceService";
-import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import {} from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
 import { FileCtrlProxyForwardLease, type CtrlProxyForwardLease } from "./CtrlProxyForwardLease";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
-import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
+import { CtrlProxyText } from "./CtrlProxyText";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus } from "./CtrlProxyFocus";
-import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
-import type { PrototypeSpec } from "../../prototype/prototypeSpec";
-import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
-import type {
-  PrototypeAppearanceOverride,
-  PrototypeAssetResult,
-  PrototypeDismiss,
-  PrototypeEvent,
-  PrototypeResult,
-} from "./ctrlProxyProtocol";
+import { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
-import type { DelegateContext, DragRequest, SwipeRequest } from "../shared/types";
+import type { DelegateContext } from "../shared/types";
 import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
 import { defaultPrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
@@ -227,24 +202,8 @@ import type {
   AccessibilityHierarchyResponse,
   CachedHierarchy,
   ScreenshotResult,
-  A11ySwipeResult,
-  A11yTapCoordinatesResult,
-  A11yDragResult,
-  A11yPinchResult,
-  A11ySetTextResult,
-  A11yImeActionResult,
-  A11ySelectAllResult,
   A11yActionResult,
   AccessibilityNodeSelector,
-  A11yClipboardResult,
-  A11yCaCertResult,
-  A11yDeviceOwnerStatusResult,
-  A11yPermissionResult,
-  A11ySettingsGetResult,
-  A11ySettingsPutResult,
-  A11ySettingsListResult,
-  SettingsNamespace,
-  SettingsValueType,
   A11yInstalledPackagesResult,
   A11yPackageInfoResult,
   A11yLaunchIntentResult,
@@ -252,323 +211,8 @@ import type {
   HierarchySyncDiagnostics,
   ObserverHierarchyRequestOptions,
 } from "./types";
-
-/**
- * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
- */
-export interface AndroidCtrlProxy extends CtrlProxyClient {
-  isLastConnectionFailureForwardingLeaseConflict?(): boolean;
-  getLastConnectionFailureMessage?(): string | undefined;
-  setRecompositionTrackingEnabled(
-    enabled: boolean,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<void>;
-
-  getLatestHierarchy(
-    waitForFresh?: boolean,
-    timeout?: number,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-  ): Promise<AccessibilityHierarchyResponse>;
-
-  requestHierarchySync(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-  ): Promise<{
-    hierarchy: AccessibilityHierarchy;
-    perfTiming?: AndroidPerfTiming[];
-    frameContext?: string;
-  } | null>;
-
-  requestHierarchySyncWithoutObservationStreamPush(
-    perf?: PerformanceTracker,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
-  ): Promise<{
-    hierarchy: AccessibilityHierarchy;
-    perfTiming?: AndroidPerfTiming[];
-    frameContext?: string;
-  } | null>;
-
-  convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
-
-  requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult>;
-
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult>;
-
-  requestDrag(request: DragRequest): Promise<A11yDragResult>;
-
-  requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult>;
-
-  requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
-
-  requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
-
-  requestInsertText(
-    text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
-    transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
-  ): Promise<A11ySetTextResult>;
-
-  commitViaIme(
-    text: string,
-    priorImeId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
-    trace?: boolean,
-  ): Promise<ImeCommitActionResult>;
-
-  setKeyboardProfile(
-    profileId: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<{
-    success: boolean;
-    activeProfileId?: string;
-    previousProfileId?: string;
-    error?: string;
-  }>;
-
-  listKeyboardProfiles(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<KeyboardProfileCatalog>;
-
-  requestClearText(
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11ySetTextResult>;
-
-  requestImeAction(
-    action: ImeAction,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yImeActionResult>;
-
-  requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;
-
-  requestAction(
-    action: string,
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yActionResult>;
-
-  requestClickFocusedInput(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult>;
-
-  requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult>;
-
-  supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
-
-  supportsCommand(name: string): Promise<boolean>;
-
-  requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yActionResult>;
-
-  supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
-
-  requestClipboard(
-    action: "copy" | "paste" | "clear" | "get",
-    text?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yClipboardResult>;
-
-  requestSettingsGet(
-    namespace: SettingsNamespace,
-    key: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsGetResult>;
-
-  requestSettingsPut(
-    namespace: SettingsNamespace,
-    key: string,
-    value: string | null,
-    valueType?: SettingsValueType,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsPutResult>;
-
-  requestSettingsList(
-    namespace: SettingsNamespace,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsListResult>;
-
-  requestInstallCaCertificate(
-    certificate: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult>;
-
-  requestInstallCaCertificateFromFile(
-    certificatePath: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult>;
-
-  requestRemoveCaCertificate(
-    alias: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult>;
-
-  requestDeviceOwnerStatus(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yDeviceOwnerStatusResult>;
-
-  requestPermission(
-    permission: string,
-    requestPermission?: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yPermissionResult>;
-
-  requestShowPrototype(
-    spec: PrototypeSpec,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
-  ): Promise<PrototypeResult>;
-  requestDismissPrototype(
-    target: PrototypeDismiss,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestPatchPrototype(
-    patch: PrototypePatchRequest,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypePatchReply>;
-  requestSavePrototype(
-    save: { spec: PrototypeSpec; label: string; icon?: string },
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestPinSavedPrototype(
-    id: string,
-    icon?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestListSavedPrototypes(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestDeleteSavedPrototype(
-    id: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestClearPrototypeStorage(
-    id: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
-  requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
-  requestPutPrototypeAsset(
-    asset: PrototypeAssetUpload,
-    options?: PrototypeAssetRequestOptions,
-  ): Promise<PrototypeAssetResult>;
-  requestRemovePrototypeAsset(
-    id: string,
-    options?: PrototypeAssetRequestOptions,
-  ): Promise<PrototypeAssetResult>;
-  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
-
-  requestAddHighlight(
-    id: string,
-    shape: HighlightShape,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<HighlightOperationResult>;
-
-  requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
-
-  requestScreenshotWithoutObservationStreamPush(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<ScreenshotResult>;
-
-  requestInstalledPackages(
-    includeSystem?: boolean,
-    userId?: number,
-    timeoutMs?: number,
-  ): Promise<A11yInstalledPackagesResult>;
-
-  requestPackageInfo(
-    packageName: string,
-    options?: PackageInfoOptions,
-    timeoutMs?: number,
-  ): Promise<A11yPackageInfoResult>;
-
-  requestLaunchIntent(packageName: string, timeoutMs?: number): Promise<A11yLaunchIntentResult>;
-}
+import type { AndroidCtrlProxy } from "./AndroidCtrlProxy";
+export type { AndroidCtrlProxy, AndroidCtrlProxyClientSurface } from "./AndroidCtrlProxy";
 
 /** Isolation markers kept for hierarchy requests whose waiter already gave up. */
 const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
@@ -875,7 +519,7 @@ export class AndroidCtrlProxyClient
   public static getInstance(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  ): AndroidCtrlProxyClient {
+  ): AndroidCtrlProxy {
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;

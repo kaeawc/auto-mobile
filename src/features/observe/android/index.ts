@@ -26,4 +26,5 @@ export type {
   A11yActionResult,
   SettingsNamespace,
   AndroidPerfTiming,
+  AccessibilityNodeSelector,
 } from "./types";

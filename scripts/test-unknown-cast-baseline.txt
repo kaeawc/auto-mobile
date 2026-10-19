@@ -1,7 +1,4 @@
 # AutoMobile test unknown-cast ratchet baseline -- see scripts/test-as-any-baseline.sh
-2	test/daemon/daemonDevicePoolStartup.test.ts
-3	test/daemon/daemonForeignForwardWiring.test.ts
-4	test/daemon/daemonShutdownSessionRelease.test.ts
 3	test/daemon/hierarchyStreamDiff.test.ts
 1	test/db/sessionToolSelectionRepository.integration.test.ts
 1	test/devices/deviceUtils.test.ts
@@ -16,7 +13,6 @@
 9	test/features/observe/ios/CtrlProxyClientAutoSetup.test.ts
 3	test/features/observe/ios/CtrlProxyClientCloseSingleCycle.test.ts
 1	test/features/observe/ios/CtrlProxyExchangeRecorder.test.ts
-1	test/features/observe/ios/CtrlProxyStructure.test.ts
 9	test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts
 33	test/features/observe/ios/IOSCtrlProxyClient.test.ts
 2	test/features/observe/ios/IosSdkContractFixtures.contract.test.ts
@@ -24,7 +20,6 @@
 1	test/features/observe/ios/tapDiagnostics.test.ts
 1	test/fixtures/observe/observeFixture.ts
 4	test/helpers/devicePoolSuite.ts
-5	test/helpers/directFrameRig.ts
 1	test/lint/deviceToolsKillDeviceImportCasing.test.ts
 1	test/lint/expensiveHookWork.ts
 1	test/models/screenScaleMetadata.test.ts

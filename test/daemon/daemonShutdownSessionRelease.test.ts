@@ -117,15 +117,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      retry = (
-        pool as unknown as {
-          releaseDisconnectedRecoverySessionWithRetry(
-            id: string,
-            device: string,
-            reason: string,
-          ): Promise<void>;
-        }
-      ).releaseDisconnectedRecoverySessionWithRetry(
+      retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
         "release-session",
         device.deviceId,
         "device-restart:Physical Android",
@@ -191,15 +183,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      const retry = (
-        pool as unknown as {
-          releaseDisconnectedRecoverySessionWithRetry(
-            id: string,
-            device: string,
-            reason: string,
-          ): Promise<void>;
-        }
-      ).releaseDisconnectedRecoverySessionWithRetry(
+      const retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
         "release-session",
         device.deviceId,
         "device-restart:Physical Android",
@@ -267,15 +251,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         stubPoolDiscovery(pool, [device]);
         await pool.initializeWithDevices([device]);
         await pool.assignDeviceToSession("release-session", "android");
-        const retry = (
-          pool as unknown as {
-            releaseDisconnectedRecoverySessionWithRetry(
-              id: string,
-              device: string,
-              reason: string,
-            ): Promise<void>;
-          }
-        ).releaseDisconnectedRecoverySessionWithRetry(
+        const retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
           "release-session",
           device.deviceId,
           "device-restart:Physical Android",
@@ -511,7 +487,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       expect(manager.hasSession("release-session")).toBe(false);
       // Model a replacement publishing after removal without waiting on the
       // old incarnation's in-flight release promise from createSession().
-      (manager as unknown as { sessions: Map<string, Session> }).sessions.set("release-session", {
+      manager.testHooks.sessions.set("release-session", {
         ...original,
       });
       throw new Error("old incarnation persistence failed");

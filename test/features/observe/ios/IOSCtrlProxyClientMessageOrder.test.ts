@@ -1,3 +1,4 @@
+import { createIosHierarchyConverter } from "../../../helpers/iosHierarchyConverter";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -44,7 +45,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         },
         convert: () => {
           calls.push("convert");
-          return { hierarchy: captured.hierarchy };
+          return createIosHierarchyConverter().convertToViewHierarchyResult(captured);
         },
         recordLayoutTelemetry: () => {
           calls.push("layout");
@@ -66,6 +67,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
           calls.push("resolve");
         },
       };
+      const options = { messageEffects: effects, transientObserver: false };
       const client = IOSCtrlProxyClient.createForTesting(
         { deviceId: "captured-order", platform: "ios", name: "Fake iPhone" },
         8765,
@@ -76,7 +78,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         undefined,
         undefined,
         undefined,
-        { messageEffects: effects },
+        options,
       );
       void client.connectionTestHooks.deliverMessage(
         JSON.stringify({

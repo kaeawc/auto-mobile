@@ -41,7 +41,7 @@ import { resolveSwipeDirection } from "./swipeOnUtils";
 import {
   AccessibilityDetector,
   TALKBACK_STATE_UNKNOWN_WARNING,
-} from "../../accessibility/interfaces/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { talkBackDisplayRefusal } from "../../talkback/talkBackDisplayRefusal";
 import { SwipeOnResolvedOptions, BoomerangConfig } from "./types";
 import {

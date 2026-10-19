@@ -1,3 +1,4 @@
+import type { NativeFrameMetrics } from "../../../src/features/screen-stream/IosScreenCaptureHelper";
 import { NativeHelperRegistry } from "../../../src/utils/nativeHelpers/NativeHelperRegistry";
 import { FakeNativeHelperRecordStore } from "../../fakes/FakeNativeHelperRecordStore";
 import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProcessControl";
@@ -334,7 +335,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("emits native capture metrics carried over stderr without logging them", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -371,7 +372,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("accepts the real nil-optionals native frame metrics line", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -400,7 +401,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("accepts the real all-fields native frame metrics line", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -429,7 +430,7 @@ describe("IosScreenCaptureHelper", () => {
 
   test("reassembles a real nil-optionals metrics line split across stderr chunks", async () => {
     const { fake, helper } = withFakeSpawner();
-    const metrics = [];
+    const metrics: NativeFrameMetrics[] = [];
     const stderr: string[] = [];
     helper.on("captureMetrics", (value) => metrics.push(value));
     helper.on("stderr", (line) => stderr.push(line));
@@ -708,7 +709,7 @@ describe("IosScreenCaptureHelper", () => {
 
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
     if (process.platform === "darwin") {
-      expect(processGroupSignals).toEqual([{ pid: fake.pid, signal: "SIGKILL" }]);
+      expect<unknown>(processGroupSignals).toEqual([{ pid: fake.pid, signal: "SIGKILL" }]);
     } else {
       expect(processGroupSignals).toEqual([]);
     }

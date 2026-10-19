@@ -40,7 +40,7 @@ function setup(gateDecision?: CapacityDecision) {
 describe("FleetBootInstrumentation", () => {
   test("records the boot duration under the requested profile fingerprint", async () => {
     const { timer, history, instrumentation } = setup();
-    const profile = { resources: { location: "disabled" as const } };
+    const profile = { resources: { findMy: "disabled" as const } };
     await instrumentation.run({ udid: UDID, profile, timeoutMs: 60_000 }, async () => {
       timer.advanceTime(4_200);
     });

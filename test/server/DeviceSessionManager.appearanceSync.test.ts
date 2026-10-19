@@ -4,7 +4,7 @@ import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionMa
 import { applyAppearanceOnConnect } from "../../src/daemon/applyAppearanceOnConnect";
 import { isAppearanceSyncEnabled } from "../../src/utils/appearance/appearanceSyncPolicy";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
-import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -33,12 +33,9 @@ function harness(
   const adb = new FakeAdbExecutor();
   const simctl = new FakeSimctl();
   const ctrlProxyManager = new FakeCtrlProxyManager();
-  const ctrlProxyClient = {
-    isConnected: () => false,
-    waitForConnection: async () => true,
-    verifyServiceReady: async () => true,
-    resetConnectionBudget: () => {},
-  } as unknown as AndroidCtrlProxy;
+  const ctrlProxyClient = new FakeCtrlProxy();
+  ctrlProxyClient.setConnected(false);
+  ctrlProxyClient.setWaitForConnectionResult(true);
   const appearanceSimctl = new FakeSimctl();
   const devices = new FakeDeviceUtils();
   const window = new FakeWindow();

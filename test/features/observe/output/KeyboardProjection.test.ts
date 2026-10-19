@@ -1,3 +1,4 @@
+import { wireCapture } from "../../../helpers/wireCapture";
 import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -56,7 +57,15 @@ describe("Android keyboard output projection", () => {
     const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
     const parser = new DefaultElementParser();
     const app = parser.parseNodeBounds(hierarchy.hierarchy.node!.node![0])!;
-    const key = parser.parseNodeBounds(hierarchy.windows![0].hierarchy.node!.node![0])!;
+    const window = hierarchy.windows?.[0];
+    if (!window?.hierarchy) {
+      throw new Error("Expected captured window hierarchy");
+    }
+    const windowRoot = parser.extractRootNodes(wireCapture({ hierarchy: window.hierarchy }))[0];
+    if (!windowRoot?.node?.[0]) {
+      throw new Error("Expected captured key node");
+    }
+    const key = parser.parseNodeBounds(windowRoot.node[0])!;
     expect(elements.clickable[0].bounds).toEqual(elements.text[0].bounds);
     expect(elements.clickable[0]["resource-id"]).toBeUndefined();
     expect(elements.text[0]["resource-id"]).toBeUndefined();
@@ -623,7 +632,7 @@ describe("fallback keycap corroboration (#6871)", () => {
 
   test("two distinct keycaps from one package still fold without the extra", () => {
     const source = loneDecoyKeycapObservation();
-    source.viewHierarchy!.hierarchy.node!.node![1].$["resource-id"] = "com.app:id/key_pos_0_1";
+    source.viewHierarchy!.hierarchy.node!.node![1].$!["resource-id"] = "com.app:id/key_pos_0_1";
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",
@@ -866,7 +875,7 @@ describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
   test("an uncollected wrapper owned by ANOTHER package never widens the fold", () => {
     const source = uncollectedImeWrapperObservation();
     // The framework's own decor wrapper encloses the keys but is not the IME's.
-    source.viewHierarchy!.hierarchy.node!.node![1].$["resource-id"] = "android:id/content";
+    source.viewHierarchy!.hierarchy.node!.node![1].$!["resource-id"] = "android:id/content";
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",
@@ -885,8 +894,8 @@ describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
     // provenance alone, and the row keeps the keys' own box, as before.
     const source = observation();
     const imeRoot = source.viewHierarchy!.hierarchy.node!.node![1];
-    imeRoot.$["resource-id"] = "example.keyboard:id/keyboard_view";
-    imeRoot.$.bounds = { left: 0, top: 0, right: 100, bottom: 200 };
+    imeRoot.$!["resource-id"] = "example.keyboard:id/keyboard_view";
+    imeRoot.$!.bounds = { left: 0, top: 0, right: 100, bottom: 200 };
     source.elements = new DefaultObserveElementCollector().collect(
       source.viewHierarchy!,
       "android",

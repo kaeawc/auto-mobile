@@ -117,7 +117,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
 `;
 
     const testFakeAdb = new FakeAdbExecutor();
-    testFakeAdb.setCommandResponse("dumpsys activity activities", { stdout, stderr: "" });
+    testFakeAdb.setCommandResponse("dumpsys activity activities", createExecResult(stdout, ""));
     const testFactory = new FakeAdbClientFactory(testFakeAdb);
     getBackStack = new GetBackStack(mockDevice, testFactory);
 

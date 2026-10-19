@@ -30,6 +30,9 @@ import {
   type InMemoryNavManagerHarness,
 } from "../helpers/navigationTestHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -141,16 +144,13 @@ describe("Android navigation graph workflow (#4459)", () => {
         return createJSONToolResponse({ success: true });
       },
     );
-    const explore = new Explore(
-      device,
-      { executeCommand: async () => "" } as never,
-      timer,
-      sessionManager,
-    );
-    (explore as any).observeScreen = {
-      execute: async () => ({
-        viewHierarchy: {
-          hierarchy: {
+    const explore = new Explore(device, new FakeAdbExecutor(), timer, sessionManager);
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult({
+      ...loadAndroidHomeObserve().observe,
+      viewHierarchy: {
+        hierarchy: {
+          node: {
             node: [
               {
                 $: {
@@ -164,11 +164,12 @@ describe("Android navigation graph workflow (#4459)", () => {
               },
             ],
           },
-          packageName: appId,
         },
-      }),
-    };
-    (explore as any).performInteraction = async () => {
+        packageName: appId,
+      },
+    });
+    explore.observeScreen = observeScreen;
+    explore.performInteraction = async () => {
       sessionManager.recordToolCall("tapOn", {
         text: "Settings",
         action: "tap",

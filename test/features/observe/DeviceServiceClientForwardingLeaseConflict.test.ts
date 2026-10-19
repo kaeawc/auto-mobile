@@ -17,6 +17,7 @@ import type WebSocket from "ws";
  * connect-attempt failure.
  */
 class TestDeviceServiceClient extends DeviceServiceClient {
+  cancelScreenshotBackoff(): void {}
   protected readonly logTag = "TestClient";
   setupError: Error | null = null;
 

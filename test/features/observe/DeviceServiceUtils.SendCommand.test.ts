@@ -225,7 +225,7 @@ describe("sendCommand lifecycle", () => {
 
   test("rechecks the required capability immediately before the fence and send", async () => {
     const h = harness({ isCommandSupported: (type) => type !== "atomic" });
-    const pending = sendCommand(h.context, {
+    const pending = sendCommand<BaseResult & { unsupportedCapability?: string }>(h.context, {
       ...h.options,
       requiredCapability: "atomic",
       beforeSend: () => {
@@ -306,8 +306,8 @@ describe("sendCommand lifecycle", () => {
     const controller = new AbortController();
     const register = h.context.requestManager.register.bind(h.context.requestManager);
     spyOn(h.context.requestManager, "register").mockImplementation(
-      (...args: Parameters<RequestManager["register"]>) => {
-        const pending = register(...args);
+      <T>(...args: Parameters<typeof register<T>>) => {
+        const pending = register<T>(...args);
         controller.abort(new Error("registration abort"));
         return pending;
       },

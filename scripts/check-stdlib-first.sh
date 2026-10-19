@@ -53,7 +53,9 @@ while IFS= read -r dependency; do
   if [[ -n "$BASE_BUN_LOCK" ]] && grep -Fq "\"${dependency}@" <<<"$BASE_BUN_LOCK"; then
     continue
   fi
-  if ! rg --glob '*.md' --fixed-strings "Dependency: \`${dependency}\`" docs/decisions >/dev/null 2>&1; then
+  # grep, not rg: ripgrep is not installed on every runner that runs this check
+  # (the Shell Changed Files job), and a missing rg reads as a missing record.
+  if ! grep -rqF --include='*.md' "Dependency: \`${dependency}\`" docs/decisions 2>/dev/null; then
     echo "error: new direct dependency '${dependency}' needs a docs/decisions record containing: Dependency: \`${dependency}\`" >&2
     missing=1
   fi

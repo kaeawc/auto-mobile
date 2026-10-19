@@ -52,6 +52,7 @@ fun DemoIndexScreen(
   onNavigateToHandledException: () -> Unit = {},
   onNavigateToNetworkTest: () -> Unit = {},
   onNavigateToDesignSystem: () -> Unit = {},
+  onNavigateToPointerProbe: () -> Unit = {},
   onNavigateBack: () -> Unit = {},
 ) {
   TrackRecomposition(id = "screen.demo.index", composableName = "DemoIndexScreen") {
@@ -140,6 +141,13 @@ fun DemoIndexScreen(
           description = "Hand-drawn crayon components: buttons, cards, nav, dialogs.",
           buttonLabel = "Open Design System",
           onClick = onNavigateToDesignSystem,
+        ),
+        DemoEntry(
+          id = "demo_pointer_probe",
+          title = "Pointer Probe",
+          description = "Logs tool type, source, pressure, tilt and buttons of every MotionEvent.",
+          buttonLabel = "Open Pointer Probe",
+          onClick = onNavigateToPointerProbe,
         ),
       )
 

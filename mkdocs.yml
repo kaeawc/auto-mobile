@@ -158,6 +158,7 @@ nav:
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
       - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
+      - "Stylus, pressure and hover injection": design-docs/mcp/stylus-pressure-hover-injection.md
       - "Daemon": design-docs/mcp/daemon.md
       - "MCP SDK v2 and stateless daemon": design-docs/mcp/sdk-v2-stateless-migration.md
       - "Session state record": design-docs/session-state-record.md

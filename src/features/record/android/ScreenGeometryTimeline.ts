@@ -86,6 +86,8 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
   private readonly entries: GeometryEntry[];
   private readonly changeReports: number[] = [];
   private readonly baselineDisplay: DisplaySize;
+  /** Timelines for other input nodes (pen digitizers) that share this display geometry. */
+  private readonly followers: ScreenGeometryTimeline[] = [];
 
   constructor(
     private readonly axes: TouchAxes,
@@ -137,10 +139,21 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
   /** A display change push arrived; the geometry refresh for it may still be in flight. */
   noteChangeReported(at: number): void {
     this.changeReports.push(at);
+    for (const follower of this.followers) {
+      follower.noteChangeReported(at);
+    }
+  }
+
+  /** Mirror every geometry change into `follower`, which maps a different node's raw axes. */
+  follow(follower: ScreenGeometryTimeline): void {
+    this.followers.push(follower);
   }
 
   /** Append a new entry derived from the latest one, effective from `reportedAt`. */
   apply(update: GeometryUpdate, reportedAt: number): void {
+    for (const follower of this.followers) {
+      follower.apply(update, reportedAt);
+    }
     const previous = this.entries[this.entries.length - 1];
     const caveats: string[] = [];
     if (update.rotation === null) {

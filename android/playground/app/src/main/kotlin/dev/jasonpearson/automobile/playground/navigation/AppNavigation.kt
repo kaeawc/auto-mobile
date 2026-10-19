@@ -27,6 +27,7 @@ import dev.jasonpearson.automobile.demos.NestedSelectionDemoScreen
 import dev.jasonpearson.automobile.demos.NetworkTestScreen
 import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
 import dev.jasonpearson.automobile.demos.PerformanceListScreen
+import dev.jasonpearson.automobile.demos.PointerProbeScreen
 import dev.jasonpearson.automobile.demos.StartupDemoScreen
 import dev.jasonpearson.automobile.demos.TapTargetsDemoScreen
 import dev.jasonpearson.automobile.demos.UxFlowDetailsScreen
@@ -158,6 +159,7 @@ fun determineStartDestinationWithDeepLink(
           is DemoBugReproDestination,
           is DemoHandledExceptionDestination,
           is DemoNetworkTestDestination,
+          is DemoPointerProbeDestination,
           is DesignSystemDemoDestination -> {
             // For protected destinations, ensure user is authenticated
             when {
@@ -297,6 +299,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             is DemoBugReproDestination,
             is DemoHandledExceptionDestination,
             is DemoNetworkTestDestination,
+            is DemoPointerProbeDestination,
             is DesignSystemDemoDestination -> {
               // For protected destinations, ensure user is authenticated
               when {
@@ -602,6 +605,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
                 backStack.add(DemoHandledExceptionDestination)
               },
               onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
+              onNavigateToPointerProbe = { backStack.add(DemoPointerProbeDestination) },
               onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
               onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
@@ -805,6 +809,17 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoNetworkTestDestination>()) {
             NetworkTestScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
+          }
+        }
+
+        entry<DemoPointerProbeDestination> { destination ->
+          Navigation3Adapter.TrackNavigation(destination)
+          LaunchedEffect(Unit) {
+            Log.d(TAG, "Navigated to PointerProbeScreen")
+            analyticsTracker.trackScreenView("PointerProbeScreen")
+          }
+          Box(modifier = Modifier.destinationSemanticModifier<DemoPointerProbeDestination>()) {
+            PointerProbeScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
           }
         }
       },

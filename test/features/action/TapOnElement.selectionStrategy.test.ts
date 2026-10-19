@@ -1,3 +1,6 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { runBlockWith, runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
+import { isolatedTapStrategy } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn } from "bun:test";
 import { warmedTests } from "../../helpers/warmedTests";
@@ -92,51 +95,50 @@ async function executeFocus(
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
+    },
     new FakeAdbClient(),
     {
       timer: new FakeTimer(),
       elementSelector: fakeSelector,
-      tapStrategy: {
-        isAccessibilityServiceEnabled: async () => false,
-        shouldRunPreTapStability: () => false,
-        settlesFocusChangeAfterTap: false,
-        rethrowsKeyboardOcclusion: true,
-        applyRefreshedObservationRotation: () => {},
-      } as any,
-      selectionStateTracker: { finalize: async () => [] } as any,
+      tapStrategy: isolatedTapStrategy(),
+      selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
-  const observation = { viewHierarchy: postTapHierarchy };
-  (tapOnElement as any).observedInteraction = async (
-    action: (currentObservation: typeof observation) => Promise<Record<string, unknown>>,
-  ) => {
-    const actionResult = await action(
+  const observation = buildObserveResult({
+    updatedAt: 0,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: postTapHierarchy,
+  });
+  tapOnElement.observedInteraction = runBlockWithEnvelope(
+    () =>
       recordObservationRead({
+        ...observation,
         viewHierarchy: preTapHierarchy ?? { hierarchy: { node: {} } },
       }),
-    );
-    if (index !== undefined || postSelectedIndex !== undefined) {
-      const resolvedIndex = index ?? postSelectedIndex ?? 0;
-      const matches = new SearchableHierarchy()
-        .project(postTapHierarchy)
-        .filter(
-          (node) =>
-            node.element &&
-            (elementId
-              ? node.element["resource-id"] === elementId
-              : testTag
-                ? node.element["test-tag"] === testTag
-                : node.element.text === element.text),
-        );
-      fakeSelector.setNextSelection({
-        element: matches[resolvedIndex]?.element ?? null,
-        indexInMatches: resolvedIndex,
-        totalMatches: matches.length,
-      });
-    }
-    return { ...actionResult, observation };
-  };
+    { observation },
+    () => {
+      if (index !== undefined || postSelectedIndex !== undefined) {
+        const resolvedIndex = index ?? postSelectedIndex ?? 0;
+        const matches = new SearchableHierarchy()
+          .project(postTapHierarchy)
+          .filter(
+            (node) =>
+              node.element &&
+              (elementId
+                ? node.element["resource-id"] === elementId
+                : testTag
+                  ? node.element["test-tag"] === testTag
+                  : node.element.text === element.text),
+          );
+        fakeSelector.setNextSelection({
+          element: matches[resolvedIndex]?.element ?? null,
+          indexInMatches: resolvedIndex,
+          totalMatches: matches.length,
+        });
+      }
+    },
+  );
   tapOnElement.executeAndroidTap = async () => {
     tapped = true;
   };
@@ -145,8 +147,8 @@ async function executeFocus(
     _previousObservation: unknown,
     currentObservation: ObserveResult,
   ) => ({ effect: undefined, observation: currentObservation });
-  (tapOnElement as any).captureTerminalObservationScreenshot = async () => {};
-  (tapOnElement as any).recordDeferredPredictionOutcome = async () => {};
+  tapOnElement.testHooks.setTerminalScreenshotCapture(async () => {});
+  tapOnElement.testHooks.setDeferredPredictionRecorder(async () => {});
   tapOnElement.enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tapOnElement.execute({
@@ -165,13 +167,13 @@ describe("TapOnElement selectionStrategy", () => {
   test("passes selectionStrategy to the element selector", () => {
     const fakeSelector = new FakeElementSelector({
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-    } as any);
+    });
     const tapOnElement = new TapOnElement(
       {
         name: "test-device",
         platform: "android",
         deviceId: "emulator-5554",
-      } as any,
+      },
       new FakeAdbClient(),
       {
         timer: new FakeTimer(),
@@ -196,13 +198,13 @@ describe("TapOnElement selectionStrategy", () => {
   test("uses input-focused text selection only for focus actions", () => {
     const fakeSelector = new FakeElementSelector({
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-    } as any);
+    });
     const tapOnElement = new TapOnElement(
       {
         name: "test-device",
         platform: "android",
         deviceId: "emulator-5554",
-      } as any,
+      },
       new FakeAdbClient(),
       {
         timer: new FakeTimer(),
@@ -228,19 +230,27 @@ describe("TapOnElement selectionStrategy", () => {
       text: "Phone notification: ",
       class: "android.widget.TextView",
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-    } as any);
+    });
     const tapOnElement = new TapOnElement(
       {
         name: "test-device",
         platform: "android",
         deviceId: "emulator-5554",
-      } as any,
+      },
       new FakeAdbClient(),
       { timer: new FakeTimer(), elementSelector: fakeSelector },
     );
     let tapped = false;
-    (tapOnElement as any).observedInteraction = async (action: (observation: unknown) => unknown) =>
-      action(recordObservationRead({ viewHierarchy: { hierarchy: { node: {} } } }));
+    tapOnElement.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: { hierarchy: { node: {} } },
+        }),
+      ),
+    );
     tapOnElement.executeAndroidTap = async () => {
       tapped = true;
     };

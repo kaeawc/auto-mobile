@@ -65,26 +65,29 @@ async function ingest(event: DecodedEvent): Promise<{
     deviceId: null,
     sessionId: null,
   };
-  const recorder = {
+  const recorder: IosTelemetryRecorder = {
     getContext: () => context,
     setContext: (deviceId: string | null, sessionId: string | null) => {
       context = { deviceId, sessionId };
     },
-    recordNavigationEvent: async (value: Record<string, unknown>) => {
-      calls.navigation.push(value);
+    recordNavigationEvent: async (value) => {
+      calls.navigation.push({ ...value });
     },
-    recordOsEvent: async (value: Record<string, unknown>) => {
-      calls.os.push(value);
+    recordOsEvent: async (value) => {
+      calls.os.push({ ...value });
     },
-    recordStorageEvent: async (value: Record<string, unknown>) => {
-      calls.storage.push(value);
+    recordStorageEvent: async (value) => {
+      calls.storage.push({ ...value });
     },
-  } as unknown as IosTelemetryRecorder;
+    recordNetworkEvent: async () => {},
+    recordLogEvent: async () => {},
+    recordLayoutEvent: async () => {},
+  };
   const ingestor = new DefaultIosSdkEventIngestor({
     deviceId: "fixture-device",
     getNavigationGraphManager: () => ({
       recordNavigationEvent: async (value) => {
-        calls.graph.push(value as unknown as Record<string, unknown>);
+        calls.graph.push({ ...value });
       },
       updateNodeScreenshot: async () => {},
     }),

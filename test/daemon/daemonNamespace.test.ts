@@ -8,7 +8,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
@@ -177,13 +177,13 @@ function createHarness(
   let spawnedPid = 202;
   let spawnedRecord: Partial<PidFileData> = {};
   const spawner: DaemonProcessSpawner = {
-    spawn(_command, args, options): ChildProcess {
+    spawn(_command, args, options) {
       calls.push({ args: [...args], options });
       const child = new FakeChildProcess(timer);
       child.pid = spawnedPid;
       identity.record = { ...makeRecord(spawnedPid), ...spawnedRecord };
       processes.livePids.add(spawnedPid);
-      return child as ChildProcess;
+      return child;
     },
   };
   const ports: number[] = [];

@@ -26,7 +26,10 @@ import type { PidFileData } from "../../src/daemon/types";
 test("daemonFiles module registers its real retention readers without eager discovery", async () => {
   const register = spyOn(loggerModule, "registerLogRetentionNamespaceSource");
   try {
-    const files = await import("../../src/daemon/daemonFiles.ts?retention-wiring");
+    const retentionWiringQuery = "retention-wiring";
+    const files: typeof import("../../src/daemon/daemonFiles") = await import(
+      `../../src/daemon/daemonFiles.ts?${retentionWiringQuery}`
+    );
     expect(register).toHaveBeenCalledWith({
       listDaemonPidFilesSync: files.listDaemonPidFilesSync,
       readPidFileDataSync: files.readPidFileDataSync,

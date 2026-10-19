@@ -223,7 +223,7 @@ async function waitFor(predicate: () => boolean, what: string): Promise<void> {
     if (Date.now() > deadline) {
       throw new Error(`Timed out waiting for ${what}`);
     }
-    await new Promise((resolve) => defaultTimer.setTimeout(resolve, 2));
+    await new Promise<void>((resolve) => defaultTimer.setTimeout(resolve, 2));
   }
 }
 

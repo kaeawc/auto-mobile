@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
+import { bindDevice, unbindDevice } from "../../src/daemon/deviceBinding";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -467,8 +468,7 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [placeholder];
       await devicePool.refreshDevices();
       const pooled = devicePool.getDevice(placeholder.deviceId)!;
-      pooled.sessionId = "held-session";
-      pooled.status = "busy";
+      bindDevice(pooled, "held-session");
     };
 
     test("upgrades a quarantined placeholder that holds a session without rebinding it", async () => {
@@ -504,8 +504,7 @@ describe("DevicePool", () => {
       // pool does: the session ends, the entry goes, a new one takes the serial.
       const retired = { ...pooled };
       expect(retired.sessionId).toBe("held-session");
-      pooled.sessionId = null;
-      pooled.status = "idle";
+      unbindDevice(pooled);
       await devicePool.removeDevice(placeholder.deviceId);
       await devicePool.refreshDevices();
       const current = devicePool.getDevice(placeholder.deviceId)!;

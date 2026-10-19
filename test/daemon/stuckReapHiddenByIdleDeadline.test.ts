@@ -10,7 +10,6 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -31,9 +30,11 @@ const DEVICE = "emulator-5554";
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkUpsert: Promise<void> | undefined;
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(
+    ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
+  ): Promise<number> {
     await this.parkUpsert;
-    await super.upsertActiveSession(record);
+    return await super.upsertActiveSession(...args);
   }
 }
 

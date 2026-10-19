@@ -35,6 +35,7 @@ import {
   sendRawSocketRequest,
   sendRequestOnPersistentSocket,
 } from "./helpers/socketRequest";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 
 /**
  * Control-socket forwards run in process (#11820): every forward reaches its own real
@@ -48,6 +49,7 @@ function fakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -58,6 +60,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
 }
 

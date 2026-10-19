@@ -16,6 +16,7 @@ import {
 import { createAcquisitionHandlers } from "../../src/server/deviceToolsAcquisition";
 import { createStartDeviceHandlers } from "../../src/server/deviceToolsStartDevice";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { ActionableError } from "../../src/models/ActionableError";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -170,18 +171,15 @@ describe("handler internal metadata regression guard", () => {
       const handlers = createAcquisitionHandlers({
         bootAndPrepareDevice: async (args) => {
           calls.push(args);
-          return createStructuredToolResponse({ message: "fake device boundary" });
+          throw new ActionableError("fake device boundary");
         },
       });
       const args = Object.freeze({
         ...(name === "getAndroid" ? { avdName: "Fold" } : { udid: "fake-udid" }),
         ...metadata,
       });
-      if (name === "getAndroid") {
-        await handlers.getAndroidHandler(args);
-      } else {
-        await handlers.getAppleHandler(args);
-      }
+      const acquire = name === "getAndroid" ? handlers.getAndroidHandler : handlers.getAppleHandler;
+      await expect(acquire(args)).rejects.toThrow("fake device boundary");
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({
         platform: name === "getAndroid" ? "android" : "ios",

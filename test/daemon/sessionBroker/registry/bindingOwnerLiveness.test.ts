@@ -75,8 +75,10 @@ describe("owner liveness that counts this daemon's live executions (#11275)", ()
 
   test("an owner whose process died with a restart is live while its session is", () => {
     const liveness = withLiveExecutionSessions(deadProcess, sessions);
-    expect(liveness({ daemonId: "before", pid: 10, sessionUuid: "live-session" })).toBe(true);
-    expect(liveness({ daemonId: "before", pid: 10, sessionUuid: "ended-session" })).toBe(false);
+    const live: BindingExecOwner = { daemonId: "before", pid: 10, sessionUuid: "live-session" };
+    const ended: BindingExecOwner = { daemonId: "before", pid: 10, sessionUuid: "ended-session" };
+    expect(liveness(live)).toBe(true);
+    expect(liveness(ended)).toBe(false);
   });
 
   test("a live process is live whatever its session; a settler is judged by its process alone", () => {

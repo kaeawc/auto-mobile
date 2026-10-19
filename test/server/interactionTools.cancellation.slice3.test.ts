@@ -309,14 +309,8 @@ test("openLink chooser cancels during handler metadata resolution before any cho
       null,
       (signal) => {
         expect(signal).toBe(controller.signal);
-        const manager = new DeepLinkManager(
-          device,
-          adb,
-          null,
-          null,
-          undefined,
-          undefined,
-          {
+        const manager = new DeepLinkManager(device, adb, {
+          chooserMetadata: {
             getActivityLabel: async (_device, _package, _url, _adb, metadataSignal) => {
               expect(metadataSignal).toBe(signal);
               controller.abort();
@@ -332,8 +326,8 @@ test("openLink chooser cancels during handler metadata resolution before any cho
             },
           },
           timer,
-          signal,
-        );
+          chooserSignal: signal,
+        });
         // Detection is outside this test's metadata/dispatch boundary; use the captured hierarchy unchanged.
         const detected = spyOn(manager, "detectIntentChooser").mockReturnValue(true);
         restores.push(() => detected.mockRestore());

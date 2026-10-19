@@ -1,6 +1,6 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
-import { markDeviceError } from "../../src/daemon/deviceBinding";
+import { bindDevice, markDeviceError, unbindDevice } from "../../src/daemon/deviceBinding";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
@@ -28,8 +28,7 @@ const rows: PredicateRow[] = [
   {
     name: "available",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      unbindDevice(device);
       session.assignedDevice = "";
     },
     expected: [false, true, false, false],
@@ -103,8 +102,7 @@ const rows: PredicateRow[] = [
   {
     name: "idle identity quarantine",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      unbindDevice(device);
       device.identityUnresolved = true;
       session.assignedDevice = "";
     },
@@ -151,7 +149,7 @@ for (const autolock of [false, true]) {
         pool["isCurrentIdleDeviceAssignable"](device),
         pool["isSessionAssignmentCurrent"](device, session),
         pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount),
-      ]).toEqual(row.expected);
+      ]).toEqual([...row.expected]);
     } finally {
       manager.stopCleanupTimer();
     }
@@ -164,7 +162,7 @@ test("captured release is refused when another session holds the device", async 
   const { pool, manager, device, session } = await createContext(false);
   try {
     const assignmentCount = device.assignmentCount;
-    device.sessionId = "other-session";
+    bindDevice(device, "other-session");
     expect(pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount)).toBe(
       false,
     );

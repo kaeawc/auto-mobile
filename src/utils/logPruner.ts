@@ -2,6 +2,7 @@ import path from "path";
 import { sequenceBackoff } from "./Backoff";
 import { defaultTimer } from "./SystemTimer";
 import { sortedReaddir, statAsync, unlinkAsync } from "./io";
+import { tryOrElseAsync } from "../models/tryOrElse";
 
 /**
  * Result of enumerating the daemon pid files that could own a `daemon-launch-*.log`
@@ -240,18 +241,20 @@ async function pruneStaleLog(
   now: number,
   abandonedMaxAgeMs: number,
 ): Promise<void> {
-  try {
-    const stats = await statAsync(fullPath);
-    if (now - stats.mtimeMs <= abandonedMaxAgeMs) {
-      return;
-    }
-    const removed = await unlinkWithRetry(io, fullPath);
-    if (removed && isDaemonLaunchLog(file)) {
-      await removeLaunchLogTombstone(io, fullPath);
-    }
-  } catch {
-    // Another process may have removed it concurrently — ignore.
-  }
+  // Another process may have removed it concurrently — ignore.
+  await tryOrElseAsync(
+    async () => {
+      const stats = await statAsync(fullPath);
+      if (now - stats.mtimeMs <= abandonedMaxAgeMs) {
+        return;
+      }
+      const removed = await unlinkWithRetry(io, fullPath);
+      if (removed && isDaemonLaunchLog(file)) {
+        await removeLaunchLogTombstone(io, fullPath);
+      }
+    },
+    () => undefined,
+  );
 }
 
 /**

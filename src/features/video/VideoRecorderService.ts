@@ -12,7 +12,7 @@ import type {
   VideoRecordingDisplayTransition,
   VideoCaptureTeardownDescriptor,
 } from "../../models";
-import { ActionableError, toActionableError } from "../../models";
+import { toActionableError } from "../../models";
 import {
   DEFAULT_VIDEO_RECORDING_CONFIG,
   capBitrateKbps,
@@ -27,6 +27,10 @@ import {
 } from "../../utils/filesystem/securePermissions";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { ProcessTeardownUnconfirmedError } from "../../utils/ChildProcessTracker";
+import { VideoCaptureFinalizationError } from "./VideoCaptureFinalizationError";
+import { VideoCaptureStartCleanupError } from "./VideoCaptureStartCleanupError";
+export { VideoCaptureStartCleanupError } from "./VideoCaptureStartCleanupError";
+export { VideoCaptureFinalizationError } from "./VideoCaptureFinalizationError";
 
 /**
  * Keep only the declared {@link VideoRecordingConfig} fields. A backend that
@@ -87,47 +91,6 @@ export interface RecordingHandle {
    */
   liveCapturePath?: string;
   backendHandle?: unknown;
-}
-
-/**
- * A backend rejected startup but still owns a process that cleanup could not
- * reap. Retaining this handle lets shutdown or rollback retry force-stop.
- */
-export class VideoCaptureStartCleanupError extends Error {
-  constructor(
-    message: string,
-    readonly handle: RecordingHandle,
-    options?: ErrorOptions,
-  ) {
-    super(message, options);
-    this.name = "VideoCaptureStartCleanupError";
-  }
-}
-
-/**
- * A backend can prove that its capture process exited while still failing to
- * finalize its artifact.  This is deliberately distinct from an ordinary
- * stop error: callers may release the capture owner only when that proof is
- * explicit.
- */
-export class VideoCaptureFinalizationError extends ActionableError {
-  /**
-   * `true` means the backend left a recoverable device artifact behind. The
-   * service must retain its handle so a later stop can retry finalization.
-   */
-  readonly retainOwnership: boolean;
-  /** A recoverable raw file which terminal cleanup must preserve. */
-  readonly retainedCapturePath?: string;
-
-  constructor(
-    message: string,
-    options?: ErrorOptions & { retainOwnership?: boolean; retainedCapturePath?: string },
-  ) {
-    super(message, options);
-    this.name = "VideoCaptureFinalizationError";
-    this.retainOwnership = options?.retainOwnership ?? false;
-    this.retainedCapturePath = options?.retainedCapturePath;
-  }
 }
 
 export interface RecordingResult {

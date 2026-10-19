@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -115,7 +116,7 @@ describe("two selector starts racing while the first is still preparing its devi
 
   async function startDevice(args: Record<string, unknown>): Promise<any> {
     const result = await ToolRegistry.getTool("startDevice")!.handler(args);
-    return JSON.parse(result.content[0].text);
+    return toolJson(result);
   }
 
   async function race(devices: BootedDevice[], images: DeviceInfo[]) {

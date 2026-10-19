@@ -105,7 +105,7 @@ describe("executePlan as an MCP task (#13088)", () => {
         recorder.stopVideoRecording,
       ),
       spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
-      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(undefined),
       spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
     ];
     restores.push(() => spies.forEach((spy) => spy.mockRestore()));

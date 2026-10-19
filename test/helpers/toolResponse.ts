@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { getStructuredPayload } from "../../src/utils/toolUtils";
 
 /**
  * Shape-checking readers for MCP tool results in tests. Tool handlers return
@@ -66,4 +67,29 @@ export function toolField(response: unknown, key: string): unknown {
     return undefined;
   }
   return structured[key];
+}
+
+/**
+ * Payload of a handler result via `getStructuredPayload` (structuredContent, else the JSON text
+ * block), or `undefined` when the result is not envelope-shaped.
+ */
+export function toolPayload(response: unknown): Record<string, unknown> | undefined {
+  return isRecord(response) ? getStructuredPayload(response) : undefined;
+}
+
+/**
+ * One entry of a JSON-schema `properties` bag, which the SDK types as `{}` and so
+ * cannot be indexed by name. `undefined` when the bag or the key is absent.
+ */
+export function schemaProperty(properties: unknown, key: string): unknown {
+  return Object.entries(isRecord(properties) ? properties : {}).find(([name]) => name === key)?.[1];
+}
+
+/** `description` of one JSON-schema property, or `undefined` when absent or not a string. */
+export function schemaPropertyDescription(properties: unknown, key: string): string | undefined {
+  const property = schemaProperty(properties, key);
+  if (!isRecord(property) || typeof property.description !== "string") {
+    return undefined;
+  }
+  return property.description;
 }

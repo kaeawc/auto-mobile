@@ -96,14 +96,14 @@ for (const method of methods) {
     test("refuses an unbound client without executing or discovering any simulator", async () => {
       // Refusal is independent of how many simulators are booted; no device-list parser is involved.
       const executor = new RecordingExecutor();
-      const client = new SimCtlClient(null, executor.execute, new FakeTimer());
+      const client = new SimCtlClient(null, executor.execute, { timer: new FakeTimer() });
       await expectRefusal(method, client);
       expect(executor.calls).toEqual([]);
     });
 
     test("preserves the bound device command byte for byte", async () => {
       const executor = new RecordingExecutor();
-      await method.invoke(new SimCtlClient(device, executor.execute, new FakeTimer()));
+      await method.invoke(new SimCtlClient(device, executor.execute, { timer: new FakeTimer() }));
       expect(executor.calls).toEqual([
         { file: "xcrun", args: ["simctl", ...method.argv(device.deviceId)] },
       ]);
@@ -113,7 +113,7 @@ for (const method of methods) {
       test(`uses the explicit UDID ${binding ? "over the binding" : "without a binding"}`, async () => {
         const executor = new RecordingExecutor();
         await method.invoke(
-          new SimCtlClient(binding, executor.execute, new FakeTimer()),
+          new SimCtlClient(binding, executor.execute, { timer: new FakeTimer() }),
           explicitId,
         );
         expect(executor.calls).toEqual([
@@ -125,7 +125,7 @@ for (const method of methods) {
     for (const binding of [device, { ...device, deviceId: "booted" }]) {
       test(`refuses the alias in ${binding.deviceId === "booted" ? "the binding" : "an explicit argument"}`, async () => {
         const executor = new RecordingExecutor();
-        const client = new SimCtlClient(binding, executor.execute, new FakeTimer());
+        const client = new SimCtlClient(binding, executor.execute, { timer: new FakeTimer() });
         await expectRefusal(method, client, binding.deviceId === "booted" ? undefined : "booted");
         expect(executor.calls).toEqual([]);
       });

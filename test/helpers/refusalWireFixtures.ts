@@ -7,6 +7,7 @@ import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureS
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
+import { AndroidIdentityUnresolvedError } from "../../src/devices/AndroidIdentityUnresolvedError";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
@@ -1100,6 +1101,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   Error["constructor"],
   string
 >([
+  [
+    AndroidIdentityUnresolvedError,
+    "shared base for the AVD and device identity refusals; it is only ever constructed through those two subclasses, which both have fixtures.",
+  ],
   [
     UnknownToolError,
     "daemon socket frame code (`daemon_unknown_tool`) only; clients still get the unchanged `Unknown tool:` text, not a typed refusal body.",

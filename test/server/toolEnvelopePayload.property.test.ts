@@ -111,7 +111,11 @@ function textEnvelope(payload: unknown): { content: Array<{ type: string; text: 
 describe("canonical envelope reads across consumers", () => {
   const structured = { success: true, sessionId: "structured-session" };
   const text = { success: true, sessionId: "text-session" };
-  const fixtures = [
+  const fixtures: Array<{
+    name: string;
+    envelope: { structuredContent?: unknown; content?: unknown; isError?: boolean };
+    expected: { success: boolean; sessionId?: string; error?: string } | undefined;
+  }> = [
     { name: "structured only", envelope: { structuredContent: structured }, expected: structured },
     { name: "text only", envelope: textEnvelope(text), expected: text },
     {
@@ -134,9 +138,11 @@ describe("canonical envelope reads across consumers", () => {
 
   for (const { name, envelope, expected } of fixtures) {
     test(name, () => {
-      expect(readToolEnvelopePayload(envelope)?.payload).toEqual(expected);
-      expect(getStructuredPayload(envelope)).toEqual(expected);
-      expect(narrowInternalToolEnvelope("swipeOn", envelope)?.structuredContent).toEqual(expected);
+      expect<unknown>(readToolEnvelopePayload(envelope)?.payload).toEqual(expected);
+      expect<unknown>(getStructuredPayload(envelope)).toEqual(expected);
+      expect<unknown>(narrowInternalToolEnvelope("swipeOn", envelope)?.structuredContent).toEqual(
+        expected,
+      );
       expect(getDeviceSessionIdFromResult(envelope)).toBe(expected?.sessionId);
     });
   }

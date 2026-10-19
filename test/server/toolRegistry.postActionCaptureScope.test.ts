@@ -14,16 +14,19 @@ import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { buildObserveResult } from "../helpers/observeFixture";
 
 const device: BootedDevice = { name: "fake", platform: "android", deviceId: "capture-device" };
+const CAPTURED_AT = "2026-01-01T00:00:00.000Z";
 function observation(id: string): ObserveResult {
-  return {
+  return buildObserveResult({
     deviceId: device.deviceId,
     observationId: id,
+    updatedAt: 0,
     screenSize: { width: 100, height: 100 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: { hierarchy: {} },
-  };
+  });
 }
 
 function payload(response: unknown) {
@@ -40,7 +43,7 @@ describe("ToolRegistry post-action capture scope", () => {
   let memoryAudit: ReturnType<typeof spyOn>;
   beforeEach(() => {
     registry = new ToolRegistryClass(new FakeTimer(), new FakeLogger());
-    registry.setToolCallRepositoryForTesting({ recordToolCall() {} });
+    registry.setToolCallRepositoryForTesting({ async recordToolCall() {} });
     memoryAudit = spyOn(serverConfig, "isMemPerfAuditEnabled").mockReturnValue(false);
     restore = registry.setPipelineOverridesForTesting({
       executionTargetResolver: {
@@ -70,7 +73,7 @@ describe("ToolRegistry post-action capture scope", () => {
       const capture = async (chosen: ObserveResult) => {
         captures++;
         chosen.screenshotPath = "client.png";
-        chosen.screenshotCapturedAt = 123;
+        chosen.screenshotCapturedAt = CAPTURED_AT;
       };
       const deferred = deferTerminalScreenshot(frame, capture);
       if (!deferred) {
@@ -85,7 +88,7 @@ describe("ToolRegistry post-action capture scope", () => {
     expect(payload(response).observation).toMatchObject({
       observationId: "client-action",
       screenshotPath: "client.png",
-      screenshotCapturedAt: 123,
+      screenshotCapturedAt: CAPTURED_AT,
     });
   });
 

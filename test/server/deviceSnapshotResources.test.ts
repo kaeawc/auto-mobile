@@ -20,6 +20,8 @@ function makeRecord(overrides: Partial<DeviceSnapshotRecord> = {}): DeviceSnapsh
     deviceName: "Test Device",
     platform: "android",
     snapshotType: "adb",
+    includeAppData: true,
+    includeSettings: true,
     sizeBytes: 1024,
     createdAt: "2024-06-01T12:00:00.000Z",
     lastAccessedAt: "2024-06-01T12:00:00.000Z",

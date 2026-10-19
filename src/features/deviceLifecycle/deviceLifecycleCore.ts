@@ -224,6 +224,7 @@ import {
   androidProvisionDeviceSpecSchema,
   iosProvisionDeviceSpecSchema,
 } from "../../server/provisionDeviceSpecSchemas";
+export { PooledAvdIdentityError } from "./PooledAvdIdentityError";
 
 export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError | undefined {
   if (error instanceof ProvisionDeviceError) {
@@ -1704,14 +1705,6 @@ export function pooledAvdKillIdentity(
 ): PooledAvdKillIdentity {
   return { capture: pooledAvdCaptureRequiringConfirmation(result), force };
 }
-
-/**
- * An identity refusal raised from inside the shutdown path. It is an
- * {@link ActionableError} so it travels through `rethrowShutdownFailure`
- * unwrapped, and its own type lets `deleteDevice` report it as
- * `target_identity_unresolved` instead of a generic operation failure.
- */
-export class PooledAvdIdentityError extends ActionableError {}
 
 /**
  * The caller's own deadline for the destructive action, which the verification

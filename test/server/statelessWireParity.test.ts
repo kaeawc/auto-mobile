@@ -128,6 +128,16 @@ function normalize(message: unknown): unknown {
   return parsed;
 }
 
+/** The `tools` array of the first `tools/list` result frame the server sent. */
+function listToolsFrameTools(sent: JSONRPCMessage[]): unknown[] {
+  for (const message of sent) {
+    if ("result" in message && Array.isArray(message.result.tools)) {
+      return message.result.tools;
+    }
+  }
+  throw new Error("no tools/list result frame was sent");
+}
+
 describe("tools/list through the proxy matches schemas/tool-definitions.json", () => {
   interface CommittedTool {
     name: string;
@@ -190,8 +200,7 @@ describe("tools/list through the proxy matches schemas/tool-definitions.json", (
       await client.connect(clientTransport);
       await client.listTools();
 
-      const frame = sent.find((message) => "result" in message && "tools" in message.result);
-      const tools = (frame as { result: { tools: unknown[] } }).result.tools;
+      const tools = listToolsFrameTools(sent);
       const served = tools as Array<{
         name: string;
         description?: string;

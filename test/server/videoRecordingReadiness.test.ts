@@ -29,7 +29,12 @@ test("video recording requires CtrlProxy only when startup highlights need it", 
     readiness!({
       action: "start",
       platform: "ios",
-      highlights: [{ description: "Tap target" }],
+      highlights: [
+        {
+          description: "Tap target",
+          shape: { type: "circle", bounds: { x: 0, y: 0, width: 10, height: 10 } },
+        },
+      ],
     }),
   ).toBe("automationReady");
   expect(readiness!({ action: "stop", platform: "ios", recordingId: "recording-1" })).toBe(

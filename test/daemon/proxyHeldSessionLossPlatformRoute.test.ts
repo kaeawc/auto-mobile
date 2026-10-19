@@ -21,11 +21,12 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
-interface Device {
+// A type alias (not an interface) so a device passes directly as tool-call arguments.
+type Device = {
   sessionUuid: string;
   deviceId: string;
   platform?: "android" | "ios";
-}
+};
 const IOS: Device = { sessionUuid: "ios-session", deviceId: "SIM-1", platform: "ios" };
 const ANDROID: Device = {
   sessionUuid: "android-session",

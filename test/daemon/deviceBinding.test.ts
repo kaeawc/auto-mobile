@@ -20,13 +20,13 @@ describe("device binding owner", () => {
   });
 
   test("bind clears a health error and leaves unrelated bookkeeping intact", () => {
-    const device = {
+    const device: { -readonly [K in keyof BindingFields]: BindingFields[K] } & {
+      assignmentCount: number;
+    } = {
       sessionId: null,
       status: "busy",
       health: "error",
       assignmentCount: 7,
-    } satisfies BindingFields & {
-      assignmentCount: number;
     };
     bindDevice(device, "owner");
     expect(statusOf(device)).toBe("busy");

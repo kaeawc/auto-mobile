@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { Session } from "../../src/daemon/sessionManager";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { sendRawSocketRequest } from "./helpers/socketRequest";
 
 /**
@@ -28,6 +29,7 @@ function fakeSession(sessionId: string, assignedDevice: string): Session {
     platform: "android",
     createdAt: 0,
     lastUsedAt: 0,
+    activityGeneration: 0,
     expiresAt: 60_000,
     cacheData: {},
     lastHeartbeat: 0,
@@ -35,6 +37,8 @@ function fakeSession(sessionId: string, assignedDevice: string): Session {
     heartbeatTimeoutMs: 10_000,
     heartbeatTimeoutSource: "default",
     hasReceivedHeartbeat: false,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
   };
 }
 
@@ -99,20 +103,15 @@ async function startServer(options: { poolFolds: boolean } = { poolFolds: true }
     { bindLock: { acquire: () => true, release: () => {} } },
   );
   server.deviceReadToolCallClassifier = (name) => name === "observe";
-  server.mcpClientFactory = async () => ({
-    listTools: async () => ({ tools: [] }),
-    callTool: async (request: unknown) => {
-      const args = (request as { arguments: Record<string, unknown> }).arguments;
-      const tag = String(args.tag);
-      forwards.push({ tag, args });
-      await blockers.get(tag)?.promise;
-      return { content: [] };
-    },
-    listResources: async () => ({ resources: [] }),
-    readResource: async () => ({ contents: [] }),
-    listResourceTemplates: async () => ({ resourceTemplates: [] }),
-    close: async () => {},
-  });
+  server.mcpClientFactory = async () =>
+    new StubMcpClient({
+      callTool: async ({ arguments: args = {} }) => {
+        const tag = String(args.tag);
+        forwards.push({ tag, args });
+        await blockers.get(tag)?.promise;
+        return { content: [] };
+      },
+    });
   await server.start();
   closers.push(async () => {
     for (const blocker of blockers.values()) {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "events";
 import {
   DeviceSessionManager,
-  DefaultDeviceClientProvider,
+  createDefaultDeviceClientProvider,
 } from "../../src/devices/DeviceSessionManager";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -475,7 +475,7 @@ describe("DeviceSessionManager", () => {
       includes: (value: string) => dumpsysOutput.includes(value),
     } as ExecResult);
     fakeAdb.setDevices([resolvedA]);
-    const provider = new DefaultDeviceClientProvider(factory);
+    const provider = createDefaultDeviceClientProvider(factory);
     const manager = createTestSessionManager(provider);
 
     await manager.verifyAndroidDevice(resolvedA.deviceId, { readiness: "booted" });
@@ -1852,7 +1852,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       includes: (value: string) => dumpsysOutput.includes(value),
     } as ExecResult);
     const provider = buildProvider();
-    const windowProvider = new DefaultDeviceClientProvider(factory);
+    const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider);
 
@@ -1902,7 +1902,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
     const { createdFor, factory } = trackWindowFactories();
     const provider = buildProvider();
-    const windowProvider = new DefaultDeviceClientProvider(factory);
+    const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider, fakeAdbFactory);
 
@@ -1928,7 +1928,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw = (device: BootedDevice): BootedDevice => ({ ...device, name: device.deviceId });
     const { createdFor, factory } = trackWindowFactories();
     const provider = buildProvider();
-    const windowProvider = new DefaultDeviceClientProvider(factory);
+    const windowProvider = createDefaultDeviceClientProvider(factory);
     provider.getWindow = windowProvider.getWindow.bind(windowProvider);
     const manager = createTestSessionManager(provider, fakeAdbFactory);
     manager.setCurrentDevice(raw(first), "android");
@@ -1958,7 +1958,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     };
     const older: BootedDevice = { ...newer, name: "Pixel_8_API_35", observedAt: 4 };
     const { createdFor, factory } = trackWindowFactories();
-    const provider = new DefaultDeviceClientProvider(factory);
+    const provider = createDefaultDeviceClientProvider(factory);
 
     const cached = provider.getWindow({ ...newer, observedAt: 2 });
     expect(provider.getWindow(newer)).toBe(cached);
@@ -1980,7 +1980,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const raw: BootedDevice = { ...newer, name: newer.deviceId };
     const { createdFor, factory } = trackWindowFactories();
     fakeAdb.setDevices([raw]);
-    const manager = createTestSessionManager(new DefaultDeviceClientProvider(factory));
+    const manager = createTestSessionManager(createDefaultDeviceClientProvider(factory));
 
     await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, newer);
     await manager.verifyAndroidDevice(raw.deviceId, { readiness: "booted" }, older);

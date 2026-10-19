@@ -3,11 +3,11 @@ import {
   type HighlightOperationResult,
   type HighlightShape,
 } from "../../src/models";
+import { highlightShapeSchema } from "../../src/features/debug/VisualHighlight";
 import {
-  highlightShapeSchema,
   type HighlightOptions,
   type VisualHighlightClient,
-} from "../../src/features/debug/VisualHighlight";
+} from "../../src/features/debug/VisualHighlightClient";
 
 export class FakeHighlightClient implements Pick<VisualHighlightClient, "addHighlight"> {
   readonly addCalls: Array<{ id: string; shape: HighlightShape; options: HighlightOptions }> = [];

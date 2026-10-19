@@ -4,6 +4,7 @@ import {
   toolField,
   toolIsError,
   toolJson,
+  toolPayload,
   toolStructured,
   toolText,
 } from "./toolResponse";
@@ -17,6 +18,11 @@ describe("toolResponse helpers", () => {
     expect(toolStructured(ok)).toEqual({ b: 2 });
     expect(toolIsError(ok)).toBe(false);
     expect(toolIsError({ ...ok, isError: true })).toBe(true);
+  });
+
+  test("reads the envelope payload and tolerates non-envelope values", () => {
+    expect(toolPayload(ok)).toEqual({ b: 2 });
+    expect(toolPayload("nope")).toBeUndefined();
   });
 
   test("throws clear errors on shape mismatch", () => {

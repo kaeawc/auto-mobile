@@ -59,6 +59,7 @@ describe("daemon_stalled handover on a recoverable session release", () => {
     subject["sessionState"].stallHandovers.set(SESSION, {
       handover: stalledHandover(SESSION),
       delivered: false,
+      restore: { bound: false, lastUsedAt: 0, initialBinding: false },
     });
 
     subject["handleSessionReleasedNotification"](released(SESSION, "daemon-restart"));
@@ -75,6 +76,7 @@ describe("daemon_stalled handover on a recoverable session release", () => {
     subject["sessionState"].stallHandovers.set(SESSION, {
       handover: stalledHandover(SESSION),
       delivered: false,
+      restore: { bound: false, lastUsedAt: 0, initialBinding: false },
     });
 
     subject["handleSessionReleasedNotification"](released(SESSION, "daemon-restart"));

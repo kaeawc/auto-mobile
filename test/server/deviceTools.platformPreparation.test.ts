@@ -194,6 +194,7 @@ describe("platform device preparation tools", () => {
       { platform: "android", name: "Pixel_9_API_36", isRunning: false, source: "local" },
     ]);
     const stalledCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async () => {
         // Past the 6s budget but inside the acquisition backstop grace (#6034),
         // so the reservation's own labelled timeout is what the caller sees.
@@ -286,8 +287,8 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5562",
       model: "sdk_gphone64_arm64",
     };
-    const image = {
-      platform: "android" as const,
+    const image: DeviceInfo = {
+      platform: "android",
       name: emulator.name,
       isRunning: true,
       apiLevel: 36,
@@ -300,7 +301,13 @@ describe("platform device preparation tools", () => {
       screenDensity: 420,
       capabilityInventory: {
         schemaVersion: 1,
-        capabilities: [{ id: "android.hardware.camera", state: "available" as const }],
+        capabilities: [
+          {
+            id: "android.hardware.camera",
+            state: "available" as const,
+            source: "platform" as const,
+          },
+        ],
       },
     };
     deviceUtils.setDeviceImages("android", [image]);
@@ -342,7 +349,7 @@ describe("platform device preparation tools", () => {
       screenDensity: 460,
       capabilityInventory: {
         schemaVersion: 1,
-        capabilities: [{ id: "ios.simulator.camera", state: "available" }],
+        capabilities: [{ id: "ios.simulator.camera", state: "available", source: "platform" }],
       },
     };
     let readinessOperationName: string | undefined;
@@ -1010,6 +1017,7 @@ describe("platform device preparation tools", () => {
           timer.advanceTime(1_500);
         },
         lifecycleCoordinator: {
+          isReserved: () => false,
           reserve: async () => ({
             signal: new AbortController().signal,
             identity: { kind: "selector", platform, selector: image.name },
@@ -1117,6 +1125,7 @@ describe("platform device preparation tools", () => {
         timer.advanceTime(1_500);
       },
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async () => ({
           signal: new AbortController().signal,
           identity: { kind: "selector", platform: "android", selector: image.name },
@@ -1398,6 +1407,7 @@ describe("platform device preparation tools", () => {
       let notificationStarted = false;
       setDeviceToolsDependencies({
         lifecycleCoordinator: {
+          isReserved: () => false,
           reserve: async () => lifecycleLease,
         },
         syncInstalledAppResourceRegistry: async () => {
@@ -1705,6 +1715,7 @@ describe("platform device preparation tools", () => {
       },
     };
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async () => lease,
     };
     setDeviceToolsDependencies({
@@ -1783,7 +1794,7 @@ describe("platform device preparation tools", () => {
     };
     setDeviceToolsDependencies({
       deviceManagerFactory: () => slow,
-      lifecycleCoordinator: { reserve: async () => lease },
+      lifecycleCoordinator: { isReserved: () => false, reserve: async () => lease },
     });
 
     let failure: unknown;
@@ -1835,7 +1846,7 @@ describe("platform device preparation tools", () => {
       reconcileSettled = true;
     };
     let releases = 0;
-    let deviceBAtRelease: ReturnType<typeof pool.getDevice> | undefined;
+    const released: { deviceB: ReturnType<typeof pool.getDevice> } = { deviceB: null };
     const lease: VirtualDeviceLifecycleLease = {
       signal: new AbortController().signal,
       identity: { kind: "selector", platform: "android", selector: emulatorA.name },
@@ -1843,10 +1854,11 @@ describe("platform device preparation tools", () => {
       transitionToTeardown: () => {},
       release: () => {
         releases++;
-        deviceBAtRelease = pool.getDevice(emulatorB.deviceId);
+        released.deviceB = pool.getDevice(emulatorB.deviceId);
       },
     };
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async () => lease,
     };
     setDeviceToolsDependencies({
@@ -1877,8 +1889,8 @@ describe("platform device preparation tools", () => {
     expect(reconcileSettled).toBe(true);
     expect(releases).toBe(1);
     expect(observations).toEqual(["pre-boot-serial-validation"]);
-    expect(deviceBAtRelease).toBe(initialDeviceB);
-    expect(pool.getDevice(emulatorB.deviceId)).toBe(deviceBAtRelease);
+    expect(released.deviceB).toBe(initialDeviceB);
+    expect(pool.getDevice(emulatorB.deviceId)).toBe(released.deviceB);
   });
 
   test("waits for fuzzy legacy Android names that match a reserved AVD", async () => {

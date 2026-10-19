@@ -514,7 +514,7 @@ describe("DevicePool", () => {
       const sourceImage = pixel8Source();
       const branches = ["remove and add", "adopt existing"] as const;
 
-      beforeEach(async () => {
+      async function arrangeHarness(): Promise<void> {
         tracker = new ExecutionTracker(fakeTimer, new FakeIdGenerator(["ambient-execution"]));
         devicePool = makePool({
           ambientExecutionIdReader: { getExecutionId: () => "ambient-execution" },
@@ -530,7 +530,32 @@ describe("DevicePool", () => {
         });
         await initializeLiveDevices([device]);
         await bindOwnerSession(device, sourceImage);
-      });
+      }
+
+      // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+      function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+        test(
+          name,
+          async () => {
+            await arrangeHarness();
+            await fn();
+          },
+          timeout,
+        );
+      }
+
+      function arrangedEach<T>(table: readonly T[]) {
+        return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+          test.each(table)(
+            name,
+            async (row: T) => {
+              await arrangeHarness();
+              await fn(row);
+            },
+            timeout,
+          );
+        };
+      }
 
       async function replaceDevice(branch: (typeof branches)[number], excludeExecutionId?: string) {
         const reservation = await requireShutdownReservation(device.deviceId);
@@ -551,7 +576,7 @@ describe("DevicePool", () => {
         }
       }
 
-      test.each(branches)(
+      arrangedEach(branches)(
         "cancels old-device work and preserves the explicitly excluded recovery during %s",
         async (branch) => {
           const oldDeviceWork = tracker.startExecution("observe");
@@ -574,7 +599,7 @@ describe("DevicePool", () => {
         },
       );
 
-      test.each(branches)(
+      arrangedEach(branches)(
         "retains old-device work and warns when the recovery execution is unknown during %s",
         async (branch) => {
           const oldDeviceWork = tracker.startExecution("observe");
@@ -599,7 +624,7 @@ describe("DevicePool", () => {
         },
       );
 
-      test.each(branches)(
+      arrangedEach(branches)(
         "preserves session-only and other-device work during %s",
         async (branch) => {
           const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
@@ -613,27 +638,30 @@ describe("DevicePool", () => {
         },
       );
 
-      test("failure retirement cancels session work including recovery and retains sessionless device work", async () => {
-        const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
-        const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
-        const sessionlessWork = tracker.startExecution("observe");
-        const otherDeviceWork = tracker.startExecution("observe");
-        tracker.bindDeviceExecution(recovery.id, device.deviceId);
-        tracker.bindDeviceExecution(sessionlessWork.id, device.deviceId);
-        tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
-        const captured = requirePooledDevice(devicePool, device.deviceId);
+      arranged(
+        "failure retirement cancels session work including recovery and retains sessionless device work",
+        async () => {
+          const sessionOnlyWork = tracker.startExecution("observe", undefined, "owner-session");
+          const recovery = tracker.startExecution("startDevice", undefined, "owner-session");
+          const sessionlessWork = tracker.startExecution("observe");
+          const otherDeviceWork = tracker.startExecution("observe");
+          tracker.bindDeviceExecution(recovery.id, device.deviceId);
+          tracker.bindDeviceExecution(sessionlessWork.id, device.deviceId);
+          tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
+          const captured = requirePooledDevice(devicePool, device.deviceId);
 
-        const retired = await devicePool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured);
+          const retired = await devicePool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured);
 
-        expect(retired).toBe(true);
-        expect(sessionManager.getSession("owner-session")).toBeNull();
-        expect(devicePool.getDevice(device.deviceId)).toBeNull();
-        expect(sessionOnlyWork.abortController.signal.aborted).toBe(true);
-        expect(recovery.abortController.signal.aborted).toBe(true);
-        expect(sessionOnlyWork.cancelReason).toMatchObject({ deviceId: device.deviceId });
-        expect(sessionlessWork.abortController.signal.aborted).toBe(false);
-        expect(otherDeviceWork.abortController.signal.aborted).toBe(false);
-      });
+          expect(retired).toBe(true);
+          expect(sessionManager.getSession("owner-session")).toBeNull();
+          expect(devicePool.getDevice(device.deviceId)).toBeNull();
+          expect(sessionOnlyWork.abortController.signal.aborted).toBe(true);
+          expect(recovery.abortController.signal.aborted).toBe(true);
+          expect(sessionOnlyWork.cancelReason).toMatchObject({ deviceId: device.deviceId });
+          expect(sessionlessWork.abortController.signal.aborted).toBe(false);
+          expect(otherDeviceWork.abortController.signal.aborted).toBe(false);
+        },
+      );
     });
 
     test("keeps the existing session through a System UI recovery handoff", async () => {

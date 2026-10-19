@@ -28,25 +28,15 @@ function harness() {
   const host = new FakeHostCommandExecutor();
   function client(child: FakeChildProcess) {
     control.processes.set(child.pid!, "helper");
-    return new AdbClient(
-      null,
-      () => host.executeCommand("adb"),
-      () => {
+    return new AdbClient(null, () => host.executeCommand("adb"), {
+      spawnFn: () => {
         // Spawn acknowledgement is asynchronous, as with a real child, without a host timer.
         queueMicrotask(() => child.emit("spawn"));
         return child as ChildProcess;
       },
-      undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      registry,
-    );
+      nativeHelperRegistry: registry,
+    });
   }
   return { timer, store, control, registry, client, host };
 }
@@ -130,21 +120,11 @@ describe("host adb native helper shutdown", () => {
       spawn: () => child as ChildProcess,
       executeCommandWithChild: () => ({ child: child as ChildProcess, result }),
     };
-    const client = new AdbClient(
-      null,
-      () => h.host.executeCommand("adb"),
-      null,
-      undefined,
-      h.timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      host,
-      undefined,
-      undefined,
-      h.registry,
-    );
+    const client = new AdbClient(null, () => h.host.executeCommand("adb"), {
+      timer: h.timer,
+      hostProcessExecutor: host,
+      nativeHelperRegistry: h.registry,
+    });
     // Exercise the production child-returning exec path with an injected host executor.
     Reflect.set(client, "isTestMode", false);
     const pending = client.execute(["get-state"], { noRetry: true });

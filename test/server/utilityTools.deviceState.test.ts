@@ -26,6 +26,7 @@ import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { readToolResponse, toolIsError, toolStructured } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -244,9 +245,9 @@ describe("device state tools", () => {
       const handler = tool.deviceAwareHandler!;
       tool.deviceAwareHandler = async (...args) => {
         const response = await handler(...args);
-        expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
-        expect(response.content).toEqual(
-          createJSONToolResponse(response.structuredContent).content,
+        expect(tool.outputSchema!.parse(toolStructured(response))).toBeDefined();
+        expect(readToolResponse(response).content).toEqual(
+          createJSONToolResponse(toolStructured(response)).content,
         );
         return response;
       };
@@ -598,9 +599,9 @@ describe("device state tools", () => {
           biometrics: { supported: true, error: "capture failed" },
           error: "capture failed",
         };
-        expect(response.structuredContent).toEqual(payload);
-        expect(response.content).toEqual(createJSONToolResponse(payload).content);
-        expect(response.isError).toBeUndefined();
+        expect(toolStructured(response)).toEqual(payload);
+        expect(readToolResponse(response).content).toEqual(createJSONToolResponse(payload).content);
+        expect(toolIsError(response)).toBe(false);
         expect(mutation).toHaveBeenCalledTimes(combined ? 1 : 0);
       } finally {
         capture.mockRestore();

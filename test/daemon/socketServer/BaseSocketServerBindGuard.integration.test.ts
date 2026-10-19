@@ -136,7 +136,9 @@ describe("BaseSocketServer bind guard", () => {
         await expect(start).rejects.toBeInstanceOf(ActionableError);
         await expect(start).rejects.toThrow("another daemon is listening");
         const current = statSync(socketPath);
-        expect({ dev: current.dev, ino: current.ino }).toEqual(racingIdentity);
+        expect<typeof racingIdentity>({ dev: current.dev, ino: current.ino }).toEqual(
+          racingIdentity,
+        );
         expect(racingPeer?.listening).toBe(true);
         expect(server.isListening()).toBe(false);
       } finally {

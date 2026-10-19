@@ -18,6 +18,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { buildObserveResult } from "../helpers/observeFixture";
 
 /**
  * Wiring coverage for the #6866 settle gate inside the after-tool-call
@@ -33,7 +34,7 @@ const device: BootedDevice = {
 };
 
 function obs(text: string, updatedAt: number): ObserveResult {
-  return {
+  return buildObserveResult({
     updatedAt,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -53,7 +54,7 @@ function obs(text: string, updatedAt: number): ObserveResult {
       },
       updatedAt,
     },
-  } as ObserveResult;
+  });
 }
 
 function handlerWith(fake: FakeObserveScreen): DefaultAfterToolCallHandler {
@@ -182,11 +183,9 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
       timer.enableAutoAdvance();
       const fake = new FakeObserveScreen();
       const action = obs("loading", 10);
-      action.platform = platform;
       action.display = { key: "0", role: "unknown", posture: "unknown", generation: 0 };
       action.selectedElements = [];
       const settled = obs("settled", 20);
-      settled.platform = platform;
       settled.display = {
         key: "focused-panel",
         role: "unknown",
@@ -194,15 +193,19 @@ describe("DefaultAfterToolCallHandler embedded-observation settle (#6866)", () =
         generation: 0,
       };
       if (platform === "ios") {
-        action.activeWindow = settled.activeWindow = { appId: "com.example.app" };
+        action.activeWindow = settled.activeWindow = {
+          appId: "com.example.app",
+          activityName: "",
+          layoutSeqSum: 0,
+        };
         action.screenSize = { width: 0, height: 0 };
         settled.screenSize = { width: 1170, height: 2532 };
         action.viewHierarchy!.packageName = settled.viewHierarchy!.packageName = "com.example.app";
         action.viewHierarchy!.hierarchy = {
-          node: { class: "XCUIElementTypeStaticText", label: "Loading" },
+          node: { class: "XCUIElementTypeStaticText", $: { label: "Loading" } },
         };
         settled.viewHierarchy!.hierarchy = {
-          node: { class: "XCUIElementTypeStaticText", label: "Ready" },
+          node: { class: "XCUIElementTypeStaticText", $: { label: "Ready" } },
         };
       }
       fake.setObserveSequence([

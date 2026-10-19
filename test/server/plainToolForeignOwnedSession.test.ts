@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -76,7 +76,7 @@ describe("a plain control tool naming a session another connection owns", () => 
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -129,7 +129,19 @@ describe("a plain control tool naming a session another connection owns", () => 
     registerDeviceTools();
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     await fixture?.teardown();
@@ -151,78 +163,93 @@ describe("a plain control tool naming a session another connection owns", () => 
     }
   });
 
-  test("the setup: another connection is foreign to the session, and its sessionless kill is refused", async () => {
-    const pool = DaemonState.getInstance().getDevicePool();
-    expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
+  arranged(
+    "the setup: another connection is foreign to the session, and its sessionless kill is refused",
+    async () => {
+      const pool = DaemonState.getInstance().getDevicePool();
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
 
-    const result = await call({ device: held, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+      const result = await call({ device: held, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
 
-    expect(result.isError).toBe(true);
-    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(manager.killed).toEqual([]);
-  });
+      expect(result.isError).toBe(true);
+      expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(manager.killed).toEqual([]);
+    },
+  );
 
-  test("killDevice naming the owner's session from another connection is refused, not run", async () => {
-    const result = await call({
-      device: held,
-      sessionUuid: HOLDER,
-      [INTERNAL_MCP_SESSION_PARAM]: OTHER,
-    });
+  arranged(
+    "killDevice naming the owner's session from another connection is refused, not run",
+    async () => {
+      const result = await call({
+        device: held,
+        sessionUuid: HOLDER,
+        [INTERNAL_MCP_SESSION_PARAM]: OTHER,
+      });
 
-    // No shutdown work reaches the device the other connection's session holds.
-    expect(manager.killed).toEqual([]);
-    expect(result.isError).toBe(true);
-    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-  });
+      // No shutdown work reaches the device the other connection's session holds.
+      expect(manager.killed).toEqual([]);
+      expect(result.isError).toBe(true);
+      expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    },
+  );
 
-  test("a plain control call naming the owner's session from another connection does not extend it", async () => {
-    const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
-    timer.advanceTime(60_000);
+  arranged(
+    "a plain control call naming the owner's session from another connection does not extend it",
+    async () => {
+      const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
+      timer.advanceTime(60_000);
 
-    // Another connection kills an unheld device and merely names the owner's session.
-    await call({ device: free, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+      // Another connection kills an unheld device and merely names the owner's session.
+      await call({ device: free, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
 
-    expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
-  });
+      expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
+    },
+  );
 
-  test("force overrides the holder check, not the naming of another connection's session", async () => {
-    const named = await call({
-      device: held,
-      force: true,
-      sessionUuid: HOLDER,
-      [INTERNAL_MCP_SESSION_PARAM]: OTHER,
-    });
+  arranged(
+    "force overrides the holder check, not the naming of another connection's session",
+    async () => {
+      const named = await call({
+        device: held,
+        force: true,
+        sessionUuid: HOLDER,
+        [INTERNAL_MCP_SESSION_PARAM]: OTHER,
+      });
 
-    expect(wire(named).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    // The remedy names the way to force-stop the device (#11555).
-    expect(JSON.stringify(named.content)).toContain("leave sessionUuid out");
-    expect(manager.killed).toEqual([]);
+      expect(wire(named).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      // The remedy names the way to force-stop the device (#11555).
+      expect(JSON.stringify(named.content)).toContain("leave sessionUuid out");
+      expect(manager.killed).toEqual([]);
 
-    await call({ device: held, force: true, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+      await call({ device: held, force: true, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
 
-    expect(manager.killed).toEqual([held.deviceId]);
-  });
+      expect(manager.killed).toEqual([held.deviceId]);
+    },
+  );
 
-  test("the owner's own killDevice naming its session still reaches the device", async () => {
+  arranged("the owner's own killDevice naming its session still reaches the device", async () => {
     await call({ device: held, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OWNER });
 
     expect(manager.killed).toEqual([held.deviceId]);
   });
 
-  test("a plain read naming the owner's session from another connection is not refused", async () => {
-    const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
-    timer.advanceTime(60_000);
+  arranged(
+    "a plain read naming the owner's session from another connection is not refused",
+    async () => {
+      const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
+      timer.advanceTime(60_000);
 
-    const result = await fixture!.client.callTool({
-      name: "listDevices",
-      arguments: { platform: "ios", sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
-    });
+      const result = await fixture!.client.callTool({
+        name: "listDevices",
+        arguments: { platform: "ios", sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
+      });
 
-    expect(result.isError).not.toBe(true);
-    expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
+    },
+  );
 
-  test("once the owner has disconnected another connection may name the session", async () => {
+  arranged("once the owner has disconnected another connection may name the session", async () => {
     DaemonState.getInstance().getDevicePool().releaseMcpSessionBindings(OWNER);
 
     await call({ device: held, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER });

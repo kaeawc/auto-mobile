@@ -466,7 +466,7 @@ describe("device lifecycle ordinary-client structured output", () => {
           }),
         }),
       });
-      setInstalledAppResourceRefresh(async () => {});
+      setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
       const state = { success: true, deviceId: device.deviceId, platform: device.platform };
       const getStateSpy = spyOn(DeviceState.prototype, "getState").mockResolvedValue(state);
       const setStateSpy = spyOn(DeviceState.prototype, "setState").mockResolvedValue(state);
@@ -475,7 +475,10 @@ describe("device lifecycle ordinary-client structured output", () => {
         registerInteractionTools(interactionDeps);
       }
       const tool = ToolRegistry.getRegisteredTool(name)!;
-      expect(tool.outputSchema).toBeDefined();
+      const outputSchema = tool.outputSchema;
+      if (!outputSchema) {
+        throw new Error(`${name} declares no outputSchema`);
+      }
       const args =
         name === "rotate"
           ? { orientation: "portrait" }
@@ -520,7 +523,7 @@ describe("device lifecycle ordinary-client structured output", () => {
         expect(result.structuredContent).toEqual(
           JSON.parse((result.content[0] as { text: string }).text),
         );
-        expect(tool.outputSchema.safeParse(result.structuredContent).success).toBe(true);
+        expect(outputSchema.safeParse(result.structuredContent).success).toBe(true);
         expect(validators.get(name)!(result.structuredContent)).toBe(true);
 
         serverConfig.setToolResultsNoStructuredContentEnabled(true);

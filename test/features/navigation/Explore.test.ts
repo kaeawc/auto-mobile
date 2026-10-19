@@ -3206,7 +3206,12 @@ describe("Explore", () => {
         },
       };
 
-      markEdgeTraversed(state, mockEdge, "Screen2", true, fakeTimer, undefined, 0.95);
+      markEdgeTraversed(
+        state,
+        mockEdge,
+        { actualTo: "Screen2", success: true, matchConfidence: 0.95 },
+        fakeTimer,
+      );
 
       expect(state.traversedEdges.size).toBe(1);
 
@@ -3238,7 +3243,12 @@ describe("Explore", () => {
         },
       };
 
-      markEdgeTraversed(state, mockEdge, "Screen3", false, fakeTimer, "Navigation diverged", 0.8);
+      markEdgeTraversed(
+        state,
+        mockEdge,
+        { actualTo: "Screen3", success: false, error: "Navigation diverged", matchConfidence: 0.8 },
+        fakeTimer,
+      );
 
       const edgeKey = getEdgeKey(mockEdge);
       const validation = state.edgeValidationResults.get(edgeKey);
@@ -3349,7 +3359,7 @@ describe("Explore", () => {
       const state = explore.graphTraversalState;
 
       // Validate the edge stored in the graph, as validate mode does.
-      markEdgeTraversed(state, mockEdge, "Screen2", true, fakeTimer);
+      markEdgeTraversed(state, mockEdge, { actualTo: "Screen2", success: true }, fakeTimer);
       markNodeVisited(state, "Screen1");
       markNodeVisited(state, "Screen2");
 

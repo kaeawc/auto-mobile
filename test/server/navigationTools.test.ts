@@ -335,14 +335,12 @@ describe("navigation tool session graph selection", () => {
     );
     const navigateToHandler = createNavigateToHandler({
       navigateToFactory: (selectedDevice) =>
-        new NavigateTo(
-          selectedDevice,
-          new FakeAdbClientFactory(),
-          { setupUIState: async () => [], setupScrollPosition: async () => null },
-          { waitForScreen: async () => true },
-          graph,
+        new NavigateTo(selectedDevice, new FakeAdbClientFactory(), {
+          uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+          screenWaiter: { waitForScreen: async () => true },
+          navigationManager: graph,
           timer,
-        ),
+        }),
     });
     const call = spyOn(ToolRegistry, "callInternal");
     try {

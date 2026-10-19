@@ -115,11 +115,9 @@ export class DefaultIosAppBundleGuard implements IosAppBundleGuard {
   private uninstall(bundleId: string): Promise<void> {
     const { device, deviceAppManager, processExecutor, timer } = this.options;
     return resolveIosDeviceBackend(device.deviceId, {
-      simctl: new SimCtlClient(
-        device,
-        (file, args) => processExecutor.executeCommand(file, args),
+      simctl: new SimCtlClient(device, (file, args) => processExecutor.executeCommand(file, args), {
         timer,
-      ),
+      }),
       deviceAppUninstaller: deviceAppManager,
     }).uninstallApp(bundleId, undefined, { terminateFirst: false });
   }

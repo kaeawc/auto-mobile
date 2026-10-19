@@ -116,6 +116,9 @@ function configureReadyDevice(adb: ReadinessAdbExecutor): void {
   adb.setCommandResponse("shell getprop ro.product.model", result("sdk_gphone64_arm64\n"));
 }
 
+/** Microtask turns the poller may take to reach its between-iteration sleep or settle after abort. */
+const MICROTASK_TURN_BUDGET = 40;
+
 describe("Android emulator readiness diagnostics", () => {
   test("reports a persistent, sanitized device-discovery failure", async () => {
     const timer = new FakeTimer();
@@ -218,12 +221,16 @@ describe("Android emulator readiness diagnostics", () => {
       rejection = error instanceof Error ? error : new Error(String(error));
     });
 
-    for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
+    for (
+      let turn = 0;
+      turn < MICROTASK_TURN_BUDGET && timer.getPendingTimeoutCount() < 2;
+      turn += 1
+    ) {
       await Promise.resolve();
     }
     const waitingBetweenIterations = timer.getPendingTimeoutCount() === 2;
     controller.abort(new Error("caller cancelled absent-target poll"));
-    for (let turn = 0; turn < 10 && !rejection; turn += 1) {
+    for (let turn = 0; turn < MICROTASK_TURN_BUDGET && !rejection; turn += 1) {
       await Promise.resolve();
     }
     const settledWithoutTimerAdvance = rejection !== undefined;
@@ -261,7 +268,7 @@ describe("Android emulator readiness diagnostics", () => {
       await Promise.resolve();
     }
     controller.abort(new Error("caller cancelled parallel probes"));
-    for (let turn = 0; turn < 10 && !rejection; turn += 1) {
+    for (let turn = 0; turn < MICROTASK_TURN_BUDGET && !rejection; turn += 1) {
       await Promise.resolve();
     }
     const settledWithoutTimerAdvance = rejection !== undefined;

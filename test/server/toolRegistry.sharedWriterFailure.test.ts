@@ -66,6 +66,7 @@ describe("shared artifact writer after a failed write (#10079 + #10080)", () => 
   const tapOn = async () => {
     const result = await handler.handle({
       name: "tapOn",
+      outputSchema: undefined,
       args: {},
       device: undefined,
       internalCall: false,

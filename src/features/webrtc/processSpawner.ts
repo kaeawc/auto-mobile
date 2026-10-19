@@ -3,6 +3,7 @@ import {
   DefaultHostCommandExecutor,
   type HostProcessExecutor,
 } from "../../utils/HostCommandExecutor";
+import { requirePipedOutput } from "../../utils/pipedChildProcess";
 
 /** Minimal child-process surface the capture sources need, for injectable testing. */
 export interface SpawnedProcess {
@@ -25,9 +26,10 @@ const hostProcessExecutor = new DefaultHostCommandExecutor();
 export const createDefaultProcessSpawner =
   (executor: Pick<HostProcessExecutor, "spawn"> = hostProcessExecutor): ProcessSpawner =>
   (command, args) => {
-    const child = executor.spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- node's ChildProcessByStdio differs from our minimal SpawnedProcess on stdin/once() variance; the members we use (stdout/stderr/kill/once) match.
-    return child as unknown as SpawnedProcess;
+    return requirePipedOutput(
+      executor.spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] }),
+      command,
+    );
   };
 
 export const defaultProcessSpawner = createDefaultProcessSpawner();

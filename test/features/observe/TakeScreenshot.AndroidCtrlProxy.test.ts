@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { readFileSync } from "node:fs";
@@ -30,10 +31,12 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     AndroidCtrlProxyClient.getInstance = (() => ({
       requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
     })) as typeof AndroidCtrlProxyClient.getInstance;
-    fakeAdb.setDefaultResponse({
-      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
-      stderr: "",
-    });
+    fakeAdb.setDefaultResponse(
+      createExecResult(
+        readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+        "",
+      ),
+    );
     try {
       const result = await screenshot.execute({ format: "webp" });
       expect(result.success).toBe(true);
@@ -96,10 +99,12 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
         return { success: false };
       },
     })) as typeof AndroidCtrlProxyClient.getInstance;
-    fakeAdb.setDefaultResponse({
-      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
-      stderr: "",
-    });
+    fakeAdb.setDefaultResponse(
+      createExecResult(
+        readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+        "",
+      ),
+    );
     try {
       const result = await screenshot.execute({ format: "png", displayId: 2 });
       expect(result.success).toBe(true);
@@ -129,10 +134,12 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     AndroidCtrlProxyClient.getInstance = (() => ({
       requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
     })) as typeof AndroidCtrlProxyClient.getInstance;
-    fakeAdb.setDefaultResponse({
-      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
-      stderr: "",
-    });
+    fakeAdb.setDefaultResponse(
+      createExecResult(
+        readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+        "",
+      ),
+    );
     try {
       const result = await screenshot.execute({});
       expect(result.success).toBe(true);
@@ -146,10 +153,12 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
 
   test("should use single optimized ADB command for screenshot capture", async function () {
     const testFakeAdb = new FakeAdbExecutor();
-    testFakeAdb.setDefaultResponse({
-      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
-      stderr: "",
-    });
+    testFakeAdb.setDefaultResponse(
+      createExecResult(
+        readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+        "",
+      ),
+    );
     const screenshot = new TakeScreenshot(
       mockDevice,
       new FakeAdbClientFactory(testFakeAdb),
@@ -176,7 +185,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       options: Parameters<TakeScreenshot["execute"]>[0],
     ) => {
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setDefaultResponse({ stdout: pngFixture().toString("base64"), stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult(pngFixture().toString("base64"), ""));
       const screenshot = new TakeScreenshot(
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),

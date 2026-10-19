@@ -49,6 +49,17 @@ const IOS_PATTERNS = {
   dropdown: ["UIPickerView", "UIDatePicker"],
 };
 
+/** The slice of {@link FieldTypeDetector} that SetUIState consumes; fakes satisfy this structurally. */
+export type FieldTypeDetection = Pick<
+  FieldTypeDetector,
+  | "detect"
+  | "isChecked"
+  | "getTextValue"
+  | "isIOSElement"
+  | "isPasswordField"
+  | "shouldSkipVerification"
+>;
+
 /**
  * Detects the field type from element properties
  */

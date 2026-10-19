@@ -372,7 +372,10 @@ export class ClearText extends BaseVisualChange {
    */
   /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
   get testHooks() {
-    return { executeAndroidClearText: this.executeAndroidClearText.bind(this) };
+    return {
+      executeAndroidClearText: this.executeAndroidClearText.bind(this),
+      executeiOSClearText: this.executeiOSClearText.bind(this),
+    };
   }
 
   private async executeAndroidClearText(

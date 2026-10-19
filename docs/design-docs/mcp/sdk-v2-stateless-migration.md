@@ -236,21 +236,28 @@ result, and only to a client whose `initialize` declared it; every other client 
   registry file, because a task is owned by a daemon's session key.
 - `runAsTask(options, work)`: the seam a tool call opts into. When the request declared the
   extension, carries a session key and tasks are served, it creates the task durably, starts
-  the work in the background under the task's `AbortSignal` (aborted by `tasks/cancel`, which
-  the existing `executionTracker` request-cancellation path turns into cooperative
-  cancellation), turns progress ticks into the task's `statusMessage`, and returns the
-  `CreateTaskResult`; otherwise it runs the work synchronously. `currentTaskContext()` gives
+  the work in the background under a policy-specific `AbortSignal` (`abort` passes the task's
+  signal to the existing cooperative request-cancellation path; `detach` passes an independent
+  signal unaffected by `tasks/cancel`), turns progress ticks into the task's `statusMessage`,
+  and returns the `CreateTaskResult`; otherwise it runs the work synchronously. `currentTaskContext()` gives
   code inside the work the task id, `holdDeviceLease(sessionUuid)` and `requestInput(...)`.
-- `TaskLeaseKeepalive`: the hook a task uses to keep a device session's lease alive until it is
-  terminal. `HeartbeatTaskLeaseKeepalive` renews the session through the session manager's own
+- `TaskLeaseKeepalive`: the hook a task uses to keep a device session's lease alive until its work
+  ends. `HeartbeatTaskLeaseKeepalive` renews the session through the session manager's own
   `recordHeartbeat` (the path the socket and HTTP heartbeat routes use, owner lease only, never
   the idle clocks) at once and then at half the session's heartbeat timeout (at most every
-  second). A hold ends when the task settles (completed, failed or cancelled; expiry follows a
-  terminal state), when the session ends under it, or at daemon shutdown
+  second). A hold ends when the work settles (including work continuing after a detached
+  cancellation), when the session ends under it, or at daemon shutdown
   (`releaseDaemonTaskLeases`). The daemon's per-request servers get the daemon-scoped instance
   from `createStatelessMcpServer`; direct stdio holds nothing.
-- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task: `startDevice` and
-  `executePlan`. `startDevice`'s work holds
+- `TASK_ELIGIBILITY`: per-call eligibility and cancellation policy. `startDevice`,
+  `executePlan` and `installApp` use cooperative `abort`; `videoRecording` with `action: "stop"`
+  uses `detach` (#13090). Recording start and other actions stay synchronous, and calls from
+  non-declaring clients still block. Cancelling a stop task promptly reports `cancelled` with
+  a message that work continues, ending client polling while the stop finishes and keeps its
+  device lease. Its later result cannot overwrite cancellation; later failures are logged at
+  warning level. A second stop joins the existing in-flight stop, and the finalized artifact
+  remains retrievable. `taskEligibleByName` adapts name allowlists to the `abort` policy.
+  `startDevice`'s work holds
   the session it binds (`currentTaskContext()?.holdDeviceLease`) right after the bind, so the
   session cannot lapse before the client learns its id from `tasks/get`. The boot itself binds
   no session until it is ready, so `tasks/cancel` during the boot runs the existing

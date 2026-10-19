@@ -413,6 +413,7 @@ describe("MemoryAudit - Unit Tests", function () {
         nativeHeapGrowthMb: 2,
         totalPssGrowthMb: 15,
         gcEvents: [],
+        unreachableObjects: { count: 0, sizeKb: 0, raw: "" },
         gcCount: 3,
         gcTotalDurationMs: 40,
       };

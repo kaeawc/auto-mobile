@@ -1,3 +1,4 @@
+import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -16,7 +17,9 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { FakeTimer } from "../../fakes/FakeTimer";
 import fixture from "../../fixtures/observe/ctrlproxy-notification-group-compact-bounds.json";
 
-const capture: ViewHierarchyResult = { hierarchy: { node: fixture.expanded } };
+const capture: ViewHierarchyResult = {
+  hierarchy: { node: capturedFlatNodeForTest(fixture.expanded) },
+};
 const nodes = new SearchableHierarchy().project(capture);
 const device = {
   name: "Captured duplicates",
@@ -108,7 +111,10 @@ for (const row of rows) {
             throw new Error("Captured target must have bounds");
           }
           expect(element["resource-id"]).toBe(targetId);
-          expect(element.bounds).toEqual(expectedNode?.bounds);
+          if (!expectedNode?.bounds) {
+            throw new Error("Captured target must have bounds");
+          }
+          expect(element.bounds).toEqual(expectedNode.bounds);
           const point = new DefaultElementGeometry().getElementCenter(element);
           expect(point).toEqual({ x, y });
           await tap.executeAndroidTap(
@@ -131,6 +137,8 @@ for (const row of rows) {
           tap.observedInteraction = (action) =>
             action(
               buildObserveResult({
+                updatedAt: 0,
+                systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
                 viewHierarchy: capture,
                 screenSize: { width: 1080, height: 2400 },
               }),
@@ -153,7 +161,10 @@ for (const row of rows) {
         expect(nodes.filter((node) => node.nativeId === id)).toHaveLength(4);
         expect(direct.mock.calls).toHaveLength(1);
         expect(direct.mock.calls[0]?.[0]["resource-id"]).toBe(id);
-        expect(direct.mock.calls[0]?.[0].bounds).toEqual(expectedNode?.bounds);
+        if (!expectedNode?.bounds) {
+          throw new Error("Captured target must have bounds");
+        }
+        expect(direct.mock.calls[0]?.[0].bounds).toEqual(expectedNode.bounds);
         expect(await direct.mock.results[0]?.value).toMatchObject({
           success: false,
           error: `Selected resource-id "${id}" is shared by 4 elements; using coordinate fallback.`,

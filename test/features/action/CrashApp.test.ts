@@ -74,7 +74,7 @@ class FakeSimulatorCommands {
 }
 
 const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDependencies => ({
-  cacheInvalidator: { invalidate: () => {} },
+  cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
   uid: () => 501,
   ...overrides,
 });
@@ -151,7 +151,7 @@ describe("CrashApp (Android)", () => {
       dependencies({
         adb,
         timer,
-        cacheInvalidator: { invalidate: () => invalidations++ },
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
       }),
     );
 
@@ -397,7 +397,10 @@ describe("CrashApp (Android)", () => {
     let invalidations = 0;
     const action = new CrashApp(
       androidDevice,
-      dependencies({ adb, cacheInvalidator: { invalidate: () => invalidations++ } }),
+      dependencies({
+        adb,
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
+      }),
     );
 
     const result = await action.execute("com.example.app");
@@ -655,7 +658,7 @@ describe("CrashApp (iOS)", () => {
       iosSimulator,
       dependencies({
         simctl,
-        cacheInvalidator: { invalidate: () => invalidations++ },
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
       }),
     );
 
@@ -693,7 +696,7 @@ describe("CrashApp (iOS)", () => {
       iosSimulator,
       dependencies({
         simctl: commands,
-        cacheInvalidator: { invalidate: () => invalidations++ },
+        cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => invalidations++ },
       }),
     );
 

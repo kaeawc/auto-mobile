@@ -215,7 +215,7 @@ test("mixed list counts only verified changes and handler retains partial succes
     permissions: [read, post, camera],
     userId: 0,
   });
-  expect(response.isError ?? false).toBe(false);
+  expect("isError" in response ? response.isError : false).toBe(false);
   const data = JSON.parse(response.content[0].text);
   expect(data).toMatchObject({ success: false, changedCount: 1, failedCount: 1 });
   expect(data?.operations).toMatchObject([
@@ -239,7 +239,7 @@ test("all failed handler sets isError", async () => {
     permissions: [camera],
     userId: 0,
   });
-  expect(response.isError).toBe(true);
+  expect("isError" in response ? response.isError : undefined).toBe(true);
 });
 
 test("all unchanged handler explains that no changes were needed", async () => {
@@ -250,7 +250,7 @@ test("all unchanged handler explains that no changes were needed", async () => {
     permissions: [post],
     userId: 0,
   });
-  expect(response.isError ?? false).toBe(false);
+  expect("isError" in response ? response.isError : false).toBe(false);
   expect(JSON.parse(response.content[0].text)).toMatchObject({
     success: true,
     changedCount: 0,

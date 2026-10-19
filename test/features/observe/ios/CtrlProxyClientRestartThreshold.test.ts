@@ -41,9 +41,13 @@ function createFakeManager(
     },
     async start() {},
     async stop() {},
+    async getReportedRunnerPort() {
+      return null;
+    },
     getServicePort() {
       return 0;
     },
+    resetSetupState() {},
     setAutoRestart() {},
     isAutoRestartEnabled() {
       return false;
@@ -95,7 +99,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     }
 
     // Allow async restart callbacks to complete
-    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
 
     // forceRestart should have been called exactly once (at failure #3)
     expect(fakeManager.forceRestartCount).toBe(1);
@@ -127,7 +131,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await expect(client.requestTapCoordinates({ x: 10, y: 20 })).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
-    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
 
     expect(fakeManager.forceRestartCount).toBe(0);
     expect(setupCalls).toBe(0);
@@ -174,7 +178,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await client.ensureConnected(); // 1
     await client.ensureConnected(); // 2
     await client.ensureConnected(); // 3 → restart
-    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
     expect(fakeManager.forceRestartCount).toBe(1);
 
     // Runner launch succeeds, but each background handshake fails. Backoff
@@ -184,7 +188,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       for (let i = 0; i < 6; i++) {
         await client.ensureConnected();
       }
-      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+      await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
     }
     expect(fakeManager.forceRestartCount).toBe(3);
     expect(fakeManager.getForcedRestartBudget().snapshot()).toMatchObject({
@@ -448,7 +452,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     let reads = 0;
     const hierarchySpy = spyOn(client, "getLatestHierarchy").mockImplementation(async () => {
       reads++;
-      return { hierarchy: null, unavailableReason: "runner_not_running" };
+      return { hierarchy: null, fresh: false, unavailableReason: "runner_not_running" as const };
     });
     const instanceSpy = spyOnIosClientInstance(client);
     try {
@@ -656,7 +660,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     await client.ensureConnected();
     await client.ensureConnected();
 
-    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
 
     expect(fakeManager.forceRestartCount).toBe(0);
   });
@@ -677,7 +681,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         await c.ensureConnected();
       }
       // Let the async isRunning()/forceRestart() chain settle.
-      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+      await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
     };
 
     test("force-restarts after repeated WebSocket failures even when HTTP reports running", async () => {
@@ -731,13 +735,13 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       for (let i = 0; i < 6; i++) {
         await client.ensureConnected();
       }
-      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+      await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
       expect(manager.getCallCount("forceRestart")).toBe(1);
       fakeTimer.advanceTime(31000);
       for (let i = 0; i < 6; i++) {
         await client.ensureConnected();
       }
-      await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+      await new Promise<void>((resolve) => fakeTimer.setTimeout(resolve, 10));
       expect(manager.getCallCount("forceRestart")).toBeGreaterThanOrEqual(2);
     });
 

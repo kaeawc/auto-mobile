@@ -749,7 +749,7 @@ describe("WcagAudit", function () {
       expect(sizeViolations[0].message).toBe(
         "Touch target is too small: 43x43dp (minimum: 44x44dp)",
       );
-      expect(sizeViolations[0].details.actualSize).toEqual({ width: 43, height: 43 });
+      expect(sizeViolations[0].details?.actualSize).toEqual({ width: 43, height: 43 });
     });
   });
 

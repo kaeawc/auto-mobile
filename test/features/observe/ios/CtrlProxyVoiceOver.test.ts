@@ -772,7 +772,10 @@ describe("CtrlProxyVoiceOver", function () {
           if (mode === "timeout") {
             timer.advanceTime(5000);
           } else if (mode === "transport") {
-            client["requestManager"].cancelAll("WebSocket connection closed");
+            if (!socket) {
+              throw new Error("Expected connected socket");
+            }
+            socket.terminate();
           } else if (mode === "abort after dispatch") {
             controller.abort(new Error("cancelled"));
             for (let i = 0; i < 30; i++) {

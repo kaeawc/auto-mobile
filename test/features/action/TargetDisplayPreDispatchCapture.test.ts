@@ -309,7 +309,7 @@ describe("explicit-display pre-dispatch read", () => {
         const observe = new CountingObserveScreen();
         observe.setObserveResult(screen(key));
         const spy = markDispatch(executor, observe);
-        const proxy = new PhaseCtrlProxy(observe) as AndroidCtrlProxyClient;
+        const proxy = new PhaseCtrlProxy(observe);
         proxySpies.push(
           spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy),
           spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(proxy),

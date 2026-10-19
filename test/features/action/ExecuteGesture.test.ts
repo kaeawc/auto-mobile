@@ -34,10 +34,10 @@ describe("ExecuteGesture", () => {
     getInstanceSpy = spyOnIosClientInstance(fakeClient);
     const gesture = new ExecuteGesture(iosDevice, null, new FakeTimer());
     await gesture.swipe(1, 2, 3, 4, { lockScreen: true, timeoutMs: 4200 });
-    expect(requestSwipe.mock.calls[0]?.[5]).toBe(4200);
-    expect(requestSwipe.mock.calls[0]?.[7]).toEqual({ lockScreen: true });
+    expect(requestSwipe.mock.calls[0]?.[0].timeoutMs).toBe(4200);
+    expect(requestSwipe.mock.calls[0]?.[0].contextOptions).toEqual({ lockScreen: true });
     await gesture.swipe(1, 2, 3, 4);
-    expect(requestSwipe.mock.calls[1]?.[7]).toBeUndefined();
+    expect(requestSwipe.mock.calls[1]?.[0].contextOptions).toBeUndefined();
   });
 
   describe("iOS swipe answered with the runner's deadline error (#10161)", () => {

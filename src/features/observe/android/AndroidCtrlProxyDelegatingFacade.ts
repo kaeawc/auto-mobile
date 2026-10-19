@@ -58,6 +58,7 @@ import type { CtrlProxyCertificates } from "./CtrlProxyCertificates";
 import type { CtrlProxyStorage } from "./CtrlProxyStorage";
 import type { CtrlProxyFocus } from "./CtrlProxyFocus";
 import type { CtrlProxyPrototypes } from "./CtrlProxyPrototypes";
+import type { DragRequest, SwipeRequest } from "../shared/types";
 import type { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 
 export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClient {
@@ -77,34 +78,8 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   // default parameter values: omitted args forward as `undefined`, so the delegate
   // (the single source of truth) applies its own defaults. This makes the two-copies
   // drift class from issue #3505 unrepresentable.
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      timeoutMs,
-      perf,
-      frameContext,
-      onDispatch,
-      signal,
-      displayId,
-      beforeSend,
-    );
+  async requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult> {
+    return this.gestures.requestSwipe(request);
   }
 
   async requestTapCoordinates(
@@ -183,36 +158,8 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestMultiFingerSwipe(request);
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<A11yDragResult> {
-    return this.gestures.requestDrag(
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      timeoutMs,
-      frameContext,
-      signal,
-      displayId,
-      beforeSend,
-      onDispatch,
-    );
+  async requestDrag(request: DragRequest): Promise<A11yDragResult> {
+    return this.gestures.requestDrag(request);
   }
 
   async requestPinch(

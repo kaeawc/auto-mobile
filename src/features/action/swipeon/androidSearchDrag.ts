@@ -89,24 +89,23 @@ export async function executeAndroidSearchDrag(options: {
     if (!info.success || info.sdkInt === undefined || info.sdkInt < 26) {
       return fallback();
     }
-    const result = await client.requestDrag(
+    const result = await client.requestDrag({
       x1,
       y1,
       x2,
       y2,
-      0,
-      duration,
-      LOOK_FOR_HOLD_MS,
-      5000,
-      undefined,
+      pressDurationMs: 0,
+      dragDurationMs: duration,
+      holdDurationMs: LOOK_FOR_HOLD_MS,
+      timeoutMs: 5000,
       signal,
       displayId,
       beforeSend,
-      () => {
+      onDispatch: () => {
         dispatched = true;
         options.onDispatched?.();
       },
-    );
+    });
     throwIfAborted(signal);
     if (!result.success) {
       if (!dispatched) {

@@ -116,7 +116,15 @@ describe("iOS gesture phase diagnostics", () => {
       ensureConnected: async () => true,
       cancelScreenshotBackoff() {},
     });
-    const result = await gestures.requestSwipe(1, 2, 3, 4, 300, 5000, perf);
+    const result = await gestures.requestSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      duration: 300,
+      timeoutMs: 5000,
+      perf,
+    });
     perf.end();
     expect(result.success).toBe(false);
     const finalized = finalizeToolResponse(

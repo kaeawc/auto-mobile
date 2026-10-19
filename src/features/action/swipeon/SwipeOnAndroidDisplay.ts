@@ -775,20 +775,17 @@ export class SwipeOnAndroidDisplay {
     target.assertCurrent();
     throwIfAborted(signal);
     if (useCtrlProxy) {
-      const result = await this.ctx().accessibilityService.requestSwipe(
+      const result = await this.ctx().accessibilityService.requestSwipe({
         x1,
         y1,
         x2,
         y2,
         duration,
-        undefined,
-        undefined,
-        undefined,
-        onDispatched,
+        onDispatch: onDispatched,
         signal,
-        target.displayId === 0 ? undefined : target.displayId,
-        target.assertCurrent,
-      );
+        displayId: target.displayId === 0 ? undefined : target.displayId,
+        beforeSend: target.assertCurrent,
+      });
       throwIfAborted(signal);
       if (!result.success) {
         throw new ActionableError(result.error ?? "Android swipe failed");

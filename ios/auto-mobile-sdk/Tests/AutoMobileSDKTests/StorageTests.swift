@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import SQLite3
 import XCTest
@@ -922,7 +919,7 @@ final class SQLiteDatabaseDriverConcurrencyTests: XCTestCase {
             queue.async {
                 defer { group.leave() }
 
-                if index % 4 == 0 {
+                if index.isMultiple(of: 4) {
                     let result = driver.executeSQL(
                         databasePath: databaseURL.path,
                         query: "UPDATE items SET value = value + 1 WHERE id = 1"
@@ -965,23 +962,23 @@ final class SQLiteDatabaseDriverConcurrencyTests: XCTestCase {
             .appendingPathComponent("auto-mobile-\(UUID().uuidString).sqlite")
         filesToDelete.append(file)
 
-        var db: OpaquePointer?
-        let openResult = sqlite3_open(file.path, &db)
+        var database: OpaquePointer?
+        let openResult = sqlite3_open(file.path, &database)
         XCTAssertEqual(openResult, SQLITE_OK)
-        guard openResult == SQLITE_OK, let db else {
+        guard openResult == SQLITE_OK, let database else {
             throw NSError(domain: "SQLiteDatabaseDriverConcurrencyTests", code: 1)
         }
-        defer { sqlite3_close(db) }
+        defer { sqlite3_close(database) }
 
-        try executeSQL(db, "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
-        try executeSQL(db, "INSERT INTO items (id, value) VALUES (1, 0)")
+        try executeSQL(database, "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
+        try executeSQL(database, "INSERT INTO items (id, value) VALUES (1, 0)")
 
         return file
     }
 
-    private func executeSQL(_ db: OpaquePointer, _ sql: String) throws {
+    private func executeSQL(_ database: OpaquePointer, _ sql: String) throws {
         var errorMessage: UnsafeMutablePointer<CChar>?
-        let result = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+        let result = sqlite3_exec(database, sql, nil, nil, &errorMessage)
         defer { sqlite3_free(errorMessage) }
 
         XCTAssertEqual(result, SQLITE_OK)
@@ -1056,7 +1053,7 @@ private final class LockedErrors: @unchecked Sendable {
 /// lossy `"\(value)"` stringification for `Data`/`Date`/array/dictionary with a
 /// recoverable encoding a downstream consumer can decode by `valueType`.
 final class UserDefaultsValueEncodingTests: XCTestCase {
-    func testEncodesDateAsRoundTrippableISO8601() {
+    func testEncodesDateAsRoundTrippableISO8601() throws {
         let date = Date(timeIntervalSince1970: 1_751_724_600.25)
         let encoded = DefaultUserDefaultsDriver.encode(date, as: .date)
 
@@ -1065,7 +1062,7 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         let decoded = formatter.date(from: encoded)
 
         XCTAssertNotNil(decoded)
-        XCTAssertEqual(decoded!.timeIntervalSince1970, date.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(decoded).timeIntervalSince1970, date.timeIntervalSince1970, accuracy: 0.001)
         // Not the debug description ("… +0000").
         XCTAssertFalse(encoded.contains("+0000"))
     }
@@ -1199,9 +1196,9 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
     /// Values round-tripped through a real UserDefaults suite are NSNumber-bridged;
     /// the pre-fix `is Int`-first switch reported bool and whole-number double as
     /// `.int` (issue #3628).
-    func testTypeOfClassifiesUserDefaultsBridgedValues() {
+    func testTypeOfClassifiesUserDefaultsBridgedValues() throws {
         let suiteName = "dev.jasonpearson.automobile.tests.typeof-3628"
-        let defaults = UserDefaults(suiteName: suiteName)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         defaults.set(true, forKey: "flag")
@@ -1210,11 +1207,11 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         defaults.set(3.5, forKey: "frac")
         defaults.set("name", forKey: "label")
 
-        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "flag")!), .bool)
-        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "count")!), .int)
-        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "whole")!), .double)
-        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "frac")!), .double)
-        XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "label")!), .string)
+        XCTAssertEqual(try DefaultUserDefaultsDriver.typeOf(XCTUnwrap(defaults.object(forKey: "flag"))), .bool)
+        XCTAssertEqual(try DefaultUserDefaultsDriver.typeOf(XCTUnwrap(defaults.object(forKey: "count"))), .int)
+        XCTAssertEqual(try DefaultUserDefaultsDriver.typeOf(XCTUnwrap(defaults.object(forKey: "whole"))), .double)
+        XCTAssertEqual(try DefaultUserDefaultsDriver.typeOf(XCTUnwrap(defaults.object(forKey: "frac"))), .double)
+        XCTAssertEqual(try DefaultUserDefaultsDriver.typeOf(XCTUnwrap(defaults.object(forKey: "label"))), .string)
     }
 }
 

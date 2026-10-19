@@ -373,7 +373,7 @@ final class PrototypeThemeModesTests: XCTestCase {
         func item(_ json: String) throws -> NavItem {
             try JSONDecoder().decode(NavItem.self, from: Data(json.utf8))
         }
-        XCTAssertEqual(try item(#"{"label":"Absent"}"#).visual(dark: false, available: []), .none)
+        XCTAssertEqual(try item(#"{"label":"Absent"}"#).visual(dark: false, available: []), .absent)
         XCTAssertEqual(try item(#"{"label":"Skew","icon":"skew"}"#).visual(dark: false, available: []), .placeholder)
         XCTAssertEqual(
             try item(#"{"label":"Unmapped","icon":"android"}"#).visual(dark: false, available: []),

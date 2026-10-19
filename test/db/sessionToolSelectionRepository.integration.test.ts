@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
@@ -59,13 +60,15 @@ describe("SqliteSessionToolSelectionRepository.setMany", () => {
   test("writes nothing when a later entry of the batch fails", async () => {
     await repository.set("session-1", "observe", true);
 
-    // A NOT NULL violation on the second row is the cheapest way to make real
-    // SQLite reject a write mid-batch; what matters is that the first row is
-    // rolled back with it rather than left behind.
+    // Fail the second insert inside SQLite, after the first row was written.
+    // This preserves the transaction failure without lying about a tool name's type.
+    await sql`CREATE TEMP TRIGGER reject_clipboard BEFORE INSERT ON session_tool_overrides
+      WHEN NEW.tool_name = 'clipboard'
+      BEGIN SELECT RAISE(ABORT, 'injected batch write failure'); END`.execute(db);
     await expect(
       repository.setMany("session-1", [
         { toolName: "sendKeys", enabled: true },
-        { toolName: null as unknown as string, enabled: true },
+        { toolName: "clipboard", enabled: true },
       ]),
     ).rejects.toThrow();
 

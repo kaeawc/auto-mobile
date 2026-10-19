@@ -1,5 +1,6 @@
+import { isolatedTapStrategy } from "../../helpers/observedInteractionStub";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
-import { IosTapStrategy } from "../../../src/features/action/strategies/IosTapStrategy";
 import type {
   BootedDevice,
   Element,
@@ -49,7 +50,13 @@ class DeviceClockObserveScreen extends FakeObserveScreen {
   pushStamp: number | undefined;
   constructor(private readonly deviceNow: () => number) {
     super();
-    this.setObserveResult({} as ObserveResult);
+    this.setObserveResult(
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      }),
+    );
   }
   override async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     await super.execute(options);
@@ -60,13 +67,13 @@ class DeviceClockObserveScreen extends FakeObserveScreen {
       // Rejected like the real freshness check: the next read is a fresh one.
       this.pushStamp = undefined;
     }
-    return {
+    return buildObserveResult({
       updatedAt,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: { node: [] }, updatedAt } as ViewHierarchyResult,
       freshness: { isFresh: floor === 0 || updatedAt >= floor },
-    } as unknown as ObserveResult;
+    });
   }
 }
 
@@ -90,8 +97,14 @@ async function runEnsureChecked(
   adb.isScreenOn = async () => true;
   const selector = new FakeElementSelector(toggle("false"));
   const screen = new DeviceClockObserveScreen(deviceNow);
+  const window = new FakeWindow();
+  window.configureCachedActiveWindow(null);
   const tap = new TapOnElement({ ...device, platform }, adb, {
     timer,
+    awaitIdle: new FakeAwaitIdle(),
+    observeScreen: screen,
+    window,
+    tapStrategy: isolatedTapStrategy(),
     elementSelector: selector,
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     hierarchyCapture: {
@@ -106,8 +119,6 @@ async function runEnsureChecked(
       }),
     },
   });
-  const window = new FakeWindow();
-  window.configureCachedActiveWindow(null);
   const hierarchy = { hierarchy: { node: [] }, updatedAt: deviceNow() } as ViewHierarchyResult;
   let hostTapTime = 0;
   let deviceTapTime = 0;
@@ -117,30 +128,17 @@ async function runEnsureChecked(
     // The accessibility push carrying the flipped toggle lands right after the tap.
     screen.pushStamp = deviceTapTime + 1;
     selector.setNextElement(toggle("true"));
+    return undefined;
   };
-  Object.assign(tap, {
-    awaitIdle: new FakeAwaitIdle(),
-    observeScreen: screen,
-    window,
-    strategy: {
-      isAccessibilityServiceEnabled: async () => false,
-      shouldRunPreTapStability: () => false,
-      settlesFocusChangeAfterTap: false,
-      rethrowsKeyboardOcclusion: true,
-      applyRefreshedObservationRotation: () => {},
-      clipNavigationTapBounds: (...args: Parameters<IosTapStrategy["clipNavigationTapBounds"]>) =>
-        new IosTapStrategy({ ...device, platform }).clipNavigationTapBounds(...args),
-    },
-    executeAndroidTap: dispatchTap,
-    executeiOSTap: dispatchTap,
-    prepareSelectionCapture: async () => null,
-    refreshViewHierarchy: async () => hierarchy,
-    captureTerminalObservationScreenshot: async () => {},
-    recordDeferredPredictionOutcome: async () => {},
-    deriveTapEffectAfterPostTapObservation: async (_previous: unknown, current: ObserveResult) => ({
-      effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
-      observation: current,
-    }),
+  tap.executeAndroidTap = dispatchTap;
+  tap.testHooks.setIosCoordinateTap(dispatchTap);
+  tap.prepareSelectionCapture = async () => null;
+  tap.refreshViewHierarchy = async () => hierarchy;
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
+  tap.deriveTapEffectAfterPostTapObservation = async (_previous, current) => ({
+    effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
+    observation: current,
   });
   const result = await tap.execute({
     text: "Wi-Fi",

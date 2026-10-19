@@ -12,7 +12,9 @@ import {
 } from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 
-function observation(checked = false): ObserveResult {
+function observation(
+  checked = false,
+): Pick<ObserveResult, "updatedAt" | "screenSize" | "activeWindow" | "viewHierarchy" | "elements"> {
   return {
     updatedAt: 123,
     screenSize: { width: 100, height: 200 },
@@ -48,7 +50,7 @@ function observation(checked = false): ObserveResult {
       text: [],
       media: [],
     },
-  } as ObserveResult;
+  };
 }
 
 function wire(response: { content: Array<{ text: string }> }): string {

@@ -79,7 +79,11 @@ class RecoveryLoopTest {
           ),
       )
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554"),
+      buildFailureResponse(
+        failedStepIndex = 1,
+        failedTool = "tapOn",
+        details = FailureDetails(deviceId = "emulator-5554"),
+      ),
     )
 
     val result = executePlan(aiAssistance = true)
@@ -114,7 +118,11 @@ class RecoveryLoopTest {
           PlanExecutorTimings(deviceOwnedSleeper = { error("A lost session must not wait") }),
       )
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554"),
+      buildFailureResponse(
+        failedStepIndex = 1,
+        failedTool = "tapOn",
+        details = FailureDetails(deviceId = "emulator-5554"),
+      ),
     )
 
     val result = executePlan(aiAssistance = true)
@@ -213,7 +221,11 @@ class RecoveryLoopTest {
     // The daemon reports the device the plan ran on as the payload's top-level deviceId;
     // `failedStep.device` is only a plan device LABEL (multi-device plans), never an id (#10089).
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554"),
+      buildFailureResponse(
+        failedStepIndex = 1,
+        failedTool = "tapOn",
+        details = FailureDetails(deviceId = "emulator-5554"),
+      ),
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -252,7 +264,7 @@ class RecoveryLoopTest {
         failedStepIndex = 3,
         failedTool = "swipe",
         error = "No scrollable container",
-        toolResults = toolResults,
+        details = FailureDetails(toolResults = toolResults),
       ),
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
@@ -309,14 +321,19 @@ class RecoveryLoopTest {
     )
   }
 
+  private data class FailureDetails(
+    val toolResults: JsonArray? = null,
+    val device: String? = null,
+    val deviceId: String? = null,
+  )
+
   private fun buildFailureResponse(
     failedStepIndex: Int,
     failedTool: String,
     error: String = "Element not found",
-    toolResults: JsonArray? = null,
-    device: String? = null,
-    deviceId: String? = null,
+    details: FailureDetails = FailureDetails(),
   ): DaemonResponse {
+    val (toolResults, device, deviceId) = details
     val failedStepFields =
       mutableMapOf<String, JsonElement>(
         "stepIndex" to JsonPrimitive(failedStepIndex),
@@ -442,11 +459,18 @@ private class FakeConfigProvider : AutoMobileAgent.ConfigProvider {
 }
 
 private class FakeFileSystemOps : AutoMobileAgent.FileSystemOperations {
-  override fun createDirectories(dir: java.io.File) {}
+  val directories = mutableListOf<java.io.File>()
+  val writes = mutableMapOf<java.io.File, String>()
+
+  override fun createDirectories(dir: java.io.File) {
+    directories.add(dir)
+  }
 
   override fun fileExists(file: java.io.File) = false
 
-  override fun writeTextToFile(file: java.io.File, content: String) {}
+  override fun writeTextToFile(file: java.io.File, content: String) {
+    writes[file] = content
+  }
 
   override fun getLastModified(file: java.io.File) = 0L
 }
@@ -488,9 +512,16 @@ private class FakeMCPClient(
 ) : AutoMobileAgent.MCPClient {
   override fun isConnected() = false
 
-  override fun connect(serverUrl: String) {}
+  val connectionUrls = mutableListOf<String>()
+  var disconnectCalls = 0
 
-  override fun disconnect() {}
+  override fun connect(serverUrl: String) {
+    connectionUrls.add(serverUrl)
+  }
+
+  override fun disconnect() {
+    disconnectCalls++
+  }
 
   override fun callTool(toolName: String, parameters: Map<String, Any>) = call(toolName, parameters)
 

@@ -88,7 +88,7 @@ describe("optimizeSourceMap", () => {
         sourcesContent === "source text" ? 0 : (sourcesContent?.length ?? 0),
       );
     }
-    const noSources: SourceMap = { mappings: "AAAA" } as unknown as SourceMap;
+    const noSources = { mappings: "AAAA" };
     expect(optimizeSourceMap(noSources, { stripSources: true }).map).toBe(noSources);
   });
 

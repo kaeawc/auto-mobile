@@ -63,8 +63,10 @@ internal class PanelUniqueIdResolver<D : Any>(
       }
       try {
         accessor?.invoke(display)
+      } catch (error: IllegalArgumentException) {
+        unavailable(error)
       } catch (error: Exception) {
-        if (error is IllegalArgumentException || isAccessFailure(error)) {
+        if (isAccessFailure(error)) {
           unavailable(error)
         } else {
           if (!transientFailureLogged) {

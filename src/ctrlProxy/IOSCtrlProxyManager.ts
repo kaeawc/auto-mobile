@@ -850,6 +850,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   get testHooks() {
     return {
+      processSupervisor: this.processSupervisor,
       trackRunner: (runner: {
         pid: number | null;
         process?: ChildProcess | null;

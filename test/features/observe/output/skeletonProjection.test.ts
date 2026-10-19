@@ -1989,14 +1989,17 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     return { result, field: result.skeleton.find((row) => row.elementId === FOLDER_NAME_ID) };
   }
 
-  test.each(captureFiles)("%s: a filled field carries the text as label and the hint", (file) => {
-    const { field } = project(loadCapture(file));
+  test.each([...captureFiles])(
+    "%s: a filled field carries the text as label and the hint",
+    (file) => {
+      const { field } = project(loadCapture(file));
 
-    expect(field).toMatchObject({ label: "Google", sublabel: "Edit Name" });
-    expect(skeletonElementSchema.parse(field)).toEqual(field);
-  });
+      expect(field).toMatchObject({ label: "Google", sublabel: "Edit Name" });
+      expect(skeletonElementSchema.parse(field)).toEqual(field);
+    },
+  );
 
-  test.each(captureFiles)("%s: an empty field with a hint is unchanged", (file) => {
+  test.each([...captureFiles])("%s: an empty field with a hint is unchanged", (file) => {
     const { field } = project(
       loadCapture(file, (node) => {
         delete node.text;
@@ -2007,7 +2010,7 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     expect(field?.sublabel).toBeUndefined();
   });
 
-  test.each(captureFiles)("%s: a field with no hint is unchanged", (file) => {
+  test.each([...captureFiles])("%s: a field with no hint is unchanged", (file) => {
     const { field } = project(
       loadCapture(file, (node) => {
         delete node["hint-text"];
@@ -2018,7 +2021,7 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     expect(field?.sublabel).toBeUndefined();
   });
 
-  test.each(captureFiles)("%s: only the field's row changes, by its sublabel", (file) => {
+  test.each([...captureFiles])("%s: only the field's row changes, by its sublabel", (file) => {
     const withHint = project(loadCapture(file)).result;
     const withoutHint = project(
       loadCapture(file, (node) => {
@@ -2035,7 +2038,7 @@ describe("a filled Android text field keeps its hint beside the entered text (#9
     );
   });
 
-  test.each(captureFiles)("%s: a hint equal to the entered text is not duplicated", (file) => {
+  test.each([...captureFiles])("%s: a hint equal to the entered text is not duplicated", (file) => {
     const { field } = project(
       loadCapture(file, (node) => {
         node["hint-text"] = node.text;

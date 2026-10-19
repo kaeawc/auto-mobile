@@ -116,7 +116,7 @@ describe("appearance override refusals happen before any device write (#11416)",
       ["capability not advertised", false],
     ] as const)("%s", (_state, supported) => {
       describe.each(FORMS)("%s", (_form, needsPriorShow, extra) => {
-        test.each(APPEARANCES)("appearance %p", async (appearance) => {
+        test.each([...APPEARANCES])("appearance %p", async (appearance) => {
           setUp(supported);
           if (needsPriorShow) {
             expect((await show(device, {})).success).toBe(true);

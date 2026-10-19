@@ -32,7 +32,6 @@ import type { WebSocketFactory } from "../../../src/features/observe/DeviceServi
 const androidDevice: BootedDevice = {
   deviceId: "delegate-context-android",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 

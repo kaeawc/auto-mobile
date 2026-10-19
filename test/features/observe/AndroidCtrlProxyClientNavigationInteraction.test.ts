@@ -20,7 +20,6 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
   const device: BootedDevice = {
     deviceId: "navigation-interaction-test-device",
     platform: "android",
-    isEmulator: true,
     name: "Navigation interaction test device",
   };
   const adb = new FakeAdbExecutor();

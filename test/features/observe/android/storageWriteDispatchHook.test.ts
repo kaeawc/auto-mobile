@@ -14,7 +14,6 @@ import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 const device: BootedDevice = {
   deviceId: "hunt-storage-device",
   platform: "android",
-  isEmulator: true,
   name: "Hunt Device",
 };
 

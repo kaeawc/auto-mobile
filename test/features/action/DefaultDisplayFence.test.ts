@@ -203,7 +203,7 @@ describe("default-display dispatch fences", () => {
           ? (["preparation", "double-unchanged"] as const)
           : (["preparation", "double-second", "double-unchanged"] as const);
       for (const site of sites) {
-        test.each(modes)(`${tool} ${platform} ${site}: %s`, async (mode: Mode) => {
+        test.each([...modes])(`${tool} ${platform} ${site}: %s`, async (mode: Mode) => {
           const h = harness(platform, mode);
           const actionName = site === "preparation" ? "tap" : "doubleTap";
           let run: () => Promise<BaseActionResult>;
@@ -290,7 +290,7 @@ describe("default-display dispatch fences", () => {
       }
     }
     for (const tool of ["pinch", "drag"] as const) {
-      test.each(modes)(`${tool} ${platform} target capture: %s`, async (mode: Mode) => {
+      test.each([...modes])(`${tool} ${platform} target capture: %s`, async (mode: Mode) => {
         const h = harness(platform, mode);
         const capture = new FakeHierarchyCapture(async () => {
           await h.bump();
@@ -334,7 +334,7 @@ describe("default-display dispatch fences", () => {
       "a11y-fallback",
       "a11y-exception",
     ] as const) {
-      test.each(modes)(`swipe ${platform} ${site}: %s`, async (mode: Mode) => {
+      test.each([...modes])(`swipe ${platform} ${site}: %s`, async (mode: Mode) => {
         const h = harness(platform, mode);
         if (site === "screen" || site === "element") {
           watch(h.detector, "detectMethod").mockImplementation(async () => {
@@ -404,7 +404,7 @@ describe("default-display dispatch fences", () => {
       });
     }
   }
-  test.each(modes)("tapOn retry after post-tap probe: %s", async (mode: Mode) => {
+  test.each([...modes])("tapOn retry after post-tap probe: %s", async (mode: Mode) => {
     const h = harness("android", mode);
     const strategy = new FakeTapStrategy();
     strategy.retryTapIfNoChange = true;
@@ -452,7 +452,7 @@ describe("TalkBack waits retain the action fence", () => {
       "double-dispatch",
       "longPress-fallback",
     ] as const) {
-      test.each(modes)(`${tool} ${site}: %s`, async (mode: Mode) => {
+      test.each([...modes])(`${tool} ${site}: %s`, async (mode: Mode) => {
         const h = harness("android", mode);
         const driver = new FakeTalkBackNavigationDriver();
         const factory = { createDriver: () => driver };
@@ -586,7 +586,7 @@ describe("TalkBack waits retain the action fence", () => {
 // Exercise the path executor independently; SwipeOn uses swipe(), not execute().
 describe("ExecuteGesture path fences", () => {
   for (const site of ["android", "ios-single", "ios-multi"] as const) {
-    test.each(modes)(`${site}: %s`, async (mode: Mode) => {
+    test.each([...modes])(`${site}: %s`, async (mode: Mode) => {
       const h = harness(site === "android" ? "android" : "ios", mode);
       const base = h.attach(new BaseVisualChange(h.device, h.adb, h.timer, undefined, h.deps));
       const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
@@ -653,7 +653,7 @@ describe("ExecuteGesture path fences", () => {
 describe("default-display recovery dispatches", () => {
   for (const tool of ["tapOn", "tapAny"] as const) {
     for (const site of ["longPress", "longPress-adb-fallback"] as const) {
-      test.each(modes)(`${tool} ${site}: %s`, async (mode: Mode) => {
+      test.each([...modes])(`${tool} ${site}: %s`, async (mode: Mode) => {
         const h = harness("android", mode);
         const element = {
           text: "Target",
@@ -737,7 +737,7 @@ describe("default-display recovery dispatches", () => {
       });
     }
   }
-  test.each(modes)("DocumentsUI semantic recovery: %s", async (mode: Mode) => {
+  test.each([...modes])("DocumentsUI semantic recovery: %s", async (mode: Mode) => {
     const h = harness("android", mode);
     const selector = new FakeElementSelector({
       text: "Target",
@@ -780,43 +780,48 @@ describe("default-display recovery dispatches", () => {
     expect(h.inputs()).toEqual(mode === "transition" ? [] : ["shell input touchscreen tap 60 80"]);
     expect(h.taps()).toEqual([]);
   });
-  test.each(modes)("VoiceOver failed activation coordinate fallback: %s", async (mode: Mode) => {
-    const h = harness("ios", mode);
-    const tapStrategy = new FakeTapStrategy();
-    tapStrategy.setAccessibilityServiceEnabled(true);
-    watch(IOSCtrlProxyClient.prototype, "requestVoiceOverActivate").mockImplementation(async () => {
-      await h.bump();
-      return { success: false, error: "activation unavailable" };
-    });
-    const result = await h
-      .attach(
-        new TapOnElement(h.device, h.adb, {
-          ...h.deps,
-          tapStrategy,
-          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
-          waitForCondition: {
-            execute: async () => ({
-              matched: false,
-              candidates: [],
-              observation: h.screen,
-              polls: 1,
-              waitMs: 0,
-              timedOut: true,
-            }),
-          },
-        }),
-      )
-      .execute({ action: "tap", text: "Target" });
-    if (mode === "transition") {
-      assertResult(result);
-    } else {
-      expect(result).toMatchObject({ success: true });
-    }
-    expect(h.taps()).toEqual(mode === "transition" ? [] : [{ x: 60, y: 80, duration: 50 }]);
-    expect(h.inputs()).toEqual([]);
-  });
+  test.each([...modes])(
+    "VoiceOver failed activation coordinate fallback: %s",
+    async (mode: Mode) => {
+      const h = harness("ios", mode);
+      const tapStrategy = new FakeTapStrategy();
+      tapStrategy.setAccessibilityServiceEnabled(true);
+      watch(IOSCtrlProxyClient.prototype, "requestVoiceOverActivate").mockImplementation(
+        async () => {
+          await h.bump();
+          return { success: false, error: "activation unavailable" };
+        },
+      );
+      const result = await h
+        .attach(
+          new TapOnElement(h.device, h.adb, {
+            ...h.deps,
+            tapStrategy,
+            selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+            waitForCondition: {
+              execute: async () => ({
+                matched: false,
+                candidates: [],
+                observation: h.screen,
+                polls: 1,
+                waitMs: 0,
+                timedOut: true,
+              }),
+            },
+          }),
+        )
+        .execute({ action: "tap", text: "Target" });
+      if (mode === "transition") {
+        assertResult(result);
+      } else {
+        expect(result).toMatchObject({ success: true });
+      }
+      expect(h.taps()).toEqual(mode === "transition" ? [] : [{ x: 60, y: 80, duration: 50 }]);
+      expect(h.inputs()).toEqual([]);
+    },
+  );
   for (const site of ["detection", "semantic-fallback"] as const) {
-    test.each(modes)(`TalkBack two-finger swipe ${site}: %s`, async (mode: Mode) => {
+    test.each([...modes])(`TalkBack two-finger swipe ${site}: %s`, async (mode: Mode) => {
       const h = harness("android", mode);
       if (site === "semantic-fallback") {
         h.screen.viewHierarchy!.hierarchy = {
@@ -869,7 +874,7 @@ describe("default-display recovery dispatches", () => {
     });
   }
   for (const platform of ["android", "ios"] as const) {
-    test.each(modes)(
+    test.each([...modes])(
       `scroll-until-visible ${platform} retains earlier observation: %s`,
       async (mode: Mode) => {
         const h = harness(platform, mode);

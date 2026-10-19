@@ -49,7 +49,7 @@ function fixture(options: { supportsDisplay: boolean; display?: string; autoAdva
   };
   const observation: ObserveResult = {
     observationId: "drag-display-observation",
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: {
       key: options.display ?? "internal",

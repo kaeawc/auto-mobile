@@ -7,7 +7,9 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 
 export function observation(text = "old"): ObserveResult {
   return {
-    timestamp: 1,
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     viewHierarchy: {
       hierarchy: { node: { $: { focused: "true", class: "android.widget.EditText", text } } },
     },

@@ -12,7 +12,9 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
 
 const observation = (): ObserveResult => ({
-  timestamp: 0,
+  updatedAt: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1000, height: 2000 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: { hierarchy: { node: { $: { _id: "top" } } } },

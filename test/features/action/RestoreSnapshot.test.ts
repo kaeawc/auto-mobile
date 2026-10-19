@@ -40,7 +40,6 @@ describe("RestoreSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
 
     // Create fakes
@@ -406,7 +405,6 @@ describe("RestoreSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
 
       const restorePhysical = new RestoreSnapshot(

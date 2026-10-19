@@ -8,13 +8,11 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 const DEVICE_A: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Pixel A",
 };
 const DEVICE_B: BootedDevice = {
   deviceId: "emulator-5556",
   platform: "android",
-  isEmulator: true,
   name: "Pixel B",
 };
 

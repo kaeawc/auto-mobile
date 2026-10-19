@@ -48,7 +48,9 @@ function harness(
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(timer));
   const observation: ObserveResult = {
     ...observationOf(viewHierarchy),
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     freshness: { isFresh: true },
     screenSize,
   };

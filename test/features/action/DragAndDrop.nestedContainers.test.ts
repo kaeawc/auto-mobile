@@ -88,7 +88,7 @@ function harness(route: Route, kind: Kind = "success", vision = false) {
   const capture = hierarchy(kind);
   const observation: ObserveResult = {
     observationId: "nested-drag",
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: { key: "external", role: "external", posture: "unknown", generation: 1 },
     screenSize: { width: 500, height: 500 },

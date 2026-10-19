@@ -161,6 +161,7 @@ internal class PackageController(
         } catch (e: CancellationException) {
           throw e
         } catch (e: Exception) {
+          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
           null
         }
       val allowBackup = appInfo?.let { (it.flags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0 }
@@ -182,6 +183,7 @@ internal class PackageController(
         } catch (e: CancellationException) {
           throw e
         } catch (e: Exception) {
+          Log.w(TAG, "Optional package metadata unavailable for $packageName", e)
           null
         }
 
@@ -205,6 +207,7 @@ internal class PackageController(
         totalTimeMs = totalTime,
       )
     } catch (e: PackageManager.NameNotFoundException) {
+      Log.w(TAG, "Package not found: $packageName", e)
       broadcastPackageInfoResult(
         requestId = requestId,
         success = false,

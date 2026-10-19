@@ -426,6 +426,8 @@ export class DaemonClient {
    */
   private readonly platform: NodeJS.Platform;
 
+  private readonly maxInboundFrameBytes: number;
+
   constructor(
     socketPath: string = SOCKET_PATH,
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
@@ -438,9 +440,15 @@ export class DaemonClient {
       version: DAEMON_VERSION,
       build: getCurrentBuildIdentity(),
     },
-    idGenerator: IdGenerator = defaultIdGenerator,
-    platformOverride: NodeJS.Platform = platform(),
-    private readonly maxInboundFrameBytes: number = DAEMON_CLIENT_MAX_FRAME_BYTES,
+    {
+      idGenerator = defaultIdGenerator,
+      platformOverride = platform(),
+      maxInboundFrameBytes = DAEMON_CLIENT_MAX_FRAME_BYTES,
+    }: {
+      idGenerator?: IdGenerator;
+      platformOverride?: NodeJS.Platform;
+      maxInboundFrameBytes?: number;
+    } = {},
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
@@ -449,6 +457,7 @@ export class DaemonClient {
     this.clientIdentity = clientIdentity;
     this.idGenerator = idGenerator;
     this.platform = platformOverride;
+    this.maxInboundFrameBytes = maxInboundFrameBytes;
     this.framer = this.createInboundFramer();
   }
 

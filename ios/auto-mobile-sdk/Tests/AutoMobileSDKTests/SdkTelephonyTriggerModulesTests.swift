@@ -3,8 +3,6 @@ import Foundation
 import os
 import XCTest
 
-// swiftlint:disable force_unwrapping
-
 final class SdkTelephonyTriggerModulesTests: XCTestCase {
     private final class FakeCallReporter: SdkCallReporting {
         let calls = OSAllocatedUnfairLock<[String]>(initialState: [])
@@ -40,7 +38,7 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
                 value += 1
                 return value
             }
-            return UUID(uuidString: "\(next)0000000-0000-0000-0000-000000000000")!
+            return UUID(uuid: (UInt8(next * 16), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         }
     }
 

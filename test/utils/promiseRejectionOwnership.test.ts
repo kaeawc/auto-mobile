@@ -26,6 +26,7 @@ import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
 } from "../helpers/navigationTestHarness";
+import { buildObserveResult } from "../helpers/observeFixture";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 
 const device: BootedDevice = { deviceId: "promise-device", name: "Fake", platform: "android" };
@@ -129,12 +130,17 @@ describe("detached promise rejection ownership", () => {
       error,
     );
     const tracker = new RecompositionTracker(timer, () => nav.db);
-    const observation = {
-      activeWindow: { appId: "com.promise.recomposition" },
+    const observation: ObserveResult = buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 100, height: 100 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      activeWindow: { appId: "com.promise.recomposition", activityName: "Main", layoutSeqSum: 0 },
       viewHierarchy: {
-        hierarchy: { node: [{ recomposition: { id: "a", total: 1, rolling1sAverage: 1 } }] },
+        hierarchy: {
+          node: { node: [{ recomposition: { id: "a", total: 1, rolling1sAverage: 1 } }] },
+        },
       },
-    } as unknown as ObserveResult;
+    });
     try {
       await tracker.processObservation(observation, device);
       expect(observation.recompositionSummary?.totalRecompositions).toBe(1);

@@ -1,37 +1,35 @@
+import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import { BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
 import { toActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { errorMessage } from "../../utils/describeUnknownError";
+import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
+import { DefaultElementParser } from "../utility/ElementParser";
+import type { ExplorationLoopContext } from "./ExplorationLoopContext";
+import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlockerDetection";
+import { detectAndHandleBlockers } from "./ExploreBlockerDetection";
+import { selectDiscoveryElement } from "./ExploreDiscoverySelection";
 import {
   getObservationPackageName,
   getSafeExplorationCandidates,
   planExplorationDryRun,
 } from "./ExploreDryRun";
 import { ExploreElementActions } from "./ExploreElementActions";
+import { getElementKey } from "./ExploreElementExtraction";
+import { ExplorePermissionDialog } from "./ExplorePermissionDialog";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
-import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
-import { registeredInternalToolCaller as toolCaller } from "./InternalToolCaller";
 import { generateExplorationReport, isExplorationResetDue } from "./ExploreReporting";
-import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
-import { selectValidateElement } from "./ExploreValidationSelection";
 import { explorationSafetyStopReason } from "./ExploreSafety";
-import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
-import {
-  NavigationGraphManager,
-  type NavigationEdge,
-  type NavigationGraphService,
-} from "./NavigationGraphManager";
-import { UIStateExtractor } from "./UIStateExtractor";
-import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
-import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import { defaultTimer, Timer } from "../../utils/SystemTimer";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { DefaultElementParser } from "../utility/ElementParser";
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import type {
   ElementSelectionStats,
   ExplorationMode,
@@ -44,24 +42,19 @@ import type {
   TrackedElement,
 } from "./ExploreTypes";
 import {
-  extractAllElements,
-  filterUnexhaustedElements,
-  getElementKey,
-} from "./ExploreElementExtraction";
-import { selectBreadthFirst, selectDepthFirst, selectWeighted } from "./ExploreElementScoring";
-import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlockerDetection";
-import {
-  detectAndHandleBlockers,
-  handlePermissionDialog,
-  isConfirmedPermissionDialogForNavigation,
-  isPermissionDialog,
-} from "./ExploreBlockerDetection";
-import {
   initializeGraphTraversal,
   isRecordedBackEdge,
   markEdgeTraversed,
   validateNavigation,
 } from "./ExploreValidateMode";
+import { selectValidateElement } from "./ExploreValidationSelection";
+import { registeredInternalToolCaller as toolCaller } from "./InternalToolCaller";
+import {
+  NavigationGraphManager,
+  type NavigationEdge,
+  type NavigationGraphService,
+} from "./NavigationGraphManager";
+import { UIStateExtractor } from "./UIStateExtractor";
 
 export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 export type { ExploreOptions } from "./ExploreTypes";
@@ -72,20 +65,6 @@ const EXPLORE_ACTION_SETTLE_MS = 1000;
 const EXPLORE_SCROLL_SETTLE_MS = 1000;
 
 export const DEFAULT_MAX_INTERACTIONS = 200;
-
-interface ExplorationLoopContext {
-  options: ExploreOptions;
-  maxInteractions: number;
-  timeoutMs: number;
-  startTime: number;
-  strategy: ExplorationStrategy;
-  mode: ExplorationMode;
-  resetInterval: number;
-  initialNodeCount: number;
-  perf: PerformanceTracker;
-  progress?: ProgressCallback;
-  signal?: AbortSignal;
-}
 
 /**
  * Explore implements intelligent app navigation exploration.
@@ -102,8 +81,7 @@ export class Explore extends BaseVisualChange {
   private elementSelections: ElementSelectionStats[] = [];
   private consecutiveBackCount: number = 0;
   consecutiveNoChangeCount: number = 0;
-  private permissionDialogIdentity: string | null = null;
-  private permissionDialogTapAttempts: number = 0;
+  private readonly permissionDialog = new ExplorePermissionDialog();
   loopDetection: Map<string, number> = new Map();
   private elementParser: ElementParser;
   private stopReason: string = "";
@@ -131,7 +109,6 @@ export class Explore extends BaseVisualChange {
 
   // Constants for safety limits
   static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
-  private static readonly MAX_PERMISSION_DIALOG_TAP_ATTEMPTS = 3;
   private static readonly DEFAULT_RESET_INTERVAL = 15;
   private static readonly MAX_OUT_OF_APP_ATTEMPTS = 5;
 
@@ -300,8 +277,7 @@ export class Explore extends BaseVisualChange {
     this.lastResetAt = 0;
     this.consecutiveBackCount = 0;
     this.consecutiveNoChangeCount = 0;
-    this.permissionDialogIdentity = null;
-    this.permissionDialogTapAttempts = 0;
+    this.permissionDialog.reset();
     this.stopReason = "";
     this.previousScreen = null;
     this.consecutiveOutOfAppCount = 0;
@@ -641,83 +617,29 @@ export class Explore extends BaseVisualChange {
     );
   }
 
-  /**
-   * Detect and act on a permission dialog at the top of the exploration loop.
-   *
-   * Returns:
-   * - `"continue"` when the dialog was granted (screen changed) or the no-op of
-   *   an ungrantable dialog was accounted for and the loop should re-observe;
-   * - `"break"` when an ungrantable (e.g. deny-only) dialog has stalled the
-   *   screen long enough to trip the stuck-screen accounting;
-   * - `"none"` when no permission dialog is present.
-   *
-   * A dialog exposing no safe affirmative control (e.g. only "Don't allow") can
-   * neither be granted nor have its deny control tapped (issue #6241). The
-   * previous fast-path discarded that outcome and always continued, so
-   * exploration re-observed the same unchanged dialog until the timeout. Counting
-   * the no-op lets the existing stuck-screen accounting stop the run instead
-   * (partially addresses issue #6169).
-   */
   async handlePermissionDialogFastPath(
     observation: ObserveResult,
     progress?: ProgressCallback,
   ): Promise<"continue" | "break" | "none"> {
-    const viewHierarchy = observation.viewHierarchy;
-    if (!viewHierarchy || viewHierarchy.hierarchy.error) {
-      return "none";
-    }
-    const elements = extractAllElements(viewHierarchy, this.elementParser);
-    if (!isPermissionDialog(elements) || !isConfirmedPermissionDialogForNavigation(elements)) {
-      return "none";
-    }
-
-    const identity = elements
-      .filter((element) => isTruthy(element.clickable))
-      .map((element) => getElementKey(element, viewHierarchy))
-      .sort()
-      .join("|");
-    if (identity !== this.permissionDialogIdentity) {
-      this.permissionDialogIdentity = identity;
-      this.permissionDialogTapAttempts = 0;
-    }
-    if (this.permissionDialogTapAttempts >= Explore.MAX_PERMISSION_DIALOG_TAP_ATTEMPTS) {
-      this.consecutiveNoChangeCount++;
-      logger.warn(
-        `[Explore] Permission dialog tap cap reached for identity "${identity}" ` +
-          `(${this.permissionDialogTapAttempts}/${Explore.MAX_PERMISSION_DIALOG_TAP_ATTEMPTS})`,
-      );
-      if (this.shouldBreakForSafety(observation)) {
-        logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
-        return "break";
-      }
-      return "continue";
-    }
-    this.permissionDialogTapAttempts++;
-
-    logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    const granted = await handlePermissionDialog(
-      elements,
-      viewHierarchy,
-      this.device,
-      this.adb,
+    return this.permissionDialog.handle(
+      observation,
+      {
+        elementParser: this.elementParser,
+        device: this.device,
+        adb: this.adb,
+        blockerHandlerDeps: this.blockerHandlerDeps(),
+        maxConsecutiveNoChange: Explore.MAX_CONSECUTIVE_NO_CHANGE,
+        incrementNoChange: () => {
+          this.consecutiveNoChangeCount++;
+        },
+        resetNoChange: () => {
+          this.consecutiveNoChangeCount = 0;
+        },
+        getNoChange: () => this.consecutiveNoChangeCount,
+        shouldBreakForSafety: () => this.shouldBreakForSafety(observation),
+      },
       progress,
-      this.blockerHandlerDeps(),
     );
-    if (granted) {
-      this.consecutiveNoChangeCount = 0;
-      return "continue";
-    }
-
-    this.consecutiveNoChangeCount++;
-    logger.warn(
-      `[Explore] Permission dialog could not be granted (deny-only); counted as no-op ` +
-        `(${this.consecutiveNoChangeCount}/${Explore.MAX_CONSECUTIVE_NO_CHANGE})`,
-    );
-    if (this.shouldBreakForSafety(observation)) {
-      logger.warn("[Explore] Unresolvable permission dialog treated as blocker, stopping");
-      return "break";
-    }
-    return "continue";
   }
 
   /**
@@ -792,36 +714,16 @@ export class Explore extends BaseVisualChange {
       this.currentTargetEdge = null;
       this.currentElementConfidence = 0;
 
-      // Filter out exhausted elements
-      const currentScreen = this.navigationManager.getCurrentScreen();
-      const unexhaustedElements = filterUnexhaustedElements(
-        safeCandidates,
-        this.exploredElements,
-        currentScreen,
-        viewHierarchy,
+      return selectDiscoveryElement(
+        { elements: safeCandidates, hierarchy: viewHierarchy },
+        strategy,
+        mode,
+        {
+          currentScreen: this.navigationManager.getCurrentScreen(),
+          exploredElements: this.exploredElements,
+          elementSelections: this.elementSelections,
+        },
       );
-
-      if (unexhaustedElements.length === 0) {
-        return null;
-      }
-
-      // Select based on strategy
-      switch (strategy) {
-        case "breadth-first":
-          return selectBreadthFirst(unexhaustedElements);
-        case "depth-first":
-          return selectDepthFirst(unexhaustedElements, this.exploredElements);
-        case "weighted":
-        default: {
-          const result = selectWeighted(unexhaustedElements, mode, this.exploredElements);
-          if (result) {
-            // Record selection stats
-            this.elementSelections.push(result.stats);
-            return result.element;
-          }
-          return null;
-        }
-      }
     });
   }
   private selectValidateElement(candidates: Element[]): Element | null {

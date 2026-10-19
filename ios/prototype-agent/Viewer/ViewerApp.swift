@@ -49,7 +49,7 @@ struct PrototypeViewerApp: App {
     var body: some Scene {
         WindowGroup {
             switch content {
-            case .none:
+            case .absent:
                 Text("No prototype saved")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case let .invalid(path, message):

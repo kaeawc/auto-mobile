@@ -9,7 +9,7 @@ import {
   type ServerCapabilities,
 } from "@modelcontextprotocol/server";
 import { ErrorCode, McpError } from "../daemon/mcpError";
-import { isCreateTaskResult } from "./tasks/mcpTasksExtension";
+import { isCreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 
 type WrapHandler = Server["_wrapHandler"];
 type RequestHandler = Parameters<WrapHandler>[1];

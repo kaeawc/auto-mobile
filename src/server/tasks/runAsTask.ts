@@ -4,9 +4,12 @@ import type { JsonObject } from "../../db/mcpTaskRepository";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { ToolCallProgress } from "../toolCallDispatch";
-import { toCreateTaskResult, type CreateTaskResult } from "./mcpTasksExtension";
-import type { RunningTask, TaskManager } from "./TaskManager";
-import { noopTaskLeaseKeepalive, type TaskLeaseKeepalive } from "./taskLeaseKeepalive";
+import { toCreateTaskResult, type CreateTaskResult } from "../../daemon/tasks/mcpTasksExtension";
+import type { RunningTask, TaskManager } from "../../daemon/tasks/TaskManager";
+import {
+  noopTaskLeaseKeepalive,
+  type TaskLeaseKeepalive,
+} from "../../daemon/tasks/taskLeaseKeepalive";
 
 const INTERNAL_ERROR = -32603;
 

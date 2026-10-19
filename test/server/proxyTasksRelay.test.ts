@@ -3,7 +3,7 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 

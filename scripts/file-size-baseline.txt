@@ -1,14 +1,13 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
 2842	src/ctrlProxy/CtrlProxyManager.ts
 4134	src/ctrlProxy/IOSCtrlProxyManager.ts
-1770	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1124	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1333	src/daemon/client.ts
 4033	src/daemon/daemon.ts
 4532	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
-2064	src/daemon/deviceDataStreamSocketServer.ts
+1262	src/daemon/deviceDataStreamSocketServer.ts
 8320	src/daemon/devicePool.ts
 1186	src/daemon/executionTracker.ts
 3913	src/daemon/manager.ts
@@ -16,10 +15,10 @@
 1344	src/daemon/sessionBroker/provisioning/executionRelease.ts
 1970	src/daemon/sessionBroker/provisioning/reconciler.ts
 1181	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
-2330	src/daemon/sessionDeviceStateRestore.ts
+1048	src/daemon/sessionDeviceStateRestore.ts
 9809	src/daemon/sessionManager.ts
 5794	src/daemon/socketServer.ts
-1805	src/daemon/videoStreamSocketServer.ts
+1180	src/daemon/videoStreamSocketServer.ts
 1401	src/db/navigationRetention.ts
 1390	src/devices/deviceBootService.ts
 1339	src/devices/deviceUtils.ts

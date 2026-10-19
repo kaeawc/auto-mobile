@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.net.MalformedURLException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -235,7 +236,7 @@ object AutoMobileNetwork {
         if (record.host == null || record.path == null) {
           try {
             java.net.URL(record.url)
-          } catch (_: Exception) {
+          } catch (_: MalformedURLException) {
             null
           }
         } else null

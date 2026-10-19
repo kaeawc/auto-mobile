@@ -2,7 +2,7 @@
 # Linux-only manual research harness. Wrapper mode is also used by AutoMobile's SDK.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=scripts/ci/linux-qualification/lib.sh disable=SC1091
+# shellcheck source=scripts/ci/linux-qualification/lib.sh
 source "$here/lib.sh"
 if [[ "${1:-}" == --emulator-wrapper ]]; then
   shift

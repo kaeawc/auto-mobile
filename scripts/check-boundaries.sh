@@ -65,8 +65,10 @@ trap 'rm -rf "$tmp"' EXIT
 run_one() {
   # $1 = tag (unique file prefix), $2 = command string (word-split intentionally)
   local out rc
-  # shellcheck disable=SC2086 # intentional word-split of "cmd arg" entries
-  out="$(${2} 2>&1)"
+  local -a command_words=()
+  # Entries are whitespace-separated words, not shell programs.
+  read -r -d '' -a command_words < <(printf '%s\0' "$2")
+  out="$(${command_words[@]+"${command_words[@]}"} 2>&1)"
   rc=$?
   printf '%s' "$out" > "$tmp/$1.out"
   printf '%s' "$rc" > "$tmp/$1.rc"

@@ -32,14 +32,14 @@ if ! { : 3>&1; } 2>/dev/null; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 runner_os="${RUNNER_OS:-}"
 if [[ -z "$runner_os" && "$(uname -s)" == Darwin ]]; then
   runner_os=macOS
 fi
 configure_bun_unit_test "$ROOT" "$runner_os"
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "$ROOT/scripts/ios/run_with_timeout.sh"
 
 report_path="${1:-scratch/bun-test-report.xml}"
@@ -529,8 +529,12 @@ recheck_probe_slowdown() {
   if [[ -n "${BUN_TEST_TIMING_PROBE_COMMAND:-}" ]]; then
     value="$("$BUN_TEST_TIMING_PROBE_COMMAND" 2> /dev/null)" || value=""
   else
-    # shellcheck disable=SC2310 # Deliberate: a probe failure must not exit the gate.
-    value="$(run_with_timeout 15 bun "$ROOT/scripts/lib/runner-calibration.ts" measure 2> /dev/null)" || value=""
+    local probe_status caller_options="$-"
+    set +e
+    value="$(run_with_timeout 15 bun "$ROOT/scripts/lib/runner-calibration.ts" measure 2> /dev/null)"
+    probe_status=$?
+    if [[ "$caller_options" == *e* ]]; then set -e; fi
+    if [[ "$probe_status" -ne 0 ]]; then value=""; fi
   fi
   if [[ ! "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
     echo "Recheck runner probe returned no usable slowdown; treating it as 1.00x." >&2 || true

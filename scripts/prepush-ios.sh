@@ -46,11 +46,11 @@ if [[ ${repo_root_status} -ne 0 ]]; then
   exit 1
 fi
 
-# shellcheck source=scripts/swiftformat/swiftformat_version.sh disable=SC1091
+# shellcheck source=scripts/swiftformat/swiftformat_version.sh
 source "${project_root}/scripts/swiftformat/swiftformat_version.sh"
-# shellcheck source=scripts/swiftlint/swiftlint_version.sh disable=SC1091
+# shellcheck source=scripts/swiftlint/swiftlint_version.sh
 source "${project_root}/scripts/swiftlint/swiftlint_version.sh"
-# shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
+# shellcheck source=scripts/ios/swift_test_counts.sh
 source "${project_root}/scripts/ios/swift_test_counts.sh"
 
 if [[ ! -f "${project_root}/scripts/ios/xctestrunner_test_filter.sh" ]]; then
@@ -58,7 +58,6 @@ if [[ ! -f "${project_root}/scripts/ios/xctestrunner_test_filter.sh" ]]; then
   exit 1
 fi
 # shellcheck source=scripts/ios/xctestrunner_test_filter.sh
-# shellcheck disable=SC1091
 source "${project_root}/scripts/ios/xctestrunner_test_filter.sh"
 
 require_pinned_swiftformat_version

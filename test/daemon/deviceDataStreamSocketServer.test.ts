@@ -40,9 +40,22 @@ import {
   DisplayTransitionTracker,
 } from "../../src/features/observe/DisplayTransition";
 import {
+  ackDeviceFrameSchema,
+  ackFrameSchema,
+  codeFrameSchema,
+  deviceErrorFrameSchema,
   deviceFrameSchema,
+  deviceSessionFrameSchema,
   errorFrameSchema,
+  hierarchyUpdateFrameSchema,
+  observeFrameSchema,
+  packageFileFrameSchema,
+  requiredErrorFrameSchema,
+  screenshotFrameSchema,
+  sessionStatusFrameSchema,
   statusFrameSchema,
+  subscriptionIdFrameSchema,
+  subscriptionScreenshotFrameSchema,
   successFrameSchema,
   typedFrameSchema,
 } from "../helpers/wireMessageSchemas";
@@ -225,14 +238,7 @@ describe("DeviceDataStreamSocketServer", () => {
           throw new Error("unexpected iOS");
         },
       });
-    const frames = (socket: FakeSocket) =>
-      socket.getWrittenMessages<{
-        type: string;
-        frameContext?: string;
-        captureSequence?: number;
-        deviceSessionUuid?: string | null;
-        hierarchyDiff?: { hasBaseline: boolean; changed: number };
-      }>();
+    const frames = (socket: FakeSocket) => socket.getWrittenMessages(observeFrameSchema);
     return {
       coordinator,
       request,
@@ -915,13 +921,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       expect(requestedDeviceId).toBe("emulator-5554");
       expect(requestSignal?.aborted).toBe(false);
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        deviceId?: string;
-        data?: { packageName?: string };
-      }>();
+      const msgs = socket.getWrittenMessages(hierarchyUpdateFrameSchema);
       expect(msgs).toHaveLength(2);
       expect(msgs[0].type).toBe("hierarchy_update");
       expect(msgs[0].deviceId).toBe("emulator-5554");
@@ -956,12 +956,7 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       expect(observed).toBe(false);
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].success).toBe(false);
@@ -987,13 +982,7 @@ describe("DeviceDataStreamSocketServer", () => {
         JSON.stringify({ id: "obs-all", command: "request_observation" }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-        deviceId?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackDeviceFrameSchema);
       // The healthy device still gets its hierarchy; the quarantined one is
       // reported as a per-device failure rather than silently dropped.
       const pushed = msgs.filter((message) => message.type === "hierarchy_update");
@@ -1020,10 +1009,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const firstMessages = socket.getWrittenMessages<{
-        type: string;
-        frameContext?: string;
-      }>();
+      const firstMessages = socket.getWrittenMessages(observeFrameSchema);
       expect(firstMessages[0].frameContext).toBe("frame-A");
       expect(server.getCurrentFrameContext("emulator-5554")).toBe("frame-A");
 
@@ -1090,12 +1076,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("obs-2");
@@ -1127,12 +1108,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("obs-no-hierarchy");
@@ -1166,13 +1142,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        deviceId?: string;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackDeviceFrameSchema);
       // Healthy device still receives its hierarchy_update...
       expect(msgs).toHaveLength(2);
       expect(msgs[0].type).toBe("hierarchy_update");
@@ -1198,12 +1168,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("obs-empty");
@@ -1225,12 +1190,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("obs-3");
@@ -1258,12 +1218,7 @@ describe("DeviceDataStreamSocketServer", () => {
       await requestPromise;
 
       expect(requestSignal?.aborted).toBe(true);
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("obs-4");
@@ -1296,12 +1251,7 @@ describe("DeviceDataStreamSocketServer", () => {
       await timer.advanceTimeAsync(PER_DEVICE_OBSERVATION_TIMEOUT_MS);
       await request;
 
-      const messages = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        deviceId?: string;
-        error?: string;
-      }>();
+      const messages = socket.getWrittenMessages(ackDeviceFrameSchema);
       const observationMessages = messages.filter((message) => message.type !== "ping");
       expect(observationMessages).toHaveLength(2);
       expect(observationMessages).not.toContainEqual(
@@ -1374,11 +1324,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       await server.processLineForTest(requestSocket, requestLine);
 
-      const msgs = requestSocket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-      }>();
+      const msgs = requestSocket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].id).toBe("req-2");
@@ -1397,11 +1343,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       await server.processLineForTest(requestSocket, requestLine);
 
-      const msgs = requestSocket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-      }>();
+      const msgs = requestSocket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].id).toBe("req-3");
@@ -1422,12 +1364,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       await server.processLineForTest(requestSocket, requestLine);
 
-      const msgs = requestSocket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = requestSocket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("req-4");
@@ -1448,11 +1385,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       await server.processLineForTest(socket, requestLine);
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].success).toBe(true);
@@ -1581,11 +1514,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       await server.processLineForTest(socket, requestLine);
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].success).toBe(true);
@@ -1616,10 +1545,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const [firstResponse, secondResponse] = socket.getWrittenMessages<{
-        id: string;
-        subscriptionId: string;
-      }>();
+      const [firstResponse, secondResponse] = socket.getWrittenMessages(subscriptionIdFrameSchema);
       expect(server.getSubscriberCount()).toBe(2);
       expect(firstResponse.subscriptionId).toBe("devicedatastream-1");
       expect(secondResponse.subscriptionId).toBe("devicedatastream-2");
@@ -1628,11 +1554,7 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushScreenshotUpdate("device-2", "device-2-frame", 100, 200);
       expect(
         socket
-          .getWrittenMessages<{
-            type: string;
-            subscriptionId: string;
-            screenshotBase64?: string;
-          }>()
+          .getWrittenMessages(subscriptionScreenshotFrameSchema)
           .filter((message) => message.type === "screenshot_update"),
       ).toMatchObject([
         { subscriptionId: firstResponse.subscriptionId, screenshotBase64: "device-1-frame" },
@@ -1788,22 +1710,7 @@ describe("DeviceDataStreamSocketServer", () => {
       } satisfies ScreenshotMetadata & { checksum: string };
       server.pushScreenshotUpdate("device-1", "png-frame", 1080, 2340, metadata);
 
-      const msgs = socket.getWrittenMessages<{
-        type: string;
-        deviceId?: string;
-        screenshotBase64?: string;
-        screenWidth?: number;
-        screenHeight?: number;
-        screenshotMimeType?: string;
-        screenshotFormat?: string;
-        screenshotCaptureSource?: string;
-        screenshotFallback?: boolean;
-        screenshotFallbackReason?: string;
-        screenshotCaptureDurationMs?: number;
-        screenshotEncodeDurationMs?: number;
-        screenshotByteLength?: number;
-        screenshotBase64Length?: number;
-      }>();
+      const msgs = socket.getWrittenMessages(screenshotFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0]).toMatchObject({
         type: "screenshot_update",
@@ -2766,7 +2673,7 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const ack = socket
-        .getWrittenMessages<{ id?: string; type: string; success?: boolean }>()
+        .getWrittenMessages(ackFrameSchema)
         .find((message) => message.id === "upd-ack");
       expect(ack?.type).toBe("subscription_response");
       expect(ack?.success).toBe(true);
@@ -2790,12 +2697,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const response = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const response = socket.getWrittenMessages(ackFrameSchema);
       expect(response).toHaveLength(1);
       expect(response[0]).toMatchObject({
         id: "upd-no-sub",
@@ -2840,14 +2742,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      expect(
-        socket.getWrittenMessages<{
-          id?: string;
-          type: string;
-          success?: boolean;
-          error?: string;
-        }>(),
-      ).toContainEqual({
+      expect(socket.getWrittenMessages(ackFrameSchema)).toContainEqual({
         id: "upd-reaped",
         type: "error",
         success: false,
@@ -2867,14 +2762,7 @@ describe("DeviceDataStreamSocketServer", () => {
         JSON.stringify({ id: "upd-no-id", command: "update_cadence", screenshotIntervalMs: 500 }),
       );
 
-      expect(
-        socket.getWrittenMessages<{
-          id?: string;
-          type: string;
-          success?: boolean;
-          error?: string;
-        }>(),
-      ).toEqual([
+      expect(socket.getWrittenMessages(ackFrameSchema)).toEqual([
         {
           id: "upd-no-id",
           type: "error",
@@ -2893,14 +2781,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.onDeviceConnectionLost("emulator-5554");
 
-      const msgs = socket.getWrittenMessages<{
-        type: string;
-        success?: boolean;
-        deviceId?: string;
-        deviceSessionUuid?: string | null;
-        timestamp?: number;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(sessionStatusFrameSchema);
       expect(msgs).toEqual([
         {
           type: "error",
@@ -2920,7 +2801,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.onDeviceConnectionLost("emulator-5554");
 
-      const msgs = socket.getWrittenMessages<{ type: string; deviceId?: string; error?: string }>();
+      const msgs = socket.getWrittenMessages(deviceErrorFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0]).toMatchObject({
         type: "error",
@@ -3708,7 +3589,7 @@ describe("DeviceDataStreamSocketServer", () => {
           subscribe: true,
         },
       ]);
-      const msgs = socket.getWrittenMessages<{ id?: string; type: string; success?: boolean }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].id).toBe("s-1");
@@ -3741,12 +3622,7 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       expect(calls).toEqual([]);
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].success).toBe(false);
@@ -3849,7 +3725,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(completeRegistration).toBeDefined();
       completeRegistration!();
       await request;
-      expect(socket.getWrittenMessages<{ id?: string; success?: boolean }>()).toEqual([
+      expect(socket.getWrittenMessages(ackFrameSchema)).toEqual([
         expect.objectContaining({ id: "storage-await", success: true }),
       ]);
     });
@@ -4358,11 +4234,7 @@ describe("DeviceDataStreamSocketServer", () => {
         expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
         expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
       ]);
-      expect(
-        socket
-          .getWrittenMessages<{ type: string; packageName?: string; fileName?: string }>()
-          .at(-1),
-      ).toMatchObject({
+      expect(socket.getWrittenMessages(packageFileFrameSchema).at(-1)).toMatchObject({
         type: "storage_reconciliation_required",
         packageName: "com.example.app",
         fileName: "prefs.xml",
@@ -4416,7 +4288,7 @@ describe("DeviceDataStreamSocketServer", () => {
       server.sessionResolver.resolveIdentity("device-1");
       server.pushHierarchyUpdate("device-1", frame("b"));
 
-      const messages = socket.getWrittenMessages<{ type: string; deviceSessionUuid: string }>();
+      const messages = socket.getWrittenMessages(deviceSessionFrameSchema);
       expect(messages).toHaveLength(1);
       expect(messages[0].deviceSessionUuid).toBe(sessionUuidFor("device-1"));
     });
@@ -4764,7 +4636,7 @@ describe("device-session release ends observation streams (#11130)", () => {
       timestamp: 3,
     });
 
-    const types = socketA.getWrittenMessages<{ type: string; code?: string }>();
+    const types = socketA.getWrittenMessages(codeFrameSchema);
     expect(types.map((message) => message.code ?? message.type)).toEqual(["SESSION_ENDED"]);
     expect(socketA.destroyed).toBe(true);
     expect(server.getSubscriberCount()).toBe(0);
@@ -4851,7 +4723,7 @@ it("registered observer request_observation passes both auth layers on unowned a
     }),
   );
   expect(captures).toBe(2);
-  expect(socket.getWrittenMessages<{ error: string; type: string }>()[0]).toMatchObject({
+  expect(socket.getWrittenMessages(requiredErrorFrameSchema)[0]).toMatchObject({
     type: "error",
     error: expect.stringContaining("not an active daemon session"),
   });

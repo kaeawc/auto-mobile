@@ -11,9 +11,9 @@ import {
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import type { DaemonResponse } from "../../src/daemon/types";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { daemonResponseFrameSchema } from "../helpers/wireMessageSchemas";
 
 function toolsCall(name: string, args: Record<string, unknown>): DaemonRequest {
   return { id: "1", type: "mcp_request", method: "tools/call", params: { name, arguments: args } };
@@ -217,7 +217,9 @@ test.each([undefined, "device:a"])(
     await flush();
     expect(secondStarted).toBe(false);
     expect(
-      socket.getWrittenMessages<DaemonResponse>().find((response) => response.id === "second"),
+      socket
+        .getWrittenMessages(daemonResponseFrameSchema)
+        .find((response) => response.id === "second"),
     ).toMatchObject({
       success: false,
       code: "daemon_queue_timeout",

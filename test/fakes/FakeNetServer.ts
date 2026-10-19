@@ -1,6 +1,10 @@
 import { Socket, type SocketConnectOpts } from "node:net";
-import type { z } from "zod/v4";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+
+/** Any zod schema (v3 or v4): the frames are validated by `parse`, which throws on a mismatch. */
+export interface FrameSchema<T> {
+  parse(data: unknown): T;
+}
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
 
@@ -50,10 +54,10 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
    * `unknown`.
    */
   getWrittenMessages(): unknown[];
-  getWrittenMessages<S extends z.ZodType>(schema: S): z.output<S>[];
+  getWrittenMessages<T>(schema: FrameSchema<T>): T[];
   /** @deprecated Asserts a frame type without checking it; pass a schema instead. */
   getWrittenMessages<T>(): T[];
-  getWrittenMessages(schema?: z.ZodType): unknown[] {
+  getWrittenMessages(schema?: FrameSchema<unknown>): unknown[] {
     const lines = this.getWrittenDataString()
       .split("\n")
       .filter((line) => line.trim());

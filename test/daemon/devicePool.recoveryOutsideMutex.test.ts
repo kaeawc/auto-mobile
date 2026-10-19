@@ -225,15 +225,7 @@ describe("DevicePool exhausted session release ownership", () => {
         await pool.initializeWithDevices([handset]);
         await pool.assignDeviceToSession("session", "android");
         const device = pool.getDevice(handset.deviceId)!;
-        const retry = (
-          pool as unknown as {
-            retrySessionRelease(
-              id: string,
-              deviceId: string,
-              attempt: () => Promise<void>,
-            ): Promise<void>;
-          }
-        ).retrySessionRelease("session", handset.deviceId, async () => {
+        const retry = pool.testHooks.retrySessionRelease("session", handset.deviceId, async () => {
           attempts++;
           if (attempts === 1 && scenario !== "present") {
             await sessions.releaseSession("session", "daemon-shutdown");

@@ -198,13 +198,7 @@ test("coalesced passive loss inherits the resolved primary awaiting-device settl
     expect(primary).toBeDefined();
     expect(joined).toBeDefined();
     await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, primary, captured);
-    const internals = pool as unknown as {
-      joinSessionPreservingRecovery(
-        recovery: { incidentId?: string; promise: Promise<"released"> },
-        incidentId?: string,
-      ): Promise<string>;
-    };
-    await internals.joinSessionPreservingRecovery(
+    await pool.testHooks.joinSessionPreservingRecovery(
       { incidentId: primary, promise: Promise.resolve("released") },
       joined,
     );

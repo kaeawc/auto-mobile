@@ -5,26 +5,26 @@ import {
   DeviceInfo,
   Platform,
   SomePlatform,
-} from "../models";
+} from "../../models";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
-import { isDeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
-import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
-import { type Timer } from "../utils/SystemTimer";
-import { AdbUnavailableError } from "../utils/android-cmdline-tools/AdbClient";
-import { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { isAndroidEmulatorSerial } from "../utils/androidSerial";
-import { errorMessage } from "../utils/describeUnknownError";
-import { type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
-import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
-import { type DiscoverySource } from "../utils/discoverySource";
-import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
-import { logger } from "../utils/logger";
-import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { ActiveDeviceSelection } from "./ActiveDeviceSelection";
+import { RunnerReadinessError } from "../../ctrlProxy/RunnerReadinessService";
+import { isDeviceIdentityQuarantinedError } from "../../models/DeviceIdentityQuarantinedError";
+import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { type Timer } from "../../utils/SystemTimer";
+import { AdbUnavailableError } from "../../utils/android-cmdline-tools/AdbClient";
+import { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { type DeviceAdmissionGate } from "../../utils/deviceAdmissionGate";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
+import { disableStylusHandwriting } from "../../utils/disableStylusHandwriting";
+import { type DiscoverySource } from "../../utils/discoverySource";
+import { PlatformDeviceManager } from "../../utils/interfaces/DeviceUtils";
+import { logger } from "../../utils/logger";
+import { throwIfProvisionedDeviceTransportRetired } from "../../utils/provisionedDeviceTransportFence";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { ActiveDeviceSelection } from "../../devices/ActiveDeviceSelection";
 import type {
   ConnectedPlatformScan,
   ConnectedPlatformScanOptions,
@@ -36,12 +36,12 @@ import type {
 import {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
-} from "./deviceBootService";
-import { isUnresolvedAndroidEmulatorName } from "./deviceIdentityEvidence";
+} from "../../devices/deviceBootService";
+import { isUnresolvedAndroidEmulatorName } from "../../devices/deviceIdentityEvidence";
 import {
   assertAndroidImageRunningStateKnown,
   type BootedDeviceDiscoveryOptions,
-} from "./deviceUtils";
+} from "../../devices/deviceUtils";
 import {
   type LifecycleStartHold,
   isScanAuthoritativeFor,
@@ -51,11 +51,11 @@ import {
   explicitReadTargetPlatform,
   matchRunningReadTarget,
   providedReadTargetNotFound,
-} from "./runningReadTarget";
+} from "../../devices/runningReadTarget";
 import {
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleIdentity,
-} from "./virtualDeviceLifecycleCoordinator";
+} from "../../devices/virtualDeviceLifecycleCoordinator";
 
 interface ReadinessSelectionDependencies {
   applyAppearanceOnConnect(

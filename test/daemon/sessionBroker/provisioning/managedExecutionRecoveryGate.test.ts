@@ -6,7 +6,7 @@ import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFi
 import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import type { BindingAssignmentRecord } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { ManagedExecutionReownRegistry } from "../../../helpers/deferredProvisioningFixtures";
-import { DeviceSessionManager } from "../../../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../../../src/daemon/readiness/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../../../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { resetDbWriteBarrier } from "../../../../src/db/dbWriteBarrier";
 import { executionTracker } from "../../../../src/daemon/executionTracker";

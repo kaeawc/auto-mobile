@@ -12,7 +12,7 @@ import {
   type ToolTransportRecovery,
 } from "../daemon/toolTransportRecovery";
 import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
 import { serverConfig } from "../utils/ServerConfig";
 

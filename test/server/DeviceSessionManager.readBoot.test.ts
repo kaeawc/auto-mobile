@@ -5,7 +5,7 @@ import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
   type DeviceReadyOptions,
-} from "../../src/devices/DeviceSessionManager";
+} from "../../src/daemon/readiness/DeviceSessionManager";
 import {
   ActionableError,
   type BootedDevice,

@@ -1,4 +1,3 @@
-import { defaultDaemonContext } from "../daemon/daemonContext";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
@@ -13,11 +12,7 @@ import { isDeviceLostError } from "../models/DeviceLostError";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import {
-  createPerformanceTracker,
-  type PerformanceTracker,
-  type TimingData,
-} from "../utils/PerformanceTracker";
+import { createPerformanceTracker, type PerformanceTracker } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import {
   deviceReadinessLockKey,
@@ -26,79 +21,13 @@ import {
 } from "../utils/deviceReadinessLock";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { serverConfig } from "../utils/ServerConfig";
-import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import type { DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
+import { consumeSetupTiming, storeSetupTiming } from "../daemon/setupTiming";
+export { consumeSetupTiming, storeSetupTiming };
 import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfaces/ProxyManager";
-
-/** Fallback timings are tagged to prevent unresolved sessions crossing owners. */
-const sessionlessSetupTimingsByDevice = new Map<
-  string,
-  { timing: TimingData; sessionId?: string }
->();
-const SESSIONLESS_SETUP_TIMING_CAP = 256;
 
 const MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS = 5;
 const DEVICE_ACQUISITION_SETUP_DEADLINE_MS = 300_000;
-
-function setupTimingSessionManager(): SessionManager | undefined {
-  return defaultDaemonContext.sessionManager();
-}
-
-/** Session-owned timing never falls back to another session's device timing. */
-export function storeSetupTiming(
-  deviceId: string,
-  timing: TimingData,
-  sessionId?: string,
-  sessionManager = setupTimingSessionManager(),
-): void {
-  if (sessionId) {
-    const session = sessionManager?.getSession(sessionId);
-    if (session && session.assignedDevice === deviceId) {
-      session.cacheData.pendingSetupTiming = timing;
-      return;
-    }
-    if (sessionManager && !session) {
-      return;
-    }
-  }
-  sessionlessSetupTimingsByDevice.delete(deviceId);
-  sessionlessSetupTimingsByDevice.set(deviceId, { timing, sessionId });
-  if (sessionlessSetupTimingsByDevice.size > SESSIONLESS_SETUP_TIMING_CAP) {
-    const oldestDeviceId = sessionlessSetupTimingsByDevice.keys().next().value;
-    if (oldestDeviceId !== undefined) {
-      sessionlessSetupTimingsByDevice.delete(oldestDeviceId);
-    }
-  }
-}
-
-function consumeFallbackSetupTiming(deviceId: string, sessionId?: string): TimingData | null {
-  const fallback = sessionlessSetupTimingsByDevice.get(deviceId);
-  if (!fallback || fallback.sessionId !== sessionId) {
-    return null;
-  }
-  sessionlessSetupTimingsByDevice.delete(deviceId);
-  return fallback.timing;
-}
-
-/** Consume once from the owning session, or the explicit session-less fallback. */
-export function consumeSetupTiming(
-  deviceId: string,
-  sessionId?: string,
-  sessionManager = setupTimingSessionManager(),
-): TimingData | null {
-  if (sessionId) {
-    const session = sessionManager?.getSession(sessionId);
-    if (!session || session.assignedDevice !== deviceId) {
-      if (sessionManager && !session) {
-        return null;
-      }
-      return consumeFallbackSetupTiming(deviceId, sessionId);
-    }
-    const timing = session.cacheData.pendingSetupTiming;
-    delete session.cacheData.pendingSetupTiming;
-    return timing ?? null;
-  }
-  return consumeFallbackSetupTiming(deviceId);
-}
 
 /**
  * Tool Execution Context

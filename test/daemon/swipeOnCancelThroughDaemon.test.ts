@@ -17,6 +17,7 @@ import {
   type UnixSocketServerHarness,
 } from "./helpers/UnixSocketServerHarness";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 
 /**
  * #10151: a client that cancels a long `swipeOn` `lookFor` search must stop the search before its
@@ -60,7 +61,7 @@ class ClientSideSocket extends NonThrowingFakeSocket {
   }
   /** The request frames the client wrote, in order. */
   get frames(): DaemonRequest[] {
-    return this.getWrittenMessages<DaemonRequest>();
+    return this.getWrittenMessages(daemonRequestFrameSchema);
   }
   write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
   write(

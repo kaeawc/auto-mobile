@@ -32,6 +32,7 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
+import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 
 function createBlackHoleSocket(): Duplex {
   return new Duplex({
@@ -570,7 +571,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
     test(`${kind}: preserves a structured daemon error exactly at its deadline without cancel`, async () => {
       const { client, timer, socket, respond } = setup();
       const outcome = send(client).catch((error: unknown) => error);
-      const request = socket.getWrittenMessages<DaemonRequest>()[0];
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
       const message =
         "MCP timeout: tapOn exceeded its deadline (timed out in queue before admission)";
       try {
@@ -595,7 +596,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
     test(`${kind}: preserves a successful result exactly at the daemon deadline`, async () => {
       const { client, timer, socket, respond } = setup();
       const outcome = send(client).catch((error: unknown) => error);
-      const request = socket.getWrittenMessages<DaemonRequest>()[0];
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
       const result = { content: [{ type: "text", text: "terminal answer" }], isError: true };
       try {
         timer.advanceTime(request.timeoutMs!);
@@ -612,7 +613,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
     test(`${kind}: cancels exactly once only at budget plus grace and ignores a late answer`, async () => {
       const { client, timer, socket, respond } = setup();
       const outcome = send(client).catch((error: unknown) => error);
-      const request = socket.getWrittenMessages<DaemonRequest>()[0];
+      const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
       try {
         timer.advanceTime(request.timeoutMs! + responseGraceMs - 1);
         expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
@@ -624,7 +625,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
         expect((error as Error).message).toContain(
           "no response from the daemon within budget + grace",
         );
-        const frames = socket.getWrittenMessages<DaemonRequest>();
+        const frames = socket.getWrittenMessages(daemonRequestFrameSchema);
         expect(frames).toHaveLength(2);
         expect(frames[1]).toMatchObject({
           method: DAEMON_CANCEL_REQUEST_METHOD,
@@ -660,7 +661,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
         .callDaemonMethod("daemon/status", {}, { timeoutMs: callerBudget })
         .catch((error: unknown) => error);
       try {
-        const request = socket.getWrittenMessages<DaemonRequest>()[0];
+        const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
         const daemonBudget = resolveMcpRequestTimeoutMs(request);
         expect(request.timeoutMs).toBe(callerBudget);
         expect(timer.getPendingTimeouts()).toEqual([daemonBudget + responseGraceMs]);
@@ -748,7 +749,7 @@ test.each(["timeout", "reply", "abort"])(
         controller.signal,
       )
       .catch((error: unknown) => error);
-    const request = socket.getWrittenMessages<DaemonRequest>()[0];
+    const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
     try {
       expect(request.timeoutMs).toBe(MAX_SETTIMEOUT_DELAY_MS);
       timer.advanceTime(MAX_SETTIMEOUT_DELAY_MS);

@@ -13,6 +13,7 @@ import {
 } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { ackFrameSchema } from "../helpers/wireMessageSchemas";
 
 const EMPTY_SUMMARY: NavigationGraphSummary = {
   appId: null,
@@ -139,12 +140,7 @@ describe("createNavigationGraphRequestHandler", () => {
         JSON.stringify({ id: "req-err", command: "request_navigation_graph" }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        success?: boolean;
-        error?: string;
-      }>();
+      const msgs = socket.getWrittenMessages(ackFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("req-err");
@@ -191,12 +187,7 @@ describe("createNavigationGraphRequestHandler", () => {
       );
 
       // Round-trip the raw wire bytes exactly as a client would receive them.
-      const [decoded] = socket.getWrittenMessages<{
-        type: string;
-        success?: boolean;
-        error?: string;
-        id?: string;
-      }>();
+      const [decoded] = socket.getWrittenMessages(ackFrameSchema);
 
       // Mirror the desktop client's `when (type) { ... else -> ignore }` dispatch: every known
       // frame type routes, and any unrecognized type is silently ignored rather than throwing.

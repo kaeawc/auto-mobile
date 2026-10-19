@@ -49,7 +49,7 @@ import {
   spyOnIosExistingFactory,
   spyOnIosExistingInstance,
 } from "../helpers/iosCtrlProxyClientSpies";
-import { typedFrameSchema } from "../helpers/wireMessageSchemas";
+import { observeFrameSchema, typedFrameSchema } from "../helpers/wireMessageSchemas";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
@@ -540,10 +540,7 @@ describe("Daemon stream wiring", () => {
             ).toHaveLength(frameCount + 1);
             expect(
               pane
-                .getWrittenMessages<{
-                  type: string;
-                  hierarchyDiff?: { hasBaseline: boolean; changed: number };
-                }>()
+                .getWrittenMessages(observeFrameSchema)
                 .filter((m) => m.type === "hierarchy_update")
                 .at(-1)?.hierarchyDiff,
             ).toMatchObject({ hasBaseline: true, changed: 0 });

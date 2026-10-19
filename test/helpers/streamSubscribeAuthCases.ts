@@ -6,6 +6,7 @@ import {
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { strictAckFrameSchema } from "./wireMessageSchemas";
 
 export interface AuthTestServer {
   receive(socket: FakeSocket, line: string): Promise<void>;
@@ -57,12 +58,7 @@ export function streamSubscribeAuthCases(
             socket,
             JSON.stringify({ id: "auth-sub", command: "subscribe", sessionUuid }),
           );
-          const replies = socket.getWrittenMessages<{
-            id: string;
-            type: string;
-            success: boolean;
-            error?: string;
-          }>();
+          const replies = socket.getWrittenMessages(strictAckFrameSchema);
           const accepted = authOff || sessionUuid === "owner" || sessionUuid === "observer";
           expect(replies).toHaveLength(1);
           expect(replies[0].id).toBe("auth-sub");

@@ -1,4 +1,6 @@
 import { makePool } from "../helpers/makePool";
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
+import { ExitedChildProcess } from "../helpers/exitedChildProcess";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -77,17 +79,8 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
     const captured = pool.getDevice(original.deviceId)!;
 
     // AutoMobile launched this emulator; its tracked child has since exited.
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = new ExitedChildProcess();
+    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     // Fresh discovery still lists the same AVD, resolved, at the same serial.
     manager.bootedDevices = [original];
@@ -138,17 +131,8 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
       expectedIdentity: original,
     });
     const captured = pool.getDevice(original.deviceId)!;
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = new ExitedChildProcess();
+    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     manager.bootedDevices = [];
     const result = await pool.recoverSessionBoundAndroidDeviceAfterLoss(

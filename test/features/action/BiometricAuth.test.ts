@@ -1,5 +1,6 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { logger } from "../../../src/utils/logger";
+import { createExecResult } from "../../../src/utils/execResult";
 import { BiometricAuth } from "../../../src/features/action/BiometricAuth";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { ObserveResult, BootedDevice } from "../../../src/models";
@@ -12,10 +13,12 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 // Helper function to create mock ObserveResult
 let hierarchyCounter = 0;
 const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  observationId: `biometric-observation-${hierarchyCounter++}`,
+  updatedAt: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-  viewHierarchy: { node: {}, id: hierarchyCounter++ },
+  viewHierarchy: { hierarchy: {} },
 });
 
 describe("BiometricAuth", () => {
@@ -49,17 +52,17 @@ describe("BiometricAuth", () => {
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
     // Emulator detection
-    fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-    fakeAdb.setCommandResponse("emu help", {
-      stdout: "finger - fingerprint commands\nhelp - show this help",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+    fakeAdb.setCommandResponse(
+      "emu help",
+      createExecResult("finger - fingerprint commands\nhelp - show this help", ""),
+    );
 
     // SDK broadcast (matches any am broadcast command for biometric override)
-    fakeAdb.setCommandResponse("BIOMETRIC_OVERRIDE", {
-      stdout: "Broadcast completed (1 receivers)",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "BIOMETRIC_OVERRIDE",
+      createExecResult("Broadcast completed (1 receivers)", ""),
+    );
 
     biometricAuth = new BiometricAuth(device, fakeAdb, fakeTimer, null, undefined, {
       observeScreen: fakeObserveScreen,
@@ -92,8 +95,8 @@ describe("BiometricAuth", () => {
       }
     });
     test("should execute fingerprint match with default ID", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -110,8 +113,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should execute fingerprint match with custom ID", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 5", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 5", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 5", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 5", createExecResult("", ""));
 
       const result = await biometricAuth.execute({
         action: "match",
@@ -127,8 +130,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should work with explicit fingerprint modality", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({
         action: "match",
@@ -140,8 +143,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should send SDK override broadcast with SUCCESS for match", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "match" });
 
@@ -156,8 +159,8 @@ describe("BiometricAuth", () => {
 
   describe("execute - fail action", () => {
     test("should execute fingerprint fail with default ID", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 2", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 2", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 2", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 2", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "fail" });
 
@@ -172,8 +175,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should include warning about ID differentiation", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 2", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 2", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 2", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 2", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "fail" });
 
@@ -182,8 +185,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should send SDK override broadcast with FAILURE for fail", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 2", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 2", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 2", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 2", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "fail" });
 
@@ -198,8 +201,8 @@ describe("BiometricAuth", () => {
 
   describe("execute - cancel action", () => {
     test("should execute fingerprint cancel", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 2", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 2", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 2", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 2", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "cancel" });
 
@@ -209,8 +212,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should use cancellation-specific message", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 2", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 2", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 2", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 2", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "cancel" });
 
@@ -219,8 +222,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should send SDK override broadcast with CANCEL for cancel", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 2", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 2", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 2", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 2", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "cancel" });
 
@@ -235,8 +238,8 @@ describe("BiometricAuth", () => {
 
   describe("execute - error action", () => {
     test("should use enrolled fingerprint ID 1 for error action", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "error", errorCode: 7 });
 
@@ -249,8 +252,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should send SDK override broadcast with ERROR and errorCode", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "error", errorCode: 7 });
 
@@ -263,8 +266,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should include SDK integration note in error action message", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "error", errorCode: 7 });
 
@@ -272,8 +275,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should proceed when action is 'error' without errorCode (defaults to -1)", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "error" }); // no errorCode
 
@@ -284,8 +287,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should use custom fingerprint ID for error action", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 3", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 3", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 3", createExecResult("", ""));
 
       const result = await biometricAuth.execute({
         action: "error",
@@ -297,8 +300,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should pass ttlMs to SDK broadcast", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "error", errorCode: 7, ttlMs: 10000 });
 
@@ -311,8 +314,8 @@ describe("BiometricAuth", () => {
 
   describe("SDK broadcast", () => {
     test("should send broadcast before emu finger commands", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "match" });
 
@@ -324,8 +327,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should include default ttlMs in broadcast", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       await biometricAuth.execute({ action: "match" });
 
@@ -341,8 +344,8 @@ describe("BiometricAuth", () => {
     test("should still proceed if broadcast throws", async () => {
       // Make broadcast throw to simulate ADB failure
       fakeAdb.setCommandError("BIOMETRIC_OVERRIDE", new Error("adb: device offline"));
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -354,7 +357,7 @@ describe("BiometricAuth", () => {
 
   describe("physical device support", () => {
     test("should return partial support on physical devices with SDK broadcast", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "0", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -364,7 +367,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should send SDK broadcast to physical devices", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "0", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
 
       await biometricAuth.execute({ action: "match" });
 
@@ -373,7 +376,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should not send emu finger commands to physical devices", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "0", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
 
       await biometricAuth.execute({ action: "match" });
 
@@ -382,7 +385,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should return failure when broadcast fails on physical devices", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "0", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
       fakeAdb.setCommandError("BIOMETRIC_OVERRIDE", new Error("adb: device offline"));
 
       const result = await biometricAuth.execute({ action: "match" });
@@ -393,7 +396,7 @@ describe("BiometricAuth", () => {
     });
 
     test("should support error action on physical devices via SDK broadcast", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "0", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("0", ""));
 
       const result = await biometricAuth.execute({ action: "error", errorCode: 7 });
 
@@ -417,8 +420,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should reject emulators without emu finger support", async () => {
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
-      fakeAdb.setCommandResponse("emu help", { stdout: "help - show this help", stderr: "" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("1", ""));
+      fakeAdb.setCommandResponse("emu help", createExecResult("help - show this help", ""));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -441,8 +444,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should accept 'any' modality", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({
         action: "match",
@@ -460,7 +463,7 @@ describe("BiometricAuth", () => {
       async (step) => {
         // Output from test/utils/android-cmdline-tools/vmSnapshot.property.test.ts.
         const output = "KO: failed";
-        fakeAdb.setCommandResponse(`emu finger ${step} 1`, { stdout: output, stderr: "" });
+        fakeAdb.setCommandResponse(`emu finger ${step} 1`, createExecResult(output, ""));
 
         const result = await biometricAuth.execute({ action: "match" });
 
@@ -480,10 +483,10 @@ describe("BiometricAuth", () => {
       "includes both output streams when emu finger %s fails",
       async (step) => {
         // Outputs from this file's command-failure test and vmSnapshot.property.test.ts.
-        fakeAdb.setCommandResponse(`emu finger ${step} 1`, {
-          stdout: "KO: failed",
-          stderr: "Command failed",
-        });
+        fakeAdb.setCommandResponse(
+          `emu finger ${step} 1`,
+          createExecResult("KO: failed", "Command failed"),
+        );
 
         const result = await biometricAuth.execute({ action: "match" });
 
@@ -495,10 +498,7 @@ describe("BiometricAuth", () => {
 
     test("preserves failure for arbitrary stderr from emu finger remove", async () => {
       // Output from this file's existing emu finger command-failure test.
-      fakeAdb.setCommandResponse("emu finger remove 1", {
-        stdout: "",
-        stderr: "Command failed",
-      });
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", "Command failed"));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -507,8 +507,8 @@ describe("BiometricAuth", () => {
     });
 
     test("should handle emu finger command failures", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "Command failed" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", "Command failed"));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -519,7 +519,7 @@ describe("BiometricAuth", () => {
     test("should treat capability check failures as physical device (partial support)", async () => {
       // When getprop fails, the device is treated as a physical device (non-emulator)
       // which returns supported: "partial" with the SDK broadcast still sent.
-      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "", stderr: "Error" });
+      fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", createExecResult("", "Error"));
 
       const result = await biometricAuth.execute({ action: "match" });
 
@@ -530,8 +530,8 @@ describe("BiometricAuth", () => {
 
   describe("with progress callback", () => {
     test("should work with progress callback", async () => {
-      fakeAdb.setCommandResponse("emu finger touch 1", { stdout: "", stderr: "" });
-      fakeAdb.setCommandResponse("emu finger remove 1", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu finger touch 1", createExecResult("", ""));
+      fakeAdb.setCommandResponse("emu finger remove 1", createExecResult("", ""));
 
       const progressCallback = async () => {
         // callback for progress tracking

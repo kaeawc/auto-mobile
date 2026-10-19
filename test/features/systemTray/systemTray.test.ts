@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import { toolJson } from "../../helpers/toolResponse";
 import { warmedTests } from "../../helpers/warmedTests";
 import {
   createHierarchyForTest,
@@ -39,6 +41,7 @@ import type {
   BootedDevice,
   Element,
   ObserveResult,
+  ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -72,7 +75,7 @@ const CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH = join(
 );
 const realCtrlProxyCompactBoundsGroups = JSON.parse(
   readFileSync(CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH, "utf8"),
-) as { collapsed: unknown; expanded: unknown };
+) as { collapsed: ViewHierarchyNode; expanded: ViewHierarchyNode };
 const headerlessTwoNotificationGroups = {
   collapsed: JSON.parse(
     readFileSync(
@@ -163,7 +166,16 @@ class SequencedObserveScreen extends FakeObserveScreen {
   }
 }
 
+const DEFAULT_DISPLAY: ObserveResult["display"] = {
+  key: "default",
+  role: "unknown",
+  posture: "unknown",
+  generation: 0,
+};
+
 const createObservation = (viewHierarchy?: ViewHierarchyResult): ObserveResult => ({
+  display: DEFAULT_DISPLAY,
+  observationId: "tray-observation",
   updatedAt: 0,
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -185,7 +197,10 @@ const createClosedHierarchy = (text: string = ""): ViewHierarchyResult => ({
   },
 });
 
-const createTrayHierarchy = (title: string): ViewHierarchyResult => ({
+const createTrayHierarchy = (
+  title: string,
+  rowResourceId: string = "com.android.systemui:id/notification_row_1",
+): ViewHierarchyResult => ({
   packageName: SYSTEM_TRAY_PACKAGE,
   hierarchy: {
     node: {
@@ -198,7 +213,7 @@ const createTrayHierarchy = (title: string): ViewHierarchyResult => ({
       node: [
         {
           $: {
-            "resource-id": "com.android.systemui:id/notification_row_1",
+            "resource-id": rowResourceId,
             class: "ExpandableNotificationRow",
             packageName: SYSTEM_TRAY_PACKAGE,
             text: title,
@@ -280,9 +295,9 @@ describe("systemTray post-tap observation", () => {
       const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
       const before = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 2000 });
       const intermediate = createObservation(createTrayHierarchy("Opening reply"));
-      const after = createObservation(createTrayHierarchy("Reply"));
-      after.viewHierarchy!.hierarchy.node.node[0].$["resource-id"] =
-        "com.android.systemui:id/remote_input_text";
+      const after = createObservation(
+        createTrayHierarchy("Reply", "com.android.systemui:id/remote_input_text"),
+      );
       const fakeObserveScreen = new FakeObserveScreen();
       fakeObserveScreen.setObserveResult((index) => {
         if (index === 0) {
@@ -308,7 +323,7 @@ describe("systemTray post-tap observation", () => {
         notification: { title: "Reply", tapActionLabel },
         platform: "android",
       });
-      const payload = JSON.parse((response.content[0] as { text: string }).text);
+      const payload = toolJson(response);
       expect(payload.success).toBe(true);
       expect(payload.settled).toBe(true);
       expect(JSON.stringify(payload.observation)).toContain("remote_input_text");
@@ -365,11 +380,15 @@ describe("systemTray post-tap observation", () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const baseline = createObservation({ ...createTrayHierarchy("Reply"), updatedAt: 900 });
-      baseline.activeWindow = { appId: "messages", activityName: "Source" };
+      baseline.activeWindow = { appId: "messages", activityName: "Source", layoutSeqSum: 0 };
       const observer = new FakeObserveScreen();
       observer.setObserveResult((index) => ({
         ...baseline,
-        activeWindow: { appId: "messages", activityName: alternating && index % 2 ? "B" : "A" },
+        activeWindow: {
+          appId: "messages",
+          activityName: alternating && index % 2 ? "B" : "A",
+          layoutSeqSum: 0,
+        },
         viewHierarchy: { ...baseline.viewHierarchy!, updatedAt: 2001 + timer.now() },
       }));
       setSystemTrayDependencies({
@@ -439,7 +458,7 @@ describe("systemTray post-tap observation", () => {
         notification: { title: "Reply" },
         platform: "android",
       });
-      const payload = JSON.parse((response.content[0] as { text: string }).text);
+      const payload = toolJson(response);
       expect(payload.success).toBe(true);
       expect(payload.settled).toBe(false);
       expect(payload.message).toContain("effect not yet settled");
@@ -964,7 +983,7 @@ describe("Android systemTray close", () => {
       awaitTimeout: 500,
       platform: "android",
     });
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(false);
     expect(payload.message).toContain("Failed to close system tray");
@@ -999,7 +1018,7 @@ describe("Android systemTray open", () => {
       awaitTimeout: 500,
       platform: "android",
     });
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(false);
     expect(payload.message).toContain("Failed to open system tray");
@@ -1040,6 +1059,8 @@ const iosDevice: BootedDevice = {
 };
 
 const createIosObservation = (viewHierarchy?: ViewHierarchyResult): ObserveResult => ({
+  display: DEFAULT_DISPLAY,
+  observationId: "ios-tray-observation",
   updatedAt: 0,
   screenSize: { width: 390, height: 844 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -1110,60 +1131,66 @@ const createTrayWithGroupedNotifications = (
               "resource-id": "com.android.systemui:id/expandableNotificationRow",
               bounds: { left: 48, top: 663, right: 1296, bottom: 993 },
             },
-            node: {
-              $: {
-                "resource-id": "com.android.systemui:id/notification_children_container",
-                className: "android.view.ViewGroup",
-                bounds: { left: 48, top: 663, right: 1296, bottom: 993 },
-              },
-              node: [
-                {
-                  $: {
-                    "resource-id": "android:id/notification_header",
-                    className: "android.widget.RelativeLayout",
-                    bounds: { left: 48, top: 663, right: 1296, bottom: 731 },
-                  },
-                  node: [
-                    {
-                      $: {
-                        text: appLabel,
-                        "resource-id": "android:id/app_name_text",
-                        bounds: { left: 204, top: 672, right: 391, bottom: 721 },
-                      },
-                    },
-                    {
-                      $: {
-                        "content-desc": headerExpandContentDesc,
-                        "resource-id": "android:id/expand_button",
-                        className: "android.widget.Button",
-                        clickable: "true",
-                        bounds: { left: 1084, top: 663, right: 1296, bottom: 731 },
-                      },
-                    },
-                  ],
+            node: [
+              {
+                $: {
+                  "resource-id": "com.android.systemui:id/notification_children_container",
+                  className: "android.view.ViewGroup",
+                  bounds: { left: 48, top: 663, right: 1296, bottom: 993 },
                 },
-                ...titles.map((title, i) => ({
-                  $: {
-                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
-                    className: "android.widget.FrameLayout",
-                    bounds: `[48,${731 + i * 80}][1296,${811 + i * 80}]`,
-                  },
-                  node: {
+                node: [
+                  {
                     $: {
-                      "resource-id": "android:id/notification_content",
+                      "resource-id": "android:id/notification_header",
+                      className: "android.widget.RelativeLayout",
+                      bounds: { left: 48, top: 663, right: 1296, bottom: 731 },
+                    },
+                    node: [
+                      {
+                        $: {
+                          text: appLabel,
+                          "resource-id": "android:id/app_name_text",
+                          bounds: { left: 204, top: 672, right: 391, bottom: 721 },
+                        },
+                      },
+                      {
+                        $: {
+                          "content-desc": headerExpandContentDesc,
+                          "resource-id": "android:id/expand_button",
+                          className: "android.widget.Button",
+                          clickable: "true",
+                          bounds: { left: 1084, top: 663, right: 1296, bottom: 731 },
+                        },
+                      },
+                    ],
+                  },
+                  ...titles.map((title, i) => ({
+                    $: {
+                      "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                      className: "android.widget.FrameLayout",
                       bounds: `[48,${731 + i * 80}][1296,${811 + i * 80}]`,
                     },
-                    node: {
-                      $: {
-                        text: title,
-                        "resource-id": "android:id/title",
-                        bounds: `[96,${741 + i * 80}][900,${801 + i * 80}]`,
+                    node: [
+                      {
+                        $: {
+                          "resource-id": "android:id/notification_content",
+                          bounds: `[48,${731 + i * 80}][1296,${811 + i * 80}]`,
+                        },
+                        node: [
+                          {
+                            $: {
+                              text: title,
+                              "resource-id": "android:id/title",
+                              bounds: `[96,${741 + i * 80}][900,${801 + i * 80}]`,
+                            },
+                          },
+                        ],
                       },
-                    },
-                  },
-                })),
-              ],
-            },
+                    ],
+                  })),
+                ],
+              },
+            ],
           },
         ],
       },
@@ -1189,49 +1216,57 @@ const createTrayWithGroupedNotificationsNoExpandButton = (
               "resource-id": "com.android.systemui:id/expandableNotificationRow",
               bounds: { left: 48, top: 663, right: 1296, bottom: 993 },
             },
-            node: {
-              $: {
-                "resource-id": "com.android.systemui:id/notification_children_container",
-                className: "android.view.ViewGroup",
-                bounds: { left: 48, top: 663, right: 1296, bottom: 993 },
-              },
-              node: [
-                {
-                  $: {
-                    "resource-id": "android:id/notification_header",
-                    className: "android.widget.RelativeLayout",
-                    bounds: { left: 48, top: 663, right: 1296, bottom: 731 },
-                  },
-                  node: {
-                    $: {
-                      text: appLabel,
-                      "resource-id": "android:id/app_name_text",
-                      bounds: { left: 204, top: 672, right: 391, bottom: 721 },
-                    },
-                  },
+            node: [
+              {
+                $: {
+                  "resource-id": "com.android.systemui:id/notification_children_container",
+                  className: "android.view.ViewGroup",
+                  bounds: { left: 48, top: 663, right: 1296, bottom: 993 },
                 },
-                ...titles.map((title, i) => ({
-                  $: {
-                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
-                    className: "android.widget.FrameLayout",
-                    bounds: `[48,${731 + i * 80}][1296,${811 + i * 80}]`,
-                  },
-                  node: {
+                node: [
+                  {
                     $: {
-                      "resource-id": "android:id/notification_content",
+                      "resource-id": "android:id/notification_header",
+                      className: "android.widget.RelativeLayout",
+                      bounds: { left: 48, top: 663, right: 1296, bottom: 731 },
+                    },
+                    node: [
+                      {
+                        $: {
+                          text: appLabel,
+                          "resource-id": "android:id/app_name_text",
+                          bounds: { left: 204, top: 672, right: 391, bottom: 721 },
+                        },
+                      },
+                    ],
+                  },
+                  ...titles.map((title, i) => ({
+                    $: {
+                      "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                      className: "android.widget.FrameLayout",
                       bounds: `[48,${731 + i * 80}][1296,${811 + i * 80}]`,
                     },
-                    node: {
-                      $: {
-                        text: title,
-                        "resource-id": "android:id/title",
-                        bounds: `[96,${741 + i * 80}][900,${801 + i * 80}]`,
+                    node: [
+                      {
+                        $: {
+                          "resource-id": "android:id/notification_content",
+                          bounds: `[48,${731 + i * 80}][1296,${811 + i * 80}]`,
+                        },
+                        node: [
+                          {
+                            $: {
+                              text: title,
+                              "resource-id": "android:id/title",
+                              bounds: `[96,${741 + i * 80}][900,${801 + i * 80}]`,
+                            },
+                          },
+                        ],
                       },
-                    },
-                  },
-                })),
-              ],
-            },
+                    ],
+                  })),
+                ],
+              },
+            ],
           },
         ],
       },
@@ -1255,19 +1290,23 @@ const createTrayWithExpandedNotifications = (titles: string[]): ViewHierarchyRes
             clickable: "true",
             bounds: `[48,${400 + i * 200}][1296,${600 + i * 200}]`,
           },
-          node: {
-            $: {
-              "resource-id": "android:id/notification_content",
-              bounds: `[48,${400 + i * 200}][1296,${600 + i * 200}]`,
-            },
-            node: {
+          node: [
+            {
               $: {
-                text: title,
-                "resource-id": "android:id/title",
-                bounds: `[96,${410 + i * 200}][900,${590 + i * 200}]`,
+                "resource-id": "android:id/notification_content",
+                bounds: `[48,${400 + i * 200}][1296,${600 + i * 200}]`,
               },
+              node: [
+                {
+                  $: {
+                    text: title,
+                    "resource-id": "android:id/title",
+                    bounds: `[96,${410 + i * 200}][900,${590 + i * 200}]`,
+                  },
+                },
+              ],
             },
-          },
+          ],
         })),
       },
     },
@@ -1306,183 +1345,207 @@ const createCtrlProxyCapturedGroupTray = (
           packageName: SYSTEM_TRAY_PACKAGE,
           bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         },
-        node: {
-          $: {
-            "resource-id": "com.android.systemui:id/expandableNotificationRow",
-            bounds: { left: 42, top: 568, right: 1038, bottom: 1639 },
-          },
-          node: {
+        node: [
+          {
             $: {
-              "resource-id": "com.android.systemui:id/notification_children_container",
+              "resource-id": "com.android.systemui:id/expandableNotificationRow",
               bounds: { left: 42, top: 568, right: 1038, bottom: 1639 },
             },
             node: [
               {
                 $: {
-                  "resource-id": "android:id/notification_header",
-                  bounds: { left: 42, top: 568, right: 1038, bottom: 715 },
+                  "resource-id": "com.android.systemui:id/notification_children_container",
+                  bounds: { left: 42, top: 568, right: 1038, bottom: 1639 },
                 },
                 node: [
                   {
                     $: {
-                      text: appLabel,
-                      "resource-id": "android:id/app_name_text",
-                      bounds: { left: 179, top: 620, right: 249, bottom: 663 },
-                    },
-                  },
-                  {
-                    $: {
-                      "content-desc": expanded ? "Collapse" : "Expand",
-                      "resource-id": "android:id/expand_button",
-                      clickable: "true",
-                      bounds: expanded
-                        ? { left: 891, top: 568, right: 1038, bottom: 715 }
-                        : { left: 852, top: 568, right: 1038, bottom: 715 },
-                    },
-                  },
-                ],
-              },
-              ...rowBounds.map((row, index) => {
-                const [left, top, right, bottom] = row;
-                const backgroundBottom = expanded ? bottom + 89 : bottom + 256;
-                const title = titles[index];
-                if (!expanded) {
-                  return {
-                    $: {
-                      "resource-id": "com.android.systemui:id/expandableNotificationRow",
-                      bounds: bounds(row),
+                      "resource-id": "android:id/notification_header",
+                      bounds: { left: 42, top: 568, right: 1038, bottom: 715 },
                     },
                     node: [
                       {
                         $: {
-                          "resource-id": "android:id/backgroundDimmed",
-                          bounds: bounds([left, top, right, backgroundBottom]),
+                          text: appLabel,
+                          "resource-id": "android:id/app_name_text",
+                          bounds: { left: 179, top: 620, right: 249, bottom: 663 },
                         },
                       },
                       {
                         $: {
-                          "resource-id": "android:id/expanded",
-                          bounds: bounds([left, top, right, backgroundBottom]),
-                        },
-                        node: [
-                          { $: { bounds: bounds(row) } },
-                          {
-                            $: {
-                              text: title,
-                              "resource-id": "android:id/notification_title",
-                              bounds: bounds([179, top, 272, bottom]),
-                            },
-                          },
-                          {
-                            $: {
-                              text: bodies[index],
-                              "resource-id": "android:id/notification_text",
-                              bounds: bounds([272, top, 1006, bottom]),
-                            },
-                          },
-                        ],
-                      },
-                      {
-                        $: {
-                          "resource-id": "android:id/fake_shadow",
-                          bounds: bounds([left, top, right, backgroundBottom]),
+                          "content-desc": expanded ? "Collapse" : "Expand",
+                          "resource-id": "android:id/expand_button",
+                          clickable: "true",
+                          bounds: expanded
+                            ? { left: 891, top: 568, right: 1038, bottom: 715 }
+                            : { left: 852, top: 568, right: 1038, bottom: 715 },
                         },
                       },
                     ],
-                  };
-                }
-                const contentTop = top + 52;
-                return {
-                  $: {
-                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
-                    bounds: bounds(row),
                   },
-                  node: [
-                    {
-                      $: {
-                        "resource-id": "android:id/backgroundNormal",
-                        bounds: bounds([left, top, right, backgroundBottom]),
-                      },
-                    },
-                    {
-                      $: {
-                        "resource-id": "android:id/backgroundDimmed",
-                        bounds: bounds([left, top, right, backgroundBottom]),
-                      },
-                    },
-                    {
-                      $: {
-                        "resource-id": "android:id/expanded",
-                        bounds: bounds([left, top, right, backgroundBottom]),
-                      },
-                      node: {
+                  ...rowBounds.map((row, index) => {
+                    const [left, top, right, bottom] = row;
+                    const backgroundBottom = expanded ? bottom + 89 : bottom + 256;
+                    const title = titles[index];
+                    if (!expanded) {
+                      return {
                         $: {
-                          "resource-id": "android:id/status_bar_latest_event_content",
+                          "resource-id": "com.android.systemui:id/expandableNotificationRow",
                           bounds: bounds(row),
                         },
-                        node: {
-                          $: {
-                            "resource-id": "android:id/notification_headerless_view_row",
-                            bounds: bounds([179, top, right, bottom]),
-                          },
-                          node: {
+                        node: [
+                          {
                             $: {
-                              "resource-id": "android:id/notification_headerless_view_column",
-                              bounds: bounds([179, contentTop, 891, bottom - 52]),
+                              "resource-id": "android:id/backgroundDimmed",
+                              bounds: bounds([left, top, right, backgroundBottom]),
+                            },
+                          },
+                          {
+                            $: {
+                              "resource-id": "android:id/expanded",
+                              bounds: bounds([left, top, right, backgroundBottom]),
                             },
                             node: [
+                              { $: { bounds: bounds(row) } },
                               {
                                 $: {
-                                  "resource-id": "android:id/notification_top_line",
-                                  bounds: bounds([179, contentTop, 891, contentTop + 51]),
+                                  text: title,
+                                  "resource-id": "android:id/notification_title",
+                                  bounds: bounds([179, top, 272, bottom]),
                                 },
-                                node: [
-                                  {
-                                    $: {
-                                      text: title,
-                                      "resource-id": "android:id/title",
-                                      bounds: bounds([179, contentTop, 261, contentTop + 51]),
-                                    },
-                                  },
-                                  {
-                                    $: {
-                                      text: bodies[index],
-                                      "resource-id": "android:id/text",
-                                      bounds: bounds([179, contentTop + 56, 891, bottom - 57]),
-                                    },
-                                  },
-                                ],
                               },
                               {
                                 $: {
-                                  "resource-id": "android:id/expand_button_touch_container",
-                                  bounds: bounds([891, top, right, bottom]),
-                                },
-                                node: {
-                                  $: {
-                                    "resource-id": "android:id/expand_button",
-                                    "content-desc": "Expand",
-                                    bounds: bounds([891, top, right, bottom]),
-                                  },
+                                  text: bodies[index],
+                                  "resource-id": "android:id/notification_text",
+                                  bounds: bounds([272, top, 1006, bottom]),
                                 },
                               },
                             ],
                           },
-                        },
-                      },
-                    },
-                    {
+                          {
+                            $: {
+                              "resource-id": "android:id/fake_shadow",
+                              bounds: bounds([left, top, right, backgroundBottom]),
+                            },
+                          },
+                        ],
+                      };
+                    }
+                    const contentTop = top + 52;
+                    return {
                       $: {
-                        "resource-id": "android:id/fake_shadow",
-                        bounds: bounds([left, top, right, backgroundBottom]),
+                        "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                        bounds: bounds(row),
                       },
-                    },
-                  ],
-                };
-              }),
+                      node: [
+                        {
+                          $: {
+                            "resource-id": "android:id/backgroundNormal",
+                            bounds: bounds([left, top, right, backgroundBottom]),
+                          },
+                        },
+                        {
+                          $: {
+                            "resource-id": "android:id/backgroundDimmed",
+                            bounds: bounds([left, top, right, backgroundBottom]),
+                          },
+                        },
+                        {
+                          $: {
+                            "resource-id": "android:id/expanded",
+                            bounds: bounds([left, top, right, backgroundBottom]),
+                          },
+                          node: [
+                            {
+                              $: {
+                                "resource-id": "android:id/status_bar_latest_event_content",
+                                bounds: bounds(row),
+                              },
+                              node: [
+                                {
+                                  $: {
+                                    "resource-id": "android:id/notification_headerless_view_row",
+                                    bounds: bounds([179, top, right, bottom]),
+                                  },
+                                  node: [
+                                    {
+                                      $: {
+                                        "resource-id":
+                                          "android:id/notification_headerless_view_column",
+                                        bounds: bounds([179, contentTop, 891, bottom - 52]),
+                                      },
+                                      node: [
+                                        {
+                                          $: {
+                                            "resource-id": "android:id/notification_top_line",
+                                            bounds: bounds([179, contentTop, 891, contentTop + 51]),
+                                          },
+                                          node: [
+                                            {
+                                              $: {
+                                                text: title,
+                                                "resource-id": "android:id/title",
+                                                bounds: bounds([
+                                                  179,
+                                                  contentTop,
+                                                  261,
+                                                  contentTop + 51,
+                                                ]),
+                                              },
+                                            },
+                                            {
+                                              $: {
+                                                text: bodies[index],
+                                                "resource-id": "android:id/text",
+                                                bounds: bounds([
+                                                  179,
+                                                  contentTop + 56,
+                                                  891,
+                                                  bottom - 57,
+                                                ]),
+                                              },
+                                            },
+                                          ],
+                                        },
+                                        {
+                                          $: {
+                                            "resource-id":
+                                              "android:id/expand_button_touch_container",
+                                            bounds: bounds([891, top, right, bottom]),
+                                          },
+                                          node: [
+                                            {
+                                              $: {
+                                                "resource-id": "android:id/expand_button",
+                                                "content-desc": "Expand",
+                                                bounds: bounds([891, top, right, bottom]),
+                                              },
+                                            },
+                                          ],
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                        {
+                          $: {
+                            "resource-id": "android:id/fake_shadow",
+                            bounds: bounds([left, top, right, backgroundBottom]),
+                          },
+                        },
+                      ],
+                    };
+                  }),
+                ],
+              },
             ],
           },
-        },
+        ],
       },
     },
   });
@@ -1596,80 +1659,128 @@ const createRealisticGroupNotificationTray = (
           packageName: SYSTEM_TRAY_PACKAGE,
           bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         },
-        node: {
-          $: {
-            "resource-id": "com.android.systemui:id/expandableNotificationRow",
-            bounds: { left: groupLeft, top: groupTop, right: groupRight, bottom: groupBottom },
-          },
-          node: {
+        node: [
+          {
             $: {
-              "resource-id": "com.android.systemui:id/notification_children_container",
-              className: "android.view.ViewGroup",
-              bounds: {
-                left: groupLeft,
-                top: groupTop,
-                right: groupRight,
-                bottom: containerBottom,
-              },
+              "resource-id": "com.android.systemui:id/expandableNotificationRow",
+              bounds: { left: groupLeft, top: groupTop, right: groupRight, bottom: groupBottom },
             },
             node: [
               {
                 $: {
-                  "resource-id": "android:id/notification_header",
-                  className: "android.widget.RelativeLayout",
+                  "resource-id": "com.android.systemui:id/notification_children_container",
+                  className: "android.view.ViewGroup",
                   bounds: {
                     left: groupLeft,
                     top: groupTop,
                     right: groupRight,
-                    bottom: headerBottom,
+                    bottom: containerBottom,
                   },
                 },
                 node: [
                   {
                     $: {
-                      text: appLabel,
-                      "resource-id": "android:id/app_name_text",
+                      "resource-id": "android:id/notification_header",
+                      className: "android.widget.RelativeLayout",
                       bounds: {
-                        left: 204,
-                        top: groupTop + 9,
-                        right: 391,
-                        bottom: groupTop + 58,
-                      },
-                    },
-                  },
-                  {
-                    $: {
-                      "content-desc": headerExpandContentDesc,
-                      "resource-id": headerExpandResourceId,
-                      className: "android.widget.Button",
-                      clickable: "true",
-                      bounds: {
-                        left: 1084,
+                        left: groupLeft,
                         top: groupTop,
                         right: groupRight,
                         bottom: headerBottom,
                       },
                     },
-                  },
-                ],
-              },
-              ...titles.map((title, i) => {
-                const childTop = headerBottom + i * childStep;
-                const childBottom = childTop + childHeight;
-                if (!expanded) {
-                  return {
-                    $: {
-                      "resource-id": "com.android.systemui:id/expandableNotificationRow",
-                      bounds: {
-                        left: groupLeft,
-                        top: childTop,
-                        right: groupRight,
-                        bottom: childBottom,
+                    node: [
+                      {
+                        $: {
+                          text: appLabel,
+                          "resource-id": "android:id/app_name_text",
+                          bounds: {
+                            left: 204,
+                            top: groupTop + 9,
+                            right: 391,
+                            bottom: groupTop + 58,
+                          },
+                        },
                       },
-                    },
-                    node: {
+                      {
+                        $: {
+                          "content-desc": headerExpandContentDesc,
+                          "resource-id": headerExpandResourceId,
+                          className: "android.widget.Button",
+                          clickable: "true",
+                          bounds: {
+                            left: 1084,
+                            top: groupTop,
+                            right: groupRight,
+                            bottom: headerBottom,
+                          },
+                        },
+                      },
+                    ],
+                  },
+                  ...titles.map((title, i) => {
+                    const childTop = headerBottom + i * childStep;
+                    const childBottom = childTop + childHeight;
+                    if (!expanded) {
+                      return {
+                        $: {
+                          "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                          bounds: {
+                            left: groupLeft,
+                            top: childTop,
+                            right: groupRight,
+                            bottom: childBottom,
+                          },
+                        },
+                        node: [
+                          {
+                            $: {
+                              "resource-id": "android:id/expanded",
+                              bounds: {
+                                left: groupLeft,
+                                top: childTop,
+                                right: groupRight,
+                                bottom: childBottom,
+                              },
+                            },
+                            node: [
+                              {
+                                $: {
+                                  text: title,
+                                  "resource-id": childTitleResourceId,
+                                  bounds: {
+                                    left: 96,
+                                    top: childTop + 10,
+                                    right: 900,
+                                    bottom: childBottom - 10,
+                                  },
+                                },
+                              },
+                              ...(body
+                                ? [
+                                    {
+                                      $: {
+                                        text: body,
+                                        "resource-id": "android:id/text",
+                                        bounds: {
+                                          left: 96,
+                                          top: childTop + 10,
+                                          right: 900,
+                                          bottom: childBottom - 10,
+                                        },
+                                      },
+                                    },
+                                  ]
+                                : []),
+                            ],
+                          },
+                        ],
+                      };
+                    }
+                    return {
                       $: {
-                        "resource-id": "android:id/expanded",
+                        "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                        className: "android.widget.FrameLayout",
                         bounds: {
                           left: groupLeft,
                           top: childTop,
@@ -1680,76 +1791,19 @@ const createRealisticGroupNotificationTray = (
                       node: [
                         {
                           $: {
-                            text: title,
-                            "resource-id": childTitleResourceId,
+                            "resource-id": "android:id/notification_content",
                             bounds: {
-                              left: 96,
-                              top: childTop + 10,
-                              right: 900,
-                              bottom: childBottom - 10,
+                              left: groupLeft,
+                              top: childTop,
+                              right: groupRight,
+                              bottom: childBottom,
                             },
                           },
-                        },
-                        ...(body
-                          ? [
-                              {
-                                $: {
-                                  text: body,
-                                  "resource-id": "android:id/text",
-                                  bounds: {
-                                    left: 96,
-                                    top: childTop + 10,
-                                    right: 900,
-                                    bottom: childBottom - 10,
-                                  },
-                                },
-                              },
-                            ]
-                          : []),
-                      ],
-                    },
-                  };
-                }
-                return {
-                  $: {
-                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
-                    className: "android.widget.FrameLayout",
-                    bounds: {
-                      left: groupLeft,
-                      top: childTop,
-                      right: groupRight,
-                      bottom: childBottom,
-                    },
-                  },
-                  node: {
-                    $: {
-                      "resource-id": "android:id/notification_content",
-                      bounds: {
-                        left: groupLeft,
-                        top: childTop,
-                        right: groupRight,
-                        bottom: childBottom,
-                      },
-                    },
-                    node: [
-                      {
-                        $: {
-                          text: title,
-                          "resource-id": childTitleResourceId,
-                          bounds: {
-                            left: 96,
-                            top: childTop + 10,
-                            right: 900,
-                            bottom: childBottom - 10,
-                          },
-                        },
-                      },
-                      ...(body
-                        ? [
+                          node: [
                             {
                               $: {
-                                text: body,
-                                "resource-id": "android:id/text",
+                                text: title,
+                                "resource-id": childTitleResourceId,
                                 bounds: {
                                   left: 96,
                                   top: childTop + 10,
@@ -1758,28 +1812,45 @@ const createRealisticGroupNotificationTray = (
                                 },
                               },
                             },
-                          ]
-                        : []),
-                      {
-                        $: {
-                          "content-desc": "Expand",
-                          "resource-id": "android:id/expand_button",
-                          className: "android.widget.Button",
-                          bounds: {
-                            left: 1084,
-                            top: childTop,
-                            right: groupRight,
-                            bottom: childBottom,
-                          },
+                            ...(body
+                              ? [
+                                  {
+                                    $: {
+                                      text: body,
+                                      "resource-id": "android:id/text",
+                                      bounds: {
+                                        left: 96,
+                                        top: childTop + 10,
+                                        right: 900,
+                                        bottom: childBottom - 10,
+                                      },
+                                    },
+                                  },
+                                ]
+                              : []),
+                            {
+                              $: {
+                                "content-desc": "Expand",
+                                "resource-id": "android:id/expand_button",
+                                className: "android.widget.Button",
+                                bounds: {
+                                  left: 1084,
+                                  top: childTop,
+                                  right: groupRight,
+                                  bottom: childBottom,
+                                },
+                              },
+                            },
+                          ],
                         },
-                      },
-                    ],
-                  },
-                };
-              }),
+                      ],
+                    };
+                  }),
+                ],
+              },
             ],
           },
-        },
+        ],
       },
     },
   });
@@ -1794,7 +1865,7 @@ const combineGroupNotificationTrays = (...trays: ViewHierarchyResult[]): ViewHie
         packageName: SYSTEM_TRAY_PACKAGE,
         bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
       },
-      node: trays.map((tray) => tray.hierarchy.node?.node),
+      node: trays.flatMap((tray) => tray.hierarchy.node?.node ?? []),
     },
   },
 });
@@ -2219,13 +2290,13 @@ describe("systemTray group expansion", () => {
     const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
     const legacy = await waitForNotificationMatch(device, { title: "Legacy title" }, [], 500);
 
-    expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode)).toBe(
+    expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode!)).toBe(
       "collapsed",
     );
-    expect(resolveNotificationGroupExpansionState(expanded.match!.candidate.groupNode)).toBe(
+    expect(resolveNotificationGroupExpansionState(expanded.match!.candidate.groupNode!)).toBe(
       "expanded",
     );
-    expect(resolveNotificationGroupExpansionState(legacy.match!.candidate.groupNode)).toBe(
+    expect(resolveNotificationGroupExpansionState(legacy.match!.candidate.groupNode!)).toBe(
       "collapsed",
     );
     const realisticExpanded = await waitForNotificationMatch(
@@ -2235,11 +2306,11 @@ describe("systemTray group expansion", () => {
       500,
     );
     expect(
-      getNotificationGroupChildRows(realisticExpanded.match!.candidate.groupNode),
+      getNotificationGroupChildRows(realisticExpanded.match!.candidate.groupNode!),
     ).toHaveLength(2);
     // Explicit header content-desc now overrides geometry when they disagree.
     expect(
-      resolveNotificationGroupExpansionState(realisticExpanded.match!.candidate.groupNode),
+      resolveNotificationGroupExpansionState(realisticExpanded.match!.candidate.groupNode!),
     ).toBe("collapsed");
   });
 
@@ -2259,10 +2330,10 @@ describe("systemTray group expansion", () => {
     const collapsed = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
     const expanded = await waitForNotificationMatch(device, { title: "Rev3" }, [], 500);
 
-    expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode)).toBe(
+    expect(resolveNotificationGroupExpansionState(collapsed.match!.candidate.groupNode!)).toBe(
       "collapsed",
     );
-    expect(resolveNotificationGroupExpansionState(expanded.match!.candidate.groupNode)).toBe(
+    expect(resolveNotificationGroupExpansionState(expanded.match!.candidate.groupNode!)).toBe(
       "expanded",
     );
   });
@@ -2845,7 +2916,7 @@ describe("systemTray group expansion", () => {
     fakeTimer.enableAutoAdvance();
     fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
     const response = await tap;
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
     // Expanding the group is not evidence that the subsequent notification tap worked.
     expect(payload.settled).toBe(false);
     expect(payload.observation).toBeUndefined();
@@ -2900,7 +2971,7 @@ describe("systemTray group expansion", () => {
     fakeTimer.enableAutoAdvance();
     fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
     const response = await dismiss;
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
     expect(payload.success).toBe(true);
 
     const commands = fakeAdb.getExecutedCommands();
@@ -2946,7 +3017,7 @@ describe("systemTray group expansion", () => {
       awaitTimeout: 1000,
       platform: "android",
     });
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
     expect(payload.success).toBe(true);
     expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
       0,
@@ -3163,7 +3234,7 @@ describe("systemTray group expansion", () => {
     await waitForPendingSleep(fakeTimer);
     fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
     const response = await dismiss;
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
     expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
@@ -3387,7 +3458,7 @@ describe("systemTray group expansion", () => {
     fakeTimer.advanceTime(EXPAND_GROUP_SETTLE_MS);
 
     const response = await dismiss;
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
     expect(payload.success).toBe(true);
     expect(fakeTimer.getSleepHistory()).toEqual([POLL_INTERVAL_MS, EXPAND_GROUP_SETTLE_MS]);
     expect(
@@ -3553,7 +3624,7 @@ describe("systemTray group expansion", () => {
       awaitTimeout: 1000,
       platform: "android",
     });
-    const payload = JSON.parse((response.content[0] as { text: string }).text);
+    const payload = toolJson(response);
     expect(payload.success).toBe(true);
     expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input tap"))).toHaveLength(
       0,
@@ -3638,7 +3709,7 @@ describe("systemTray dismiss outcome verification (#10010)", () => {
     observations: ObserveResult[],
     timer: FakeTimer = new FakeTimer(),
   ): Promise<{
-    payload: { success: boolean; message: string; observation?: unknown };
+    payload: Record<string, unknown>;
     isError: boolean | undefined;
     observe: SequencedObserveScreen;
     adb: SequencedFakeAdbExecutor;
@@ -3661,7 +3732,7 @@ describe("systemTray dismiss outcome verification (#10010)", () => {
       platform: "android",
     });
     return {
-      payload: JSON.parse((response.content[0] as { text: string }).text),
+      payload: toolJson(response),
       isError: (response as { isError?: boolean }).isError,
       observe,
       adb,
@@ -3887,7 +3958,7 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
     const root: RawNode = expanded.hierarchy.node ?? {};
     const icon: RawNode = {
       "resource-id": "com.android.systemui:id/status_bar_icon",
-      bounds: [0, 0, 80, 80],
+      bounds: { left: 0, top: 0, right: 80, bottom: 80 },
       package: "com.android.systemui",
       class: "android.widget.ImageView",
       "content-desc": iconText,
@@ -3923,7 +3994,7 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
         platform: "android",
       });
       return {
-        payload: JSON.parse((response.content[0] as { text: string }).text) as {
+        payload: toolJson(response) as {
           success: boolean;
           message: string;
         },
@@ -4528,10 +4599,13 @@ describe("Android systemTray clearAll initial shade readiness", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("shell dumpsys notification --noredact", {
-      stdout: "Current Notification Manager state:\nNotification List:\nSnoozed notifications:",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell dumpsys notification --noredact",
+      createExecResult(
+        "Current Notification Manager state:\nNotification List:\nSnoozed notifications:",
+        "",
+      ),
+    );
     const observer = new FakeObserveScreen();
     observer.setObserveResult(createEmptyTrayObservation());
     const installedAppsSpy = mockInstalledApps(["com.example.empty"]);
@@ -4549,7 +4623,7 @@ describe("Android systemTray clearAll initial shade readiness", () => {
         notification: { appId: "com.example.empty" },
         awaitTimeout: 30000,
       });
-      expect(JSON.parse(result.content[0].text).dismissedCount).toBe(0);
+      expect(toolJson(result).dismissedCount).toBe(0);
       expect(timer.now()).toBeLessThan(2000);
     } finally {
       installedAppsSpy.mockRestore();
@@ -4593,7 +4667,7 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       if (expectedSwipes === 0) {
         await expect(result).rejects.toThrow("shade not readable");
       } else {
-        expect(JSON.parse((await result).content[0].text).dismissedCount).toBe(expectedSwipes);
+        expect(toolJson(await result).dismissedCount).toBe(expectedSwipes);
       }
       expect(swipes()).toHaveLength(expectedSwipes);
       // Later no-match iterations retain the short drain budget rather than
@@ -4634,7 +4708,7 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       awaitTimeout: 2000,
     });
 
-    expect(JSON.parse(result.content[0].text).dismissedCount).toBe(1);
+    expect(toolJson(result).dismissedCount).toBe(1);
     expect(swipes()).toHaveLength(1);
   });
 });

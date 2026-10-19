@@ -2,15 +2,9 @@
 import Foundation
 import XCTest
 
-// Test fixtures fail-fast on malformed setup data, so force-unwrap is idiomatic here
-// (blanket-allowed for force_unwrapping in test targets — see .swiftlint.yml).
-// swiftlint:disable force_unwrapping
-
 final class SdkDatabaseClientTests: XCTestCase {
-    private let baseURL = URL(string: "http://localhost:8766")!
-
-    private func makeClient(_ stub: StubHTTPTransport) -> SdkDatabaseClient {
-        SdkDatabaseClient(baseURL: baseURL, transport: stub)
+    private func makeClient(_ stub: StubHTTPTransport) throws -> SdkDatabaseClient {
+        try SdkDatabaseClient(baseURL: XCTUnwrap(URL(string: "http://localhost:8766")), transport: stub)
     }
 
     /// Assert an async database call throws a `SdkDatabaseError` matching `predicate`.
@@ -85,7 +79,7 @@ final class SdkDatabaseClientTests: XCTestCase {
 
     func testBusyLockIsReportedAsBusyNotAsAMissingSdk() async {
         let busy = Data(#"{"error":"busy_lock","diagnostic":{"code":"busy_lock","message":"busy_lock"}}"#.utf8)
-        let client = { self.makeClient(StubHTTPTransport([.respond(status: 503, body: busy)])) }
+        let client = { try self.makeClient(StubHTTPTransport([.respond(status: 503, body: busy)])) }
         await assertThrows(
             { _ = try await client().executeSQL(databasePath: "/db", query: "SELECT 1", sessionId: nil) },
             { if case .busy = $0 { return true } else { return false } },

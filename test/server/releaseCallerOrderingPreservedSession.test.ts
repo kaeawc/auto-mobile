@@ -1,3 +1,4 @@
+import { DefaultPerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { describe, expect, spyOn, test } from "bun:test";
 import * as systemUiAnr from "../../src/server/deviceToolsSystemUiAnr";
 import { prepareStartDeviceRunnerReadiness } from "../../src/server/deviceTools";
@@ -43,7 +44,17 @@ describe("deviceTools preserved-session release caller ordering", () => {
   ] as const)("%s", async (scenario: Scenario) => {
     const events: unknown[][] = [];
     const session = { assignedDevice: "old" } as Session;
-    const replacement = { id: "replacement", sessionId: "s1" } as PooledDevice;
+    const replacement = {
+      id: "replacement",
+      name: "Pixel",
+      platform: "android",
+      sessionId: "s1",
+      status: "busy",
+      lastUsedAt: 0,
+      assignmentCount: 0,
+      errorCount: 0,
+      incarnation: 1,
+    } satisfies PooledDevice;
     const finished = new Error("callback exercised");
     const failure = new Error("release failed");
     let live = !scenario.startsWith("missing");
@@ -75,7 +86,7 @@ describe("deviceTools preserved-session release caller ordering", () => {
       clearIntentionalShutdown: unexercised("clearIntentionalShutdown"),
       getDevice: (id) =>
         id === "old"
-          ? ({ id, sessionId: "s1" } as PooledDevice)
+          ? { ...replacement, id, sessionId: "s1" }
           : scenario === "wrong-instance"
             ? { ...replacement }
             : replacement,
@@ -124,9 +135,7 @@ describe("deviceTools preserved-session release caller ordering", () => {
           timer: new FakeTimer(),
           signal: undefined,
           progress: undefined,
-          perf: { mark: () => {} } as Parameters<
-            typeof prepareStartDeviceRunnerReadiness
-          >[0]["perf"],
+          perf: new DefaultPerformanceTracker(new FakeTimer()),
           requestedIdentity: "Pixel",
           ensureCtrlProxyReady: async () => {
             throw new SystemUiAnrRecoveryRequiredError("ANR");

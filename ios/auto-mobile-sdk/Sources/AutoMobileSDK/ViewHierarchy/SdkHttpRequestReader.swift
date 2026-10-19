@@ -38,11 +38,12 @@
                     var nextData = initialData
                     if let data { nextData.append(data) }
                     // Inspect appended bytes even on EOF, so oversized headers always get 431.
-                    if isComplete, nextData.range(of: Self.httpHeaderDelimiter) == nil,
-                       nextData.count <= Self.maxHeaderBytes
-                    {
-                        completion(.failed)
-                        return
+                    if isComplete {
+                        let headerDelimiter = nextData.range(of: Self.httpHeaderDelimiter)
+                        if headerDelimiter == nil, nextData.count <= Self.maxHeaderBytes {
+                            completion(.failed)
+                            return
+                        }
                     }
                     self.readCompleteHttpHeaders(connection, initialData: nextData, completion: completion)
                 }

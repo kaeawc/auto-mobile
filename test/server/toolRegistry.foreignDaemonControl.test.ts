@@ -168,13 +168,17 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     );
   }
 
-  function arrangedEach<T>(table: readonly T[]) {
-    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+  function arrangedEach(table: Array<[string, Record<string, unknown>]>) {
+    return (
+      name: string,
+      fn: (name: string, args: Record<string, unknown>) => void | Promise<void>,
+      timeout?: number,
+    ): void => {
       test.each(table)(
         name,
-        async (row: T) => {
+        async (tool, args) => {
           await arrangeHarness();
-          await fn(row);
+          await fn(tool, args);
         },
         timeout,
       );

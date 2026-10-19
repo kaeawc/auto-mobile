@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -160,7 +161,7 @@ describe("a failed start does not stop the device it booted once another session
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each(table.map((row) => [row] as const))(
         name,
         async (row: T) => {
           await arrange();
@@ -291,7 +292,7 @@ describe("a failed start does not stop the device it booted once another session
           name: avd.name,
           __mcpSessionId: "client-a",
         });
-        expect(started.isError).not.toBe(true);
+        expect(readToolResponse(started).isError).not.toBe(true);
         const sessionId = pool.getDevice(AVD_SERIAL)?.sessionId;
         expect(sessionId).toBeString();
         held = sessionId!;

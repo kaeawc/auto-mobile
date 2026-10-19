@@ -162,9 +162,9 @@ final class PrototypeDataTests: XCTestCase {
 
     func testConstantConditionsDecodeAndHold() throws {
         let yes = try JSONDecoder().decode(Condition.self, from: Data(#"{"all":[]}"#.utf8))
-        let no = try JSONDecoder().decode(Condition.self, from: Data(#"{"any":[]}"#.utf8))
+        let missing = try JSONDecoder().decode(Condition.self, from: Data(#"{"any":[]}"#.utf8))
         XCTAssertTrue(yes.holds([:]))
-        XCTAssertFalse(no.holds([:]))
+        XCTAssertFalse(missing.holds([:]))
         XCTAssertThrowsError(try JSONDecoder().decode(Condition.self, from: Data(#"{"data":"/n","gt":0}"#.utf8)))
     }
 

@@ -1,4 +1,3 @@
-// swiftlint:disable force_unwrapping - fail-fast on bad fixtures is idiomatic in tests.
 import Foundation
 import XCTest
 @testable import XCTestRunner
@@ -12,7 +11,7 @@ final class AsyncHTTPTransportTests: XCTestCase {
         throws -> StreamableHTTPMCPClient
     {
         try StreamableHTTPMCPClient(
-            endpoint: URL(string: "http://unused/auto-mobile/streamable")!, performer: performer,
+            endpoint: XCTUnwrap(URL(string: "http://unused/auto-mobile/streamable")), performer: performer,
             options: .init(scheduler: scheduler)
         )
     }
@@ -265,5 +264,3 @@ final class AsyncHTTPTransportTests: XCTestCase {
         XCTAssertEqual(performer.cancellations.count, 1)
     }
 }
-
-// swiftlint:enable force_unwrapping

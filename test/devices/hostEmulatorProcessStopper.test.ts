@@ -51,7 +51,8 @@ for (const group of ["own-group", "shared"] as const) {
       });
       expect(tableReads).toBe(2);
       expect(generation.currentCalls).toEqual([42]);
-      expect(generation.compareCalls.at(-1)).toEqual({ pid: 42, recorded: generation.token });
+      expect(generation.compareCalls.at(-1)?.pid).toBe(42);
+      expect(generation.compareCalls.at(-1)?.recorded).toBe(generation.token);
       expect(kill.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([
         [group === "own-group" ? -42 : 42, "SIGTERM"],
       ]);
@@ -64,7 +65,7 @@ test("memoized host stopper captures and compares the default generation probe",
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const table = spyOn(ProcessTableReader.prototype, "read").mockResolvedValue({
-    value: [{ pid: 42, ppid: 1, command }],
+    value: [{ pid: 42, ppid: 1, rssBytes: 0, command }],
   });
   const group = spyOn(HostEmulatorProcessSignaler.prototype, "resolveOwnGroup").mockResolvedValue({
     kind: "own-group",

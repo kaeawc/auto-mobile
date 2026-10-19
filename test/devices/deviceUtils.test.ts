@@ -20,9 +20,20 @@ import type {
   IosBootRequest,
 } from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import type {
+  IosPhysicalDeviceLister,
+  PhysicalIosDeviceDiscovery,
+} from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../../src/utils/logger";
-import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidDeviceInventoryScanner";
+import type { AndroidEmulatorLaunchHandle } from "../../src/utils/android-cmdline-tools/AndroidEmulatorLaunchTypes";
+
+const launchedHandle = (avdName: string): AndroidEmulatorLaunchHandle => ({
+  avdName,
+  process: null,
+  outcome: "launched",
+  dispose: () => {},
+});
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -279,9 +290,9 @@ describe("MultiPlatformDeviceManager", () => {
         expect(physicalListings).toBe(0);
         expect(discovery.devices).toEqual([simulator]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(true);
-        expect([...discovery.succeededSources]).toEqual(["ios-simulator"]);
+        expect([...(discovery.succeededSources ?? [])]).toEqual(["ios-simulator"]);
         expect(discovery.sourceErrors).toBeUndefined();
-        expect([...discovery.freshDeviceIds]).toEqual([simulator.deviceId]);
+        expect([...(discovery.freshDeviceIds ?? [])]).toEqual([simulator.deviceId]);
       });
     });
 
@@ -471,7 +482,7 @@ describe("MultiPlatformDeviceManager", () => {
           {
             listConnectedDevices: async () => {
               listerCalls++;
-              return [physicalDevice];
+              return { devices: [physicalDevice], complete: true };
             },
           },
         );
@@ -585,11 +596,8 @@ describe("MultiPlatformDeviceManager", () => {
     await withProcessPlatform("darwin", async () => {
       const controller = new AbortController();
       const cancellation = new Error("iOS discovery cancelled");
-      let resolvePhysical!: (discovery: { devices: BootedDevice[]; complete: boolean }) => void;
-      const physicalDiscovery = new Promise<{
-        devices: BootedDevice[];
-        complete: boolean;
-      }>((resolve) => {
+      let resolvePhysical!: (discovery: PhysicalIosDeviceDiscovery) => void;
+      const physicalDiscovery = new Promise<PhysicalIosDeviceDiscovery>((resolve) => {
         resolvePhysical = resolve;
       });
       let simctlCalled = false;
@@ -725,7 +733,7 @@ describe("MultiPlatformDeviceManager", () => {
       fakeSimctl,
       null,
     ).withIosBootInstrumentation(instrumentation);
-    const resourceProfile = { resources: { location: "disabled" as const } };
+    const resourceProfile = { resources: { widgets: "disabled" as const } };
 
     await manager.startDevice(
       { name: "iPhone", platform: "ios", isRunning: false, deviceId: "UDID-1", runtimeId: "rt" },
@@ -780,13 +788,6 @@ describe("MultiPlatformDeviceManager", () => {
         runningStateProbed = true;
         return [];
       },
-      // An already-booted simulator that happens to share the target's name:
-      // pre-fix, this made isDeviceImageRunning() return true and the caller
-      // observed "already running" instead of the missing-UDID error.
-      isSimulatorRunning: async () => {
-        runningStateProbed = true;
-        return true;
-      },
       startSimulator: async () => {
         throw new Error("simctl bootstatus must not run for a name-only iOS target");
       },
@@ -839,7 +840,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           admitColdBoot = request.admitColdBoot;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     ).withAndroidBootAdmission({
@@ -866,7 +867,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           sawHook = request.admitColdBoot !== undefined;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     ).withAndroidBootAdmission(null);
@@ -885,7 +886,7 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedDevicesChecked: async () => [],
         launchEmulator: async (request) => {
           received = request.cameraPosterPath;
-          return { process: null };
+          return launchedHandle(request.avdName);
         },
       }),
     );
@@ -920,7 +921,7 @@ describe("MultiPlatformDeviceManager", () => {
       },
       launchEmulator: async () => {
         launched = true;
-        return { process: null };
+        return launchedHandle("Pixel");
       },
     });
     const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
@@ -948,7 +949,7 @@ describe("MultiPlatformDeviceManager", () => {
       },
       launchEmulator: async () => {
         launched = true;
-        return { process: null };
+        return launchedHandle("Pixel");
       },
     });
     const manager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, fakeEmulator);
@@ -1058,9 +1059,6 @@ describe("MultiPlatformDeviceManager", () => {
       getBootedSimulatorsChecked: async () => [
         { name: "iPhone 15", platform: "ios", deviceId: "booted-1" },
       ],
-      isSimulatorRunning: async () => {
-        throw new Error("should not use name-based check when deviceId is present");
-      },
     });
 
     // Use FakeAdbClient to avoid starting real adb daemon
@@ -1702,6 +1700,7 @@ describe("MultiPlatformDeviceManager", () => {
     timer.advanceTime(4_000);
     let reservedDeadlineMs: number | undefined;
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async (identity, options) => {
         reservedDeadlineMs = options.deadlineMs;
         return {

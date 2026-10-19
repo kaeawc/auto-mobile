@@ -2,13 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { ActiveDeviceSelection } from "./ActiveDeviceSelection";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import { CtrlProxyForwardOwnershipUnreadableError } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import {
-  describeDevices,
-  explicitReadTargetPlatform,
-  matchRunningReadTarget,
-  providedReadTargetNotFound,
-} from "./runningReadTarget";
-import { isDeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
+import { describeDevices } from "./runningReadTarget";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import {
   ambientDeviceExecutionBinding,
@@ -27,7 +21,6 @@ import {
 } from "../models";
 import {
   assertAndroidImageRunningStateKnown,
-  type BootedDeviceDiscoveryOptions,
   type DeviceManagerSimCtl,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
@@ -39,18 +32,14 @@ import {
 import type { SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import type { IosPhysicalDeviceLister } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
-import { type DiscoverySource, discoverySourceFor } from "../utils/discoverySource";
+import { type DiscoverySource } from "../utils/discoverySource";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { Window as WindowImpl } from "../features/observe/Window";
 import type { Window } from "../features/observe/interfaces/Window";
 import { logger } from "../utils/logger";
 import type { CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
-import { AdbUnavailableError } from "../utils/android-cmdline-tools/AdbClient";
-import {
-  AndroidBootedDeviceDiscoveryIncompleteError,
-  BootedDeviceDiscoveryIncompleteError,
-} from "./deviceBootService";
+import { BootedDeviceDiscoveryIncompleteError } from "./deviceBootService";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
@@ -76,21 +65,18 @@ import {
   type AppearanceOnConnectDependencies,
 } from "../server/applyAppearanceOnConnect";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
-import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
-import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
 import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
 import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { serverConfig } from "../utils/ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
 import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
 import {
   getVirtualDeviceLifecycleCoordinator,
-  selectorLifecycleIdentity,
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
@@ -99,29 +85,21 @@ import {
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
-import { isUnresolvedAndroidEmulatorName } from "./deviceIdentityEvidence";
-import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
-import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
 import {
   DefaultDeviceClientProvider,
   type ObserveClientFactories,
 } from "./DefaultDeviceClientProvider";
-import { AndroidForwardReadinessConflictError } from "./AndroidForwardReadinessConflictError";
-
-function lifecycleIdentityForDevice(
-  device: BootedDevice,
-): StableVirtualDeviceIdentity | VirtualDeviceLifecycleIdentity {
-  if (device.platform === "ios") {
-    return { platform: "ios", stableId: device.deviceId };
-  }
-
-  return isAndroidEmulatorSerial(device.deviceId) && !isUnresolvedAndroidEmulatorName(device)
-    ? { platform: "android", stableId: device.name }
-    : selectorLifecycleIdentity("android", { deviceId: device.deviceId });
-}
-
+import { type LifecycleStartHold, lifecycleIdentityForDevice } from "./readinessLifecycleIdentity";
+import { AndroidCtrlProxyReadiness } from "./AndroidCtrlProxyReadiness";
+import { ReadinessSelection } from "./ReadinessSelection";
+import {
+  androidReadinessWindowDevice,
+  assertAndroidActiveWindow,
+  assertIosDeviceAvailable,
+  assertUsableIosOverride,
+} from "./readinessValidation";
 /**
  * The simctl surface the session manager drives, plus what the device manager built from it
  * needs. Exactly what consumers use, so a fake (`FakeSimctl`) satisfies it without a cast.
@@ -259,17 +237,7 @@ export interface ConnectedPlatformScan {
    */
   scannedSources?: Partial<Record<DiscoverySource, boolean>>;
 }
-
-/**
- * True when `scan` completed the discovery source that would have observed
- * `device`, so the device's absence from `scan.devices` proves it is gone.
- */
-export function isScanAuthoritativeFor(scan: ConnectedPlatformScan, device: BootedDevice): boolean {
-  if (!scan.scannedSources) {
-    return scan.scanned[device.platform];
-  }
-  return scan.scannedSources[discoverySourceFor(device.platform, device.deviceId)] === true;
-}
+export { isScanAuthoritativeFor } from "./readinessLifecycleIdentity";
 
 export type DeviceReadinessLevel = "booted" | "automationReady";
 
@@ -362,19 +330,13 @@ export interface DeviceReadinessOptions {
   iosBootInstrumentation?: IosBootInstrumentation;
 }
 
-/** What a lifecycle-start operation may do to keep its AVD lease past its own return. */
-interface LifecycleStartHold {
-  lease: VirtualDeviceLifecycleLease;
-  /** Keeps the lease held until `settlement` settles, though the operation has already returned. */
-  holdLeaseUntil: (settlement: Promise<unknown>) => void;
-}
-
 export class DeviceReadiness implements DeviceReadiness {
   private readonly selection = new ActiveDeviceSelection();
   private static instance: DeviceReadiness;
   private static defaultProvider: DeviceClientProvider | undefined;
   private readonly admissionGate: DeviceAdmissionGate;
   private readonly executionBinding: DeviceExecutionBinding;
+  private readonly readinessSelection: ReadinessSelection;
   private readonly provider: DeviceClientProvider;
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
@@ -401,6 +363,12 @@ export class DeviceReadiness implements DeviceReadiness {
     this.admissionGate = options.admissionGate ?? daemonDeviceAdmissionGate;
     this.executionBinding = options.executionBinding ?? ambientDeviceExecutionBinding;
     this.provider = provider;
+    this.androidCtrlProxyReadiness = new AndroidCtrlProxyReadiness({
+      provider,
+      checkedAndroidOwnership: this.checkedAndroidOwnership,
+      errors: { DeviceOwnedByOtherDaemonError, CtrlProxyForwardOwnershipUnreadableError },
+      storeSetupTiming,
+    });
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
     this.physicalIosScanBudgetMs = options.physicalIosScanBudgetMs ?? PHYSICAL_IOS_SCAN_BUDGET_MS;
@@ -419,6 +387,47 @@ export class DeviceReadiness implements DeviceReadiness {
       getIosClient: (device, port) => this.provider.getIOSCtrlProxyClient(device, port),
       checkIosOverride: checkIosCtrlProxyOverride,
       awaitIosStartupMaintenance: () => IOSCtrlProxyManager.awaitStartupOrphanRunnerReap(),
+    });
+    const owner = this;
+    this.readinessSelection = new ReadinessSelection({
+      detectConnectedPlatformsWithStatus: (...args) =>
+        this.detectConnectedPlatformsWithStatus(...args),
+      findProvidedReadinessImage: (...args) => this.findProvidedReadinessImage(...args),
+      get adb() {
+        return owner.adb;
+      },
+      get simctl() {
+        return owner.simctl;
+      },
+      provider: this.provider,
+      runnerReadinessTimer: this.runnerReadinessTimer,
+      physicalIosScanBudgetMs: this.physicalIosScanBudgetMs,
+      selection: this.selection,
+      withLifecycleStart: (...args) => this.withLifecycleStart(...args),
+      verifyDevice: (...args) => this.verifyDevice(...args),
+      setCurrentDevice: (...args) => this.setCurrentDevice(...args),
+      applyAppearanceOnConnect: (device, sessionId) =>
+        applyAppearanceOnConnect(
+          device,
+          this.appearanceOnConnectDependencies,
+          resolveAppearanceSessionKey(sessionId),
+        ),
+      resumeAfterDeviceStart: (platform, deviceId) =>
+        ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, deviceId),
+      resumeReadBootClient: (platform, deviceId) =>
+        ({ android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient })[
+          platform
+        ].resumeAfterDeviceStart(deviceId),
+      adbFactory: this.adbFactory,
+      checkedAndroidOwnership: this.checkedAndroidOwnership,
+      findOrStartDevice: (...args) => this.findOrStartDevice(...args),
+      get deviceUtils() {
+        return owner.deviceUtils;
+      },
+      bootAndroidReadinessImage: (...args) => this.bootAndroidReadinessImage(...args),
+      bootIosReadinessImage: (...args) => this.bootIosReadinessImage(...args),
+      clearExplicitDevicePin: (...args) => this.clearExplicitDevicePin(...args),
+      admissionGate: this.admissionGate,
     });
   }
 
@@ -545,123 +554,15 @@ export class DeviceReadiness implements DeviceReadiness {
   public async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
     return (await this.detectConnectedPlatformsWithStatus(signal)).devices;
   }
-
-  public async detectConnectedPlatformsWithStatus(
+  public detectConnectedPlatformsWithStatus(
     signal?: AbortSignal,
     options?: ConnectedPlatformScanOptions,
   ): Promise<ConnectedPlatformScan> {
-    const devices: BootedDevice[] = [];
-    const scannedSources: Record<DiscoverySource, boolean> = {
-      android: false,
-      "ios-simulator": false,
-      "ios-physical": false,
-    };
-    const perf = createGlobalPerformanceTracker();
-
-    try {
-      // Check for Android devices via ADB
-      perf.startOperation("androidDeviceScan");
-      // A missing adb binary (or its cooldown) must not read as a complete,
-      // empty scan: that would let reconciliation clear a pinned Android device.
-      const androidDevices = this.mapAndroidReadinessRows(
-        await this.adb.getBootedAndroidDevices({
-          signal,
-          throwOnMissingAdb: true,
-        }),
-      );
-      perf.endOperation("androidDeviceScan");
-      devices.push(...androidDevices);
-      scannedSources.android = true;
-    } catch (error) {
-      perf.endOperation("androidDeviceScan");
-      signal?.throwIfAborted();
-      if (error instanceof AdbUnavailableError) {
-        // Expected on hosts without the Android SDK; the scan stays non-authoritative.
-        logger.debug(`Android scan skipped: ${error.message}`);
-      } else {
-        logger.warn(`Failed to detect Android devices: ${error}`);
-      }
-    }
-
-    const [simulators, physical] = await Promise.all([
-      this.scanBootedSimulators(perf, signal),
-      this.scanPhysicalIosDevices(options?.platform, signal),
-    ]);
-    signal?.throwIfAborted();
-    // Simulator entries win on overlap: they carry richer runtime metadata.
-    const seen = new Set(simulators.devices.map((device) => device.deviceId));
-    devices.push(
-      ...simulators.devices,
-      ...physical.devices.filter((device) => !seen.has(device.deviceId)),
-    );
-    scannedSources["ios-simulator"] = simulators.complete;
-    scannedSources["ios-physical"] = physical.complete;
-
-    return {
-      devices,
-      scanned: {
-        android: scannedSources.android,
-        ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
-      },
-      scannedSources,
-    };
-  }
-
-  /**
-   * Booted simulators via the checked listing: a failed `simctl` call leaves
-   * the source unscanned rather than reading as "no simulators" (#11063).
-   */
-  private async scanBootedSimulators(
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
-    signal?: AbortSignal,
-  ): Promise<{ devices: BootedDevice[]; complete: boolean }> {
-    if (!this.simctl) {
-      return { devices: [], complete: false };
-    }
-    perf.startOperation("iosSimulatorScan");
-    try {
-      const devices = await this.simctl.getBootedSimulatorsChecked(undefined, signal);
-      return { devices, complete: true };
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`Failed to detect iOS simulators: ${error}`);
-      return { devices: [], complete: false };
-    } finally {
-      perf.endOperation("iosSimulatorScan");
-    }
-  }
-
-  /**
-   * Connected physical iOS devices via the shared devicectl lister. Retained
-   * devices from an incomplete listing still resolve, but the source counts as
-   * scanned only when devicectl reported a complete listing (#11063).
-   */
-  private async scanPhysicalIosDevices(
-    platform?: SomePlatform,
-    signal?: AbortSignal,
-  ): Promise<{ devices: BootedDevice[]; complete: boolean }> {
-    const lister = this.provider.getIosPhysicalDeviceLister?.();
-    if (!lister || platform === "android") {
-      return { devices: [], complete: false };
-    }
-    try {
-      // The lister run is shared and uncancellable; losing the race leaves it running.
-      const discovery = await raceWithDeadline(() => lister.listConnectedDevices(), {
-        timer: this.runnerReadinessTimer,
-        timeoutMs: this.physicalIosScanBudgetMs,
-        signal,
-        label: "Physical iOS device scan",
-      });
-      return { devices: discovery.devices, complete: discovery.complete };
-    } catch (error) {
-      signal?.throwIfAborted();
-      // The lister contract is non-throwing; a misbehaving one must not fail the scan.
-      logger.warn(`Failed to detect physical iOS devices: ${errorMessage(error)}`);
-      return { devices: [], complete: false };
-    }
+    return this.readinessSelection.detectConnectedPlatformsWithStatus(signal, options);
   }
 
   private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();
+  private readonly androidCtrlProxyReadiness: AndroidCtrlProxyReadiness;
 
   /**
    * Ensure a device is ready for the specified platform and return its ID
@@ -673,203 +574,8 @@ export class DeviceReadiness implements DeviceReadiness {
     options?: DeviceReadyOptions,
   ): Promise<BootedDevice> {
     return this.checkedAndroidOwnership.run(new Set(), () =>
-      this.ensureDeviceReadyInCall(platform, providedDeviceId, options),
+      this.readinessSelection.ensureDeviceReadyInCall(platform, providedDeviceId, options),
     );
-  }
-
-  private async ensureDeviceReadyInCall(
-    platform: SomePlatform,
-    providedDeviceId?: string,
-    options?: DeviceReadyOptions,
-  ): Promise<BootedDevice> {
-    logger.info(
-      `[DeviceReadiness] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
-    );
-    providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
-
-    // Detect all connected devices
-    const result = await this.getReadinessScan(platform, options);
-    const scan = this.normalizeReadinessScan(result);
-    const connectedPlatforms = scan.devices;
-    this.reconcileReadinessPin(scan);
-    logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
-    const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
-    logger.info(`Found ${androidDevices.length} android devices`);
-    const iosDevices = connectedPlatforms.filter((device) => device.platform === "ios");
-    logger.info(`Found ${iosDevices.length} ios devices`);
-
-    const readTarget = await this.resolveReadinessReadTarget(
-      platform,
-      providedDeviceId,
-      scan,
-      options,
-    );
-    if (readTarget.bootedDevice) {
-      return await this.finishReadinessSelection(
-        readTarget.bootedDevice,
-        readTarget.bootedDevice.platform,
-        "provided",
-        scan,
-        options,
-      );
-    }
-
-    // A running read name is judged and verified by its serial/UDID from here on.
-    providedDeviceId = readTarget.providedDeviceId;
-    const { platformDevices, resolvedPlatform } = this.resolveReadinessPlatform(
-      platform,
-      androidDevices,
-      iosDevices,
-      providedDeviceId,
-    );
-
-    let selectedDevice: BootedDevice | undefined;
-    let deviceVerified = false;
-    let deviceSource: "provided" | "current" | "auto" = "auto";
-    let staleCurrentDeviceId: string | undefined;
-
-    // If a specific device is provided, verify it exists on the correct platform
-    if (providedDeviceId) {
-      const providedDevice = this.requireProvidedReadinessDevice(
-        platform,
-        platformDevices,
-        providedDeviceId,
-      );
-      selectedDevice = await this.resolveAndroidReadinessIdentity(providedDevice, options?.signal);
-      deviceSource = "provided";
-    }
-
-    // Explicit selection takes precedence over ambient resolution by another call.
-    const selectedPin = this.findPinnedReadinessDevice(platformDevices);
-    if (this.shouldResolveReadinessPin(selectedDevice, providedDeviceId, selectedPin)) {
-      selectedDevice = await this.resolveAndroidReadinessIdentity(selectedPin, options?.signal);
-      deviceSource = "provided";
-    }
-
-    // If we have a current device for the requested platform, verify it's still ready
-    if (!selectedDevice && this.hasCurrentReadinessDevice(platform, resolvedPlatform)) {
-      const currentDeviceId = this.selection.currentDevice!.deviceId;
-      selectedDevice = await this.verifyCurrentReadinessDevice(
-        platformDevices,
-        resolvedPlatform,
-        scan,
-        options,
-      );
-      if (selectedDevice) {
-        deviceVerified = true;
-        deviceSource = "current";
-      } else {
-        staleCurrentDeviceId = currentDeviceId;
-      }
-    }
-
-    // No device set - find or start one for the requested platform
-    if (!selectedDevice) {
-      logger.info(
-        `[DeviceReadiness] No current device, finding or starting device for platform ${resolvedPlatform}`,
-      );
-      selectedDevice = await this.findOrStartReadinessDevice(
-        resolvedPlatform,
-        scan,
-        options,
-        staleCurrentDeviceId,
-      );
-      deviceVerified = true;
-      deviceSource = "auto";
-    }
-
-    if (!deviceVerified) {
-      if (!selectedDevice) {
-        throw new ActionableError("No device was selected for readiness verification");
-      }
-      const deviceForVerification = selectedDevice;
-      await this.withLifecycleStart(
-        lifecycleIdentityForDevice(deviceForVerification),
-        options,
-        async (signal) =>
-          await this.verifyDevice(
-            deviceForVerification.deviceId,
-            resolvedPlatform,
-            { ...options, signal },
-            deviceForVerification,
-          ),
-      );
-    }
-
-    return await this.finishReadinessSelection(
-      selectedDevice,
-      resolvedPlatform,
-      deviceSource,
-      scan,
-      options,
-    );
-  }
-
-  private assertUsableIosOverride(
-    iosOverride: Awaited<ReturnType<typeof checkIosCtrlProxyOverride>>,
-  ): void {
-    if (iosOverride.present && !iosOverride.usable) {
-      throw new ActionableError(
-        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`,
-      );
-    }
-  }
-
-  private async finishReadinessSelection(
-    selectedDevice: BootedDevice,
-    resolvedPlatform: Platform,
-    deviceSource: "provided" | "current" | "auto",
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
-  ): Promise<BootedDevice> {
-    // Safety check: ensure the selected device's platform matches the resolved platform.
-    // This guards against cross-platform contamination where an iOS device could be
-    // returned when Android was explicitly requested (or vice versa).
-    if (selectedDevice.platform !== resolvedPlatform) {
-      logger.warn(
-        `[DeviceReadiness] Platform mismatch: selected device ${selectedDevice.deviceId} ` +
-          `has platform '${selectedDevice.platform}' but resolved platform is '${resolvedPlatform}'. ` +
-          `Discarding and finding correct platform device.`,
-      );
-      selectedDevice = await this.findOrStartReadinessDevice(resolvedPlatform, scan, options);
-    }
-
-    // A cancelled call (e.g. another session acquired the device, #10905) stops before each
-    // control-only step: the current-device pin, appearance and stylus settings writes.
-    // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
-    // (owner decision 2026-10-12, #11964). CtrlProxy accessibility settings are part of readiness above.
-    options?.signal?.throwIfAborted();
-    if (options?.intent !== "read") {
-      await this.assertAndroidSelectionAvailable(selectedDevice, deviceSource, options?.signal);
-      this.setCurrentDevice(selectedDevice, resolvedPlatform);
-      if (deviceSource !== "current") {
-        await applyAppearanceOnConnect(
-          selectedDevice,
-          this.appearanceOnConnectDependencies,
-          resolveAppearanceSessionKey(options?.sessionId),
-        );
-        options?.signal?.throwIfAborted();
-        await disableStylusHandwriting(selectedDevice, this.adbFactory);
-      }
-    }
-    logger.info(`[DeviceReadiness] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
-    return selectedDevice;
-  }
-
-  private async assertAndroidSelectionAvailable(
-    device: BootedDevice,
-    deviceSource: "provided" | "current" | "auto",
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (
-      device.platform !== "android" ||
-      deviceSource === "current" ||
-      this.checkedAndroidOwnership.getStore()?.has(device.deviceId)
-    ) {
-      return;
-    }
-    await this.provider.getAndroidCtrlProxyManager(device).assertNotDrivenByOtherDaemon?.(signal);
-    signal?.throwIfAborted();
   }
 
   private assertCreatedIosReservation(
@@ -883,507 +589,18 @@ export class DeviceReadiness implements DeviceReadiness {
     }
   }
 
-  private shouldResolveReadinessPin(
-    selectedDevice: BootedDevice | undefined,
-    providedDeviceId: string | undefined,
-    selectedPin: BootedDevice | undefined,
-  ): selectedPin is BootedDevice {
-    return !selectedDevice && !providedDeviceId && !!selectedPin;
-  }
-
-  private requireProvidedReadinessDevice(
-    platform: SomePlatform,
-    platformDevices: BootedDevice[],
-    providedDeviceId: string,
-  ): BootedDevice {
-    const providedDevice = platformDevices.find((device) => device.deviceId === providedDeviceId);
-    if (!providedDevice) {
-      throw providedReadTargetNotFound(providedDeviceId, platform, platformDevices);
-    }
-    return providedDevice;
-  }
-
-  private assertReadinessDiscoveryComplete(
-    platform: SomePlatform,
-    scan: ConnectedPlatformScan,
-  ): void {
-    const platforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
-    for (const candidate of platforms) {
-      if (!scan.scanned[candidate]) {
-        throw new BootedDeviceDiscoveryIncompleteError(candidate, undefined);
-      }
-    }
-  }
-
-  private async resolveReadinessReadTarget(
-    platform: SomePlatform,
-    providedDeviceId: string | undefined,
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
-  ): Promise<{ providedDeviceId: string | undefined; bootedDevice?: BootedDevice }> {
-    if (options?.intent !== "read") {
-      return { providedDeviceId };
-    }
-    if (!providedDeviceId) {
-      // Stop before current-device verification can reserve a lifecycle lease for a stale target.
-      this.requireRunningReadinessDevice(platform, scan);
-      return { providedDeviceId };
-    }
-    const running = matchRunningReadTarget(scan.devices, providedDeviceId, platform);
-    if (running) {
-      return { providedDeviceId: running.deviceId };
-    }
-    // Resolve a stopped image before mixed-platform ambiguity: the call names its own platform.
-    return {
-      providedDeviceId,
-      bootedDevice: await this.bootProvidedReadinessImage(
-        platform,
-        providedDeviceId,
-        scan,
-        options,
-      ),
-    };
-  }
-
-  private requireRunningReadinessDevice(
-    platform: SomePlatform,
-    scan: ConnectedPlatformScan,
-    excludedDeviceId?: string,
-  ): BootedDevice {
-    const devices = scan.devices.filter(
-      (candidate) =>
-        (platform === "either" || candidate.platform === platform) &&
-        candidate.deviceId !== excludedDeviceId,
-    );
-    // Preserve findOrStartIosDevice's deterministic first-running selection.
-    if (platform === "ios") {
-      devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-    }
-    const device = devices[0];
-    if (device) {
-      return device;
-    }
-    // An either-platform read can establish absence on any completed platform.
-    if (platform !== "either" || !Object.values(scan.scanned).some(Boolean)) {
-      this.assertReadinessDiscoveryComplete(platform, scan);
-    }
-    const label =
-      platform === "either" ? "Android or iOS" : platform === "android" ? "Android" : "iOS";
-    throw new ActionableError(
-      `No ${label} device is running, so there is nothing to read. ` +
-        "Start one with startDevice or provisionDevice, or pass a deviceId.",
-    );
-  }
-
-  /** Every readiness fallback, including platform mismatch, observes the read's no-implicit-boot rule. */
-  private async findOrStartReadinessDevice(
-    platform: Platform,
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
-    excludedDeviceId?: string,
-  ): Promise<BootedDevice> {
-    if (options?.intent !== "read") {
-      return await this.findOrStartDevice(platform, options);
-    }
-    const device = await this.resolveAndroidReadinessIdentity(
-      this.requireRunningReadinessDevice(platform, scan, excludedDeviceId),
-      options.signal,
-    );
-    await this.withLifecycleStart(lifecycleIdentityForDevice(device), options, async (signal) => {
-      ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, device.deviceId);
-      await this.verifyDevice(device.deviceId, platform, { ...options, signal }, device);
-    });
-    return device;
-  }
-
-  private async listProvidedReadinessImages(
-    platform: Platform,
-    options: DeviceReadyOptions,
-  ): Promise<DeviceInfo[]> {
-    if (platform === "ios" && !this.simctl) {
-      throw new BootedDeviceDiscoveryIncompleteError("ios", {
-        code: "unavailable",
-        message: "iOS simulator tools not available",
-        retryable: true,
-      });
-    }
-    const controller = new AbortController();
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, controller.signal])
-      : controller.signal;
-    const timeoutError = new BootedDeviceDiscoveryIncompleteError(platform, {
-      code: "timeout",
-      message: "Named device image discovery timed out",
-      retryable: true,
-    });
-    try {
-      return await raceWithDeadline(
-        () =>
-          platform === "android"
-            ? this.deviceUtils.listDeviceImages("android", signal)
-            : this.simctl!.listSimulatorImages(undefined, { bypassCache: true, signal }),
-        {
-          timer: this.runnerReadinessTimer,
-          timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
-          signal: options.signal,
-          label: "Named device image discovery",
-          timeoutError: () => timeoutError,
-          onTimeout: () => controller.abort(timeoutError),
-        },
-      );
-    } catch (error) {
-      options.signal?.throwIfAborted();
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw new BootedDeviceDiscoveryIncompleteError(platform, {
-        code: "failed",
-        message: errorMessage(error),
-        retryable: true,
-      });
-    }
-  }
-
-  /** Read-only inventory lookup, also used to prove a target before read discovery retries. */
-  async findProvidedReadinessImage(
+  findProvidedReadinessImage(
     platform: SomePlatform,
     providedDeviceId: string,
     scan: ConnectedPlatformScan,
     options: DeviceReadyOptions,
   ): Promise<DeviceInfo | undefined> {
-    platform = explicitReadTargetPlatform(providedDeviceId, platform);
-    if (platform !== "either") {
-      this.assertReadinessDiscoveryComplete(platform, scan);
-    }
-    const platforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
-    const inventories = await Promise.allSettled(
-      platforms.map((p) => this.listProvidedReadinessImages(p, options)),
+    return this.readinessSelection.findProvidedReadinessImage(
+      platform,
+      providedDeviceId,
+      scan,
+      options,
     );
-    options.signal?.throwIfAborted();
-    const images = inventories.flatMap((result) =>
-      result.status === "fulfilled" ? result.value : [],
-    );
-    const matches = images.filter((image) =>
-      image.platform === "android"
-        ? image.name === providedDeviceId
-        : image.deviceId === providedDeviceId,
-    );
-    const image = matches.length === 1 ? matches[0] : undefined;
-    // A match needs authoritative discovery only for its own platform. Without
-    // a match, an incomplete in-scope scan still cannot establish not-found.
-    this.assertReadinessDiscoveryComplete(image?.platform ?? platform, scan);
-    for (const [index, result] of inventories.entries()) {
-      if (result.status === "rejected" && scan.scanned[platforms[index]]) {
-        // Completed discovery with failed inventory cannot rule out an ambiguous ID.
-        throw result.reason;
-      }
-    }
-    return image;
-  }
-
-  private async bootProvidedReadinessImage(
-    platform: SomePlatform,
-    providedDeviceId: string,
-    scan: ConnectedPlatformScan,
-    options: DeviceReadyOptions,
-  ): Promise<BootedDevice> {
-    const image = await this.findProvidedReadinessImage(platform, providedDeviceId, scan, options);
-    if (image?.platform === "android" && image.isRunning === true) {
-      throw new AndroidBootedDeviceDiscoveryIncompleteError(
-        undefined,
-        `Android AVD '${image.name}' is running but its serial could not be resolved yet.`,
-      );
-    }
-    if (
-      !image ||
-      image.isRunning !== false ||
-      (image.platform === "ios" && image.isAvailable === false)
-    ) {
-      // Keep the existing not-found text, even when ambient devices span both platforms.
-      return this.requireProvidedReadinessDevice(
-        platform,
-        scan.devices.filter((device) => platform === "either" || device.platform === platform),
-        providedDeviceId,
-      );
-    }
-    if (image.platform === "android") {
-      if (image.isRunningStateKnown === false) {
-        throw new AndroidBootedDeviceDiscoveryIncompleteError(
-          undefined,
-          `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
-        );
-      }
-      await options.beforeReadBoot?.(image);
-      return await this.bootAndroidReadinessImage(image, options);
-    }
-    await options.beforeReadBoot?.(image);
-    return await this.bootIosReadinessImage(image, options);
-  }
-
-  private findPinnedReadinessDevice(platformDevices: BootedDevice[]): BootedDevice | undefined {
-    return platformDevices.find(
-      (device) => device.deviceId === this.selection.explicitDevicePin?.deviceId,
-    );
-  }
-
-  /** Ownership has been rechecked; now observe boot state while holding the image lease. */
-  private async recheckReadBootImage(
-    image: DeviceInfo,
-    options: DeviceReadyOptions | undefined,
-  ): Promise<BootedDevice | undefined> {
-    if (options?.intent !== "read") {
-      return undefined;
-    }
-    let running: BootedDevice | undefined;
-    if (image.platform === "android") {
-      running = await this.recheckAndroidReadBootImage(image, options);
-    } else {
-      const images = await this.listProvidedReadinessImages("ios", options);
-      const matches = images.filter((candidate) => candidate.deviceId === image.deviceId);
-      const current = matches.length === 1 ? matches[0] : undefined;
-      if (!current || current.isAvailable === false) {
-        throw providedReadTargetNotFound(image.deviceId!, "ios", []);
-      }
-      if (current.isRunning === true) {
-        running = { ...current, deviceId: image.deviceId! };
-      } else if (current.isRunning !== false) {
-        throw providedReadTargetNotFound(image.deviceId!, "ios", []);
-      }
-    }
-    if (running) {
-      await options.beforeReadReadiness?.(running);
-      options.signal?.throwIfAborted();
-      const client = { android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient }[image.platform];
-      client.resumeAfterDeviceStart(running.deviceId);
-      await this.verifyDevice(running.deviceId, image.platform, options, running);
-    }
-    return running;
-  }
-
-  private async recheckAndroidReadBootImage(
-    image: DeviceInfo,
-    options: DeviceReadyOptions,
-  ): Promise<BootedDevice | undefined> {
-    // Do not reuse the caller's discovery memo or Android's short device-list cache.
-    const bootedDevices = await this.listBootedAndroidDevicesForSelection({
-      bypassAndroidDeviceListCache: true,
-      signal: options.signal,
-    });
-    options.signal?.throwIfAborted();
-    const images = await this.listProvidedReadinessImages("android", options);
-    const matches = images.filter((candidate) => candidate.name === image.name);
-    const current = matches.length === 1 ? matches[0] : undefined;
-    if (!current) {
-      throw providedReadTargetNotFound(image.name, "android", []);
-    }
-    const running = matchRunningReadTarget(
-      bootedDevices.filter(
-        (device) => isAndroidEmulatorSerial(device.deviceId) && device.name === image.name,
-      ),
-      image.name,
-      "android",
-    );
-    if (running) {
-      return running;
-    }
-    if (current.isRunning === true) {
-      throw new AndroidBootedDeviceDiscoveryIncompleteError(
-        undefined,
-        `Android AVD '${image.name}' is running but its serial could not be resolved yet.`,
-      );
-    }
-    assertAndroidImageRunningStateKnown(current);
-    if (current.isRunning !== false) {
-      throw new AndroidBootedDeviceDiscoveryIncompleteError(
-        undefined,
-        `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
-      );
-    }
-    return undefined;
-  }
-
-  private async listBootedAndroidDevicesForSelection(
-    options?: BootedDeviceDiscoveryOptions,
-  ): Promise<BootedDevice[]> {
-    const discovery = await this.deviceUtils.getBootedDevicesDetailed("android", options);
-    options?.signal?.throwIfAborted();
-    // Failed discovery cannot establish absence and admit a cold boot (#11103).
-    if (!discovery.succeededPlatforms.has("android")) {
-      throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
-    }
-    return discovery.devices;
-  }
-
-  private getReadinessScan(
-    platform: SomePlatform,
-    options?: DeviceReadyOptions,
-  ): Promise<BootedDevice[] | ConnectedPlatformScan> {
-    return options?.getConnectedPlatforms
-      ? options.getConnectedPlatforms()
-      : this.detectConnectedPlatformsWithStatus(options?.signal, { platform });
-  }
-
-  private reconcileReadinessPin(scan: ConnectedPlatformScan): void {
-    const pinnedDevice = this.selection.explicitDevicePin;
-    if (
-      pinnedDevice &&
-      isScanAuthoritativeFor(scan, pinnedDevice) &&
-      !scan.devices.some(
-        (device) =>
-          device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
-      )
-    ) {
-      this.clearExplicitDevicePin(pinnedDevice.deviceId);
-    }
-  }
-
-  private resolveReadinessPlatform(
-    platform: SomePlatform,
-    androidDevices: BootedDevice[],
-    iosDevices: BootedDevice[],
-    providedDeviceId?: string,
-  ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
-    // Get devices for the requested platform
-    let platformDevices: BootedDevice[] = [];
-    let resolvedPlatform: Platform;
-    switch (platform) {
-      case "android":
-        platformDevices = androidDevices;
-        resolvedPlatform = "android";
-        break;
-      case "ios":
-        platformDevices = iosDevices;
-        resolvedPlatform = "ios";
-        break;
-      default:
-        // Only check for mixed platforms when auto-detecting (not explicitly specified)
-        if (androidDevices.length > 0 && iosDevices.length > 0) {
-          return this.resolveMixedReadinessPlatform(androidDevices, iosDevices, providedDeviceId);
-        }
-
-        if (androidDevices.length > 0) {
-          platformDevices = androidDevices;
-          resolvedPlatform = "android";
-        } else if (iosDevices.length > 0) {
-          platformDevices = iosDevices;
-          resolvedPlatform = "ios";
-        } else {
-          platformDevices = [];
-          resolvedPlatform = "android";
-        }
-    }
-
-    return { platformDevices, resolvedPlatform };
-  }
-
-  private resolveMixedReadinessPlatform(
-    androidDevices: BootedDevice[],
-    iosDevices: BootedDevice[],
-    providedDeviceId?: string,
-  ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
-    // An explicit deviceId names the target unambiguously, so it resolves
-    // the platform ahead of the ambient one — otherwise switching to a
-    // device on the other platform by id would be pinned to whatever
-    // setActiveDevice last selected and fail (issue #5870).
-    if (providedDeviceId) {
-      const allDevices = [...androidDevices, ...iosDevices];
-      const match = allDevices.find((d) => d.deviceId === providedDeviceId);
-      if (match) {
-        return {
-          platformDevices: match.platform === "android" ? androidDevices : iosDevices,
-          resolvedPlatform: match.platform,
-        };
-      }
-    }
-    // With no matching deviceId, fall back to the platform setActiveDevice selected.
-    const selectedPlatform =
-      this.selection.explicitDevicePin?.platform ?? this.selection.currentPlatform;
-    if (selectedPlatform && (this.selection.explicitDevicePin || this.selection.currentDevice)) {
-      return {
-        platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
-        resolvedPlatform: selectedPlatform,
-      };
-    }
-    throw new ActionableError(
-      "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
-    );
-  }
-
-  private skipUndiscoveredReadinessCurrentDevice(
-    platformDevices: BootedDevice[],
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
-  ): boolean {
-    if (
-      options?.intent === "read" &&
-      !platformDevices.some((device) => device.deviceId === this.selection.currentDevice?.deviceId)
-    ) {
-      // A cached current device is not an explicit deviceId on this call.
-      if (isScanAuthoritativeFor(scan, this.selection.currentDevice!)) {
-        this.selection.currentDevice = undefined;
-        this.selection.currentPlatform = undefined;
-      }
-      return true;
-    }
-    return false;
-  }
-
-  private async verifyCurrentReadinessDevice(
-    platformDevices: BootedDevice[],
-    resolvedPlatform: Platform,
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
-  ): Promise<BootedDevice | undefined> {
-    if (this.skipUndiscoveredReadinessCurrentDevice(platformDevices, scan, options)) {
-      return undefined;
-    }
-    logger.info(
-      `[DeviceReadiness] Found current device: ${this.selection.currentDevice!.deviceId}, verifying readiness`,
-    );
-    try {
-      // Prefer the current discovery over the cached selection, resolved to
-      // its stable AVD name so an Android emulator is keyed by the runtime on
-      // the serial rather than by the serial itself.
-      const currentDevice = await this.resolveAndroidReadinessIdentity(
-        platformDevices.find(
-          (device) => device.deviceId === this.selection.currentDevice?.deviceId,
-        ) ?? this.selection.currentDevice!,
-        options?.signal,
-      );
-      // Use resolvedPlatform (always "android" | "ios") instead of platform (which may be "either")
-      // to ensure verifyDevice dispatches to the correct platform-specific verification
-      await this.withLifecycleStart(
-        lifecycleIdentityForDevice(currentDevice),
-        options,
-        async (signal) =>
-          await this.verifyDevice(
-            currentDevice.deviceId,
-            resolvedPlatform,
-            { ...options, signal },
-            currentDevice,
-          ),
-      );
-      return currentDevice;
-    } catch (error) {
-      // Request cancellation does not make the selected device stale. Preserve
-      // the user's explicit selection so a later platform-implicit call does
-      // not become ambiguous merely because this caller disconnected.
-      options?.signal?.throwIfAborted();
-      if (error instanceof RunnerReadinessError || isDeviceIdentityQuarantinedError(error)) {
-        throw error;
-      }
-      logger.warn(`Current device ${this.selection.currentDevice} is no longer ready: ${error}`);
-      const stillDiscovered = platformDevices.some(
-        (device) => device.deviceId === this.selection.currentDevice?.deviceId,
-      );
-      this.selection.currentDevice = undefined;
-      this.selection.currentPlatform = undefined;
-      if (options?.intent === "read" && stillDiscovered) {
-        // Verification failure does not mean a discovered device stopped running.
-        throw error;
-      }
-    }
-    return undefined;
   }
 
   /**
@@ -1403,57 +620,6 @@ export class DeviceReadiness implements DeviceReadiness {
   }
 
   /**
-   * Production discovery lists Android devices from raw `adb devices`, so the
-   * provided-device and current-device readiness paths only see
-   * `name === serial`. Resolve the AVD identity from the enriched discovery
-   * (the same source `findOrStartAndroidDevice` uses) so those paths also
-   * rebuild the cached Window when another AVD takes over the serial (#7031).
-   * Falls back to the raw entry when the runtime cannot be resolved.
-   */
-  private async findLiveAndroidDevice(deviceId: string): Promise<BootedDevice | undefined> {
-    return (await this.deviceUtils.getBootedDevices("android")).find(
-      (candidate) => candidate.deviceId === deviceId,
-    );
-  }
-
-  /** AVD name currently attached to `deviceId`, or undefined when not resolvable. */
-  private async resolveCurrentAndroidIdentity(deviceId: string): Promise<string | undefined> {
-    try {
-      const live = await this.findLiveAndroidDevice(deviceId);
-      return live && !isUnresolvedAndroidEmulatorName(live) ? live.name : undefined;
-    } catch (error) {
-      logger.warn(
-        `[DeviceReadiness] Could not resolve the live identity of ${deviceId} for the retired-transport check: ${errorMessage(error)}`,
-        error,
-      );
-      return undefined;
-    }
-  }
-
-  private async resolveAndroidReadinessIdentity(
-    device: BootedDevice,
-    signal?: AbortSignal,
-  ): Promise<BootedDevice> {
-    if (!isUnresolvedAndroidEmulatorName(device)) {
-      return device;
-    }
-    signal?.throwIfAborted();
-    let enriched: BootedDevice | undefined;
-    try {
-      enriched = await this.findLiveAndroidDevice(device.deviceId);
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(
-        `[DeviceReadiness] Could not resolve the AVD identity for ${device.deviceId}; ` +
-          `keeping the raw serial identity: ${errorMessage(error)}`,
-        error,
-      );
-      return device;
-    }
-    return enriched && !isUnresolvedAndroidEmulatorName(enriched) ? enriched : device;
-  }
-
-  /**
    * Verify an Android device is connected and ready
    */
   public async verifyAndroidDevice(
@@ -1462,12 +628,14 @@ export class DeviceReadiness implements DeviceReadiness {
     resolvedIdentity?: ResolvedDeviceIdentity,
   ): Promise<void> {
     options?.signal?.throwIfAborted();
-    deviceId = this.canonicalAndroidId(deviceId);
+    deviceId = this.readinessSelection.canonicalAndroidId(deviceId);
     // Gate before discovery or a cached Window can use its pre-quarantine executor.
     // Identity reconciliation/lifting uses discovery directly, never readiness.
     this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
     this.executionBinding.bindDeviceExecution(deviceId);
-    const allDevices = this.mapAndroidReadinessRows(await this.adb.getBootedAndroidDevices());
+    const allDevices = this.readinessSelection.mapAndroidReadinessRows(
+      await this.adb.getBootedAndroidDevices(),
+    );
     const device = allDevices.find((device) => device.deviceId === deviceId);
 
     if (!device) {
@@ -1479,11 +647,11 @@ export class DeviceReadiness implements DeviceReadiness {
     try {
       logger.info(`[DeviceReadiness] Verifying Android device ${deviceId} readiness`);
 
-      const deviceForWindow = this.androidReadinessWindowDevice(device, resolvedIdentity);
+      const deviceForWindow = androidReadinessWindowDevice(device, resolvedIdentity);
       const window = this.provider.getWindow(deviceForWindow);
 
       const activeWindow = await window.getActive(true);
-      this.assertAndroidActiveWindow(deviceId, activeWindow);
+      assertAndroidActiveWindow(deviceId, activeWindow);
     } catch (error) {
       const errorMsg = errorMessage(error);
       throw new ActionableError(
@@ -1498,475 +666,9 @@ export class DeviceReadiness implements DeviceReadiness {
 
     await withDeviceReadinessLock(
       deviceReadinessLockKey("android", deviceId),
-      () => this.ensureAndroidCtrlProxyReady(deviceId, device, options),
+      () => this.androidCtrlProxyReadiness.ensureReady(deviceId, device, options),
       { signal: options?.signal },
     );
-  }
-
-  private androidReadinessWindowDevice(
-    device: BootedDevice,
-    resolvedIdentity?: ResolvedDeviceIdentity,
-  ): BootedDevice {
-    return resolvedIdentity?.deviceId === device.deviceId
-      ? {
-          ...device,
-          name: resolvedIdentity.name,
-          ...(resolvedIdentity.observedAt === undefined
-            ? {}
-            : { observedAt: resolvedIdentity.observedAt }),
-        }
-      : device;
-  }
-
-  private assertAndroidActiveWindow(
-    deviceId: string,
-    activeWindow: Awaited<ReturnType<Window["getActive"]>>,
-  ): void {
-    if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-      logger.warn(`[DeviceReadiness] Android device ${deviceId} is not fully ready`);
-      if (activeWindow) {
-        logger.warn(
-          `[DeviceReadiness] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
-        );
-      } else {
-        logger.warn(`[DeviceReadiness] activeWindow: ${activeWindow}`);
-      }
-      throw new ActionableError(
-        `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
-      );
-    }
-  }
-
-  // Existing CtrlProxy state machine moved intact so the readiness lock covers it.
-  // oxlint-disable-next-line eslint/complexity
-  private async ensureAndroidCtrlProxyReady(
-    deviceId: string,
-    device: BootedDevice,
-    options?: DeviceReadyOptions,
-  ): Promise<void> {
-    // Always track setup timing (one-time per session, valuable for debugging)
-    const perf = createPerformanceTracker(true);
-    perf.serial("ensureAccessibilityService");
-    const state = { didSetup: false, needsSetup: false };
-    let accessibilityClient: AndroidCtrlProxy | undefined;
-
-    try {
-      const skipCtrlProxyDownload = this.skipCtrlProxyDownload(options);
-      this.warnDeprecatedAccessibilityOptions(options);
-
-      const manager = this.provider.getAndroidCtrlProxyManager(device);
-      accessibilityClient = this.provider.getAndroidCtrlProxyClient(device);
-      if (accessibilityClient.isConnected()) {
-        if (await this.verifyConnectedAndroidService(deviceId, accessibilityClient, perf)) {
-          options?.signal?.throwIfAborted();
-          // This process already drives the responsive socket; no readiness write is needed.
-          this.checkedAndroidOwnership.getStore()?.add(deviceId);
-          return;
-        }
-      }
-
-      await manager.assertNotDrivenByOtherDaemon?.(options?.signal);
-      options?.signal?.throwIfAborted();
-      this.checkedAndroidOwnership.getStore()?.add(deviceId);
-
-      const verifyCompatibilityWhenSkipping = async (): Promise<void> => {
-        const isCompatible = await manager.isVersionCompatible();
-        if (isCompatible) {
-          logger.info(`[DeviceReadiness] Accessibility service version compatible for ${deviceId}`);
-          return;
-        }
-        const errorMsg =
-          "Accessibility service version mismatch detected. Run without skipCtrlProxyDownload to install a compatible version.";
-        logger.warn(`[DeviceReadiness] ${errorMsg} Device: ${deviceId}`);
-        throw new ActionableError(errorMsg);
-      };
-
-      const [isInstalled, isEnabled] = await perf.track("checkStatus", () =>
-        Promise.all([manager.isInstalled(), manager.isEnabled()]),
-      );
-      // Enabling or installing CtrlProxy mutates the device; a cancelled call stops here (#10905).
-      options?.signal?.throwIfAborted();
-
-      state.needsSetup = false;
-
-      if (isInstalled && isEnabled) {
-        if (
-          await this.verifyEnabledAndroidService(
-            deviceId,
-            manager,
-            accessibilityClient,
-            perf,
-            state,
-            {
-              skipCtrlProxyDownload,
-              verifyCompatibilityWhenSkipping,
-              signal: options?.signal,
-            },
-          )
-        ) {
-          return;
-        }
-      }
-
-      if (!isInstalled && skipCtrlProxyDownload) {
-        logger.info(
-          `[DeviceReadiness] Accessibility service not installed for ${deviceId}, skipping download/install`,
-        );
-        return;
-      }
-
-      if (isInstalled && !isEnabled && !state.needsSetup) {
-        if (
-          await this.enableInstalledAndroidService(
-            deviceId,
-            manager,
-            accessibilityClient,
-            perf,
-            state,
-            {
-              skipCtrlProxyDownload,
-              verifyCompatibilityWhenSkipping,
-              signal: options?.signal,
-            },
-          )
-        ) {
-          return;
-        }
-      }
-
-      if (skipCtrlProxyDownload && !state.needsSetup) {
-        logger.info(
-          `[DeviceReadiness] Skipping accessibility service download/install for ${deviceId}`,
-        );
-        return;
-      }
-
-      if (state.needsSetup || !isInstalled) {
-        options?.signal?.throwIfAborted();
-        await this.setupAndroidService(
-          deviceId,
-          manager,
-          accessibilityClient,
-          perf,
-          state,
-          options?.signal,
-        );
-      }
-    } catch (error) {
-      options?.signal?.throwIfAborted();
-      const errorMsg = errorMessage(error);
-      if (
-        options?.intent === "read" &&
-        (error instanceof DeviceOwnedByOtherDaemonError ||
-          error instanceof CtrlProxyForwardOwnershipUnreadableError ||
-          error instanceof AndroidForwardReadinessConflictError)
-      ) {
-        logger.warn(
-          `[DeviceReadiness] Skipping CtrlProxy readiness for read on ${deviceId}: ${errorMsg}`,
-        );
-        return;
-      }
-      logger.error(`[DeviceReadiness] Failed to setup accessibility service: ${errorMsg}`);
-      // Rethrow ActionableErrors to preserve their specific error messages, and cancellation so
-      // readiness does not go on to pin and configure the device (#10905).
-      if (error instanceof ActionableError || options?.signal?.aborted) {
-        throw error;
-      }
-    } finally {
-      perf.end();
-      // Store timing if we actually did setup work
-      if (state.didSetup) {
-        const timings = perf.getTimings();
-        if (timings) {
-          storeSetupTiming(deviceId, timings, options?.sessionId);
-        }
-      }
-    }
-  }
-
-  private skipCtrlProxyDownload(options?: DeviceReadyOptions): boolean | undefined {
-    return (
-      options?.skipCtrlProxyDownload ??
-      options?.skipAccessibilityDownload ??
-      options?.skipAccessibilitySetup
-    );
-  }
-
-  private warnDeprecatedAccessibilityOptions(options?: DeviceReadyOptions): void {
-    if (options?.skipAccessibilitySetup !== undefined) {
-      if (options?.skipAccessibilityDownload !== undefined) {
-        logger.warn(
-          "[DeviceReadiness] skipAccessibilityDownload is deprecated; use skipCtrlProxyDownload instead.",
-        );
-      } else {
-        logger.warn(
-          "[DeviceReadiness] skipAccessibilitySetup is deprecated; use skipCtrlProxyDownload instead.",
-        );
-      }
-    }
-  }
-
-  private async verifyConnectedAndroidService(
-    deviceId: string,
-    accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-  ): Promise<boolean> {
-    // WebSocket appears connected, but verify service is actually responsive
-    // This catches cases where service crashed but socket wasn't properly closed
-    logger.info(
-      `[DeviceReadiness] WebSocket connected for ${deviceId}, verifying service is responsive`,
-    );
-    const isReady = await perf.track("verifyConnectedService", () =>
-      accessibilityClient.verifyServiceReady(2, 200, 2000),
-    );
-    if (isReady) {
-      logger.info(`[DeviceReadiness] Accessibility service verified responsive for ${deviceId}`);
-      perf.end();
-      return true;
-    }
-    // Service not responsive despite a connected socket: the socket itself
-    // is suspect (issue #7554 — readyState stays OPEN across a half-open
-    // connection to a wedged or unreachable peer). Terminate it so the
-    // normal flow below reconnects with a fresh socket, rather than
-    // falling through to a waitForConnection() that would just reuse the
-    // same half-open one and report success immediately. Unlike close(),
-    // terminateStaleConnection() does not disable auto-reconnect for the
-    // rest of this client's lifetime — it drives the same was-open close
-    // path a real network failure would.
-    logger.warn(
-      `[DeviceReadiness] WebSocket connected but service not responsive for ${deviceId}, terminating stale connection and checking status`,
-    );
-    accessibilityClient.terminateStaleConnection();
-    return false;
-  }
-
-  private async verifyEnabledAndroidService(
-    deviceId: string,
-    manager: CtrlProxyManager,
-    accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    setupState: { didSetup: boolean; needsSetup: boolean },
-    compatibility: {
-      skipCtrlProxyDownload: boolean | undefined;
-      verifyCompatibilityWhenSkipping: () => Promise<void>;
-      signal?: AbortSignal;
-    },
-  ): Promise<boolean> {
-    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = compatibility;
-    logger.info(
-      `[DeviceReadiness] Accessibility service already enabled for ${deviceId}, verifying WebSocket connection`,
-    );
-    // Verify the service is actually working by checking WebSocket connection
-    const connected = await perf.track("verifyConnection", () =>
-      accessibilityClient.waitForConnection(3, 200),
-    );
-    if (connected) {
-      if (skipCtrlProxyDownload) {
-        await verifyCompatibilityWhenSkipping();
-        return true;
-      }
-      logger.info(
-        `[DeviceReadiness] Accessibility service enabled and connected for ${deviceId}, verifying version compatibility`,
-      );
-    } else {
-      await this.throwAndroidForwardConflictIfPresent(
-        deviceId,
-        manager,
-        accessibilityClient,
-        signal,
-      );
-      // Service claims to be installed but WebSocket won't connect - cache is stale
-      logger.warn(
-        `[DeviceReadiness] Accessibility service cache stale for ${deviceId} - marked as installed/enabled but WebSocket failed. Resetting setup state and forcing reinstall.`,
-      );
-      manager.resetSetupState();
-      setupState.needsSetup = true;
-    }
-    return false;
-  }
-
-  private async enableInstalledAndroidService(
-    deviceId: string,
-    manager: CtrlProxyManager,
-    accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    setupState: { didSetup: boolean; needsSetup: boolean },
-    compatibility: {
-      skipCtrlProxyDownload: boolean | undefined;
-      verifyCompatibilityWhenSkipping: () => Promise<void>;
-      signal?: AbortSignal;
-    },
-  ): Promise<boolean> {
-    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = compatibility;
-    logger.info(
-      `[DeviceReadiness] Accessibility service installed but not enabled for ${deviceId}, enabling now`,
-    );
-    try {
-      await perf.track("enableService", () => manager.enable());
-      setupState.didSetup = true;
-      // enable() just changed the endpoint's state; failures recorded
-      // before this point must not cool down the connect that follows
-      // (issue #7538).
-      accessibilityClient.resetConnectionBudget();
-      // Wait for WebSocket to be ready after enabling
-      logger.info(
-        `[DeviceReadiness] Waiting for accessibility WebSocket connection for ${deviceId}`,
-      );
-      const enableConnected = await perf.track("waitForConnection", () =>
-        accessibilityClient.waitForConnection(),
-      );
-      if (!enableConnected) {
-        await this.throwAndroidForwardConflictIfPresent(
-          deviceId,
-          manager,
-          accessibilityClient,
-          signal,
-        );
-        logger.warn(
-          `[DeviceReadiness] WebSocket connection failed after enabling for ${deviceId}, will attempt full setup`,
-        );
-        manager.resetSetupState();
-        setupState.needsSetup = true;
-      } else {
-        if (skipCtrlProxyDownload) {
-          await verifyCompatibilityWhenSkipping();
-          return true;
-        }
-        logger.info(
-          `[DeviceReadiness] Accessibility service enabled for ${deviceId}, verifying version compatibility`,
-        );
-      }
-    } catch (error) {
-      if (
-        error instanceof DeviceOwnedByOtherDaemonError ||
-        accessibilityClient.isLastConnectionFailureForwardingLeaseConflict?.()
-      ) {
-        throw error;
-      }
-      const errorMsg = errorMessage(error);
-      logger.warn(`[DeviceReadiness] Failed to enable accessibility service: ${errorMsg}`);
-      if (skipCtrlProxyDownload) {
-        return true;
-      }
-      setupState.needsSetup = true;
-    }
-    return false;
-  }
-
-  private async setupAndroidService(
-    deviceId: string,
-    manager: CtrlProxyManager,
-    accessibilityClient: AndroidCtrlProxy,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    state: { didSetup: boolean },
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const setup = await manager.setup(false, perf);
-    if (!setup.success) {
-      if (
-        setup.cause instanceof DeviceOwnedByOtherDaemonError ||
-        setup.cause instanceof CtrlProxyForwardOwnershipUnreadableError
-      ) {
-        throw setup.cause;
-      }
-      throw new ActionableError(setup.error ?? setup.message);
-    }
-    state.didSetup = true;
-    // setup() just changed the endpoint's state (fresh install/enable);
-    // failures recorded before this point must not cool down the connect
-    // that follows (issue #7538).
-    accessibilityClient.resetConnectionBudget();
-    // Wait for WebSocket to be ready after setup (install + enable)
-    logger.info(
-      `[DeviceReadiness] Waiting for accessibility WebSocket connection after setup for ${deviceId}`,
-    );
-    const connected = await perf.track("waitForConnection", () =>
-      accessibilityClient.waitForConnection(),
-    );
-    if (!connected) {
-      await this.throwAndroidForwardConflictIfPresent(
-        deviceId,
-        manager,
-        accessibilityClient,
-        signal,
-      );
-    }
-    if (connected) {
-      // Verify service is actually ready to respond (not just WebSocket connected)
-      logger.info(
-        `[DeviceReadiness] Verifying accessibility service is responsive for ${deviceId}`,
-      );
-      const ready = await perf.track("verifyServiceReady", () =>
-        accessibilityClient.verifyServiceReady(5, 500, 3000),
-      );
-      if (!ready) {
-        logger.warn(
-          `[DeviceReadiness] Accessibility service not responsive after setup for ${deviceId}, observe may fall back to UIAutomator`,
-        );
-      }
-    }
-  }
-
-  private async throwAndroidForwardConflictIfPresent(
-    deviceId: string,
-    manager: CtrlProxyManager,
-    client: AndroidCtrlProxy,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (!client.isLastConnectionFailureForwardingLeaseConflict?.()) {
-      return;
-    }
-    await manager.assertNotDrivenByOtherDaemon?.(signal);
-    signal?.throwIfAborted();
-    throw new AndroidForwardReadinessConflictError(
-      client.getLastConnectionFailureMessage?.() ??
-        `CtrlProxy forwarding lease conflict for Android device ${deviceId}`,
-    );
-  }
-
-  private hasCurrentReadinessDevice(platform: SomePlatform, resolvedPlatform: Platform): boolean {
-    return !!(
-      this.selection.currentDevice &&
-      (this.selection.currentPlatform === platform ||
-        this.selection.currentPlatform === resolvedPlatform)
-    );
-  }
-
-  /**
-   * Raw adb rows name transports, while pooled sessions hold a canonical id. A
-   * USB+Wi-Fi phone keeps its USB serial after the cable is pulled, so map
-   * through the pool's alias groups before matching readiness ids (#11133).
-   */
-  /**
-   * Readiness rows are keyed by the pooled canonical id, so a caller naming a
-   * known transport alias (e.g. the Wi-Fi `ip:port`) must resolve to it (#11133).
-   */
-  private async resolveProvidedReadinessId(
-    providedDeviceId: string | undefined,
-  ): Promise<string | undefined> {
-    if (!providedDeviceId) {
-      return undefined;
-    }
-    await throwIfProvisionedDeviceTransportRetired(providedDeviceId, {
-      currentIdentity: () => this.resolveCurrentAndroidIdentity(providedDeviceId),
-    });
-    return this.canonicalAndroidId(providedDeviceId);
-  }
-
-  private canonicalAndroidId(deviceId: string): string {
-    return this.admissionGate.resolveAndroidCanonicalId?.(deviceId) ?? deviceId;
-  }
-
-  private mapAndroidReadinessRows(devices: BootedDevice[]): BootedDevice[] {
-    return this.admissionGate.mapAndroidReadinessDiscovery?.(devices) ?? devices;
-  }
-
-  private normalizeReadinessScan(
-    result: BootedDevice[] | ConnectedPlatformScan,
-  ): ConnectedPlatformScan {
-    return Array.isArray(result)
-      ? { devices: result, scanned: { android: true, ios: true } }
-      : result;
   }
 
   /**
@@ -1998,7 +700,7 @@ export class DeviceReadiness implements DeviceReadiness {
     // loaded (#4221).
     if (readiness === "automationReady") {
       const iosOverride = await checkIosCtrlProxyOverride();
-      this.assertUsableIosOverride(iosOverride);
+      assertUsableIosOverride(iosOverride);
     }
 
     if (!this.simctl) {
@@ -2007,7 +709,7 @@ export class DeviceReadiness implements DeviceReadiness {
     const deviceInfo = await this.simctl.getDeviceInfo(deviceId);
     options?.signal?.throwIfAborted();
 
-    this.assertIosDeviceAvailable(deviceId, deviceInfo);
+    assertIosDeviceAvailable(deviceId, deviceInfo);
 
     // If simulator is not booted, we could boot it, but for now we'll just check
     if (deviceInfo.state !== "Booted") {
@@ -2051,7 +753,7 @@ export class DeviceReadiness implements DeviceReadiness {
     if (readiness === "booted") {
       return;
     }
-    this.assertUsableIosOverride(await checkIosCtrlProxyOverride());
+    assertUsableIosOverride(await checkIosCtrlProxyOverride());
     await this.ensureIosRunnerReady(deviceId, device, options);
   }
 
@@ -2071,23 +773,6 @@ export class DeviceReadiness implements DeviceReadiness {
       `Physical iPhone ${deviceId} is not connected or not reachable through devicectl${incomplete}. ` +
         "Connect, unlock, and trust the device, then acquire it with getApple.",
     );
-  }
-
-  private assertIosDeviceAvailable(
-    deviceId: string,
-    deviceInfo: Awaited<ReturnType<DeviceClientSimctl["getDeviceInfo"]>>,
-  ): asserts deviceInfo is NonNullable<Awaited<ReturnType<DeviceClientSimctl["getDeviceInfo"]>>> {
-    if (!deviceInfo) {
-      throw new ActionableError(
-        `iOS simulator ${deviceId} is not available. Please check if it exists and is available.`,
-      );
-    }
-
-    if (!deviceInfo.isAvailable) {
-      throw new ActionableError(
-        `iOS simulator ${deviceId} is not available (state: ${deviceInfo.state}). Please check simulator availability.`,
-      );
-    }
   }
 
   private async ensureIosRunnerReady(
@@ -2121,7 +806,7 @@ export class DeviceReadiness implements DeviceReadiness {
         operationName: "legacy iOS session auto-start",
         totalDeadlineMs,
         readinessTimeoutMs: runnerReadinessTimeoutMs,
-        skipCtrlProxyDownload: this.skipCtrlProxyDownload(options),
+        skipCtrlProxyDownload: this.androidCtrlProxyReadiness.skipCtrlProxyDownload(options),
         perf,
         signal: options?.signal,
         onRunnerSetup: () => {
@@ -2161,7 +846,7 @@ export class DeviceReadiness implements DeviceReadiness {
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("listBootedDevices");
-    const allDevices = await this.listBootedAndroidDevicesForSelection();
+    const allDevices = await this.readinessSelection.listBootedAndroidDevicesForSelection();
     perf.endOperation("listBootedDevices");
 
     if (allDevices.length > 0) {
@@ -2213,7 +898,10 @@ export class DeviceReadiness implements DeviceReadiness {
           await options.beforeReadBoot(deviceImage);
           signal.throwIfAborted();
         }
-        const running = await this.recheckReadBootImage(deviceImage, { ...options, signal });
+        const running = await this.readinessSelection.recheckReadBootImage(deviceImage, {
+          ...options,
+          signal,
+        });
         if (running) {
           return running;
         }
@@ -2549,7 +1237,10 @@ export class DeviceReadiness implements DeviceReadiness {
           await options.beforeReadBoot(device);
           signal.throwIfAborted();
         }
-        const running = await this.recheckReadBootImage(device, { ...options, signal });
+        const running = await this.readinessSelection.recheckReadBootImage(device, {
+          ...options,
+          signal,
+        });
         if (running) {
           return running;
         }

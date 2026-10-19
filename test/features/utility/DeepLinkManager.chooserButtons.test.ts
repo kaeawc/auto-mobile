@@ -1,3 +1,4 @@
+import { IntentChooserHandler } from "../../../src/features/utility/IntentChooserHandler";
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,9 +12,8 @@ const capture = JSON.parse(
   fs.readFileSync(path.join(fixtureDir, "observe-raw-artifact.json"), "utf8"),
 );
 const device = { deviceId: "emulator-5556", name: "emulator-5556", platform: "android" } as const;
-
-const manager = new DeepLinkManager(device, new FakeAdbExecutor());
-const parser = manager["parser"];
+const manager = new IntentChooserHandler(device, { create: () => new FakeAdbExecutor() });
+const parser = manager.parser;
 const rootNodes: unknown[] = parser.extractRootNodes(capture.viewHierarchy);
 
 type Props = Record<string, unknown>;
@@ -51,7 +51,7 @@ function legacyFindButtonByText(root: unknown, textOptions: string[]): unknown {
 }
 
 function find(root: unknown, textOptions: string[]): unknown {
-  return manager["findButtonByText"](root, textOptions);
+  return manager.findButtonByText(root, textOptions);
 }
 
 // Option sets are derived from the capture's own labels so the table covers what is on screen:
@@ -145,12 +145,12 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
   });
 
   test("still honours a per-instance override of the findButtonByText seam", () => {
-    const patched = new DeepLinkManager(device, new FakeAdbExecutor());
+    const patched = new IntentChooserHandler(device, { create: () => new FakeAdbExecutor() });
     const node = allNodes().find(
       (candidate) => propsOf(candidate)["resource-id"] === "android:id/button_always",
     );
     Object.defineProperty(patched, "findButtonByText", { value: () => node });
-    const element = patched["findChooserButton"](rootNodes as never, ["Never"]);
+    const element = patched.findChooserButton(rootNodes as never, ["Never"]);
     expect(element?.["resource-id"]).toBe("android:id/button_always");
     expect(element?.bounds).toEqual(parser.parseNodeBounds(node as never)?.bounds);
   });
@@ -166,7 +166,7 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
     const node = allNodes().find((candidate) => propsOf(candidate)["resource-id"] === resourceId);
     const bounds = parser.parseNodeBounds(node as never)?.bounds;
     expect(bounds).toBeDefined();
-    const center = tapper["geometry"].getElementCenter({ bounds } as never);
+    const center = manager.geometry.getElementCenter({ bounds } as never);
     expect(adb.getExecutedCommands()).toContain(`shell input tap ${center.x} ${center.y}`);
   });
 });

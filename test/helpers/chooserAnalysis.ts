@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
+import { IntentChooserHandler } from "../../src/features/utility/IntentChooserHandler";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 const fixtureDir = path.join(import.meta.dir, "../fixtures/intent-chooser");
@@ -29,8 +29,8 @@ const INDICATOR_TEXTS = [
 export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) {
   const capture = JSON.parse(fs.readFileSync(capturePath, "utf8"));
   const hierarchy = capture.viewHierarchy;
-  const manager = new DeepLinkManager(null, new FakeAdbExecutor());
-  const parser = manager["parser"];
+  const manager = new IntentChooserHandler(null, { create: () => new FakeAdbExecutor() });
+  const parser = manager.parser;
   const props = (node: unknown): Props => parser.extractNodeProperties(node as never) as Props;
   const visit = (h: unknown, fn: (node: Mutable) => void) => {
     for (const root of parser.extractRootNodes(h as never)) {
@@ -77,7 +77,7 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
 
   const analyseHierarchy = async (h: typeof hierarchy) => {
     const roots = parser.extractRootNodes(h);
-    const list = manager["findChooserList"](roots);
+    const list = manager.findChooserList(roots);
     const packages = new Set<string>();
     visit(h, (node) => {
       const p = props(node);
@@ -94,10 +94,11 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
     const apps: Record<string, unknown> = {};
     const labels: Record<string, unknown> = {};
     for (const pkg of [...packages, "com.example.nomatch"]) {
-      const probe = new DeepLinkManager(null, new FakeAdbExecutor());
-      const select = DeepLinkManager.prototype["selectUniqueChooserRow"];
+      const probe = new IntentChooserHandler(null, { create: () => new FakeAdbExecutor() });
+      const select = IntentChooserHandler.prototype.selectUniqueChooserRow;
       Object.defineProperty(probe, "selectUniqueChooserRow", {
-        value: (candidates: Mutable[], labelRows: Map<Mutable, Set<string>>, ...rest: never[]) => {
+        value: (...args: Parameters<IntentChooserHandler["selectUniqueChooserRow"]>) => {
+          const [candidates, labelRows] = args;
           labels[pkg] = {
             candidates: candidates.map((row) => row["view-id"] ?? null),
             labelRows: [...labelRows.entries()].map(([row, set]) => [
@@ -105,16 +106,11 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
               [...set],
             ]),
           };
-          return (select as (...args: unknown[]) => unknown).call(
-            probe,
-            candidates,
-            labelRows,
-            ...rest,
-          );
+          return select.call(probe, ...args);
         },
       });
       try {
-        const match = await probe["findAppInChooser"](roots, pkg, h.packageName);
+        const match = await probe.findAppInChooser(roots, pkg, h.packageName);
         apps[pkg] = {
           ok: true,
           packageVerified: match.packageVerified,
@@ -125,7 +121,7 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
       }
     }
     return {
-      anchors: [...manager["getChooserAnchorRows"](h).entries()],
+      anchors: [...manager.getChooserAnchorRows(h).entries()],
       list: list ? { bounds: list.bounds, resourceId: list["resource-id"] ?? null } : null,
       apps,
       labels,

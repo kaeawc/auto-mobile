@@ -142,6 +142,11 @@ export class FakeAdbExecutor implements AdbExecutor {
     );
   }
 
+  /** Model a device whose wakefulness cannot be read (dumpsys omits the field). */
+  setWakefulnessUnknown(): void {
+    this.wakefulness = null;
+  }
+
   /**
    * Configure screen state and wakefulness
    * @param isOn - Whether screen is on

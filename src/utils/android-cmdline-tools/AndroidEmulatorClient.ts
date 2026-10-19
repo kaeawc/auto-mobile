@@ -486,7 +486,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.emulatorPath = getFallbackEmulatorPath();
   }
 
-  private wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+  wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     return this.readinessPoller.wakeAndUnlock(device, signal);
   }
 

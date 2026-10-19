@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -58,37 +59,9 @@ sealed class OnboardingPage {
 @Composable
 fun OnboardingScreen(onFinish: () -> Unit) {
   TrackRecomposition(id = "screen.onboarding", composableName = "OnboardingScreen") {
-    val pages: List<OnboardingPage> =
-      listOf(
-        OnboardingPage.Drawable(
-          title = stringResource(id = R.string.onboarding_welcome_title),
-          description = stringResource(id = R.string.onboarding_welcome_description),
-          drawableResId = dev.jasonpearson.automobile.design.assets.R.drawable.automobile_logo,
-        ),
-        OnboardingPage.Emoji(
-          title = stringResource(id = R.string.onboarding_source_intelligence_title),
-          description = stringResource(id = R.string.onboarding_source_intelligence_description),
-          emoji = stringResource(id = R.string.onboarding_source_intelligence_emoji),
-        ),
-        OnboardingPage.Emoji(
-          title = stringResource(id = R.string.onboarding_gestures_title),
-          description = stringResource(id = R.string.onboarding_gestures_description),
-          emoji = stringResource(id = R.string.onboarding_gestures_emoji),
-        ),
-        OnboardingPage.Emoji(
-          title = stringResource(id = R.string.onboarding_automation_title),
-          description = stringResource(id = R.string.onboarding_automation_description),
-          emoji = stringResource(id = R.string.onboarding_automation_emoji),
-        ),
-        OnboardingPage.Emoji(
-          title = stringResource(id = R.string.onboarding_opensource_title),
-          description = stringResource(id = R.string.onboarding_opensource_description),
-          emoji = stringResource(id = R.string.onboarding_opensource_emoji),
-        ),
-      )
+    val pages = onboardingPages()
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
-    val coroutineScope = rememberCoroutineScope()
 
     Column(
       modifier =
@@ -111,60 +84,97 @@ fun OnboardingScreen(onFinish: () -> Unit) {
         OnboardingPageContent(page = pages[page], modifier = Modifier.fillMaxSize())
       }
 
-      // Bottom navigation
-      Column(
-        modifier = Modifier.padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-      ) {
-        // Page indicators
-        PageIndicators(
-          pageCount = pages.size,
-          currentPage = pagerState.currentPage,
-          modifier = Modifier.padding(bottom = 24.dp),
-        )
+      OnboardingNavigation(pagerState, pages.size, onFinish)
+    }
+  }
+}
 
-        // Navigation buttons
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+@Composable
+private fun onboardingPages(): List<OnboardingPage> {
+  return listOf(
+    OnboardingPage.Drawable(
+      title = stringResource(id = R.string.onboarding_welcome_title),
+      description = stringResource(id = R.string.onboarding_welcome_description),
+      drawableResId = dev.jasonpearson.automobile.design.assets.R.drawable.automobile_logo,
+    ),
+    OnboardingPage.Emoji(
+      title = stringResource(id = R.string.onboarding_source_intelligence_title),
+      description = stringResource(id = R.string.onboarding_source_intelligence_description),
+      emoji = stringResource(id = R.string.onboarding_source_intelligence_emoji),
+    ),
+    OnboardingPage.Emoji(
+      title = stringResource(id = R.string.onboarding_gestures_title),
+      description = stringResource(id = R.string.onboarding_gestures_description),
+      emoji = stringResource(id = R.string.onboarding_gestures_emoji),
+    ),
+    OnboardingPage.Emoji(
+      title = stringResource(id = R.string.onboarding_automation_title),
+      description = stringResource(id = R.string.onboarding_automation_description),
+      emoji = stringResource(id = R.string.onboarding_automation_emoji),
+    ),
+    OnboardingPage.Emoji(
+      title = stringResource(id = R.string.onboarding_opensource_title),
+      description = stringResource(id = R.string.onboarding_opensource_description),
+      emoji = stringResource(id = R.string.onboarding_opensource_emoji),
+    ),
+  )
+}
+
+@Composable
+private fun OnboardingNavigation(pagerState: PagerState, pageCount: Int, onFinish: () -> Unit) {
+  val coroutineScope = rememberCoroutineScope()
+  // Bottom navigation
+  Column(
+    modifier = Modifier.padding(24.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    // Page indicators
+    PageIndicators(
+      pageCount = pageCount,
+      currentPage = pagerState.currentPage,
+      modifier = Modifier.padding(bottom = 24.dp),
+    )
+
+    // Navigation buttons
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      // Back button
+      if (pagerState.currentPage > 0) {
+        OutlinedButton(
+          onClick = {
+            coroutineScope.launch {
+              pagerState.animateScrollToPage(pagerState.currentPage - 1)
+            }
+          },
         ) {
-          // Back button
-          if (pagerState.currentPage > 0) {
-            OutlinedButton(
-              onClick = {
-                coroutineScope.launch {
-                  pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                }
-              },
-            ) {
-              Text(stringResource(id = R.string.onboarding_back))
+          Text(stringResource(id = R.string.onboarding_back))
+        }
+      } else {
+        Spacer(modifier = Modifier.width(80.dp))
+      }
+
+      // Next/Finish button
+      Button(
+        onClick = {
+          if (pagerState.currentPage < pageCount - 1) {
+            coroutineScope.launch {
+              pagerState.animateScrollToPage(pagerState.currentPage + 1)
             }
           } else {
-            Spacer(modifier = Modifier.width(80.dp))
+            onFinish()
           }
-
-          // Next/Finish button
-          Button(
-            onClick = {
-              if (pagerState.currentPage < pages.size - 1) {
-                coroutineScope.launch {
-                  pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                }
-              } else {
-                onFinish()
-              }
-            },
-            modifier = Modifier.widthIn(min = 100.dp),
-          ) {
-            Text(
-              text =
-                if (pagerState.currentPage < pages.size - 1)
-                  stringResource(id = R.string.onboarding_next)
-                else stringResource(id = R.string.onboarding_get_started),
-            )
-          }
-        }
+        },
+        modifier = Modifier.widthIn(min = 100.dp),
+      ) {
+        Text(
+          text =
+            if (pagerState.currentPage < pageCount - 1)
+              stringResource(id = R.string.onboarding_next)
+            else stringResource(id = R.string.onboarding_get_started),
+        )
       }
     }
   }

@@ -6,22 +6,22 @@ final class CollectionsBehaviorTests: XCTestCase {
     // MARK: - RangeReplaceableCollection max-size helper
 
     func testRemovePrefixEnforcingMaximumSize() {
-        var a = Array(0 ..< 10)
-        XCTAssertEqual(a.removePrefix(enforcingMaximumSize: 4), 6)
-        XCTAssertEqual(a, [6, 7, 8, 9])
+        var values = Array(0 ..< 10)
+        XCTAssertEqual(values.removePrefix(enforcingMaximumSize: 4), 6)
+        XCTAssertEqual(values, [6, 7, 8, 9])
         // Already within bounds → no-op, returns 0.
-        XCTAssertEqual(a.removePrefix(enforcingMaximumSize: 4), 0)
-        XCTAssertEqual(a, [6, 7, 8, 9])
-        XCTAssertEqual(a.removePrefix(enforcingMaximumSize: 0), 4)
-        XCTAssertEqual(a, [])
+        XCTAssertEqual(values.removePrefix(enforcingMaximumSize: 4), 0)
+        XCTAssertEqual(values, [6, 7, 8, 9])
+        XCTAssertEqual(values.removePrefix(enforcingMaximumSize: 0), 4)
+        XCTAssertEqual(values, [])
     }
 
     func testAppendEnforcingMaximumSizeKeepsMostRecent() {
-        var a: [Int] = []
+        var values: [Int] = []
         for i in 0 ..< 6 {
-            a.append(i, enforcingMaximumSize: 3)
+            values.append(i, enforcingMaximumSize: 3)
         }
-        XCTAssertEqual(a, [3, 4, 5])
+        XCTAssertEqual(values, [3, 4, 5])
     }
 
     // MARK: - SdkEventBuffer (500-event most-recent ring)

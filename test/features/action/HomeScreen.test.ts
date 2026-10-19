@@ -1,8 +1,9 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { BootedDevice, ExecResult, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type { CtrlProxyHierarchy } from "../../../src/features/observe/ios/types";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -30,10 +31,12 @@ import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 // Each call creates a unique viewHierarchy object so change detection works
 let hierarchyCounter = 0;
 const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  observationId: `home-observation-${hierarchyCounter}`,
+  updatedAt: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-  viewHierarchy: { node: {}, id: hierarchyCounter++ },
+  viewHierarchy: { hierarchy: { node: { text: `screen-${hierarchyCounter++}` } } },
 });
 
 // Read/parse each byte-exact capture at most once.
@@ -154,10 +157,7 @@ describe("HomeScreen", () => {
   function createIosHomeScreen(options?: {
     simulator?: boolean;
     simctl?: {
-      executeCommandArgs: (
-        args: string[],
-        timeoutMs?: number,
-      ) => Promise<{ stdout: string; stderr: string }>;
+      executeCommandArgs: (args: string[], timeoutMs?: number) => Promise<ExecResult>;
     };
   }): { action: HomeScreen; client: FakeIOSCtrlProxy } {
     const iosDevice: BootedDevice = {
@@ -191,7 +191,7 @@ describe("HomeScreen", () => {
           });
           fakeAdb.setCommandResponse(
             "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN",
-            { stdout: `${launcherPackage}/.NexusLauncherActivity`, stderr: "" },
+            createExecResult(`${launcherPackage}/.NexusLauncherActivity`, ""),
           );
         } else {
           observation.viewHierarchy.hierarchy = { node: { $: { class: "Home" } } };
@@ -240,7 +240,7 @@ describe("HomeScreen", () => {
         });
         fakeAdb.setCommandResponse(
           "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN",
-          { stdout: `${launcherPackage}/.NexusLauncherActivity`, stderr: "" },
+          createExecResult(`${launcherPackage}/.NexusLauncherActivity`, ""),
         );
       });
 
@@ -671,10 +671,7 @@ describe("HomeScreen", () => {
       });
       const resolveCommand =
         "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN";
-      fakeAdb.setCommandResponse(resolveCommand, {
-        stdout: "com.example.home/.Home",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(resolveCommand, createExecResult("com.example.home/.Home", ""));
 
       const result = await homeScreen.execute();
       expect(result.success).toBe(true);
@@ -746,7 +743,7 @@ describe("HomeScreen", () => {
     );
 
     test("should execute hardware navigation using keyevent 3", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result = await homeScreen.execute();
       expect(result.success).toBe(true);
@@ -759,7 +756,7 @@ describe("HomeScreen", () => {
     });
 
     test("should work with progress callback", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       let callbackCalled = false;
       const progressCallback = async () => {
@@ -773,7 +770,7 @@ describe("HomeScreen", () => {
     });
 
     test("should include observation in result", async () => {
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result = await homeScreen.execute();
 
@@ -857,7 +854,7 @@ describe("HomeScreen", () => {
               if (timeouts.length === 1) {
                 throw new SimctlCommandTimeoutError("busy host launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -898,7 +895,7 @@ describe("HomeScreen", () => {
               if (timeouts.length === 1) {
                 throw new SimctlCommandTimeoutError("busy host launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -924,7 +921,7 @@ describe("HomeScreen", () => {
                 await fakeTimer.sleep(timeoutMs);
                 throw new SimctlCommandTimeoutError("busy host launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -952,7 +949,7 @@ describe("HomeScreen", () => {
               if (timeoutMs < 1200) {
                 throw new SimctlCommandTimeoutError("slow launch timed out");
               }
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -1012,7 +1009,7 @@ describe("HomeScreen", () => {
           simctl: {
             executeCommandArgs: async (_args, timeoutMs = 0) => {
               timeouts.push(timeoutMs);
-              return { stdout: "", stderr: "" };
+              return createExecResult("", "");
             },
           },
         });
@@ -1109,7 +1106,7 @@ describe("HomeScreen", () => {
         simctl: {
           executeCommandArgs: async (args) => {
             calls.push(args);
-            return { stdout: "", stderr: "" };
+            return createExecResult("", "");
           },
         },
       });
@@ -1141,7 +1138,7 @@ describe("HomeScreen", () => {
     test("simulator waits for a slow SpringBoard switch using fake time", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       const readSpy = spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
         hierarchy: iosHierarchy(
@@ -1159,7 +1156,7 @@ describe("HomeScreen", () => {
     test("simulator allows a slow hierarchy read within the 5s deadline", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       const readSpy = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
         await fakeTimer.sleep(1200);
@@ -1174,7 +1171,7 @@ describe("HomeScreen", () => {
     test("simctl launch reports the remaining foreground app after the bounded wait", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
 
@@ -1188,7 +1185,7 @@ describe("HomeScreen", () => {
     test("unknown foreground failure does not claim an app was backgrounded", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       client.setHierarchyData(null);
 
@@ -1201,7 +1198,7 @@ describe("HomeScreen", () => {
     test("simulator foreground polling respects a shorter caller budget", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
       const readSpy = spyOn(client, "requestHierarchySync");
@@ -1216,7 +1213,7 @@ describe("HomeScreen", () => {
     test("unknown initial foreground succeeds once SpringBoard appears", async () => {
       const { action, client } = createIosHomeScreen({
         simulator: true,
-        simctl: { executeCommandArgs: async () => ({ stdout: "", stderr: "" }) },
+        simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       let readCount = 0;
       spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
@@ -1234,7 +1231,7 @@ describe("HomeScreen", () => {
         simctl: {
           executeCommandArgs: async (args) => {
             calls.push(args);
-            return { stdout: "", stderr: "" };
+            return createExecResult("", "");
           },
         },
       });
@@ -1251,7 +1248,7 @@ describe("HomeScreen", () => {
         simctl: {
           executeCommandArgs: async () => {
             launches++;
-            return { stdout: "", stderr: "" };
+            return createExecResult("", "");
           },
         },
       });
@@ -1296,7 +1293,7 @@ describe("HomeScreen", () => {
         awaitIdle: fakeAwaitIdle2,
       });
 
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result1 = await homeScreen.execute();
       const result2 = await homeScreen2.execute();
@@ -1337,7 +1334,7 @@ describe("HomeScreen", () => {
         requestGlobalAction: async () => ({ success: true }),
       });
       homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
 
@@ -1362,7 +1359,7 @@ describe("HomeScreen", () => {
           "com.android.launcher3",
         ]),
       );
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       const result = await homeScreen.execute();
 
@@ -1375,7 +1372,7 @@ describe("HomeScreen", () => {
         requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
       });
       homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
-      fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
     });

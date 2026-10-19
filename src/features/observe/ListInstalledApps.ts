@@ -139,7 +139,7 @@ interface ListInstalledAppsOptions {
 
 export class ListInstalledApps {
   private adb: AdbExecutor;
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow">;
   private device: BootedDevice;
   private installedAppsRepository: InstalledAppsStore;
   private cacheEnabled: boolean;
@@ -157,7 +157,7 @@ export class ListInstalledApps {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "listAppsOrThrow"> | null = null,
     options: ListInstalledAppsOptions = {},
   ) {
     this.adb = adbFactory.create(device);

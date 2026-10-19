@@ -1,9 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
-import {
-  DaemonBoundSessionExpiredError,
-  daemonInternalErrors,
-} from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import { HeldSessionNotFoundError } from "../../../src/daemon/proxy/HeldSessionNotFoundError";
 import {
   HeldSessionHeartbeatOutcomes,
   type HeldSessionHeartbeatOutcomesPort,
@@ -17,7 +15,6 @@ import {
 } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const { HeldSessionNotFoundError } = daemonInternalErrors;
 const LEASH_MS = 10_000;
 
 function harness() {

@@ -23,7 +23,6 @@ import {
   SimulatorBootLease,
 } from "./SimCtlSupport";
 import { simCtlSharedState } from "./SimCtlSharedState";
-export { DEFAULT_SIMCTL_BOOT_OPTIONS } from "./SimCtlSupport";
 export type {
   AppleDevice,
   AppleDeviceRuntime,

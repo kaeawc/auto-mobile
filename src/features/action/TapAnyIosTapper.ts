@@ -7,7 +7,7 @@ import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, BootedDevice, Element } from "../../models";
 import { logger } from "../../utils/logger";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
@@ -97,7 +97,7 @@ export class TapAnyIosTapper {
    * healthy CtrlProxy round trip already had (issue #6306 review, P1).
    */
   async executeIosTapWithCoordinates(
-    xcTestClient: IOSCtrlProxy,
+    xcTestClient: IosCtrlProxy,
     action: string,
     x: number,
     y: number,
@@ -192,7 +192,7 @@ export class TapAnyIosTapper {
    * identifier-based node-action path rather than a coordinate press.
    */
   private async activateIosByResourceId(
-    xcTestClient: IOSCtrlProxy,
+    xcTestClient: IosCtrlProxy,
     resourceId: string,
     voiceOverAction: "activate" | "long_press",
     timeoutMs: number | undefined,
@@ -200,7 +200,7 @@ export class TapAnyIosTapper {
     signal?: AbortSignal,
   ): Promise<void> {
     let dispatched = false;
-    let result: Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
+    let result: Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
     try {
       result = await xcTestClient.requestAction(
         voiceOverAction,
@@ -243,7 +243,7 @@ export class TapAnyIosTapper {
   }
 
   private async executeIosTapWithVoiceOver(
-    xcTestClient: IOSCtrlProxy,
+    xcTestClient: IosCtrlProxy,
     action: string,
     element: Element,
     x: number,

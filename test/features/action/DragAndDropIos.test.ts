@@ -9,7 +9,7 @@ import {
   IOS_DRAG_TIMEOUT_DURATION_RATIO,
 } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { IOSCtrlProxy } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -43,7 +43,7 @@ describe("DragAndDrop - iOS", () => {
   let fakeWindow: FakeWindow;
   let fakeIosClient: FakeCtrlProxy;
   let fakeAndroidClient: FakeCtrlProxy;
-  let iosDragClient: Pick<IOSCtrlProxy, "requestDrag">;
+  let iosDragClient: Pick<IosCtrlProxy, "requestDrag">;
   let fakeTimer: FakeTimer;
   let iosSpy: ReturnType<typeof spyOn> | null = null;
   let androidSpy: ReturnType<typeof spyOn> | null = null;
@@ -88,7 +88,7 @@ describe("DragAndDrop - iOS", () => {
     fakeWindow = new FakeWindow();
     fakeIosClient = new FakeCtrlProxy();
     // The shared fake retains Android positional arguments; view its iOS request contract.
-    iosDragClient = fakeIosClient as Pick<IOSCtrlProxy, "requestDrag">;
+    iosDragClient = fakeIosClient as Pick<IosCtrlProxy, "requestDrag">;
     fakeAndroidClient = new FakeCtrlProxy();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

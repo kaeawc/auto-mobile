@@ -89,7 +89,15 @@ describe("Android gesture duration wire", () => {
             holdDurationMs: duration,
             timeoutMs: 5000,
           }),
-        () => gestures.requestPinch(10, 20, 30, 40, 15.5, duration),
+        () =>
+          gestures.requestPinch({
+            centerX: 10,
+            centerY: 20,
+            distanceStart: 30,
+            distanceEnd: 40,
+            rotationDegrees: 15.5,
+            duration,
+          }),
       ];
       for (const send of requests) {
         const promise = send();
@@ -611,7 +619,16 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_pinch","requestId":"request","centerX":10,"centerY":20,"distanceStart":30,"distanceEnd":40,"rotationDegrees":0,"duration":300}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestPinch(10, 20, 30, 40, 0, 300, 5000, undefined, undefined, id),
+        g.requestPinch({
+          centerX: 10,
+          centerY: 20,
+          distanceStart: 30,
+          distanceEnd: 40,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 5000,
+          displayId: id,
+        }),
     },
     {
       name: "gesture start",

@@ -802,7 +802,6 @@ export abstract class AndroidCtrlProxyServices extends AndroidCtrlProxyDelegatin
     this.localPort = PortManager.allocate(this.portAllocationId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
-    AndroidCtrlProxyManager.getInstance(device);
   }
   protected abstract removeHierarchyObservationStreamSuppression(requestId: string): boolean;
   protected abstract getHierarchyNavigationDetector(): HierarchyNavigationDetector;

@@ -17,8 +17,6 @@ import { capToQualityPreset, qualityPresetBitrateBps } from "./qualityPresets";
 export { capToQualityPreset } from "./qualityPresets";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 
-export type { SpawnedProcess } from "./processSpawner";
-
 /**
  * `screenrecord` enforces a 180s `--time-limit`. Start the next segment a few
  * seconds early so the H.264 stream stays continuous across the rotation

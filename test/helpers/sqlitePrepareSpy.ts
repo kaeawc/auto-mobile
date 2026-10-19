@@ -19,15 +19,11 @@ export interface DatabasePrepareHooks {
 export function spyOnDatabasePrepare(hooks: DatabasePrepareHooks = {}) {
   const prepare = Database.prototype.prepare;
   return spyOn(Database.prototype, "prepare").mockImplementation(function <
-    ReturnType,
-    ParamsType extends SQLQueryBindings | SQLQueryBindings[],
-  >(
-    this: Database,
-    sql: string,
-    params?: ParamsType,
-  ): Statement<ReturnType, ParamsType extends unknown[] ? ParamsType : [ParamsType]> {
+    Row,
+    Params extends SQLQueryBindings | SQLQueryBindings[],
+  >(this: Database, sql: string, params?: Params): ReturnType<typeof prepare<Row, Params>> {
     hooks.beforePrepare?.(sql);
-    const statement = prepare.bind(this)<ReturnType, ParamsType>(sql, params);
+    const statement = prepare.bind(this)<Row, Params>(sql, params);
     hooks.afterPrepare?.(sql, statement);
     return statement;
   });

@@ -7,7 +7,8 @@ import {
 } from "../client";
 import { DaemonUnavailableError } from "../client";
 import { isRecoverableDaemonReleaseReason } from "../../models/releaseReasons";
-import { DaemonBoundSessionExpiredError, DaemonToolOutcomeUnknownError } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
+import { DaemonToolOutcomeUnknownError } from "./DaemonToolOutcomeUnknownError";
 import type { SessionReleaseSnapshot } from "../sessionManager";
 import { releaseReasonFromError } from "../types";
 import type { DaemonErrorClassifier } from "./DaemonErrorClassifier";

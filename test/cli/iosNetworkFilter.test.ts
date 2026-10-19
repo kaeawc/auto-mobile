@@ -4,7 +4,6 @@ import {
   functionBody,
   ifStatements,
   parseSource,
-  swapNodes,
   variableDeclarations,
 } from "../helpers/entrypointOrder";
 import { describe, expect, test } from "bun:test";
@@ -88,47 +87,50 @@ describe("--ios-network-filter", () => {
   });
 
   test("dispatches before any daemon or server import", async () => {
-    const entrypoint = await Bun.file("src/index.ts").text();
-    expect(networkFilterDispatchViolations(entrypoint)).toEqual([]);
+    const early = await Bun.file("src/startup/earlyEntrypoints.ts").text();
+    expect(networkFilterDispatchViolations(early)).toEqual([]);
   });
 
-  test("the dispatch guard fails when the server import moves ahead of the dispatch", async () => {
-    const entrypoint = await Bun.file("src/index.ts").text();
-    const main = functionBody(parseSource(entrypoint), "main")!;
-    const dispatch = ifStatements(main, "networkFilterIndex >= 0")[0]!;
-    const serverImportStatement = dynamicImports(main, "./server")[0]!.parent.parent.parent;
-    expect(
-      networkFilterDispatchViolations(swapNodes(entrypoint, dispatch, serverImportStatement)),
-    ).not.toEqual([]);
+  test("the dispatch guard fails when a server import moves into the early entrypoints", async () => {
+    const early = await Bun.file("src/startup/earlyEntrypoints.ts").text();
+    const mutated = early.replace(
+      "const networkFilterIndex",
+      'await import("../server");\n  const networkFilterIndex',
+    );
+    expect(mutated).not.toBe(early);
+    expect(networkFilterDispatchViolations(mutated)).toContain(
+      "early entrypoints must not import ../server",
+    );
   });
 
   test("the dispatch guard fails when the dispatch lookup disappears", async () => {
-    const entrypoint = await Bun.file("src/index.ts").text();
-    const mutated = entrypoint.replace('rawArgs.indexOf("--ios-network-filter")', "-1");
-    expect(mutated).not.toBe(entrypoint);
+    const early = await Bun.file("src/startup/earlyEntrypoints.ts").text();
+    const mutated = early.replace('rawArgs.indexOf("--ios-network-filter")', "-1");
+    expect(mutated).not.toBe(early);
     expect(networkFilterDispatchViolations(mutated)).toContain("missing networkFilterIndex lookup");
   });
 });
 
-/** `--ios-network-filter` dispatches before any daemon or server import in main(). */
+/**
+ * `--ios-network-filter` dispatches in the early entrypoints, which main() runs before it loads any
+ * daemon or server module (pinned in bootDeviceEntrypoint.test.ts), so the early module itself must
+ * not import either.
+ */
 function networkFilterDispatchViolations(source: string): string[] {
-  const main = functionBody(parseSource(source), "main");
-  if (!main) {
-    return ["missing main()"];
+  const early = functionBody(parseSource(source), "runEarlyEntrypoints");
+  if (!early) {
+    return ["missing runEarlyEntrypoints()"];
   }
   const check = new OrderCheck();
-  const lookup = check.require(
+  check.require(
     "networkFilterIndex lookup",
-    variableDeclarations(main, "networkFilterIndex", 'rawArgs.indexOf("--ios-network-filter")'),
+    variableDeclarations(early, "networkFilterIndex", 'rawArgs.indexOf("--ios-network-filter")'),
   );
-  const dispatch = check.require(
-    "network filter dispatch",
-    ifStatements(main, "networkFilterIndex >= 0"),
-  );
-  const serverImport = check.require("server import", dynamicImports(main, "./server"));
-  const daemonImport = check.require("daemon import", dynamicImports(main, "./daemon/daemon"));
-  check.before("network filter lookup", lookup, "server import", serverImport);
-  check.before("network filter dispatch", dispatch, "server import", serverImport);
-  check.before("network filter dispatch", dispatch, "daemon import", daemonImport);
+  check.require("network filter dispatch", ifStatements(early, "networkFilterIndex >= 0"));
+  for (const spec of ["../server", "../daemon/daemon"]) {
+    if (dynamicImports(early, spec).length > 0) {
+      check.violations.push(`early entrypoints must not import ${spec}`);
+    }
+  }
   return check.violations;
 }

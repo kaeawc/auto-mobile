@@ -70,6 +70,9 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const SCANNED = [
     "src/daemon/daemonStreamRouting.ts",
     "src/daemon/socketServer.ts",
+    "src/daemon/socketServer/ideDeviceRoutes.ts",
+    "src/daemon/socketServer/inputDeviceGating.ts",
+    "src/daemon/socketServer/inputStrokes.ts",
     "src/daemon/deviceDataStreamSocketServer.ts",
     "src/daemon/videoStreamSocketServer.ts",
     "src/daemon/webrtcStreamSocketServer.ts",
@@ -97,14 +100,14 @@ describe("device-addressed admission gate (issue #6863)", () => {
         "so the socket server's preflight cannot run",
     },
     {
-      file: "src/daemon/socketServer.ts",
+      file: "src/daemon/socketServer/inputDeviceGating.ts",
       fn: "runTrackedDeviceInput",
       what:
         "input/tap, input/swipe, input/typeText, input/pressButton, input/key and the " +
         "gestureStart/Move/End stream — gated BEFORE the sessionless early return",
     },
     {
-      file: "src/daemon/socketServer.ts",
+      file: "src/daemon/socketServer/ideDeviceRoutes.ts",
       fn: "resolveKeyValueMutationClient",
       what: "ide/* SharedPreferences and key-value mutations",
     },

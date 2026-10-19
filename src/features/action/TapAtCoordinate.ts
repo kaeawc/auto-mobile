@@ -1,17 +1,12 @@
-import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
+import { AndroidCoordinateTalkBack } from "./AndroidCoordinateTalkBack";
 import type { TapAtPlanContext } from "../../models/TapAtGeometry";
 import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
-import {
-  resolveTalkBackStateConfirmation,
-  TALKBACK_STATE_UNKNOWN_WARNING,
-} from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import {
   DefaultTalkBackNavigationDriverFactory,
-  type TalkBackNavigationDriver,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
@@ -36,7 +31,7 @@ import {
   type PerformanceTracker,
 } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { withStaleDisplay } from "../observe/StaleDisplayError";
@@ -47,7 +42,6 @@ import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touc
 import {
   BaseVisualChange,
   type DisplayFenceDependencies,
-  type DisplayFence,
   type ProgressCallback,
 } from "./BaseVisualChange";
 import {
@@ -65,7 +59,7 @@ import {
   tryAtomicAndroidDoubleTap,
 } from "./androidDoubleTap";
 
-import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { tapDurationMs, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote, tapDeliveryReporter } from "./tapSharedHelpers";
 import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
@@ -78,9 +72,6 @@ import {
 } from "./tapAtCoordinateResolution";
 
 export { resolveTapAtCoordinates };
-
-const ANDROID_TAP_DURATION_MS = 10;
-const IOS_TAP_DURATION_MS = 50;
 
 // These capture-only fields are documented by the observation diff as nondeterministic between
 // captures of one unchanged Android screen. They cannot establish that a coordinate was retargeted.
@@ -96,13 +87,6 @@ type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
 /** Outcome of the first Android tap: whether a single-gesture double tap already finished. */
 type AndroidFirstTap = { doubleTapDelivered: boolean; startedAt: number };
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
-
-function tapDurationMs(options: TapAtOptions, platform: BootedDevice["platform"]): number {
-  if (options.action === "longPress") {
-    return options.durationMs ?? LONG_PRESS_DEFAULT_MS;
-  }
-  return platform === "android" ? ANDROID_TAP_DURATION_MS : IOS_TAP_DURATION_MS;
-}
 
 function withoutVolatileTapLayoutFields(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -226,14 +210,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly invalidateIosCache: () => void;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly snapshotReferences: SnapshotReferenceStore;
-  private readonly featureFlags: FeatureFlagReader;
-  private readonly accessibilityDetector: AccessibilityDetector;
-  private readonly talkBackStrategy: Pick<
-    TalkBackTapStrategy,
-    "executePreciseTap" | "executeCoordinateFallback"
-  >;
-  private readonly talkBackDriverFactory: TalkBackNavigationDriverFactory;
-  private readonly useContextualFocusTap: boolean;
+  private readonly androidTalkBack: AndroidCoordinateTalkBack;
 
   constructor(
     device: BootedDevice,
@@ -258,11 +235,11 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.timer,
       new DefaultTalkBackNavigationDriverFactory(this.adbFactory),
     );
-    this.featureFlags = talkBack.featureFlags;
-    this.accessibilityDetector = talkBack.accessibilityDetector;
-    this.talkBackDriverFactory = talkBack.talkBackDriverFactory;
-    this.talkBackStrategy = talkBack.talkBackStrategy;
-    this.useContextualFocusTap = talkBack.useContextualFocusTap;
+    this.androidTalkBack = new AndroidCoordinateTalkBack({
+      target: this,
+      androidClient: this.androidClient,
+      ...talkBack,
+    });
   }
 
   private async executeOnDisplay(
@@ -310,7 +287,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         assertCurrent();
         const talkBackEnabled =
           this.device.platform === "android" &&
-          (await this.resolveTalkBackState(signal, onActivationWarnings));
+          (await this.androidTalkBack.resolveState(signal, onActivationWarnings));
         if (talkBackEnabled) {
           // The shared TalkBack driver has no display-addressed activation capability.
           const refusal = talkBackDisplayRefusal(displayId);
@@ -464,7 +441,10 @@ export class TapAtCoordinate extends BaseVisualChange {
                 onTapDelivered();
                 break;
               }
-              const talkBackEnabled = await this.resolveTalkBackState(signal, onActivationWarnings);
+              const talkBackEnabled = await this.androidTalkBack.resolveState(
+                signal,
+                onActivationWarnings,
+              );
               delivery.talkBack = talkBackEnabled;
               await this.dispatchAndroidTaps(
                 options,
@@ -678,7 +658,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       onActivationWarnings: context.onActivationWarnings,
     };
     try {
-      await this.dispatchAndroidTalkBackTap(
+      await this.androidTalkBack.dispatchTap(
         options,
         resolved,
         frameContext,
@@ -715,7 +695,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         throw actionable;
       }
       // No loop: a second stale rejection surfaces to the caller.
-      await this.dispatchAndroidTalkBackTap(
+      await this.androidTalkBack.dispatchTap(
         options,
         retry.point,
         retry.frameContext,
@@ -778,7 +758,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     };
     try {
       if (context.talkBackEnabled) {
-        await this.dispatchAndroidTalkBackTap(options, resolved, frameContext, signal, {
+        await this.androidTalkBack.dispatchTap(options, resolved, frameContext, signal, {
           assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
           onTapDelivered,
           onDispatched: () => {
@@ -828,7 +808,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       // Deliberately no loop: if this single retry also races a frame advance, its actionable stale
       // rejection escapes and the caller can choose a new point from another explicit observation.
       if (context.talkBackEnabled) {
-        await this.dispatchAndroidTalkBackTap(options, retry.point, retry.frameContext, signal, {
+        await this.androidTalkBack.dispatchTap(options, retry.point, retry.frameContext, signal, {
           assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
           onTapDelivered,
           onDispatched: () => {
@@ -1003,158 +983,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     // Legacy injected dispatchers confirm delivery by returning, without invoking the new hook.
     reportDelivery();
     throwIfAborted(signal);
-  }
-
-  private async resolveTalkBackState(
-    signal: AbortSignal | undefined,
-    onActivationWarnings?: (warnings?: string[]) => void,
-  ): Promise<boolean> {
-    throwIfAborted(signal);
-    const { talkBack, unconfirmed } = await awaitWhileRequestIsLive(
-      resolveTalkBackStateConfirmation(
-        this.accessibilityDetector,
-        this.device.deviceId,
-        this.adb,
-        this.featureFlags,
-      ),
-      signal,
-    );
-    throwIfAborted(signal);
-    if (unconfirmed) {
-      onActivationWarnings?.([TALKBACK_STATE_UNKNOWN_WARNING]);
-    }
-    return talkBack === true;
-  }
-
-  private async dispatchAndroidTalkBackTap(
-    options: TapAtOptions,
-    point: { x: number; y: number },
-    frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    context: {
-      assertCurrent: () => void;
-      onTapDelivered: () => void;
-      onDispatched?: () => void;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    },
-  ): Promise<void> {
-    const fence: DisplayFence = {
-      assertCurrent: () => {
-        throwIfAborted(signal);
-        context.assertCurrent();
-      },
-    };
-    const driver = this.talkBackDriverFactory.createDriver(this.device);
-    // Preserve the first touch's frame context and beforeSend fence on the default
-    // transport: the shared navigation driver exposes neither argument. Injected
-    // drivers remain the test seam for both existing strategy gestures.
-    const guardedDriver: TalkBackNavigationDriver = {
-      requestTraversalOrder: driver.requestTraversalOrder.bind(driver),
-      requestCurrentFocus: driver.requestCurrentFocus.bind(driver),
-      requestAction: driver.requestAction.bind(driver),
-      requestNodeAction: driver.requestNodeAction.bind(driver),
-      supportsNodeActionSelectors: driver.supportsNodeActionSelectors.bind(driver),
-      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
-        const { x, y, duration = 10, onDispatch } = request;
-
-        fence.assertCurrent();
-        const reportDispatch = () => {
-          context.onDispatched?.();
-          onDispatch?.();
-        };
-        const result = this.useContextualFocusTap
-          ? await this.requestContextualTalkBackFocus(
-              { x, y },
-              duration,
-              frameContext,
-              signal,
-              fence,
-              reportDispatch,
-            )
-          : await driver.requestTapCoordinates({ x, y, duration, onDispatch: reportDispatch });
-        if (result.success) {
-          context.onTapDelivered();
-        }
-        throwIfAborted(signal);
-        return { ...result, totalTimeMs: 0 };
-      },
-      requestDoubleTapCoordinates: async (x, y, onDispatch) => {
-        fence.assertCurrent();
-        const result = await driver.requestDoubleTapCoordinates(x, y, () => {
-          context.onDispatched?.();
-          onDispatch?.();
-        });
-        if (result.success) {
-          // The driver's atomic request delivers the two activation touches.
-          context.onTapDelivered();
-          context.onTapDelivered();
-        }
-        throwIfAborted(signal);
-        return result;
-      },
-    };
-    const result = await awaitWhileRequestIsLive(
-      options.action === "longPress"
-        ? this.talkBackStrategy.executeCoordinateFallback(
-            point.x,
-            point.y,
-            "longPress",
-            tapDurationMs(options, "android"),
-            guardedDriver,
-            { displayFence: fence },
-          )
-        : // A precise TalkBack activation already contains the double-tap gesture.
-          this.talkBackStrategy.executePreciseTap(point.x, point.y, guardedDriver, fence),
-      signal,
-    );
-    context.onActivationWarnings?.(result.warnings);
-    if (!result.success) {
-      throw new ActionableError(
-        `TalkBack coordinate tap failed: ${result.error ?? "activation was not confirmed"}${
-          result.focusCompleted
-            ? " Focus touch was delivered; activation failed. Do not retry automatically."
-            : ""
-        }`,
-      );
-    }
-    throwIfAborted(signal);
-  }
-
-  private async requestContextualTalkBackFocus(
-    point: { x: number; y: number },
-    duration: number,
-    frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    fence: DisplayFence,
-    onDispatch: () => void,
-  ): Promise<{ success: boolean; error?: string }> {
-    let dispatched = false;
-    try {
-      const result = await this.androidClient.requestTapCoordinates({
-        x: point.x,
-        y: point.y,
-        duration,
-        timeoutMs: resolveCoordinateTapCtrlProxyTimeoutMs(duration),
-        frameContext,
-        onDispatch: () => {
-          dispatched = true;
-        },
-        signal,
-        beforeSend: fence.assertCurrent,
-      });
-      // A stale-frame reply proves the device rejected the focus touch. Preserve
-      // tapAt's one safe retry even though the request was sent on the wire.
-      if (dispatched && !isStaleFrameContextRejection(result.error)) {
-        onDispatch();
-      }
-      return result;
-    } catch (error) {
-      if (dispatched) {
-        onDispatch();
-        throw indeterminateTapError(errorMessage(error));
-      }
-      throw toActionableError(error, "TalkBack focus tap failed before dispatch");
-    }
   }
 
   private async dispatchAndroidDisplayGesture(

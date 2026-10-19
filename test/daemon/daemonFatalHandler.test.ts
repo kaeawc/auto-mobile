@@ -62,7 +62,7 @@ describe("createDaemonFatalProcessHandler (unit)", () => {
     const handler = createDaemonFatalProcessHandler(logger);
 
     // Node types this as Error, but a thrown non-Error can still reach here.
-    handler({ type: "uncaughtException", error: "not-an-error" as unknown as Error });
+    handler({ type: "uncaughtException", error: "not-an-error" });
 
     expect(logger.errors[0].message).toContain("not-an-error");
   });

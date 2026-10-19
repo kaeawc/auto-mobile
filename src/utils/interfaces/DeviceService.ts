@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "./TapCoordinatesRequest";
 /**
  * DeviceService - Unified interface for device automation clients
  *
@@ -161,13 +162,7 @@ export interface DeviceService {
    * @param timeoutMs Operation timeout in milliseconds
    * @param perf Optional performance tracker
    */
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<GestureResult>;
 
   /**
    * Perform a swipe gesture.

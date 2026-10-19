@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test, spyOn } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
@@ -97,7 +98,11 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
     return this.accessibilityHierarchies.shift() ?? null;
   }
 
-  async requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+  async requestTapCoordinates(
+    request: TapCoordinatesRequest,
+  ): Promise<{ success: boolean; error?: string }> {
+    const { x, y } = request;
+
     this.tapCoordinates.push({ x, y });
     await this.onTap?.();
     return this.tapResult;

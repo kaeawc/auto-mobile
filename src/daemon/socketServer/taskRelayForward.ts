@@ -1,4 +1,5 @@
 import type { Client } from "@modelcontextprotocol/client";
+import type { ForwardMcpClient } from "./forwardSessionKey";
 import {
   declaredTasksMeta,
   isTaskRelayMethod,
@@ -24,7 +25,7 @@ type CallToolArguments = Parameters<Client["callTool"]>[0]["arguments"];
  * carries it, and a task handle the daemon answered with is returned as it was sent.
  */
 export async function callForwardedTool(
-  mcpClient: Client,
+  mcpClient: ForwardMcpClient,
   request: DaemonRequest,
   args: unknown,
   callOptions: Record<string, unknown>,
@@ -48,7 +49,7 @@ export async function callForwardedTool(
  * other method is refused.
  */
 export async function forwardTaskRequest(
-  mcpClient: Client,
+  mcpClient: ForwardMcpClient,
   request: DaemonRequest,
   requestOptions: { timeout: number; signal?: AbortSignal },
 ): Promise<unknown> {

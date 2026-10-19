@@ -126,16 +126,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
         });
         expect(tap).not.toHaveBeenCalled();
       } else {
-        expect(tap).toHaveBeenCalledWith(
-          42,
-          84,
-          17000,
-          19000,
-          undefined,
-          undefined,
-          undefined,
-          expect.any(Function),
-        );
+        expect(tap).toHaveBeenCalledWith({
+          x: 42,
+          y: 84,
+          duration: 17000,
+          timeoutMs: 19000,
+          perf: undefined,
+          frameContext: undefined,
+          signal: undefined,
+          onDispatch: expect.any(Function),
+        });
         expect(activate).not.toHaveBeenCalled();
       }
     },
@@ -330,7 +330,15 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
       const controller = new AbortController();
       const request = spyOn(fakeIosClient, "requestTapCoordinates").mockImplementation(
-        async (_x, _y, duration, _timeout, _perf, _frame, signal) => {
+        async ({
+          x: _x,
+          y: _y,
+          duration: duration,
+          timeoutMs: _timeout,
+          perf: _perf,
+          frameContext: _frame,
+          signal: signal,
+        }) => {
           expect(duration).toBe(1500);
           expect(signal).toBe(controller.signal);
           if (failure === "abort") {
@@ -365,16 +373,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 6000 });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(
-      42,
-      84,
-      6000,
-      8000,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
+    expect(tapSpy).toHaveBeenCalledWith({
+      x: 42,
+      y: 84,
+      duration: 6000,
+      timeoutMs: 8000,
+      perf: undefined,
+      frameContext: undefined,
+      signal: undefined,
+      onDispatch: expect.any(Function),
+    });
   });
 
   // Issue #6276 (follow-up to #6248 review thread funaf): an ordinary
@@ -394,16 +402,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(
-      42,
-      84,
-      50,
-      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
+    expect(tapSpy).toHaveBeenCalledWith({
+      x: 42,
+      y: 84,
+      duration: 50,
+      timeoutMs: TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      perf: undefined,
+      frameContext: undefined,
+      signal: undefined,
+      onDispatch: expect.any(Function),
+    });
   });
 
   // Issue #6306 review (P1/P2): the outer MCP request signal previously never
@@ -424,7 +432,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
     expect(result.success).toBe(true);
-    const [, , , , , , signalArg] = tapSpy.mock.calls[0] ?? [];
+    const signalArg = tapSpy.mock.calls[0]?.[0].signal;
     expect(signalArg).toBe(controller.signal);
   });
 
@@ -568,16 +576,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(
-      42,
-      84,
-      duration,
-      duration + 2000,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
+    expect(tapSpy).toHaveBeenCalledWith({
+      x: 42,
+      y: 84,
+      duration: duration,
+      timeoutMs: duration + 2000,
+      perf: undefined,
+      frameContext: undefined,
+      signal: undefined,
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("VoiceOver longPress duration just over TAP_ANY_LONG_PRESS_MAX_DURATION_MS is REJECTED, not clamped-and-sent", async () => {
@@ -639,16 +647,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     // Normalized to 1501ms — used verbatim for the request payload, and the
     // timeout preserves the default while covering that normalized press.
-    expect(tapSpy).toHaveBeenCalledWith(
-      42,
-      84,
-      1501,
-      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
+    expect(tapSpy).toHaveBeenCalledWith({
+      x: 42,
+      y: 84,
+      duration: 1501,
+      timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      perf: undefined,
+      frameContext: undefined,
+      signal: undefined,
+      onDispatch: expect.any(Function),
+    });
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1501 }]);
   });
 
@@ -666,16 +674,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     // Floored to 1ms — still a long press (duration > 0), not a tap — and the
     // timeout preserves the default while covering that floored press.
-    expect(tapSpy).toHaveBeenCalledWith(
-      42,
-      84,
-      1,
-      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-      undefined,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
+    expect(tapSpy).toHaveBeenCalledWith({
+      x: 42,
+      y: 84,
+      duration: 1,
+      timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      perf: undefined,
+      frameContext: undefined,
+      signal: undefined,
+      onDispatch: expect.any(Function),
+    });
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1 }]);
   });
 

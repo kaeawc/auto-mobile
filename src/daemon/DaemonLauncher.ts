@@ -256,9 +256,9 @@ function resolveBunxPath(
 ): string | undefined {
   const extensions =
     platform === "win32"
-      ? (environment.PATHEXT?.split(";").filter((extension) =>
-          /\.(?:com|exe)/i.test(extension),
-        ) ?? [".COM", ".EXE"])
+      ? (readEnvRaw(AMBIENT_ENV.PATHEXT, environment)
+          ?.split(";")
+          .filter((extension) => /\.(?:com|exe)/i.test(extension)) ?? [".COM", ".EXE"])
       : [""];
   const pathJoin = platform === "win32" ? win32.join : posix.join;
   for (const directory of pathEntries(environment, platform)) {

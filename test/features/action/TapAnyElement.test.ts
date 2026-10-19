@@ -289,7 +289,9 @@ describe("TapAnyElement Android gesture dispatch", () => {
     const adbTapCountAtRequest: number[] = [];
     const semanticCalls: string[] = [];
     const service = {
-      requestTapCoordinates: async (x: number, y: number, duration?: number) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, duration } = request;
+
         adbTapCountAtRequest.push(
           adb.getCommandCalls().filter((call) => call.command.includes("input touchscreen tap"))
             .length,

@@ -1,3 +1,4 @@
+import type { GestureStartRequest } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { describe, expect, test } from "bun:test";
 import { DragPath } from "../../../src/features/action/DragPath";
 import {
@@ -37,7 +38,9 @@ function fakeClient(
   const frames: Frame[] = [];
   let moves = 0;
   const client: StrokeClient = {
-    requestGestureStart: async (_id, x, y, _t, _p, displayId) => {
+    requestGestureStart: async (request: GestureStartRequest) => {
+      const { x, y, displayId } = request;
+
       frames.push({ kind: "start", at: timer.now(), x, y, displayId });
       return behavior.failStart ? { success: false, totalTimeMs: 0, error: "no" } : ok();
     },
@@ -271,7 +274,9 @@ describe("runDragPathStroke", () => {
     const { client: base } = fakeClient(timer);
     const client: StrokeClient = {
       ...base,
-      requestGestureStart: async (_id, x, y) => {
+      requestGestureStart: async (request: GestureStartRequest) => {
+        const { x, y } = request;
+
         frames.push({ kind: "start", at: timer.now(), x, y });
         await timer.sleep(2000);
         throw new Error("Gesture start timed out");

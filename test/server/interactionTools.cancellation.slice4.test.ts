@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -293,15 +294,9 @@ test.each(["tap", "dismiss"])(
       timer: new FakeTimer(),
       observeScreenFactory: () => ({ execute: async () => observation }),
       iosClientFactory: () => ({
-        requestTapCoordinates: async (
-          _x,
-          _y,
-          _duration?: number,
-          _timeout?: number,
-          _perf?: unknown,
-          _frame?: string,
-          signal?: AbortSignal,
-        ) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { signal } = request;
+
           received = signal;
           dispatches++;
           started.resolve();

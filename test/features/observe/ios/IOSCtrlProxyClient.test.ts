@@ -2186,7 +2186,12 @@ describe("IOSCtrlProxyClient", function () {
       );
 
       try {
-        const resultPromise = testClient.requestTapCoordinates(150, 300, 0, 5000);
+        const resultPromise = testClient.requestTapCoordinates({
+          x: 150,
+          y: 300,
+          duration: 0,
+          timeoutMs: 5000,
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);

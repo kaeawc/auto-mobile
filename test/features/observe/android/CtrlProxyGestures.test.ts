@@ -75,7 +75,7 @@ describe("Android gesture duration wire", () => {
       const { context, sent, requestManager } = createFakeContext();
       const gestures = new CtrlProxyGestures(context);
       const requests = [
-        () => gestures.requestTapCoordinates(10, 20, duration),
+        () => gestures.requestTapCoordinates({ x: 10, y: 20, duration }),
         () => gestures.requestSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration }),
         () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
         () =>
@@ -484,14 +484,14 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_tap_coordinates","requestId":"request","x":10,"y":20,"duration":10}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestTapCoordinates(10, 20, 10, 5000, undefined, undefined, undefined, undefined, id),
+        g.requestTapCoordinates({ x: 10, y: 20, duration: 10, timeoutMs: 5000, displayId: id }),
     },
     {
       name: "long press",
       legacy:
         '{"type":"request_tap_coordinates","requestId":"request","x":10,"y":20,"duration":800}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestTapCoordinates(10, 20, 800, 5000, undefined, undefined, undefined, undefined, id),
+        g.requestTapCoordinates({ x: 10, y: 20, duration: 800, timeoutMs: 5000, displayId: id }),
     },
     {
       name: "swipe",
@@ -544,7 +544,13 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_gesture_start","requestId":"request","gestureId":"finger","x":10,"y":20}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestGestureStart("finger", 10, 20, 5000, undefined, id),
+        g.requestGestureStart({
+          gestureId: "finger",
+          x: 10,
+          y: 20,
+          timeoutMs: 5000,
+          displayId: id,
+        }),
     },
   ];
   for (const { name, send } of cases) {
@@ -648,12 +654,12 @@ describe("Android client forwards gesture displayId", () => {
     {
       name: "tap",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestTapCoordinates(1, 2, 10, 5000, undefined, undefined, undefined, undefined, 2),
+        c.requestTapCoordinates({ x: 1, y: 2, duration: 10, timeoutMs: 5000, displayId: 2 }),
     },
     {
       name: "long press",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestTapCoordinates(1, 2, 800, 5000, undefined, undefined, undefined, undefined, 2),
+        c.requestTapCoordinates({ x: 1, y: 2, duration: 800, timeoutMs: 5000, displayId: 2 }),
     },
     {
       name: "swipe",
@@ -696,7 +702,7 @@ describe("Android client forwards gesture displayId", () => {
     {
       name: "gesture start",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestGestureStart("finger", 1, 2, 5000, undefined, 2),
+        c.requestGestureStart({ gestureId: "finger", x: 1, y: 2, timeoutMs: 5000, displayId: 2 }),
     },
   ];
   for (const { name, send } of cases) {
@@ -729,7 +735,14 @@ describe("Android display gesture cancellation", () => {
     {
       name: "tap",
       send: (c: AndroidCtrlProxyClient, signal: AbortSignal) =>
-        c.requestTapCoordinates(1, 2, 10, 5000, undefined, undefined, undefined, signal, 2),
+        c.requestTapCoordinates({
+          x: 1,
+          y: 2,
+          duration: 10,
+          timeoutMs: 5000,
+          signal,
+          displayId: 2,
+        }),
     },
     {
       name: "drag",
@@ -798,7 +811,15 @@ describe("gesture pre-send display fence during reconnect", () => {
     {
       name: "tap",
       send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
-        c.requestTapCoordinates(1, 2, 10, 5000, undefined, undefined, undefined, signal, 2, guard),
+        c.requestTapCoordinates({
+          x: 1,
+          y: 2,
+          duration: 10,
+          timeoutMs: 5000,
+          signal,
+          displayId: 2,
+          beforeSend: guard,
+        }),
     },
     {
       name: "swipe",
@@ -845,7 +866,14 @@ describe("gesture pre-send display fence during reconnect", () => {
     {
       name: "gesture start",
       send: (c: AndroidCtrlProxyClient, guard: () => void) =>
-        c.requestGestureStart("finger", 1, 2, 5000, undefined, 2, guard),
+        c.requestGestureStart({
+          gestureId: "finger",
+          x: 1,
+          y: 2,
+          timeoutMs: 5000,
+          displayId: 2,
+          beforeSend: guard,
+        }),
     },
   ];
   for (const { name, send } of cases) {
@@ -941,18 +969,15 @@ it("tap cancellation inside the pre-send guard prevents dispatch and cleans regi
   const controller = new AbortController();
   const reason = new Error("Operation cancelled at send");
   const pending = client
-    .requestTapCoordinates(
-      1,
-      2,
-      10,
-      5000,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-      2,
-      () => controller.abort(reason),
-    )
+    .requestTapCoordinates({
+      x: 1,
+      y: 2,
+      duration: 10,
+      timeoutMs: 5000,
+      signal: controller.signal,
+      displayId: 2,
+      beforeSend: () => controller.abort(reason),
+    })
     .then(
       (result) => ({ result, error: undefined }),
       (error: unknown) => ({ result: undefined, error }),

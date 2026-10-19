@@ -1,8 +1,8 @@
 import { makePool } from "../helpers/makePool";
+import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
+import type { VirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { describe, it, expect } from "bun:test";
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -12,6 +12,18 @@ import type { DeviceInfo } from "../../src/models";
 
 // Regressions for #11123 (items 1-3): tracked-process, release-capture and start-timer leaks.
 const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+
+class ThrowingLifecycleCoordinator implements VirtualDeviceLifecycleCoordinator {
+  constructor(private readonly error: Error) {}
+
+  isReserved(): boolean {
+    return false;
+  }
+
+  async reserve(): Promise<never> {
+    throw this.error;
+  }
+}
 
 describe("DevicePool removeDevice / start leaks (#11123)", () => {
   let timer: FakeTimer;
@@ -32,7 +44,7 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
     return pool;
   };
   const internals = poolInternals;
-  const aliveChild = (): ChildProcess => new EventEmitter() as unknown as ChildProcess;
+  const aliveChild = (): StreamlessChildProcess => new StreamlessChildProcess();
 
   let pool: DevicePool;
   async function arrangeHarness(): Promise<void> {
@@ -107,11 +119,7 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
   arranged("clears the start deadline timer when lifecycle reserve throws", async () => {
     const reserveError = new Error("reserve failed");
     pool = await build({
-      lifecycleCoordinator: {
-        reserve: async () => {
-          throw reserveError;
-        },
-      } as unknown as DevicePoolDependencies["lifecycleCoordinator"],
+      lifecycleCoordinator: new ThrowingLifecycleCoordinator(reserveError),
     });
     const before = timer.getPendingTimeoutCount();
 

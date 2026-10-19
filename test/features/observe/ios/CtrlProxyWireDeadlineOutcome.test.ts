@@ -15,15 +15,13 @@ describe("iOS wire deadline outcome vs unconfirmed dispatch", () => {
   async function tapWithWireDeadline() {
     const h = createIosDelegateHarness();
     h.context.wireDeadlineParams = iosWireDeadlineParams;
-    const pending = new CtrlProxyGestures(h.context).requestTapCoordinates(
-      1,
-      2,
-      budgetMs,
-      budgetMs,
-      undefined,
-      undefined,
-      new AbortController().signal,
-    );
+    const pending = new CtrlProxyGestures(h.context).requestTapCoordinates({
+      x: 1,
+      y: 2,
+      duration: budgetMs,
+      timeoutMs: budgetMs,
+      signal: new AbortController().signal,
+    });
     await Promise.resolve();
     return { h, pending };
   }

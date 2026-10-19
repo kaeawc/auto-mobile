@@ -32,7 +32,7 @@ import type { IosCtrlProxyBuilderSurface } from "./IosCtrlProxyBuilderSurface";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
-import { type ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../utils/PortManager";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../utils/HostCommandExecutor";
 import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";
@@ -58,6 +58,7 @@ import {
 import { IosCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IosCtrlProxyProcessClient";
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import type { ProxyManager, ProxySetupResult } from "../utils/interfaces/ProxyManager";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
 export const DIRECT_RUNNER_DISCOVERY_DEADLINE_MS = 5_000;
@@ -567,8 +568,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         legacyAppBundleId: IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
         isSimulator: () => this.isSimulator(),
         isHashVerificationSkipped: () =>
-          process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH === "true" ||
-          process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH === "1",
+          ["true", "1"].includes(readEnvRaw(ENV.IOS_SKIP_CTRL_PROXY_APP_HASH) ?? ""),
         getExpectedAppHash: (platform) => this.builder.getExpectedAppHash(platform),
       })
     );
@@ -1404,7 +1404,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static getExistingTargetBundleId(device: BootedDevice): string | undefined {
     return (
       IOSCtrlProxyManager.registry.peek(device.deviceId)?.getTargetBundleId() ??
-      process.env.CTRL_PROXY_IOS_BUNDLE_ID ??
+      readEnvRaw(AMBIENT_ENV.CTRL_PROXY_IOS_BUNDLE_ID) ??
       undefined
     );
   }
@@ -1413,7 +1413,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Resolve the target bundle ID: explicit property > env var > undefined.
    */
   private resolveTargetBundleId(): string | undefined {
-    return this.targetBundleId ?? process.env.CTRL_PROXY_IOS_BUNDLE_ID ?? undefined;
+    return this.targetBundleId ?? readEnvRaw(AMBIENT_ENV.CTRL_PROXY_IOS_BUNDLE_ID) ?? undefined;
   }
 
   /**
@@ -2653,7 +2653,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // left by post-extract verification alone (issue #4759).
     await this.builder.verifyRunnerBinaryBeforeLaunch("simulator");
 
-    const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
+    const timeout = readEnvRaw(AMBIENT_ENV.CTRL_PROXY_IOS_TIMEOUT) || "86400";
     const bundleId = this.resolveTargetBundleId();
     await this.ensureLocalServicePortAllocatedAndAvailable();
 
@@ -2672,7 +2672,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       ...runnerHierarchyPairCaptureEnv(process.env),
     };
     if (bundleId) {
-      runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      runnerEnv[AMBIENT_ENV.CTRL_PROXY_IOS_BUNDLE_ID.name] = bundleId;
       logger.info(
         `[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`,
       );
@@ -2773,7 +2773,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private shouldPromoteCtrlProxyOutput(output: string): boolean {
-    if (process.env.AUTOMOBILE_CTRLPROXY_VERBOSE === "true") {
+    if (readEnvRaw(ENV.CTRLPROXY_VERBOSE) === "true") {
       return true;
     }
 
@@ -3146,8 +3146,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   static resolveHealthPollMaxAttempts(env: NodeJS.ProcessEnv = process.env): number {
     return readEnvPositiveInteger(
-      "AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
-      "AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
+      ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.name,
+      ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.legacyName,
       { fallback: IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS },
       env,
     );
@@ -4113,12 +4113,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // which then falls back to its default 8765 (issue #2731).
     const runnerEnv: Record<string, string> = {
       CTRL_PROXY_IOS_PORT: String(this.servicePort),
-      CTRL_PROXY_IOS_TIMEOUT: process.env.CTRL_PROXY_IOS_TIMEOUT || "86400",
+      CTRL_PROXY_IOS_TIMEOUT: readEnvRaw(AMBIENT_ENV.CTRL_PROXY_IOS_TIMEOUT) || "86400",
       AUTOMOBILE_DEVICE_ID: this.device.deviceId,
       ...runnerQueryTimeoutEnv(process.env),
     };
     if (bundleId) {
-      runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      runnerEnv[AMBIENT_ENV.CTRL_PROXY_IOS_BUNDLE_ID.name] = bundleId;
       logger.info(
         `[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to runner via xctestrun`,
       );

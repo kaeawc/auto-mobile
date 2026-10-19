@@ -1242,9 +1242,7 @@ describe("DaemonManager readiness", () => {
       processTable,
     });
 
-    const internals = manager as unknown as {
-      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-    };
+    const internals = manager.getInternalsForTesting();
     // Budget equals the single-probe cap, so the first probe alone exhausts it.
     await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
     expect(reachability.calls).toBe(1);
@@ -1277,9 +1275,7 @@ describe("DaemonManager readiness", () => {
     // An unrelated auto-mobile daemon (a different worktree/namespace) is always
     // "live" per the unscoped process-table scan.
 
-    const internals = manager as unknown as {
-      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-    };
+    const internals = manager.getInternalsForTesting();
     const start = fakeTimer.getCurrentTime();
     // A generous budget that would, on the default namespace, poll for a long
     // time on the strength of the (unrelated) live-process signal alone.
@@ -1301,7 +1297,7 @@ describe("DaemonManager readiness", () => {
   // instead, which stays fixed regardless of any env override.
   describe("isolated-namespace detection (#6140)", () => {
     function internalsOf(manager: DaemonManager) {
-      return manager as unknown as { isIsolatedSocketNamespace(): boolean };
+      return manager.getInternalsForTesting();
     }
 
     test("is false for the built-in default PID file and socket paths", () => {
@@ -1368,9 +1364,7 @@ describe("DaemonManager readiness", () => {
       peerSocketReachability: reachability,
     });
 
-    const internals = manager as unknown as {
-      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-    };
+    const internals = manager.getInternalsForTesting();
 
     await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
     expect(scanTimeouts.length).toBeGreaterThan(0);

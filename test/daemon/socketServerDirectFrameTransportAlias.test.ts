@@ -117,7 +117,7 @@ describe("a direct frame naming a held handset by its other transport id", () =>
       createAndroidTestClient(device, {
         getScreenScaleMetadata: () => null,
         requestTapCoordinates: async (...args) => {
-          args[6]?.();
+          args[0].onDispatch?.();
           driven.push(`tap:${device.deviceId}`);
           return { success: true, totalTimeMs: 0 };
         },
@@ -134,7 +134,7 @@ describe("a direct frame naming a held handset by its other transport id", () =>
       requestTapCoordinates: async (
         ...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>
       ) => {
-        args[7]?.();
+        args[0].onDispatch?.();
         driven.push(`ios-tap:${device.deviceId}`);
         return { success: true };
       },

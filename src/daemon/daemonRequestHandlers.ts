@@ -1322,7 +1322,7 @@ export interface SessionExecutionCounter {
 
 export async function handleSessionInfo(
   request: DaemonRequest,
-  state: DaemonStateAccess,
+  state: Pick<DaemonStateAccess, "getSessionManager">,
   executions: SessionExecutionCounter = executionTracker,
 ): Promise<DaemonMethodResult> {
   const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;

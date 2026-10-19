@@ -1,4 +1,5 @@
 import type { SwipeGestureRequest } from "../../../src/features/action/swipeon/types";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import type { DragRequest } from "../../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
@@ -249,7 +250,7 @@ describe("explicit action display", () => {
       "abort-post-return",
       "abort-settle",
     ] as const) {
-      test(`${kind} targeted post-capture: ${outcome}`, async () => {
+      const scenario = async () => {
         const executor = adb();
         const timer = autoTimer();
         const before = screen("external", "Notifications");
@@ -447,7 +448,8 @@ describe("explicit action display", () => {
           invalidate.mockRestore();
           dispatch.mockRestore();
         }
-      });
+      };
+      test(`${kind} targeted post-capture: ${outcome}`, scenario);
     }
   }
 
@@ -705,7 +707,9 @@ describe("explicit action display", () => {
     observe.setObserveResult(screen("internal"));
     const taps: Array<[number, number]> = [];
     const client = {
-      requestTapCoordinates: async (x: number, y: number) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y } = request;
+
         taps.push([x, y]);
         return { success: true };
       },
@@ -731,7 +735,9 @@ describe("explicit action display", () => {
     const observation = screen("internal");
     const taps: Array<[number, number]> = [];
     const ctrlProxy = new FakeCtrlProxy();
-    spyOn(ctrlProxy, "requestTapCoordinates").mockImplementation(async (x: number, y: number) => {
+    spyOn(ctrlProxy, "requestTapCoordinates").mockImplementation(async (request) => {
+      const { x, y } = request;
+
       taps.push([x, y]);
       return { success: true, totalTimeMs: 0 };
     });
@@ -1544,9 +1550,9 @@ describe("explicit action display", () => {
           if (outcome === "confirmed" || outcome === "unconfirmed") {
             if (route === "CtrlProxy") {
               expect(tap).toHaveBeenCalledTimes(1);
-              expect(tap.mock.calls[0].slice(0, 2)).toEqual([50, 60]);
-              expect(tap.mock.calls[0].at(-2)).toBe(2);
-              expect(tap.mock.calls[0].at(-1)).toBeFunction();
+              expect(tap.mock.calls[0][0]).toMatchObject({ x: 50, y: 60 });
+              expect(tap.mock.calls[0][0].displayId).toBe(2);
+              expect(tap.mock.calls[0][0].beforeSend).toBeFunction();
               expect(commands).toEqual([]);
             } else {
               expect(tap).not.toHaveBeenCalled();
@@ -1626,7 +1632,7 @@ describe("explicit action display", () => {
       );
       expect(result.success).toBe(true);
       expect(tap).toHaveBeenCalledTimes(1);
-      expect(tap.mock.calls[0].at(-2)).toBe(2);
+      expect(tap.mock.calls[0][0].displayId).toBe(2);
       expect(typed).toEqual(["hello"]);
       expect(executed).toEqual(["type", "clear", "key:done"]);
       expect(observe.getExecuteOptions().at(-1)?.display).toBe("external");
@@ -1769,9 +1775,16 @@ describe("CtrlProxy display-targeted action routing", () => {
           ...dragCallTails(drag.mock.calls),
         ];
         expect(requests).toHaveLength(1);
-        expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
-        expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
-        expect(requests[0].at(kind === "dragAndDrop" ? -2 : -1)).toBeFunction();
+        const tapRequest = tap.mock.calls[0]?.[0];
+        if (tapRequest) {
+          expect(tapRequest.signal).toBe(controller.signal);
+          expect(tapRequest.displayId).toBe(2);
+          expect(tapRequest.beforeSend).toBeFunction();
+        } else {
+          expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
+          expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
+          expect(requests[0].at(kind === "dragAndDrop" ? -2 : -1)).toBeFunction();
+        }
         expect(
           executor.getExecutedCommands().filter((cmd) => cmd.startsWith("shell input")),
         ).toEqual([]);
@@ -1951,17 +1964,26 @@ describe("CtrlProxy display-targeted action routing", () => {
                 expect(calls).toHaveLength(
                   gesture === "doubleTapOn" && (!failure || fallsBack) ? 2 : 1,
                 );
-                expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
-                  panel === "external" ? 2 : undefined,
-                );
-                expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
-                if (panel === "external") {
-                  expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
+                const tapRequest = tap.mock.calls[0]?.[0];
+                if (tapRequest) {
+                  expect(tapRequest.displayId).toBe(panel === "external" ? 2 : undefined);
+                  expect(tapRequest.beforeSend).toBeFunction();
+                  if (panel === "external") {
+                    expect(tapRequest.signal).toBe(controller.signal);
+                  }
+                } else {
+                  expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
+                    panel === "external" ? 2 : undefined,
+                  );
+                  expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
+                  if (panel === "external") {
+                    expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
+                  }
                 }
                 expect(inputs).toEqual(
                   fallsBack
                     ? tap.mock.calls.map(
-                        ([x, y, duration]) =>
+                        ([{ x, y, duration }]) =>
                           `shell input touchscreen -d 2 ${
                             gesture === "longPressAt" || gesture === "longPressOn"
                               ? `swipe ${x} ${y} ${x} ${y} ${duration}`
@@ -1971,16 +1993,16 @@ describe("CtrlProxy display-targeted action routing", () => {
                     : [],
                 );
                 if (gesture === "longPressAt") {
-                  expect(tap.mock.calls[0][2]).toBe(1000);
-                  expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+                  expect(tap.mock.calls[0][0]?.duration).toBe(1000);
+                  expect(tap.mock.calls[0][0]?.timeoutMs).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
                 }
                 if (gesture === "longPressOn") {
-                  expect(tap.mock.calls[0][2]).toBe(800);
-                  expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+                  expect(tap.mock.calls[0][0]?.duration).toBe(800);
+                  expect(tap.mock.calls[0][0]?.timeoutMs).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
                 }
                 if (gesture === "tapAt" || gesture === "tapOn" || gesture === "doubleTapOn") {
                   for (const call of tap.mock.calls) {
-                    expect(call[3]).toBeUndefined();
+                    expect(call[0].timeoutMs).toBeUndefined();
                   }
                 }
                 if (gesture === "pinch") {
@@ -2494,15 +2516,15 @@ describe("selected-display double tap delivery", () => {
           AndroidCtrlProxyClient.prototype,
           "requestTapCoordinates",
         ).mockImplementation(async (...args) => {
-          args[9]?.();
-          expect(args[8]).toBe(2);
+          args[0].beforeSend?.();
+          expect(args[0].displayId).toBe(2);
           if (failure === "first tap pre-dispatch failure") {
             return { success: false, error: "Stale frame context" };
           }
           if (failure === "pre-dispatch fallback" && tap.mock.calls.length === 1) {
             return { success: false, error: "Not connected" };
           }
-          args[6]?.();
+          args[0].onDispatch?.();
           if (failure === "second tap post-send failure" && tap.mock.calls.length === 2) {
             return { success: false, error: "Tap timed out after send" };
           }

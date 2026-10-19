@@ -78,7 +78,7 @@ function harness() {
     getStartedDeviceProcesses: () => processes,
     getStartedDeviceProcessOutput: () => outputs,
     getDevices: () => devices,
-    getSessionManager: () => ({ getSession: () => null }) as unknown as SessionManager,
+    getSessionManager: () => ({ getSession: () => null }),
     isReservedForShutdown: () => reserved,
     prepareSessionPreservingRecovery: () => {
       calls.push("prepare");

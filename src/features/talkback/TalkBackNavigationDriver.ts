@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import type { BootedDevice } from "../../models";
 import type { A11yTapCoordinatesResult } from "../observe/android/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -16,12 +17,7 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
    * @param y - Y coordinate
    * @param durationMs - Duration of the tap in milliseconds
    */
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    durationMs: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult>;
 
   /** Dispatch both activation taps in one device request. */
   requestDoubleTapCoordinates(

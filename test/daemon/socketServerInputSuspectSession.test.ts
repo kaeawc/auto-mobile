@@ -197,7 +197,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
   const sendGesture = (kind: "Start" | "Move" | "End") =>
     send(`gesture-${kind}`, `input/gesture${kind}`, { gestureId: "drag-1" });
 
-  beforeEach(async () => {
+  async function arrange(): Promise<void> {
     taps = 0;
     strokes = [];
     tapOnDevice = undefined;
@@ -227,12 +227,15 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       requestTapCoordinates: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
       ) => {
-        args[6]?.();
+        args[0].onDispatch?.();
         taps++;
         tapEntered.resolve();
         return (await tapOnDevice?.promise) ?? { success: true };
       },
-      requestGestureStart: stroke("start"),
+      requestGestureStart: async () => {
+        strokes.push("start");
+        return { success: true };
+      },
       requestGestureMove: stroke("move"),
       requestGestureEnd: stroke("end"),
     });
@@ -249,9 +252,9 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     server.allowRequests();
     socket = new FakeSocket();
     server.connect(socket);
-  });
+  }
 
-  afterEach(async () => {
+  async function dismantle(): Promise<void> {
     await monitor?.stop();
     monitor = undefined;
     unsubscribeActivity();
@@ -260,7 +263,10 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
     sessionManager.stopCleanupTimer();
-  });
+  }
+
+  beforeEach(arrange);
+  afterEach(dismantle);
 
   test("a tap inside the suspect window is refused, retryable, and restores nothing", async () => {
     timer.advanceTime(LEASE_MS + 1);

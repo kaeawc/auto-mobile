@@ -29,7 +29,6 @@
 1855	src/devices/deviceBootService.ts
 1354	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
-1634	src/features/accessibility/ContrastChecker.ts
 1413	src/features/action/BaseVisualChange.ts
 1038	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
@@ -42,8 +41,8 @@
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
 1234	src/features/device/SetPosture.ts
 5861	src/features/deviceLifecycle/deviceLifecycleCore.ts
-1392	src/features/navigation/Explore.ts
-2499	src/features/navigation/NavigationGraphManager.ts
+1084	src/features/navigation/Explore.ts
+1117	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
 1032	src/features/observe/TakeScreenshot.ts
 1012	src/features/observe/ViewHierarchy.ts
@@ -55,7 +54,7 @@
 4568	src/features/observe/ios/IOSCtrlProxyClient.ts
 2136	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
-1424	src/features/performance/PerformanceMonitor.ts
+1105	src/features/performance/PerformanceMonitor.ts
 1223	src/features/preferences/AppPreferences.ts
 1291	src/features/prototype/prototypeSpec.ts
 1271	src/features/prototype/prototypeValidation.ts

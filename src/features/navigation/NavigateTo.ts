@@ -11,7 +11,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { ToolRegistry } from "../../server/toolRegistry";
+import { registeredInternalToolCaller, type InternalToolCaller } from "./InternalToolCaller";
 import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import {
   NavigationGraphManager,
@@ -136,6 +136,7 @@ export interface NavigateToDependencies {
   foregroundObserverProvider?: () => ForegroundObserver;
   scrollSearcher?: ReplayScrollSearcher;
   uiStateSetupFactory?: UIStateSetupFactory;
+  internalToolCaller?: InternalToolCaller;
 }
 
 /**
@@ -149,6 +150,7 @@ export class NavigateTo {
   private uiStateSetup: UIStateSetup | null;
   private screenWaiter: ScreenTransitionWaiter;
   private timer: Timer;
+  private readonly internalTools: InternalToolCaller;
   private pathOptimizer: PathOptimizer | undefined;
   private sessionUuid?: string;
   private foregroundObserverProvider: () => ForegroundObserver;
@@ -171,6 +173,7 @@ export class NavigateTo {
     dependencies: NavigateToDependencies = {},
   ) {
     this.uiStateSetupFactory = dependencies.uiStateSetupFactory ?? defaultUIStateSetupFactory;
+    this.internalTools = dependencies.internalToolCaller ?? registeredInternalToolCaller;
     const {
       uiStateSetup = null,
       screenWaiter = null,
@@ -763,7 +766,7 @@ export class NavigateTo {
     // `interaction.args` is never mutated. Under `--actions-diff-observe` this
     // replay neither diffs its observation nor advances the agent-facing diff
     // baseline. Throws ActionableError if the tool is not registered.
-    const response = await ToolRegistry.callInternal(
+    const response = await this.internalTools.callInternal(
       interaction.toolName,
       {
         ...stripNavigationToolParams(interaction.args),
@@ -809,7 +812,7 @@ export class NavigateTo {
 
     // iOS has no injected host transport, so retain its internal tool routing
     // for the selected device and no-diff behavior.
-    const response = await ToolRegistry.callInternal(
+    const response = await this.internalTools.callInternal(
       "pressButton",
       {
         button: "back",

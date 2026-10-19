@@ -5,7 +5,7 @@ import {
   writeToolEnvelopePayload,
 } from "../../src/server/toolEnvelopePayload";
 import { getStructuredPayload, stringifyToolResponse } from "../../src/utils/toolUtils";
-import { narrowInternalToolEnvelope } from "../../src/server/internalToolPayloads";
+import { narrowInternalToolEnvelope } from "../../src/utils/internalToolPayloads";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 
 // Property-based coverage for the tool-envelope payload seam. The module promises

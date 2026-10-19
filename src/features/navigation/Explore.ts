@@ -15,7 +15,7 @@ import {
 import { ExploreElementActions } from "./ExploreElementActions";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
 import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
-import { ToolRegistry } from "../../server/toolRegistry";
+import { registeredInternalToolCaller as toolCaller } from "./InternalToolCaller";
 import { generateExplorationReport, isExplorationResetDue } from "./ExploreReporting";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import { selectValidateElement } from "./ExploreValidationSelection";
@@ -1150,7 +1150,7 @@ export class Explore extends BaseVisualChange {
       this.adb,
       this.timer,
       async (toolName, args, signal) => {
-        const response = await ToolRegistry.callInternal(toolName, args, undefined, signal);
+        const response = await toolCaller.callInternal(toolName, args, undefined, signal);
         throwIfInternalToolFailed(response, toolName, this.device.platform);
       },
       this.sessionUuid,

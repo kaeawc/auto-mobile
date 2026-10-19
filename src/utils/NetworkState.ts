@@ -107,16 +107,28 @@ interface DeviceNetworkScope {
   simulationOwner: string | null;
 }
 
-const noopNotifier: ResourceNotifier = { notifyResourceUpdated(): void {} };
+let registeredNotifier: ResourceNotifier | undefined;
 
-let defaultNotifier: ResourceNotifier = noopNotifier;
+/**
+ * Resolves the registered notifier on every call, so a NetworkState constructed before the
+ * server registered itself (e.g. the singleton) still notifies once it does.
+ */
+const defaultNotifier: ResourceNotifier = {
+  notifyResourceUpdated(uri: string): void {
+    if (!registeredNotifier) {
+      logger.debug(`[NetworkState] No resource notifier registered; dropping update for ${uri}`);
+      return;
+    }
+    registeredNotifier.notifyResourceUpdated(uri);
+  },
+};
 
 /**
  * Wires the notifier a default-constructed NetworkState uses. The MCP server owns the
  * resource registry, so it registers itself here and this lower layer stays unaware of it.
  */
-export function setDefaultResourceNotifier(notifier: ResourceNotifier): void {
-  defaultNotifier = notifier;
+export function setDefaultResourceNotifier(notifier: ResourceNotifier | undefined): void {
+  registeredNotifier = notifier;
 }
 
 export class NetworkState {

@@ -3,7 +3,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   InternalToolPayloads,
   narrowInternalToolEnvelope,
-} from "../../src/server/internalToolPayloads";
+} from "../../src/utils/internalToolPayloads";
 import {
   createStructuredToolResponse,
   getStructuredField,

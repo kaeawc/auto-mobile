@@ -2,9 +2,14 @@ import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
-import { runDeviceManagerContract, type ScriptedDeviceManager } from "./DeviceManagerContract";
+import {
+  runDeviceManagerContract,
+  runImageIdentityContract,
+  type ScriptedDeviceManager,
+} from "./DeviceManagerContract";
 
 function scriptedFake(): ScriptedDeviceManager {
   const fake = new FakeDeviceUtils();
@@ -34,6 +39,9 @@ function scriptedReal(): ScriptedDeviceManager {
       listSimulatorImages: async () => images.ios,
       getBootedSimulators: async () => booted.ios,
       getBootedSimulatorsChecked: async () => booted.ios,
+      deleteSimulator: async (deviceId: string) => {
+        images.ios = images.ios.filter((image) => image.deviceId !== deviceId);
+      },
     }),
     createFakeAndroidEmulator({
       listAvds: async () => images.android.map((image) => ({ ...image, isRunning: false })),
@@ -60,3 +68,25 @@ function scriptedReal(): ScriptedDeviceManager {
 
 runDeviceManagerContract("FakeDeviceUtils", scriptedFake);
 runDeviceManagerContract("MultiPlatformDeviceManager (stubbed seams)", scriptedReal);
+
+function scriptedFakeManager(): ScriptedDeviceManager {
+  const fake = new FakeDeviceManager();
+  const replace = <T extends { platform: Platform }>(list: T[], platform: Platform, next: T[]) => [
+    ...list.filter((item) => item.platform !== platform),
+    ...next,
+  ];
+  return {
+    manager: fake,
+    setImages: (platform, images) => {
+      fake.deviceImages = replace(fake.deviceImages, platform, images);
+    },
+    setBooted: (platform, devices) => {
+      fake.bootedDevices = replace(fake.bootedDevices, platform, devices);
+    },
+    failBootedDiscovery: (platform) => fake.failedPlatforms.add(platform),
+  };
+}
+
+runImageIdentityContract("FakeDeviceUtils", scriptedFake);
+runImageIdentityContract("FakeDeviceManager", scriptedFakeManager);
+runImageIdentityContract("MultiPlatformDeviceManager (stubbed seams)", scriptedReal);

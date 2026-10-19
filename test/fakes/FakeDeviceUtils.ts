@@ -1,3 +1,5 @@
+import { ActionableError } from "../../src/models/ActionableError";
+import { isAndroidEmulatorSerial } from "../../src/utils/androidSerial";
 import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { HostChildProcess as ChildProcess } from "../../src/utils/HostCommandExecutor";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
@@ -250,7 +252,13 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     if (platform !== "android") {
       return images;
     }
-    const bootedNames = new Set((this.bootedDevices.get("android") ?? []).map((d) => d.name));
+    // Only `emulator-<port>` serials count: the booted scan also reports physical handsets whose
+    // name is their model, and one modelled like an AVD must not mark that AVD running.
+    const bootedNames = new Set(
+      (this.bootedDevices.get("android") ?? [])
+        .filter((d) => isAndroidEmulatorSerial(d.deviceId))
+        .map((d) => d.name),
+    );
     // A row a test configured as running stays running (the direct way to script a stale or
     // racing listing); booting its emulator additionally flips a stopped row to running.
     return images.map((image) =>
@@ -259,7 +267,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   }
 
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
-    const identifier = device.deviceId ?? device.name;
+    // The real manager matches an Android image by AVD name (its serial is per-boot) and an iOS
+    // simulator by UDID, falling back to the name only for an image that has no UDID.
+    const identifier =
+      device.platform === "android" ? device.name : (device.deviceId ?? device.name);
     this.executedOperations.push(`isDeviceImageRunning:${identifier}`);
     return this.runningDeviceNames.has(identifier);
   }
@@ -481,6 +492,11 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
   }
 
   async destroyDevice(device: DeviceInfo, _options?: DeviceDestroyOptions): Promise<void> {
+    if (device.platform === "ios" && !device.deviceId) {
+      throw new ActionableError(
+        `Cannot delete iOS simulator '${device.name}' without a simulator UDID`,
+      );
+    }
     this.executedOperations.push(
       `destroyDevice:${device.platform}:${device.deviceId ?? device.name}`,
     );
@@ -488,9 +504,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     this.deviceImages.set(
       device.platform,
       images.filter((image) =>
-        device.platform === "ios"
-          ? (image.deviceId ?? image.name) !== (device.deviceId ?? device.name)
-          : image.name !== device.name,
+        device.platform === "ios" ? image.deviceId !== device.deviceId : image.name !== device.name,
       ),
     );
   }

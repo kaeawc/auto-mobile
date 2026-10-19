@@ -1,4 +1,4 @@
-import { DaemonBoundSessionExpiredError } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
 import type { NotFoundAnswerOutcome } from "./notFoundDecision";
 import type { StallHandoverRecord } from "./ProxySessionState";
 import type { SessionReleaseSnapshot } from "../sessionManager";

@@ -13,7 +13,7 @@ import {
   daemonInstanceFromError,
   releaseReasonFromError,
 } from "../types";
-import { DaemonSessionStalledError } from "./daemonErrors";
+import { DaemonSessionStalledError } from "./DaemonSessionStalledError";
 import type { HeldSessionLosses } from "./HeldSessionLosses";
 import {
   isLivenessOwnerConflictError,

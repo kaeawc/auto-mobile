@@ -14,7 +14,12 @@ import { ctrlProxyManagerHostInstalled } from "../../src/ctrlProxy/ctrlProxyMana
 const ROOT = path.resolve(import.meta.dir, "../..");
 const WIRINGS = ["./daemon/bootAdmissionWiring", "./daemon/ctrlProxyManagerHostWiring"];
 // Imports allowed to precede the wiring: they never reach a boot path.
-const BEFORE_WIRING = new Set(["./runtime/bunRuntimeGuard", "./daemon/processEntry"]);
+const BEFORE_WIRING = new Set([
+  "./runtime/bunRuntimeGuard",
+  "./daemon/processEntry",
+  // Decorator metadata must initialise before anything else loads (see test/package/webrtcRuntimeMetadata).
+  "./runtime/reflectMetadata",
+]);
 
 function importSpecifiersInOrder(file: string): string[] {
   const program = parseGuardSource(file, readFileSync(file, "utf8"));

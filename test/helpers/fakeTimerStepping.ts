@@ -22,8 +22,10 @@ export async function drainMicrotasks(turns: number): Promise<void> {
 
 // The four DevicePool suites measured a longest observable-event gap of 40 turns;
 // the shared drain adds an await boundary, so thresholds 1..38 failed and 39
-// passed. Use four times that minimum (156) as margin for await-chain growth.
-export const FAKE_TIMER_QUIET_TURNS = 156;
+// passed. The read-readiness path of the tool registry (readToolsExplicitDeviceIdRule)
+// later measured 163: its target resolution runs as one await per step. Keep headroom over the
+// longest measured gap for await-chain growth.
+export const FAKE_TIMER_QUIET_TURNS = 200;
 const MAX_MICROTASK_TURNS = 1_000;
 
 async function drainTimerState(

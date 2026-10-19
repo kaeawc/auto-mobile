@@ -155,7 +155,7 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
       8765,
       (url) => defaultWebSocketFactory(url),
       timer,
-      () => createIosManager(timer),
+      { serviceManagerFactory: () => createIosManager(timer) },
     );
     await expect(call(ios)).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
   });

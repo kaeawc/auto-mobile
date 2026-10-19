@@ -21,7 +21,7 @@
 1002	src/daemon/sessionBroker/sqliteStore.ts
 2339	src/daemon/sessionDeviceStateRestore.ts
 10195	src/daemon/sessionManager.ts
-7006	src/daemon/socketServer.ts
+5800	src/daemon/socketServer.ts
 1805	src/daemon/videoStreamSocketServer.ts
 1145	src/db/deviceSessionRepository.ts
 1082	src/db/failureAnalyticsRepository.ts
@@ -62,7 +62,6 @@
 1115	src/features/video/IosPhysicalVideoCaptureBackend.ts
 1518	src/features/webrtc/IosH264Source.ts
 1316	src/features/webrtc/PersistentEncoderH264Source.ts
-2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
 1508	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts

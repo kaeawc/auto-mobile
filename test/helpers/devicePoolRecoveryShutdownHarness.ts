@@ -58,7 +58,7 @@ export class LaggingShutdownManager extends FakeDeviceManager {
     super();
   }
 
-  override async killDevice(): Promise<void> {
+  override async killDevice(_device?: BootedDevice): Promise<void> {
     this.killAccepted.resolve();
   }
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
@@ -66,7 +66,7 @@ export class LaggingShutdownManager extends FakeDeviceManager {
     this.bootedDevices = [{ ...original, deviceId: this.replacementDeviceId }];
     return { pid: 0 } as ChildProcess;
   }
-  override async waitForDeviceReady(): Promise<BootedDevice> {
+  override async waitForDeviceReady(_device?: DeviceInfo): Promise<BootedDevice> {
     return this.bootedDevices[0];
   }
 }
@@ -75,7 +75,7 @@ export class KillTrackingShutdownManager extends LaggingShutdownManager {
 
   override async killDevice(device: BootedDevice): Promise<void> {
     this.kills.push(device.deviceId);
-    await super.killDevice();
+    await super.killDevice(device);
   }
 }
 export class BlockingRecoveryReadyManager extends LaggingShutdownManager {
@@ -160,8 +160,18 @@ export class FailingGetIncidentStore extends InMemoryEmulatorLossIncidentStore {
   }
 }
 
-export async function setup(
+export function setup(
   manager: LaggingShutdownManager = new LaggingShutdownManager(),
+  cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
+  emulatorLossIncidentStore?: EmulatorLossIncidentStore,
+  apps = new FakeInstalledAppsRepository(),
+) {
+  return setupWith(manager, cancelDeviceSessionExecutions, emulatorLossIncidentStore, apps);
+}
+
+/** {@link setup} that keeps the concrete manager type, so its own recording members stay visible. */
+export async function setupWith<M extends LaggingShutdownManager>(
+  manager: M,
   cancelDeviceSessionExecutions?: (sessionId: string, reason: string) => Promise<number>,
   emulatorLossIncidentStore?: EmulatorLossIncidentStore,
   apps = new FakeInstalledAppsRepository(),

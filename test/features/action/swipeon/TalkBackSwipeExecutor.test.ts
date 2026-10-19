@@ -1,3 +1,4 @@
+import { buildElement } from "../../../helpers/elementBuilder";
 import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
   TalkBackSwipeExecutor,
@@ -659,7 +660,7 @@ describe("TalkBackSwipeExecutor", () => {
         100,
         200,
         "up",
-        { "resource-id": "test:id/scrollView" },
+        buildElement({ "resource-id": "test:id/scrollView" }),
         { duration: 300 },
         perf,
       );
@@ -685,7 +686,7 @@ describe("TalkBackSwipeExecutor", () => {
           100,
           200,
           "up",
-          { "resource-id": "test:id/scrollView" },
+          buildElement({ "resource-id": "test:id/scrollView" }),
           { duration: 300 },
           perf,
         );
@@ -715,7 +716,7 @@ describe("TalkBackSwipeExecutor", () => {
         100,
         200,
         "up",
-        { "resource-id": "test:id/scrollView" },
+        buildElement({ "resource-id": "test:id/scrollView" }),
         { duration: 300 },
         perf,
       );

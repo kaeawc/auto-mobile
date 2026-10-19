@@ -46,7 +46,6 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { dispatchAndroidLongPress } from "./androidLongPress";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
-import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
   type DisplayFenceOption,
@@ -114,8 +113,8 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
-import { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
+import { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
@@ -438,6 +437,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hashViewHierarchy: this.hashViewHierarchy.bind(this),
       replaceObservationHierarchy: this.replaceObservationHierarchy.bind(this),
       verifyFocusedInputTarget: this.verifyFocusedInputTarget.bind(this),
+      handleElementNotFound: this.handleElementNotFound.bind(this),
       executeAndroidLongPress: this.executeAndroidLongPress.bind(this),
       executeiOSTap: this.executeiOSTap.bind(this),
       executeiOSTapWithCoordinates: this.executeiOSTapWithCoordinates.bind(this),
@@ -850,12 +850,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     } else if (observeResult.screenSize) {
       observeResult.screenSize = { width: 0, height: 0 };
     }
-    if (this.device.platform === "ios") {
-      observeResult.rotation = resolveIosObserveRotation(
-        viewHierarchy.rotation,
-        observeResult.screenSize,
-      );
-    }
+    this.strategy.applyRefreshedObservationRotation(observeResult, viewHierarchy.rotation);
     if (refreshedFromDevice) {
       this.markObservationFreshAfterSyncRefresh(observeResult);
     }
@@ -1029,7 +1024,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return true;
     }
     const initial = result.observation;
-    if (this.device.platform !== "ios" || !initial) {
+    if (!this.strategy.settlesFocusChangeAfterTap || !initial) {
       return false;
     }
     const deadline = this.timer.now() + IOS_FOCUS_SETTLE_TIMEOUT_MS;
@@ -2319,7 +2314,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): void {
     if (
       recovery?.throwOnKeyboardOcclusion &&
-      this.device.platform === "android" &&
+      this.strategy.rethrowsKeyboardOcclusion &&
       action === "focus" &&
       error instanceof KeyboardOcclusionError
     ) {

@@ -8,8 +8,8 @@ import type {
 } from "../../models/AccessibilityResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { AccessibilityDetector } from "./interfaces/AccessibilityDetector";
-import { accessibilityDetector } from "./AccessibilityDetector";
+import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
 import {

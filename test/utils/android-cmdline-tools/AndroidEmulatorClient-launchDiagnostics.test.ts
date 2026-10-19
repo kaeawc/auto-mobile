@@ -1,4 +1,4 @@
-import { EmulatorProcessOutputTail } from "../../../src/daemon/emulatorProcessLifecycle";
+import { EmulatorProcessOutputTail } from "../../../src/daemon/EmulatorProcessOutputTail";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
 import { afterEach, describe, expect, test } from "bun:test";

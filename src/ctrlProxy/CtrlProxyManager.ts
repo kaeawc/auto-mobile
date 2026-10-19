@@ -1,14 +1,7 @@
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
-import {
-  defaultSavedPrototypeMirror,
-  type SavedPrototypeMirror,
-} from "../features/prototype/savedPrototypeMirror";
-import {
-  AndroidSavedPrototypeRestoreDevice,
-  restoreSavedPrototypes,
-  type SavedPrototypeRestoreReport,
-} from "../features/prototype/savedPrototypeRestore";
+import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyManagerHost";
+import type { SavedPrototypeRestoreReport } from "../models/SavedPrototypeRestoreReport";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -50,8 +43,8 @@ import {
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 import os from "os";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
-import type { AccessibilityDetector } from "../features/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "./accessibility/AccessibilityDetector";
+import type { AccessibilityDetector } from "./accessibility/interfaces/AccessibilityDetector";
 import {
   NoOpPerformanceTracker,
   createGlobalPerformanceTracker,
@@ -71,11 +64,8 @@ import {
 } from "./CtrlProxyApkPrefetcher";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
-import {
-  createForeignCtrlProxyForwardEvidence,
-  CtrlProxyForwardOwnershipUnreadableError,
-  type ForeignCtrlProxyForwardEvidence,
-} from "../features/observe/android/foreignCtrlProxyForwardEvidence";
+import { CtrlProxyForwardOwnershipUnreadableError } from "../models/CtrlProxyForwardOwnershipUnreadableError";
+import type { ForeignCtrlProxyForwardEvidence } from "../models/ForeignCtrlProxyForwardEvidence";
 import { ENV, readEnvRaw } from "../config/env";
 
 export {
@@ -296,14 +286,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly foreignForwardGuardContext = new AsyncLocalStorage<boolean>();
 
   private timer: Timer;
-  private savedPrototypeMirror: SavedPrototypeMirror = defaultSavedPrototypeMirror();
-  private savedPrototypeRestorer: typeof restoreSavedPrototypes = restoreSavedPrototypes;
+  private savedPrototypeServiceOverride: SavedPrototypeService | undefined;
 
-  public setSavedPrototypeMirrorForTesting(mirror: SavedPrototypeMirror): void {
-    this.savedPrototypeMirror = mirror;
+  public setSavedPrototypeServiceForTesting(service: SavedPrototypeService | undefined): void {
+    this.savedPrototypeServiceOverride = service;
   }
-  public setSavedPrototypeRestorerForTesting(restorer: typeof restoreSavedPrototypes): void {
-    this.savedPrototypeRestorer = restorer;
+
+  private get savedPrototypes(): SavedPrototypeService {
+    return this.savedPrototypeServiceOverride ?? ctrlProxyManagerHost.savedPrototypes();
   }
 
   // Shared utilities for download and checksum
@@ -441,7 +431,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
     const evidence =
       AndroidCtrlProxyManager.foreignForwardEvidenceOverride ??
-      createForeignCtrlProxyForwardEvidence({ create: () => this.adb });
+      ctrlProxyManagerHost.createForeignForwardEvidence({ create: () => this.adb });
     const finding = await evidence.read(this.device.deviceId, activeSignal);
     activeSignal?.throwIfAborted();
     if (finding.kind === "none") {
@@ -1805,7 +1795,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   private async warnBeforePrototypeUninstall(): Promise<boolean> {
     try {
-      const entries = await this.savedPrototypeMirror.list(this.device.deviceId);
+      const entries = await this.savedPrototypes.list(this.device.deviceId);
       if (entries.length === 0) {
         return false;
       }
@@ -1838,11 +1828,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
     let report: SavedPrototypeRestoreReport;
     try {
-      report = await this.savedPrototypeRestorer(
-        this.device.deviceId,
-        this.savedPrototypeMirror,
-        new AndroidSavedPrototypeRestoreDevice(this.device, this.timer),
-      );
+      report = await this.savedPrototypes.restore(this.device, this.timer);
     } catch (error) {
       logger.warn("[CTRL_PROXY] Saved prototype restore after reinstall failed", error);
       report = {

@@ -1,3 +1,24 @@
+function convertRawHierarchy(raw: unknown) {
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    !("hierarchy" in raw) ||
+    typeof raw.hierarchy !== "object" ||
+    raw.hierarchy === null ||
+    !("updatedAt" in raw) ||
+    typeof raw.updatedAt !== "number" ||
+    !("packageName" in raw) ||
+    typeof raw.packageName !== "string"
+  ) {
+    throw new Error("Expected raw runner hierarchy");
+  }
+  return new CtrlProxyHierarchy(stubContext).convertToViewHierarchyResult({
+    ...raw,
+    updatedAt: raw.updatedAt,
+    packageName: raw.packageName,
+    hierarchy: { ...raw.hierarchy },
+  });
+}
 import capturedWire from "../../../fixtures/ios/keyboard-modes/hardware-keyboard.runner-hierarchy.json";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
@@ -53,8 +74,8 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
 
   test("omits null inset fields from a captured runner hierarchy", () => {
     // Only systemInsets and insets are overwritten with the runner's null sentinel on an otherwise captured runner payload.
-    const wire = Object.assign(structuredClone(capturedWire), { systemInsets: null, insets: null });
-    const result = subject.convertToViewHierarchyResult(wire as XCTestHierarchy);
+    const wire = { ...structuredClone(capturedWire), systemInsets: null, insets: null };
+    const result = convertRawHierarchy(wire);
     expect(Object.hasOwn(result, "systemInsets")).toBe(false);
     expect(Object.hasOwn(result, "insets")).toBe(false);
     expect(wire.systemInsets).toBeNull();

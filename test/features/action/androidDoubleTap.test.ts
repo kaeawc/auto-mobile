@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
@@ -629,13 +630,12 @@ describe("tapAny (Android default display)", () => {
       talkBackStrategy: new FakeTalkBackTapStrategy(),
       talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
     });
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead({
-          viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ marker: "before" }) } },
-          screenSize: { width: 500, height: 500 },
-        }),
-      );
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead({
+        viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ marker: "before" }) } },
+        screenSize: { width: 500, height: 500 },
+      }),
+    );
     tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     return tapAny;
   }

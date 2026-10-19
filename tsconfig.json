@@ -11,7 +11,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "noEmit": false,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "types": ["bun", "node"]
   },
   "include": [
     "src",

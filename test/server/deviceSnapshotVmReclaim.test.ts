@@ -1,4 +1,3 @@
-import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -302,7 +301,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
   test("notifies archive subscribers when a dispatched VM save persists a pending reclaim", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    ResourceRegistry.registerWithServer(server);
     ResourceRegistry.register(
       DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
       "Device Snapshot Archive",

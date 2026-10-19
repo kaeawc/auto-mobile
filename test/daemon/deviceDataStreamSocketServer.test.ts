@@ -9,7 +9,6 @@ import {
   installDeviceDataStreamSocketServerForTesting,
   type InitialFrameSubscriber,
   type NavigationGraphStreamData,
-  type PerformanceStreamData,
   type RequestedObservation,
 } from "../../src/daemon/deviceDataStreamSocketServer";
 import {
@@ -24,8 +23,6 @@ import {
 import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import type { ScreenshotMetadata } from "../../src/features/observe/ScreenshotMetadata";
-import type { StorageChangedEvent } from "../../src/features/storage/storageTypes";
-import { partialFixture } from "../helpers/partialFixture";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
@@ -792,11 +789,11 @@ describe("DeviceDataStreamSocketServer", () => {
   it("records a device-authored frame context even without an IDE subscriber", () => {
     server.pushHierarchyUpdate(
       "device-1",
-      partialFixture<ViewHierarchyResult>({
+      {
         updatedAt: 123,
         packageName: "com.example.app",
-        hierarchy: { text: "Home" },
-      }),
+        hierarchy: {},
+      },
       "frame-A",
     );
 
@@ -804,11 +801,11 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   it("clears a device frame context when a hierarchy has no proven context", () => {
-    const hierarchy = partialFixture<ViewHierarchyResult>({
+    const hierarchy = {
       updatedAt: 123,
       packageName: "com.example.app",
-      hierarchy: { text: "Home" },
-    });
+      hierarchy: {},
+    };
     server.pushHierarchyUpdate("device-1", hierarchy, "frame-A");
     server.pushHierarchyUpdate("device-1", hierarchy);
 
@@ -825,12 +822,12 @@ describe("DeviceDataStreamSocketServer", () => {
         updatedAt: "2026-06-24T00:00:00.000Z",
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: partialFixture<ViewHierarchyResult>({
+        viewHierarchy: {
           updatedAt: 123,
           packageName: "com.example.app",
-          hierarchy: { text: "Home" },
+          hierarchy: {},
           ...(frameContext === undefined ? {} : { frameContext }),
-        }),
+        },
       },
     });
 
@@ -1771,24 +1768,20 @@ describe("DeviceDataStreamSocketServer", () => {
     it("includes optional screenshot metadata when pushing updates", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
-      server.pushScreenshotUpdate(
-        "device-1",
-        "png-frame",
-        1080,
-        2340,
-        partialFixture<ScreenshotMetadata>({
-          screenshotMimeType: "image/png",
-          screenshotFormat: "png",
-          screenshotCaptureSource: "android_adb_screencap",
-          screenshotFallback: true,
-          screenshotFallbackReason: "websocket_unavailable",
-          screenshotCaptureDurationMs: 42,
-          screenshotEncodeDurationMs: 7,
-          screenshotByteLength: 1200,
-          screenshotBase64Length: 1600,
-          checksum: "internal-checksum",
-        }),
-      );
+      // `checksum` is an internal field outside ScreenshotMetadata that must not reach the wire.
+      const metadata = {
+        screenshotMimeType: "image/png",
+        screenshotFormat: "png",
+        screenshotCaptureSource: "android_adb_screencap",
+        screenshotFallback: true,
+        screenshotFallbackReason: "websocket_unavailable",
+        screenshotCaptureDurationMs: 42,
+        screenshotEncodeDurationMs: 7,
+        screenshotByteLength: 1200,
+        screenshotBase64Length: 1600,
+        checksum: "internal-checksum",
+      } satisfies ScreenshotMetadata & { checksum: string };
+      server.pushScreenshotUpdate("device-1", "png-frame", 1080, 2340, metadata);
 
       const msgs = socket.getWrittenMessages<{
         type: string;
@@ -1861,11 +1854,10 @@ describe("DeviceDataStreamSocketServer", () => {
   };
 
   describe("hierarchy diff annotation", () => {
-    const frame = (text: string, rotation: number = 0) =>
-      partialFixture<ViewHierarchyResult>({
-        hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } },
-        rotation,
-      });
+    const frame = (text: string, rotation: number = 0): ViewHierarchyResult => ({
+      hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } },
+      rotation,
+    });
 
     it("reports no baseline and annotates nothing on the first frame", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
@@ -2213,7 +2205,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const second = frame("b");
       server.pushHierarchyUpdate("device-1", second);
 
-      expect(second.hierarchy.node.node[0].$.diffState).toBeUndefined();
+      expect(second.hierarchy.node?.node?.[0]?.$?.diffState).toBeUndefined();
     });
   });
 
@@ -2944,30 +2936,29 @@ describe("DeviceDataStreamSocketServer", () => {
   describe("canonical-pixel conversion at the wire (issue #4549)", () => {
     // A hierarchy carrying the #4548 runner scale metadata: iOS points + nativeScale + reported
     // physical pixel dims. Element bounds live under $.bounds as {left,top,right,bottom}.
-    const iosFrame = () =>
-      partialFixture<ViewHierarchyResult>({
-        hierarchy: {
-          bounds: { left: 0, top: 0, right: 390, bottom: 844 },
-          node: {
-            $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
-            node: [
-              {
-                $: {
-                  class: "UIButton",
-                  text: "Go",
-                  bounds: { left: 10, top: 20, right: 100, bottom: 60 },
-                },
+    const iosFrame = (): ViewHierarchyResult => ({
+      hierarchy: {
+        bounds: { left: 0, top: 0, right: 390, bottom: 844 },
+        node: {
+          $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
+          node: [
+            {
+              $: {
+                class: "UIButton",
+                text: "Go",
+                bounds: { left: 10, top: 20, right: 100, bottom: 60 },
               },
-            ],
-          },
+            },
+          ],
         },
-        screenWidth: 390,
-        screenHeight: 844,
-        screenScale: 3,
-        nativeScale: 3,
-        pixelWidth: 1170,
-        pixelHeight: 2532,
-      });
+      },
+      screenWidth: 390,
+      screenHeight: 844,
+      screenScale: 3,
+      nativeScale: 3,
+      pixelWidth: 1170,
+      pixelHeight: 2532,
+    });
 
     it("publishes iOS element bounds and screen dims in pixels and stamps coordinateSpace:px", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-1" });
@@ -2999,7 +2990,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const input = iosFrame();
       server.pushHierarchyUpdate("ios-1", input);
       // The push converts a clone; the object the caller (and MCP observe) holds is untouched.
-      expect(input.data ?? input.hierarchy.node.$.bounds).toEqual({
+      expect(input.hierarchy.node?.$?.bounds).toEqual({
         left: 0,
         top: 0,
         right: 390,
@@ -3031,7 +3022,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("Android (nativeScale 1) leaves bounds numerically identical but still declares px", () => {
       const { socket } = server.simulateSubscription({ deviceId: "android-1" });
-      const androidFrame = partialFixture<ViewHierarchyResult>({
+      const androidFrame = {
         hierarchy: {
           node: {
             $: { class: "FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 2340 } },
@@ -3042,7 +3033,7 @@ describe("DeviceDataStreamSocketServer", () => {
         nativeScale: 1,
         pixelWidth: 1080,
         pixelHeight: 2340,
-      });
+      };
       server.pushHierarchyUpdate("android-1", androidFrame);
 
       const [message] = socket.getWrittenMessages<any>();
@@ -3091,10 +3082,9 @@ describe("DeviceDataStreamSocketServer", () => {
     // pushScreenshotUpdate): the capture identity is echoed on the screenshot exactly when the
     // frame's measured pixels are consistent with the claimed geometry (exact match or swapped
     // orientation — never a scale change, never an unmeasurable frame).
-    const goldenFrame = (text: string) =>
-      partialFixture<ViewHierarchyResult>({
-        hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } },
-      });
+    const goldenFrame = (text: string) => ({
+      hierarchy: { node: { $: { class: "Root" }, node: [{ $: { class: "Child", text } }] } },
+    });
 
     const vectors = loadCoordinateMappingVectors().geometryPairing;
 
@@ -3304,20 +3294,38 @@ describe("DeviceDataStreamSocketServer", () => {
       navigationGraph?: NavigationGraphStreamData;
     }
     const frames = (socket: FakeSocket) => socket.getWrittenMessages<Frame>();
-    const hierarchy = partialFixture<ViewHierarchyResult>({
+    const hierarchy = {
       hierarchy: { node: { $: {}, node: [] } },
-    });
+    };
 
     it("stamps deviceId and the resolved deviceSessionUuid on every device frame (AC1)", () => {
       const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
 
       server.pushHierarchyUpdate("emulator-5554", hierarchy);
       server.pushScreenshotUpdate("emulator-5554", "png", 100, 200);
-      server.pushPerformanceUpdate(
-        "emulator-5554",
-        partialFixture<PerformanceStreamData>({ fps: 60 }),
-      );
-      server.pushStorageUpdate("emulator-5554", partialFixture<StorageChangedEvent>({ key: "k" }));
+      server.pushPerformanceUpdate("emulator-5554", {
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        droppedFrames: 0,
+        memoryUsageMb: 1,
+        cpuUsagePercent: 1,
+        touchLatencyMs: null,
+        timeToInteractiveMs: null,
+        screenName: null,
+        isResponsive: true,
+        recompositionCount: null,
+        recompositionRate: null,
+      });
+      server.pushStorageUpdate("emulator-5554", {
+        packageName: "com.example.app",
+        fileName: "prefs",
+        key: "k",
+        value: null,
+        valueType: "STRING",
+        timestamp: 0,
+        sequenceNumber: 1,
+      });
 
       const got = frames(socket).filter((f) => f.type.endsWith("_update"));
       expect(got.length).toBe(4);
@@ -4362,8 +4370,9 @@ describe("DeviceDataStreamSocketServer", () => {
   // nor anyone else, since the serial they are attributed to is the only thing
   // the daemon still knows about them.
   describe("unresolved pooled identity", () => {
-    const frame = (text: string) =>
-      partialFixture<ViewHierarchyResult>({ hierarchy: { node: { $: { class: "Root", text } } } });
+    const frame = (text: string): ViewHierarchyResult => ({
+      hierarchy: { node: { $: { class: "Root", text } } },
+    });
 
     it("drops device-attributed frames while routing is suspended", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });

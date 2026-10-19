@@ -25,19 +25,23 @@ test.each(["waiting", "in-flight", "absent", "prepared"])(
     pool.isShutdownReservationHeld = async () => false;
     pool.prepareSessionPreservingRecovery = () => preparation;
     pool.recordEmulatorLossIncident = async () => "incident";
-    const wait = mock(async () => branch === "waiting");
+    const wait = mock<DevicePool["waitForSessionPreservingRecovery"]>(
+      async () => branch === "waiting",
+    );
     pool.waitForSessionPreservingRecovery = wait;
-    const inFlight = mock(() => branch === "in-flight");
+    const inFlight = mock<DevicePool["isSessionRecoveryInFlight"]>(() => branch === "in-flight");
     pool.isSessionRecoveryInFlight = inFlight;
-    const finishIncident = mock(async () => {});
+    const finishIncident = mock<DevicePool["finishEmulatorLossIncident"]>(async () => {});
     pool.finishEmulatorLossIncident = finishIncident;
-    const finishPreparation = mock(() => {});
+    const finishPreparation = mock<DevicePool["finishSessionPreservingRecoveryPreparation"]>(
+      () => {},
+    );
     pool.finishSessionPreservingRecoveryPreparation = finishPreparation;
     const daemon: Daemon = Object.create(Daemon.prototype);
     Object.assign(daemon, { devicePool: pool, forceDisconnectedDeviceIds: new Set<string>() });
     daemon["shouldSkipStaleDisconnectCleanup"] = async () => false;
     daemon["isCapturedDisconnectTargetCurrent"] = () => true;
-    const retire = mock(() => {});
+    const retire = mock<Daemon["retireAdbServerResetDisconnectState"]>(() => {});
     daemon["retireAdbServerResetDisconnectState"] = retire;
     try {
       expect(
@@ -125,13 +129,13 @@ test.each([
     const prepare = mock<DevicePool["prepareSessionPreservingRecovery"]>(() => undefined);
     pool.prepareSessionPreservingRecovery = prepare;
     pool.recordEmulatorLossIncident = async () => incidentId;
-    const wait = mock(async () => false);
+    const wait = mock<DevicePool["waitForSessionPreservingRecovery"]>(async () => false);
     pool.waitForSessionPreservingRecovery = wait;
-    const inFlight = mock(() => false);
+    const inFlight = mock<DevicePool["isSessionRecoveryInFlight"]>(() => false);
     pool.isSessionRecoveryInFlight = inFlight;
     const recover = mock<DevicePool["recoverSessionBoundDeviceAfterLoss"]>(async () => outcome);
     pool.recoverSessionBoundDeviceAfterLoss = recover;
-    const finish = mock(() => {});
+    const finish = mock<DevicePool["finishSessionPreservingRecoveryPreparation"]>(() => {});
     pool.finishSessionPreservingRecoveryPreparation = finish;
     const daemon: Daemon = Object.create(Daemon.prototype);
     Object.assign(daemon, { devicePool: pool, forceDisconnectedDeviceIds: new Set<string>() });

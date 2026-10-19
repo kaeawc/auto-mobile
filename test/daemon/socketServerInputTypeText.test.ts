@@ -12,7 +12,13 @@ import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const reason = "No element has keyboard focus -- ensure a text field is focused";
 const guidance = `IME action 'done' failed after the text was entered: ${reason}. Do not retype the text.`;
-type TextResult = { success: boolean; error?: string; charsSent?: number };
+type TextResult = {
+  success: boolean;
+  error?: string;
+  charsSent?: number;
+  action?: string;
+  totalTimeMs?: number;
+};
 
 interface TypeTextHandler {
   timer: Timer;
@@ -136,6 +142,14 @@ test("input/typeText submit preserves a rejected IME error's class and metadata"
   );
 });
 
+function prototypeOnlyIosClient(): IOSCtrlProxyClient {
+  return Object.create(IOSCtrlProxyClient.prototype);
+}
+
+function prototypeOnlyAndroidClient(): AndroidCtrlProxyClient {
+  return Object.create(AndroidCtrlProxyClient.prototype);
+}
+
 test.each([
   ["shared Error", "ios", false, new Error("owner cancelled submit")],
   ["string", "ios", false, "owner cancelled submit"],
@@ -147,35 +161,36 @@ test.each([
     const controller = new AbortController();
     const { handler } = createHandler(platform, controller.signal);
     const originalMessage = abortReason instanceof Error ? abortReason.message : undefined;
-    const client =
-      platform === "ios"
-        ? Object.create(IOSCtrlProxyClient.prototype)
-        : (Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient);
+    const abortingIme = (signal: AbortSignal | undefined): Promise<never> => {
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+      const pending = new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      controller.abort(abortReason);
+      return pending;
+    };
+    let ime;
     if (platform === "ios") {
-      spyOnIosClientInstance(client);
-      spyOn(client, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
+      const iosClient = prototypeOnlyIosClient();
+      spyOnIosClientInstance(iosClient);
+      spyOn(iosClient, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
+      ime = spyOn(iosClient, "requestImeAction").mockImplementation(
+        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
+      );
     } else {
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        client as AndroidCtrlProxyClient,
+      const androidClient = prototypeOnlyAndroidClient();
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidClient);
+      ime = spyOn(androidClient, "requestImeAction").mockImplementation(
+        (_action, _timeoutMs, _perf, signal) => abortingIme(signal),
       );
     }
-    const ime = spyOn(client, "requestImeAction").mockImplementation(
-      (_action, _timeoutMs, _perf, signal) => {
-        expect(signal).toBeInstanceOf(AbortSignal);
-        expect(signal?.aborted).toBe(false);
-        const pending = new Promise<never>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        });
-        controller.abort(abortReason);
-        return pending;
-      },
-    );
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
 
     await expect(handler.handleInputTypeText(request(true, append, platform))).rejects.toBe(
       abortReason,
     );
-    if (abortReason instanceof Error) {
+    if (abortReason instanceof Error && originalMessage !== undefined) {
       expect(abortReason.message).toBe(originalMessage);
     }
     expect(controller.signal.reason).toBe(abortReason);
@@ -188,7 +203,7 @@ test.each([false, true])(
   "Android append preserves charsSent for an IME failure (throws=%s)",
   async (throws) => {
     const { handler } = createHandler("android");
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    const client = prototypeOnlyAndroidClient();
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     const ime = spyOn(client, "requestImeAction");
     if (throws) {

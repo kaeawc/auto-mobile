@@ -4,10 +4,11 @@ import { useScratchRoot } from "../helpers/scratchRoot";
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 
 import { join, resolve } from "node:path";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 import { PassThrough } from "node:stream";
 import { relayDaemonStderr, type DaemonProcessSpawner } from "../../src/daemon/manager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDaemonProcess } from "../fakes/FakeDaemonProcess";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { TOOL_OUTPUTS_DIR_ENV, TOOL_OUTPUTS_DIR_FLAG } from "../../src/utils/toolOutputArtifacts";
 import { EVENT_ALL_MARKERS_ENV, EVENT_ALL_MARKERS_FLAG } from "../../src/utils/eventAllMarkers";
@@ -59,7 +60,7 @@ describe("DaemonManager launch", () => {
     }) as typeof process.stderr.write);
 
     try {
-      relayDaemonStderr({ stderr: daemonStderr } as ChildProcess);
+      relayDaemonStderr({ stderr: daemonStderr });
       daemonStderr.write("daemon structured record\n");
     } finally {
       stderrSpy.mockRestore();
@@ -83,15 +84,7 @@ describe("DaemonManager launch", () => {
       spawn: (_command: string, args: string[], options: SpawnOptions) => {
         capturedArgs = [...args];
         capturedEnv = options.env;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -152,15 +145,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], options: SpawnOptions) => {
         capturedStdio = options.stdio;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -204,15 +189,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], options: SpawnOptions) => {
         capturedOptions = options;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -260,15 +237,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], options: SpawnOptions) => {
         capturedOptions = options;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -315,15 +284,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], options: SpawnOptions) => {
         capturedEnv = options.env;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -366,15 +327,7 @@ describe("DaemonManager launch", () => {
       spawn: (_command: string, args: string[], options: SpawnOptions) => {
         capturedArgs = args;
         capturedEnv = options.env;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -418,15 +371,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, args: string[], _options: SpawnOptions) => {
         capturedArgs = args;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -468,15 +413,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, args: string[], _options: SpawnOptions) => {
         capturedArgs = args;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 
@@ -525,15 +462,7 @@ describe("DaemonManager launch", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], options: SpawnOptions) => {
         capturedEnv = options.env;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonProcess();
       },
     };
 

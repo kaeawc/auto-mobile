@@ -1,5 +1,5 @@
 import { InputDeviceOwnedError } from "./inputDeviceOwnership";
-import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
+import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
 import type { StreamSubscriptionIdentity } from "./streamSubscriptionPolicy";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { isSessionReleasing } from "./sessionReleaseState";

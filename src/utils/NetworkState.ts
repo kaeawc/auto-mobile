@@ -1,7 +1,6 @@
-import { isFailedNetworkRequest } from "../utils/networkRequestOutcome";
-import { ResourceRegistry } from "./resourceRegistry";
-import { logger } from "../utils/logger";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { isFailedNetworkRequest } from "./networkRequestOutcome";
+import { logger } from "./logger";
+import { defaultTimer, type Timer } from "./SystemTimer";
 
 export type NotifFilter = "all" | "errors" | "slow";
 
@@ -108,11 +107,29 @@ interface DeviceNetworkScope {
   simulationOwner: string | null;
 }
 
+let registeredNotifier: ResourceNotifier | undefined;
+
+/**
+ * Resolves the registered notifier on every call, so a NetworkState constructed before the
+ * server registered itself (e.g. the singleton) still notifies once it does.
+ */
 const defaultNotifier: ResourceNotifier = {
   notifyResourceUpdated(uri: string): void {
-    void ResourceRegistry.notifyResourceUpdated(uri);
+    if (!registeredNotifier) {
+      logger.debug(`[NetworkState] No resource notifier registered; dropping update for ${uri}`);
+      return;
+    }
+    registeredNotifier.notifyResourceUpdated(uri);
   },
 };
+
+/**
+ * Wires the notifier a default-constructed NetworkState uses. The MCP server owns the
+ * resource registry, so it registers itself here and this lower layer stays unaware of it.
+ */
+export function setDefaultResourceNotifier(notifier: ResourceNotifier | undefined): void {
+  registeredNotifier = notifier;
+}
 
 export class NetworkState {
   private static instance: NetworkState | null = null;

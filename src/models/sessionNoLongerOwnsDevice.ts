@@ -1,4 +1,4 @@
-import { ActionableError } from "../models/ActionableError";
+import { ActionableError } from "./ActionableError";
 
 /**
  * A kill's terminal-release reservation named a device the session no longer holds (#11166).

@@ -28,7 +28,7 @@ import {
   INTERNAL_TOOL_PARAM_NAMES,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/constants";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 
 isolateToolRegistry();
 

@@ -19,6 +19,7 @@ import { serverConfig } from "../utils/ServerConfig";
 
 import { logger, type Logger } from "../utils/logger";
 import { assertSessionBrokerToolCall } from "./sessionBrokerToolGate";
+import "./featureWiring";
 
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
@@ -27,14 +28,14 @@ import { runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { markInternalToolCall } from "./internalToolCall";
+import { markInternalToolCall } from "../daemon/internalToolCall";
 import { ListChangedBroadcaster, type ServerRegistrationOptions } from "./listChangedBroadcast";
 import { StructuredToolResponse } from "../utils/toolUtils";
 import {
   InternalToolName,
   InternalToolPayloads,
   narrowInternalToolEnvelope,
-} from "./internalToolPayloads";
+} from "../utils/internalToolPayloads";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,
@@ -721,18 +722,14 @@ export class ToolRegistryClass {
     return tool.handler(markInternalToolCall(args), progress, signal);
   }
 
-  // Typed variant of `callInternal` for the handful of internally-consumed tools
-  // whose envelope a caller then reads (issue #3222). Threads the concrete
-  // payload type from `InternalToolPayloads` through the registry seam so
-  // `callInternalTyped("swipeOn", …)` resolves to
-  // `StructuredToolResponse<SwipeOnToolPayload> | undefined` instead of the
-  // untyped `Promise<any>` — reading a non-hoisted field off the envelope top
-  // level is a compile error and `getStructuredField` keys are checked against
-  // the payload. It delegates to `callInternal` (so the #3108 `markInternalToolCall`
-  // guarantee is preserved) and validates the shape at runtime via
-  // `narrowInternalToolEnvelope` — there is NO unchecked `any`→typed cast. A
-  // response that is not envelope-shaped narrows to `undefined`, which the read
-  // sites already handle (`getStructuredField(undefined, …)` is `undefined`).
+  // Typed variant of `callInternal` for internally-consumed tools whose envelope a caller then
+  // reads (issue #3222): threads the concrete `InternalToolPayloads` type through the registry
+  // seam, so `callInternalTyped("swipeOn", …)` resolves to
+  // `StructuredToolResponse<SwipeOnToolPayload> | undefined` instead of the untyped `Promise<any>`
+  // and `getStructuredField` keys are checked against the payload. It delegates to `callInternal`
+  // (keeping the #3108 `markInternalToolCall` guarantee) and validates the shape at runtime via
+  // `narrowInternalToolEnvelope` — there is NO unchecked `any`→typed cast. A response that is not
+  // envelope-shaped narrows to `undefined`, which the read sites already handle.
   async callInternalTyped<K extends InternalToolName>(
     name: K,
     args: Record<string, unknown>,

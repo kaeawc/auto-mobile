@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { ToolRegistryClass, DefaultAfterToolCallHandler } from "../../src/server/toolRegistry";
 import { createSendKeysCaptureHarness } from "../features/action/SendKeysTestHarness";
 import type { BootedDevice, ObserveResult } from "../../src/models";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import {
   beginPostActionCaptureAction,
   deferTerminalScreenshot,

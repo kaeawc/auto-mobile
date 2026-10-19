@@ -77,7 +77,7 @@ async function idleTrackedCohort(stopSignals: NodeJS.Signals[], onLoss = true) {
       deviceId: booted.deviceId,
       platform: "android",
       sourceImage: image,
-      childProcess: process as unknown as ChildProcess,
+      childProcess: process,
       expectedIdentity: booted,
     });
     await pool.releaseDevice(booted.deviceId, sessionId);

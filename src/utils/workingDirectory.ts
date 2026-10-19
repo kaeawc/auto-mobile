@@ -2,8 +2,9 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { tryOrElse } from "../models/tryOrElse";
+import { ENV } from "../config/env";
 
-export const DAEMON_LAUNCH_CWD_ENV = "AUTOMOBILE_DAEMON_LAUNCH_CWD";
+export const DAEMON_LAUNCH_CWD_ENV = ENV.DAEMON_LAUNCH_CWD.name;
 
 /**
  * UNVERIFIED against a real toolchain (#6900). A future rename (or switch to

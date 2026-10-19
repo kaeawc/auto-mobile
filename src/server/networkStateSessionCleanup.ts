@@ -9,7 +9,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { NetworkState } from "./NetworkState";
+import { NetworkState } from "../utils/NetworkState";
 
 /** Pushes a device's current host-side network state (rules + simulation) to it. */
 export interface NetworkDeviceStatePusher {

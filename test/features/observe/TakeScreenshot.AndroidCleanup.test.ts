@@ -139,7 +139,7 @@ describe("Android base64 screenshot cleanup", () => {
 
   test("keeps the successful capture command and command count unchanged", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("screencap", { stdout: pngBytes.toString("base64"), stderr: "" });
+    adb.setCommandResponse("screencap", createExecResult(pngBytes.toString("base64"), ""));
 
     const result = await captureFor(adb).captureScreenshotBase64(
       "/screenshots/result.png",

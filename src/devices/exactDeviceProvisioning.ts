@@ -17,7 +17,7 @@ import {
   FileAndroidAvdConfigWriter,
   type AndroidAvdConfigWriter,
 } from "./FileAndroidAvdConfigWriter";
-import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
+import { DeviceAssignedToBindingError } from "../models/DeviceAssignedToBindingError";
 import type { DeviceInfo } from "../models";
 import { ActionableError } from "../models";
 import type { DeviceCreationGate } from "./deviceCreationGate";

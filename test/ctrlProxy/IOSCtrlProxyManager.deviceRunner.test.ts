@@ -99,7 +99,7 @@ class DeviceWorld {
         this.runnerPorts.push(runnerPort);
         const child = this.register("xcodebuild", `xcodebuild ${args.join(" ")}`, runnerPort);
         this.events.push(`spawn:${child.pid}`);
-        return child as unknown as ChildProcess;
+        return child;
       },
     };
   }

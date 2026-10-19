@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { Readable } from "node:stream";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import type { ChildProcess } from "node:child_process";
 import {
   AndroidEmulatorClient,
@@ -25,16 +24,8 @@ const execResult = (stdout = ""): ExecResult => ({
   includes: (value) => stdout.includes(value),
 });
 
-function createChild(): ChildProcess & EventEmitter {
-  const child = new EventEmitter() as ChildProcess & EventEmitter;
-  child.stdout = new Readable({ read() {} }) as never;
-  child.stderr = new Readable({ read() {} }) as never;
-  child.killed = false;
-  child.kill = (() => {
-    child.killed = true;
-    return true;
-  }) as ChildProcess["kill"];
-  return child;
+function createChild(): FakeChildProcess {
+  return new FakeChildProcess();
 }
 
 function createClient(
@@ -54,25 +45,19 @@ function createClient(
     posterFileSystem.setExists(resolve(file), true);
   }
   const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
     execAsync: async () => execResult(),
-    spawnFn: spawnFn as never,
+    spawnFn,
     timer,
     adbFactory,
     avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker,
     posterFileSystem,
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
-    { name: avdName, platform: "android", isRunning: false },
-  ];
-  (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
-  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-    false;
-  (
-    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
-  ).checkArchitectureCompatibility = async () => ({ compatible: true });
+  client.listAvds = async () => [{ name: avdName, platform: "android", isRunning: false }];
+  client.isAvdRunning = async () => false;
+  client.isAvdStarting = async () => false;
+  client.checkArchitectureCompatibility = async () => ({ compatible: true, hostArch: "arm64" });
   return client;
 }
 
@@ -87,7 +72,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       let args: string[] = [];
       const client = createClient((_command, actual) => {
         args = actual;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       });
       await client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath });
@@ -173,7 +158,7 @@ describe("AndroidEmulatorClient launch contract", () => {
   test("returns a typed launch handle correlated to the requested adb serial", async () => {
     const child = createChild();
     const client = createClient(() => {
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     });
 
@@ -193,7 +178,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       let spawnedArgs: string[] = [];
       const client = createClient((_command, args) => {
         spawnedArgs = args;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       });
 
@@ -230,7 +215,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const firstClient = createClient((_command, args) => {
       firstSpawnedArgs = args;
       queueMicrotask(() =>
-        firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+        firstChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n")),
       );
       return firstChild;
     }, adb);
@@ -241,7 +226,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       (_command, args) => {
         secondSpawnedArgs = args;
         queueMicrotask(() =>
-          secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+          secondChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n")),
         );
         return secondChild;
       },
@@ -272,7 +257,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const client = createClient(
       (_command, args) => {
         spawnedArgs = args;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       },
       adb,
@@ -305,9 +290,7 @@ describe("AndroidEmulatorClient launch contract", () => {
         (_command, args) => {
           spawnedArgs.push(args);
           const child = children.shift()!;
-          queueMicrotask(() =>
-            child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
-          );
+          queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
           return child;
         },
         adb,
@@ -342,7 +325,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     let spawnedArgs: string[] = [];
     const client = createClient((_command, args) => {
       spawnedArgs = args;
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     }, adb);
 
@@ -361,7 +344,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const firstClient = createClient((_command, args) => {
       firstSpawnedArgs = args;
       queueMicrotask(() =>
-        firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+        firstChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n")),
       );
       return firstChild;
     }, adb);
@@ -371,7 +354,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       (_command, args) => {
         secondSpawnedArgs = args;
         queueMicrotask(() =>
-          secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+          secondChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n")),
         );
         return secondChild;
       },
@@ -403,7 +386,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const client = createClient((_command, args) => {
       spawnedArgs.push(args);
       const child = children.shift()!;
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     }, adb);
 
@@ -450,9 +433,7 @@ describe("AndroidEmulatorClient launch contract", () => {
         (_command, args) => {
           spawnedArgs.push(args);
           const child = children.shift()!;
-          queueMicrotask(() =>
-            child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
-          );
+          queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
           return child;
         },
         adb,
@@ -491,7 +472,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       () => {
         spawns += 1;
         const child = spawns === 1 ? failedChild : nextChild;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       },
       adb,
@@ -529,7 +510,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     let secondSpawns = 0;
     const firstClient = createClient(
       () => {
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       },
       adb,
@@ -574,7 +555,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       () => {
         spawns += 1;
         const child = spawns === 1 ? firstChild : secondChild;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       },
       adb,
@@ -617,7 +598,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       () => {
         firstSpawns += 1;
         queueMicrotask(() =>
-          firstChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+          firstChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n")),
         );
         return firstChild;
       },
@@ -630,7 +611,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       () => {
         secondSpawns += 1;
         queueMicrotask(() =>
-          secondChild.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")),
+          secondChild.stdout.emit("data", Buffer.from("Detected GPU type: host\n")),
         );
         return secondChild;
       },
@@ -676,7 +657,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       () => {
         spawns += 1;
         const child = spawns === 1 ? firstChild : secondChild;
-        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
         return child;
       },
       adb,
@@ -730,7 +711,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     let spawnedArgs: string[] = [];
     const client = createClient((_command, args) => {
       spawnedArgs = args;
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     }, adb);
 
@@ -767,7 +748,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       spawns += 1;
       return createChild();
     });
-    (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => {
+    client.listAvds = async () => {
       validating = true;
       return availableAvds;
     };
@@ -860,7 +841,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     }
     controller.abort();
     expect(child.killed).toBe(true);
-    child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
 
     await expect(launch).rejects.toThrow("cancelled");
   });
@@ -962,7 +943,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const controller = new AbortController();
     const child = createChild();
     const client = createClient(() => {
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     });
     let listSignal: AbortSignal | undefined;
@@ -1003,7 +984,7 @@ describe("AndroidEmulatorClient launch contract", () => {
   test("disposal kills a process launched by this handle", async () => {
     const child = createChild();
     const client = createClient(() => {
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     });
 
@@ -1017,7 +998,7 @@ describe("AndroidEmulatorClient launch contract", () => {
     const controller = new AbortController();
     const child = createChild();
     const client = createClient(() => {
-      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      queueMicrotask(() => child.stdout.emit("data", Buffer.from("Detected GPU type: host\n")));
       return child;
     });
 

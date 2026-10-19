@@ -17,7 +17,7 @@ import {
 import {
   DeviceOwnedByOtherDaemonError,
   freshStartAlreadyBoundError,
-} from "./deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 import type { AutolockClient, DeviceAutolockManager } from "./deviceAutolockManager";
 import {
   CREATE_SESSION_RELEASE_WAIT_MS,

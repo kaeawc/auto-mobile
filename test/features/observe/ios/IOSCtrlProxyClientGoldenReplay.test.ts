@@ -3,7 +3,7 @@ import path from "node:path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { CtrlProxyNode } from "../../../../src/features/observe/ios/types";
 import type { BootedDevice } from "../../../../src/models";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import {

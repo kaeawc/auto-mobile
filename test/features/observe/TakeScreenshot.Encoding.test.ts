@@ -1,6 +1,6 @@
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Image } from "../../../src/utils/image-utils";
@@ -22,6 +22,7 @@ import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { screenshotFileName } from "../../../src/utils/screenshot/screenshotFormats";
 import { iosDevice, mockDevice } from "./takeScreenshotTestHelpers";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 
 const png = readFileSync("test/fixtures/screenshots/black-on-white.png");
 
@@ -45,14 +46,13 @@ describe("screenshot encoding and truthful metadata", () => {
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x12, 0x34]);
     const adb = new FakeAdbExecutor();
     const writer = new RecordingWriter();
-    const original = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      requestScreenshot: async () => ({
-        success: true,
-        format: "jpeg",
-        data: jpeg.toString("base64"),
-      }),
-    })) as typeof AndroidCtrlProxyClient.getInstance;
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestScreenshot").mockImplementation(async () => ({
+      success: true,
+      format: "jpeg",
+      data: jpeg.toString("base64"),
+    }));
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const shot = new TakeScreenshot(
         mockDevice,
@@ -75,19 +75,18 @@ describe("screenshot encoding and truthful metadata", () => {
       }
       expect(adb.getExecutedCommands()).toEqual([]);
     } finally {
-      AndroidCtrlProxyClient.getInstance = original;
+      getInstance.mockRestore();
     }
   });
 
   test("omitted format preserves ADB PNG bytes through direct and file-pull fallback", async () => {
-    const original = AndroidCtrlProxyClient.getInstance;
     let ctrlProxyCalls = 0;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      requestScreenshot: async () => {
-        ctrlProxyCalls++;
-        return { success: false, error: "unavailable" };
-      },
-    })) as typeof AndroidCtrlProxyClient.getInstance;
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestScreenshot").mockImplementation(async () => {
+      ctrlProxyCalls++;
+      return { success: false, error: "unavailable" };
+    });
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const directAdb = new FakeAdbExecutor();
       directAdb.setDefaultResponse(createExecResult(png.toString("base64"), ""));
@@ -161,7 +160,7 @@ describe("screenshot encoding and truthful metadata", () => {
       expect(pullWriter.files.get(expectedPath)).toEqual(png);
       expect(fileSystem.existsSync(`${expectedPath}.temp`)).toBe(false);
     } finally {
-      AndroidCtrlProxyClient.getInstance = original;
+      getInstance.mockRestore();
     }
   });
 
@@ -222,10 +221,9 @@ describe("screenshot encoding and truthful metadata", () => {
     const adb = new FakeAdbExecutor();
     adb.setDefaultResponse(createExecResult(png.toString("base64"), ""));
     const writer = new RecordingWriter();
-    const original = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      requestScreenshot: async () => ({ success: false }),
-    })) as typeof AndroidCtrlProxyClient.getInstance;
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestScreenshot").mockImplementation(async () => ({ success: false }));
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const shot = new TakeScreenshot(
         mockDevice,
@@ -251,20 +249,19 @@ describe("screenshot encoding and truthful metadata", () => {
         "image/jpeg",
       );
     } finally {
-      AndroidCtrlProxyClient.getInstance = original;
+      getInstance.mockRestore();
     }
   });
 
   test("CtrlProxy MIME mismatch and an extensionless target use the detected bytes", async () => {
     const writer = new RecordingWriter();
-    const original = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      requestScreenshot: async () => ({
-        success: true,
-        format: "jpeg",
-        data: png.toString("base64"),
-      }),
-    })) as typeof AndroidCtrlProxyClient.getInstance;
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestScreenshot").mockImplementation(async () => ({
+      success: true,
+      format: "jpeg",
+      data: png.toString("base64"),
+    }));
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const shot = new TakeScreenshot(
         mockDevice,
@@ -285,7 +282,7 @@ describe("screenshot encoding and truthful metadata", () => {
       expect(writer.files.get(result.path ?? "")).toEqual(png);
       expect(replaceScreenshotExtension("/tmp/capture", "png")).toBe("/tmp/capture.png");
     } finally {
-      AndroidCtrlProxyClient.getInstance = original;
+      getInstance.mockRestore();
     }
   });
 

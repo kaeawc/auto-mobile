@@ -1,5 +1,3 @@
-src/devices/AndroidIdentityUnresolvedError.ts -> src/daemon/deviceAcquisitionRefusals
-src/devices/DeviceReadiness.ts -> src/daemon/deviceAcquisitionRefusals
 src/devices/DeviceReadiness.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/DeviceReadiness.ts -> src/features/iosSimFleet/IosBootInstrumentation
 src/devices/DeviceReadiness.ts -> src/features/iosSimFleet/defaultIosBootInstrumentation
@@ -15,10 +13,8 @@ src/devices/DeviceReadiness.ts -> src/features/observe/ios/IOSCtrlProxyClient
 src/devices/DeviceReadiness.ts -> src/server/ToolExecutionContext
 src/devices/DeviceReadiness.ts -> src/server/appearanceSessionKey
 src/devices/DeviceReadiness.ts -> src/server/applyAppearanceOnConnect
-src/devices/DeviceReadiness.ts -> src/server/deviceExecutionBinding
 src/devices/deviceBootService.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/deviceUtils.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/deviceUtils.ts -> src/features/iosSimFleet/IosBootInstrumentation
 src/devices/deviceUtils.ts -> src/features/iosSimFleet/defaultIosBootInstrumentation
-src/devices/exactDeviceProvisioning.ts -> src/daemon/sessionBroker/provisioning/refusal
 src/devices/hostEmulatorProcessStopper.ts -> src/features/bootAdmission/processTableRetry

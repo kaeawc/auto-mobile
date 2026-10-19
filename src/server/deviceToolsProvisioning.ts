@@ -7,7 +7,7 @@ import {
   DeviceOwnedByOtherDaemonError,
   SESSION_CREATION_TIMEOUT_CODE,
   RetryableDeviceAcquisitionError,
-} from "../daemon/deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import {
   DeviceAssignedToBindingError,

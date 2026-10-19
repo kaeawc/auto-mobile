@@ -5,12 +5,15 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
-import { iosSqlErrorMessage } from "./storageSdkErrors";
+import { iosSqlErrorMessage } from "../utils/storageSdkErrors";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { notifyDatabaseChanged } from "./databaseResources";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import {
+  defaultIosDatabaseClientResolver,
+  type IosDatabaseClientResolver,
+} from "./iosDatabaseClient";
 import type { SQLResult } from "../features/database/DatabaseInspector";
 import { lexSql, splitSqlStatements, type SqlToken } from "../features/database/sqlLexer";
 
@@ -201,11 +204,13 @@ export function isReadOnlySqlQuery(query: string): boolean {
  * (listDatabases, listTables, getTableData, getTableStructure) are
  * exposed as MCP resources instead.
  */
-export function registerDatabaseTools() {
+export function registerDatabaseTools(
+  iosClient: IosDatabaseClientResolver = defaultIosDatabaseClientResolver,
+) {
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     try {
-      const result = await executeSqlForDevice(device, args);
+      const result = await executeSqlForDevice(device, args, iosClient);
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.
@@ -257,7 +262,11 @@ export function registerDatabaseTools() {
 /**
  * Execute SQL using the platform-specific database bridge.
  */
-async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Promise<SQLResult> {
+async function executeSqlForDevice(
+  device: BootedDevice,
+  args: SqlQueryArgs,
+  iosClient: IosDatabaseClientResolver,
+): Promise<SQLResult> {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
     const inspector = new DatabaseInspector(device, adb, undefined, () =>
@@ -275,7 +284,7 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
 
   if (device.platform === "ios") {
     try {
-      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(
+      return await iosClient(device).executeSQLForIos(
         args.appId,
         args.databasePath,
         args.query,

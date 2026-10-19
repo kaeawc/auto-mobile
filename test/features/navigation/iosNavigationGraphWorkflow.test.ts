@@ -6,7 +6,7 @@ import {
   type IosTelemetryRecorder,
 } from "../../../src/features/observe/ios/IosSdkEventIngestor";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import type { BootedDevice } from "../../../src/models";
 import type { SdkEvent } from "../../../src/features/observe/interfaces/SdkEventIngestor";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";

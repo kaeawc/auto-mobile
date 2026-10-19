@@ -20,7 +20,7 @@ beforeEach(() => {
     } else {
       queueMicrotask(onConnect!);
     }
-    return socket as unknown as net.Socket;
+    return socket;
   });
 });
 

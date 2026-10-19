@@ -1,6 +1,5 @@
 import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
@@ -8,7 +7,7 @@ import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRe
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -1354,9 +1353,9 @@ test("pool signals only a newly tracked spawned Android process", async () => {
   await pool.trackStartedDeviceProcess(device, undefined);
   expect(started).toEqual([]);
   const child = new FakeChildProcess();
-  await pool.trackStartedDeviceProcess(device, child as unknown as ChildProcess);
+  await pool.trackStartedDeviceProcess(device, child);
   expect(started).toEqual([device.deviceId]);
-  await pool.trackStartedDeviceProcess(device, child as unknown as ChildProcess);
+  await pool.trackStartedDeviceProcess(device, child);
   expect(started).toEqual([device.deviceId]);
 });
 
@@ -1421,7 +1420,7 @@ test("removed startup orphan is acquirable on the first bind with a newly starte
       sessionId: "fresh",
       deviceId: device.deviceId,
       platform: "android",
-      childProcess: new FakeChildProcess() as unknown as ChildProcess,
+      childProcess: new FakeChildProcess(),
     }),
   ).toBe("fresh");
   expect(commands).toBe(1);
@@ -1437,11 +1436,9 @@ test("process-start listener deadline releases real pool tracking with quarantin
   });
   const pool = poolInternals(h.pool);
   let settled = false;
-  const tracking = pool
-    .trackStartedDeviceProcess(device, new FakeChildProcess() as unknown as ChildProcess)
-    .then(() => {
-      settled = true;
-    });
+  const tracking = pool.trackStartedDeviceProcess(device, new FakeChildProcess()).then(() => {
+    settled = true;
+  });
   await flush();
   expect(commands).toBe(1);
   expect(settled).toBe(false);
@@ -1465,7 +1462,7 @@ test("a rejected process-start listener warns without failing real pool tracking
     throw failure;
   });
   const pool = poolInternals(h.pool);
-  const child = new FakeChildProcess() as unknown as ChildProcess;
+  const child = new FakeChildProcess();
   try {
     await expect(pool.trackStartedDeviceProcess(device, child)).resolves.toBeUndefined();
     expect(h.pool.hasStartedDeviceProcess(device.deviceId, child)).toBe(true);

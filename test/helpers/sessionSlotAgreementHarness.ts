@@ -7,7 +7,7 @@ import {
   SessionTerminalReleaseInProgressError,
   SessionRebindingError,
 } from "../../src/daemon/sessionManager";
-import { SessionReleasedDuringCreationError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcquisitionRefusals";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { deriveSlot, isSlotKnown, type LegacyLifecycleView } from "../../src/daemon/sessionSlots";
 import { errorMessage } from "../../src/utils/describeUnknownError";

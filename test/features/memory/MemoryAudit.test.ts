@@ -103,9 +103,9 @@ describe("MemoryAudit - Unit Tests", function () {
       expect(violations.length).toBeGreaterThan(0);
       const heapViolation = violations.find((v: any) => v.metric === "javaHeapGrowth");
       expect(heapViolation).toBeDefined();
-      expect(heapViolation.actual).toBe(100);
-      expect(heapViolation.threshold).toBe(50);
-      expect(heapViolation.severity).toBe("critical"); // 100 > 50 * 1.5
+      expect(heapViolation?.actual).toBe(100);
+      expect(heapViolation?.threshold).toBe(50);
+      expect(heapViolation?.severity).toBe("critical"); // 100 > 50 * 1.5
     });
 
     test("should detect native heap growth violation", function () {
@@ -150,9 +150,9 @@ describe("MemoryAudit - Unit Tests", function () {
       expect(violations.length).toBeGreaterThan(0);
       const nativeViolation = violations.find((v: any) => v.metric === "nativeHeapGrowth");
       expect(nativeViolation).toBeDefined();
-      expect(nativeViolation.actual).toBe(70);
-      expect(nativeViolation.threshold).toBe(30);
-      expect(nativeViolation.severity).toBe("critical"); // 70 > 30 * 1.5
+      expect(nativeViolation?.actual).toBe(70);
+      expect(nativeViolation?.threshold).toBe(30);
+      expect(nativeViolation?.severity).toBe("critical"); // 70 > 30 * 1.5
     });
 
     test("should detect GC count violation", function () {
@@ -197,9 +197,9 @@ describe("MemoryAudit - Unit Tests", function () {
       expect(violations.length).toBeGreaterThan(0);
       const gcViolation = violations.find((v: any) => v.metric === "gcCount");
       expect(gcViolation).toBeDefined();
-      expect(gcViolation.actual).toBe(25);
-      expect(gcViolation.threshold).toBe(10);
-      expect(gcViolation.severity).toBe("critical"); // 25 > 10 * 2
+      expect(gcViolation?.actual).toBe(25);
+      expect(gcViolation?.threshold).toBe(10);
+      expect(gcViolation?.severity).toBe("critical"); // 25 > 10 * 2
     });
 
     test("should detect unreachable objects violation", function () {
@@ -244,10 +244,10 @@ describe("MemoryAudit - Unit Tests", function () {
       expect(violations.length).toBeGreaterThan(0);
       const unreachableViolation = violations.find((v: any) => v.metric === "unreachableObjects");
       expect(unreachableViolation).toBeDefined();
-      expect(unreachableViolation.actual).toBe(2000);
-      expect(unreachableViolation.threshold).toBe(1000);
-      expect(unreachableViolation.severity).toBe("critical");
-      expect(unreachableViolation.contributionWeight).toBe(0.95); // High weight for leak indicator
+      expect(unreachableViolation?.actual).toBe(2000);
+      expect(unreachableViolation?.threshold).toBe(1000);
+      expect(unreachableViolation?.severity).toBe("critical");
+      expect(unreachableViolation?.contributionWeight).toBe(0.95); // High weight for leak indicator
     });
 
     test("should detect baseline anomaly when current exceeds 2x baseline", function () {
@@ -300,11 +300,11 @@ describe("MemoryAudit - Unit Tests", function () {
       // Should detect anomalies even though absolute thresholds not exceeded
       const javaAnomalyViolation = violations.find((v: any) => v.metric === "javaHeapAnomaly");
       expect(javaAnomalyViolation).toBeDefined();
-      expect(javaAnomalyViolation.threshold).toBe(100); // baseline * 2
+      expect(javaAnomalyViolation?.threshold).toBe(100); // baseline * 2
 
       const gcAnomalyViolation = violations.find((v: any) => v.metric === "gcCountAnomaly");
       expect(gcAnomalyViolation).toBeDefined();
-      expect(gcAnomalyViolation.threshold).toBe(10); // baseline * 2
+      expect(gcAnomalyViolation?.threshold).toBe(10); // baseline * 2
     });
   });
 

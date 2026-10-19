@@ -1,5 +1,5 @@
 import { MockRule, NetworkState } from "./NetworkState";
-import { errorMessage } from "../utils/describeUnknownError";
+import { errorMessage } from "./describeUnknownError";
 
 /**
  * Wire shape for a single mock rule sent to a device's CtrlProxy over the

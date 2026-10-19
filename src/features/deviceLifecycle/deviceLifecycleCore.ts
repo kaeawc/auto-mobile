@@ -42,7 +42,7 @@ import {
   getAbortSignal,
 } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ProgressCallback } from "../../server/toolRegistry";
+import type { ProgressCallback } from "../action/BaseVisualChange";
 
 export type { ProgressCallback };
 import { getHostEmulatorProcessStopper } from "../../devices/hostEmulatorProcessStopper";
@@ -192,7 +192,7 @@ import {
 import {
   DeviceTransportOfflineError,
   DeviceUnhealthyError,
-} from "../../daemon/deviceAcquisitionRefusals";
+} from "../../models/deviceAcquisitionRefusals";
 import { DeviceLostError } from "../../models/DeviceLostError";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,

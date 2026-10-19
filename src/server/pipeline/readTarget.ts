@@ -30,13 +30,13 @@ import { didSourceSucceedForDevice } from "../../utils/discoverySource";
 import { bindingPoolGate } from "../../daemon/sessionBroker/provisioning/poolGate";
 import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../../daemon/inputDeviceOwnership";
 import { DeviceAssignedToBindingError } from "../../daemon/sessionBroker/provisioning/refusal";
-import { DeviceOwnedByOtherDaemonError } from "../../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
 import {
   assertControlNotOnForeignDaemonDevice,
   deviceReservedForRestartRecoveryError,
 } from "../../daemon/inputDeviceOwnership";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { INTERNAL_NO_DIFF_PARAM } from "../internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { combineAbortSignals, runWithAbortSignal } from "../../utils/AbortContext";

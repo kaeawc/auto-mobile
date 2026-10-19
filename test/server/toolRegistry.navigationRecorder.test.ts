@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { z } from "zod/v4";
 import { stripNavigationInternalParams, ToolRegistryClass } from "../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { reportToolDispatched } from "../../src/utils/ToolDispatchContext";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";

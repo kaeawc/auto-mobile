@@ -1,11 +1,10 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import {
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -186,7 +185,7 @@ describe("exact Android binding during transitional adb presence", () => {
     test(`${autolock ? "autolock" : "explicit bind"}: live first-boot process holds offline then absent transport until the same serial returns`, async () => {
       const h = await setup(true);
       const child = new FakeChildProcess(h.timer);
-      const process = child as unknown as ChildProcess;
+      const process = child;
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
       expect(await h.manager.getBootedDevices("android")).toEqual([device]);
@@ -238,7 +237,7 @@ describe("exact Android binding during transitional adb presence", () => {
             deviceId: device.deviceId,
             platform: "android",
             sourceImage: image,
-            childProcess: live ? (child as unknown as ChildProcess) : undefined,
+            childProcess: live ? child : undefined,
           }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
@@ -288,7 +287,7 @@ describe("exact Android binding during transitional adb presence", () => {
             deviceId: device.deviceId,
             platform: "android",
             sourceImage: image,
-            childProcess: child as unknown as ChildProcess,
+            childProcess: child,
           }),
         );
         await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {

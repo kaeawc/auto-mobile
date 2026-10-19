@@ -1,7 +1,7 @@
 import { holderOf } from "../daemon/deviceBinding";
 import { defaultDaemonContext, type DevicePoolReads } from "../daemon/daemonContext";
 import type { SessionManager } from "../daemon/sessionManager";
-import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import {
   assertInputRequesterHoldsDevice,
   InputDeviceOwnedError,

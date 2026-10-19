@@ -16,7 +16,7 @@ import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { readFileSync } from "node:fs";

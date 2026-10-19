@@ -8,7 +8,7 @@ import {
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
 } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { logger } from "../../src/utils/logger";
@@ -18,7 +18,7 @@ import {
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
 import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   deferHeldPlanAppCleanup,
   takeHeldPlanAppCleanup,

@@ -962,7 +962,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       }
 
       // One re-observation distinguishes Android's benign generation churn from a layout-invalidating
-      // advance. Any unprovable or changed targeting state preserves the original fail-closed error.
+      // advance. Any unprovable or changed targeting state still fails closed.
       throwIfAborted(signal);
       const refreshedObservation = await this.observeScreen.execute({
         freshness: this.retryFreshness(options),
@@ -1048,13 +1048,17 @@ export class TapAtCoordinate extends BaseVisualChange {
       "error" in resolved ||
       resolved.x !== point.x ||
       resolved.y !== point.y ||
-      !this.hasSafeRetryLayout(options, initial, refreshed) ||
       !frameContext ||
       // iOS tokens identify semantic state, not captures. A genuinely fresh capture can
       // repeat the rejected token after transient post-gesture UI settles (#13437).
       (this.device.platform !== "ios" && frameContext === initial.viewHierarchy?.frameContext)
     ) {
       return undefined;
+    }
+    if (!options.snapshotId && !hasSameTapTargetingLayout(initial, refreshed)) {
+      throw new ActionableError(
+        "Stale frame context: screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId.",
+      );
     }
     return { point: resolved, frameContext };
   }
@@ -1088,14 +1092,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (stale) {
       throw new ActionableError(stale);
     }
-  }
-
-  private hasSafeRetryLayout(
-    options: TapAtOptions,
-    initial: ObserveResult,
-    refreshed: ObserveResult,
-  ): boolean {
-    return Boolean(options.snapshotId) || hasSameTapTargetingLayout(initial, refreshed);
   }
 
   private retryFreshness(options: TapAtOptions): "fresh" | "cached-ok" {

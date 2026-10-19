@@ -8,6 +8,7 @@ import { logger } from "../logger";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
 import { clockInstantTextInWindow } from "../../models/DeviceClock";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 /**
  * Result of plan validation
@@ -56,7 +57,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
   logger.info(`[PlanSchemaValidator] Loading schema from: ${__dirname}`);
   logger.info(`[PlanSchemaValidator] Current working directory: ${process.cwd()}`);
   logger.info(
-    `[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+    `[PlanSchemaValidator] GITHUB_WORKSPACE: ${readEnvRaw(AMBIENT_ENV.GITHUB_WORKSPACE) || "not set"}`,
   );
 
   // Try multiple paths to support different execution contexts:
@@ -80,7 +81,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
         path.join(process.cwd(), "../../../schemas/test-plan.schema.json"),
         path.join(process.cwd(), "../../../../schemas/test-plan.schema.json"),
         // From GitHub Actions workspace
-        path.join(process.env.GITHUB_WORKSPACE || "", "schemas/test-plan.schema.json"),
+        path.join(readEnvRaw(AMBIENT_ENV.GITHUB_WORKSPACE) || "", "schemas/test-plan.schema.json"),
         // From package root (when installed as npm package)
         path.join(__dirname, "../../../../../schemas/test-plan.schema.json"),
       ].map((candidate) => path.resolve(candidate)),
@@ -112,7 +113,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
       "Could not find test-plan.schema.json.",
       `Current working directory: ${process.cwd()}`,
       `Module directory: ${__dirname}`,
-      `GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+      `GITHUB_WORKSPACE: ${readEnvRaw(AMBIENT_ENV.GITHUB_WORKSPACE) || "not set"}`,
       "Tried paths:",
       ...attemptedPaths.map((p) => `  - ${p}`),
     ].join("\n");

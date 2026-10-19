@@ -9,7 +9,7 @@ import type {
   TouchTrackFailure,
 } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
-import { AndroidCtrlProxyClient } from "../../observe/android";
+import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverInputNodes } from "./InputNodeDiscovery";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
@@ -139,7 +139,7 @@ export class DualTrackRecorder {
   async start(): Promise<void> {
     // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
     // so we can send start/stop recording notifications to the Kotlin service.
-    let a11yClient: AndroidCtrlProxyClient | undefined;
+    let a11yClient: AndroidCtrlProxy | undefined;
     if (!this.a11ySource) {
       a11yClient = AndroidCtrlProxyClient.getInstance(this.device);
     }

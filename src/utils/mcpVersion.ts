@@ -8,6 +8,7 @@ import {
   type GitMetadataClient,
   type GitVersionInfo,
 } from "./GitMetadataClient";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 export type { GitVersionInfo } from "./GitMetadataClient";
 
@@ -154,8 +155,8 @@ export const getMcpServerVersion = (): string => {
 
   cachedVersion = resolveMcpServerVersion({
     env: {
-      MCP_SERVER_VERSION: process.env.MCP_SERVER_VERSION,
-      npm_package_version: process.env.npm_package_version,
+      MCP_SERVER_VERSION: readEnvRaw(AMBIENT_ENV.MCP_SERVER_VERSION),
+      npm_package_version: readEnvRaw(AMBIENT_ENV.NPM_PACKAGE_VERSION),
     },
     readPackageVersion: readPackageVersionFromDisk,
     readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),

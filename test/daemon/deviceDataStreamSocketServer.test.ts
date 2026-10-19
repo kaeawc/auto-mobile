@@ -3,7 +3,6 @@ import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSoc
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import type { ObserverReleaseSource } from "../../src/daemon/observerReleaseBroadcast";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
-import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
@@ -24,7 +23,7 @@ import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/obse
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import type { ScreenshotMetadata } from "../../src/features/observe/ScreenshotMetadata";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
@@ -94,13 +93,13 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   }
 
   async startFake(): Promise<void> {
-    Object.assign(this, { server: { listening: true } });
+    this.server = new FakeListeningNetServer();
     this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
     this.onServerClosing();
-    Object.assign(this, { server: null });
+    this.server = null;
   }
 
   simulateSubscription(options: {
@@ -123,7 +122,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
       deviceSessionUuid = null;
     }
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: socket,
       subscriptionId,
       lastActivity: timer.now(),
       filter: {
@@ -138,16 +137,20 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
     return { socket, subscriptionId };
   }
 
+  liveFrameGenerationsForTest(): ReadonlyMap<string, number> {
+    return this.liveFrameGenerations;
+  }
+
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
-    await this.processLine(socket as unknown as Socket, line);
+    await this.processLine(socket, line);
   }
 
   closeConnectionForTest(socket: FakeSocket): void {
-    this.onConnectionClose(socket as unknown as Socket);
+    this.onConnectionClose(socket);
   }
 
   errorConnectionForTest(socket: FakeSocket): void {
-    this.onConnectionError(socket as unknown as Socket, new Error("socket error"));
+    this.onConnectionError(socket, new Error("socket error"));
   }
 }
 
@@ -413,8 +416,7 @@ describe("DeviceDataStreamSocketServer", () => {
   ];
 
   it("reading generations does not retain capture-only serials", () => {
-    const generations = (server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> })
-      .liveFrameGenerations;
+    const generations = server.liveFrameGenerationsForTest();
     const size = generations.size;
     server.getLiveFrameGeneration("never-pushed-1");
     server.getLiveFrameGeneration("never-pushed-2");
@@ -437,11 +439,7 @@ describe("DeviceDataStreamSocketServer", () => {
     finish.resolve();
     await first;
     expect(h.frames(pane.socket)).toEqual([]);
-    expect(
-      (
-        server as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
-      ).liveFrameGenerations.has("device-1"),
-    ).toBe(false);
+    expect(server.liveFrameGenerationsForTest().has("device-1")).toBe(false);
   });
 
   for (const event of frameInvalidations) {

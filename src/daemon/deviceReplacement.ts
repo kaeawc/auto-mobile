@@ -4,7 +4,7 @@ import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } fr
 import { logger } from "../utils/logger";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { ConnectionOwnership } from "./connectionOwnership";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import type {
   DevicePool,
   DeviceAutolockChildProcess as ChildProcess,

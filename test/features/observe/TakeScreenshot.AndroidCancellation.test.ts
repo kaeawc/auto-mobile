@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -8,20 +8,22 @@ import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { androidDevice } from "./takeScreenshotTestHelpers";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 
 describe("TakeScreenshot Android cancellation", function () {
   test("abandons an in-flight CtrlProxy screenshot as soon as the signal aborts", async function () {
     const controller = new AbortController();
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
     let finishScreenshot: (() => void) | undefined;
     let requestScreenshotCalls = 0;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      requestScreenshot: () =>
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestScreenshot").mockImplementation(
+      () =>
         new Promise((resolve) => {
           requestScreenshotCalls++;
           finishScreenshot = () => resolve({ success: false, error: "too late" });
         }),
-    })) as typeof AndroidCtrlProxyClient.getInstance;
+    );
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const screenshot = new TakeScreenshot(
         androidDevice("android-cancel-device"),
@@ -42,20 +44,19 @@ describe("TakeScreenshot Android cancellation", function () {
       finishScreenshot?.();
       await resultPromise;
     } finally {
-      AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      getInstance.mockRestore();
     }
   });
 
   test("discards a capture written after the caller cancelled", async function () {
     const controller = new AbortController();
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    AndroidCtrlProxyClient.getInstance = (() => ({
-      requestScreenshot: async () => ({
-        success: true,
-        data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
-        format: "jpeg" as const,
-      }),
-    })) as typeof AndroidCtrlProxyClient.getInstance;
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestScreenshot").mockImplementation(async () => ({
+      success: true,
+      data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+      format: "jpeg" as const,
+    }));
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     const writer = new FakeScreenshotFileWriter(() => controller.abort());
     try {
       const screenshot = new TakeScreenshot(
@@ -70,7 +71,7 @@ describe("TakeScreenshot Android cancellation", function () {
       expect(writer.written).toHaveLength(1);
       expect(writer.removed).toEqual(writer.written);
     } finally {
-      AndroidCtrlProxyClient.getInstance = originalGetInstance;
+      getInstance.mockRestore();
     }
   });
 });

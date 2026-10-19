@@ -24,7 +24,7 @@ import {
 import { getStructuredField, observationOfPayload } from "../../utils/toolUtils";
 import { readToolEnvelopePayload } from "../toolEnvelopePayload";
 import { isMarkedToolFailure } from "../../utils/toolFailureSignal";
-import { narrowInternalToolEnvelope } from "../internalToolPayloads";
+import { narrowInternalToolEnvelope } from "../../utils/internalToolPayloads";
 import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactRetention,

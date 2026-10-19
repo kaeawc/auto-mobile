@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -9,7 +8,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import { logger } from "../../src/utils/logger";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
-import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { SimctlCommandTimeoutError } from "../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import os from "os";
 import {
@@ -22,6 +21,29 @@ import {
   fakeIosCtrlProxyBuilder,
   createStartableBuilder,
 } from "../helpers/iosCtrlProxyBuilderFake";
+
+type BundleHashLookupOptions = { signal?: AbortSignal; throwOnLookupTimeout?: boolean };
+
+/** A DeviceAppManager whose installed-bundle hash lookup is scripted by the test. */
+class ScriptedBundleHashDeviceAppManager extends DeviceAppManager {
+  constructor(
+    private readonly lookup: (options?: BundleHashLookupOptions) => Promise<string | null>,
+  ) {
+    super();
+  }
+
+  override async getInstalledAppBundleHash(
+    _deviceUdid: string,
+    _bundleId: string,
+    _isSimulator = false,
+    options?: BundleHashLookupOptions,
+  ): Promise<string | null> {
+    return this.lookup(options);
+  }
+}
+
+const noInstalledBundle = (): DeviceAppManager =>
+  new ScriptedBundleHashDeviceAppManager(async () => null);
 
 describe("IOSCtrlProxyManager", function () {
   let testDevice: BootedDevice;
@@ -560,16 +582,14 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
 
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => null,
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = noInstalledBundle();
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           launchCount++;
           runnerHealthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -610,18 +630,16 @@ describe("IOSCtrlProxyManager", function () {
         ),
       );
       let legacyProbeCount = 0;
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => {
-          legacyProbeCount++;
-          return null;
-        },
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new ScriptedBundleHashDeviceAppManager(async () => {
+        legacyProbeCount++;
+        return null;
+      });
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -660,18 +678,16 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
       let legacyProbeCount = 0;
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => {
-          legacyProbeCount++;
-          return null;
-        },
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new ScriptedBundleHashDeviceAppManager(async () => {
+        legacyProbeCount++;
+        return null;
+      });
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -712,23 +728,16 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
       const lookupOptions: unknown[] = [];
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async (
-          _deviceId: string,
-          _bundleId: string,
-          _simulator: boolean,
-          options?: unknown,
-        ) => {
-          lookupOptions.push(options);
-          return lookup(lookupOptions.length);
-        },
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new ScriptedBundleHashDeviceAppManager(async (options) => {
+        lookupOptions.push(options);
+        return lookup(lookupOptions.length);
+      });
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -815,7 +824,7 @@ describe("IOSCtrlProxyManager", function () {
         }),
         fakeExecutor,
         undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+        noInstalledBundle(),
       );
 
       // First pass through the gate: attemptedSetup becomes true and the
@@ -859,7 +868,7 @@ describe("IOSCtrlProxyManager", function () {
         }),
         fakeExecutor,
         undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+        noInstalledBundle(),
       );
 
       expect((await manager.setup()).success).toBe(true);
@@ -892,7 +901,7 @@ describe("IOSCtrlProxyManager", function () {
         }),
         fakeExecutor,
         undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+        noInstalledBundle(),
       );
 
       expect((await manager.setup()).success).toBe(true);
@@ -964,7 +973,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
       tunnel(manager).setStateForTesting({ processId: fakeProcess.pid });
-      tunnel(manager).setStateForTesting({ process: fakeProcess as unknown as ChildProcess });
+      tunnel(manager).setStateForTesting({ process: fakeProcess });
 
       fakeTimer.enableAutoAdvance();
       await tunnel(manager).stop();

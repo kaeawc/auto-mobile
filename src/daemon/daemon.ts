@@ -189,7 +189,7 @@ import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
-import { NetworkState } from "../server/NetworkState";
+import { NetworkState } from "../utils/NetworkState";
 import {} from "../server/networkStateSessionCleanup";
 import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
@@ -284,8 +284,7 @@ import {
   logSkippedObservationStreamDevice,
 } from "./daemonStreamRouting";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import type { InstalledAppsStore } from "../db/installedAppsRepository";
-import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
 import {
   BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
@@ -398,6 +397,7 @@ import {
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
 import type { DaemonStateWrites } from "./daemonContext";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 export type {
   DaemonDependencies,
@@ -1106,7 +1106,7 @@ export class Daemon {
           acquisition &&
           !this.sessionBrokerConfigPath &&
           !this.bindingRedrive &&
-          process.env.NODE_ENV !== "test"
+          readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test"
         ) {
           this.bindingRedrive = acquisition.startJournalRedrive(registry);
         }
@@ -1189,7 +1189,7 @@ export class Daemon {
     });
     this.daemonState.setSessionBrokerService(this.sessionBrokerService);
     // No generic journal work starts before the exclusive host lock and inventory checks.
-    if (!this.bindingRedrive && process.env.NODE_ENV !== "test") {
+    if (!this.bindingRedrive && readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test") {
       this.bindingRedrive = acquisition.startJournalRedrive(registry);
     }
   }
@@ -3689,7 +3689,7 @@ export class Daemon {
    * failures (locked file, temporary disk-full) exit fast so the next launch can
    * retry immediately.
    */
-  private async initializeDatabase(): Promise<void> {
+  async initializeDatabase(): Promise<void> {
     try {
       // getDatabase() + await ensureMigrations(): a failed startup migration
       // rejects here (rather than swallowing on a detached promise).

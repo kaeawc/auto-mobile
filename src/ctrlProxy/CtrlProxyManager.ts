@@ -70,7 +70,7 @@ import {
   type CtrlProxyApkPrefetcherDeps,
 } from "./CtrlProxyApkPrefetcher";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import {
   createForeignCtrlProxyForwardEvidence,
   CtrlProxyForwardOwnershipUnreadableError,

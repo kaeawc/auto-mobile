@@ -1,6 +1,6 @@
 import { decodeCtrlProxyMessage } from "../../src/features/observe/ios/decodeCtrlProxyMessage";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";

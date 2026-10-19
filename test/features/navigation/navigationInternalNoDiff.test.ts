@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import { DefaultUIStateSetup } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";

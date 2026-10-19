@@ -1,6 +1,7 @@
 import type { SessionToolSelectionRepository } from "../../db/sessionToolSelectionRepository";
 import { isAlwaysOnTool } from "./toolSelectionControl";
 import { logger } from "../../utils/logger";
+import { getConfigurableToolNames as getRegisteredConfigurableToolNames } from "./configurableToolNames";
 
 export type ToolDefaultOverrides = ReadonlyMap<string, boolean>;
 
@@ -226,8 +227,7 @@ export function getSessionToolSelectionService(): SessionToolSelectionService {
     const {
       SqliteSessionToolSelectionRepository,
     } = require("../../db/sessionToolSelectionRepository");
-    const { ToolRegistry } = require("../../server/toolRegistry");
-    const knownToolNames = new Set<string>(ToolRegistry.getConfigurableToolNames());
+    const knownToolNames = new Set<string>(getRegisteredConfigurableToolNames());
     defaultService = new SessionToolSelectionService(
       new SqliteSessionToolSelectionRepository(),
       getStartupToolDefaults(

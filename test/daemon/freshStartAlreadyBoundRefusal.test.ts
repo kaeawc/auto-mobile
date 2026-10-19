@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { freshStartAlreadyBoundError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { freshStartAlreadyBoundError } from "../../src/models/deviceAcquisitionRefusals";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,

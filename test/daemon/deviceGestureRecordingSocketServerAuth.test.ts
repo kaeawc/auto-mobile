@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Socket } from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
@@ -40,7 +39,7 @@ class TestableServer extends DeviceGestureRecordingSocketServer {
     return this.handleRequest(request);
   }
   line(socket: FakeSocket, request: DeviceGestureRecordingCommand) {
-    return this.processLine(socket as unknown as Socket, JSON.stringify(request));
+    return this.processLine(socket, JSON.stringify(request));
   }
 }
 

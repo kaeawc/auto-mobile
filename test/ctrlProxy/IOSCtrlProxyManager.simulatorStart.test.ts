@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import {
   IOSCtrlProxyManager,
   STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
@@ -889,7 +888,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
           isAvailable: async () => true,
           startStreaming: async () => {
             events.push("spawn");
-            return new FakeChildProcess(fakeTimer) as unknown as ChildProcess;
+            return new FakeChildProcess(fakeTimer);
           },
         };
         const { steps } = createManagerWithOwnSteps({
@@ -1004,7 +1003,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       replacement.pid = 41002;
       manager.testHooks.trackRunner({
         pid: replacement.pid,
-        process: replacement as unknown as ChildProcess,
+        process: replacement,
       });
 
       staleChild.emit("error", new Error("late stale failure"));
@@ -1037,7 +1036,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       child.pid = process.pid;
       manager.testHooks.trackRunner({
         pid: process.pid,
-        process: child as unknown as ChildProcess,
+        process: child,
       });
 
       await expect(manager.stop()).rejects.toThrow(

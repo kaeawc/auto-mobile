@@ -20,9 +20,9 @@ import {
   SimulatorList,
   SimCtlBootOptions,
   DEFAULT_SIMCTL_BOOT_OPTIONS,
-  SimulatorBootState,
   SimulatorBootLease,
 } from "./SimCtlSupport";
+import { simCtlSharedState } from "./SimCtlSharedState";
 export { DEFAULT_SIMCTL_BOOT_OPTIONS } from "./SimCtlSupport";
 export type {
   AppleDevice,
@@ -68,6 +68,7 @@ import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDispla
 import type { DeviceDisplays } from "../../models/DisplayPanel";
 import { type TransitionalSimulator } from "../../models/TransitionalSimulator";
 import { SimctlUnavailableError } from "./SimctlUnavailableError";
+import { ENV, readEnvRaw } from "../../config/env";
 
 export { SimctlScreenshotError } from "./SimctlScreenshotError";
 export { SimctlUnavailableError } from "./SimctlUnavailableError";
@@ -151,7 +152,7 @@ export class SimCtlClient implements SimCtl {
       },
       getBootedSimulatorsChecked: (...args) => client.getBootedSimulatorsChecked(...args),
       get bootPresentationGenerations() {
-        return SimCtlClient.bootPresentationGenerations;
+        return simCtlSharedState.bootPresentationGenerations;
       },
       get idGenerator() {
         return client.idGenerator;
@@ -163,7 +164,7 @@ export class SimCtlClient implements SimCtl {
       },
       shutdownSimulatorCoordinated: (...args) => client.shutdownSimulatorCoordinated(...args),
       get simulatorBoots() {
-        return SimCtlClient.simulatorBoots;
+        return simCtlSharedState.simulatorBoots;
       },
       get bootOptions() {
         return client.bootOptions;
@@ -200,11 +201,6 @@ export class SimCtlClient implements SimCtl {
   private readonly bootOptions: SimCtlBootOptions;
   private readonly simulatorAppPresenter: SimulatorAppPresenter;
   private readonly idGenerator: IdGenerator;
-  private static readonly bootPresentationGenerations = new Map<string, string>();
-  private static readonly simulatorAppPresentations = new Map<
-    string,
-    { bootGeneration: string; presentation: Promise<void> }
-  >();
   // Cached result of the launchctl headless-session probe (null = not yet probed).
   // Re-probed after HEADLESS_SESSION_CACHE_TTL so a GUI login/logout mid-process
   // (e.g. an SSH session that later gains a GUI, or vice versa) does not leave a
@@ -213,7 +209,6 @@ export class SimCtlClient implements SimCtl {
   private headlessSessionCacheTimestamp = 0;
   private headlessSessionProbeSequence = 0;
   private static readonly HEADLESS_SESSION_CACHE_TTL = 30_000;
-  private static readonly simulatorBoots = new Map<string, SimulatorBootState>();
 
   /**
    * Create an IosUtils instance
@@ -274,7 +269,7 @@ export class SimCtlClient implements SimCtl {
       presenter ??
       new DefaultSimulatorAppPresenter(
         (udid) => this.openSimulatorAppBounded(udid),
-        SimCtlClient.simulatorAppPresentations,
+        simCtlSharedState.simulatorAppPresentations,
       )
     );
   }
@@ -1021,8 +1016,7 @@ export class SimCtlClient implements SimCtl {
    *     This gate comes BEFORE the env override so `AUTOMOBILE_IOS_HEADLESS=false`
    *     (or `""`) can never make `openSimulatorApp` shell `open -a Simulator` on
    *     Linux/Windows, where that binary does not exist (issue #4177).
-   *  2. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless,
-   *     `false`/`0` => force GUI launch).
+   *  2. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless, else force GUI launch).
    *  3. Auto-detect via `launchctl managername`: an `Aqua` manager means a GUI
    *     login session; anything else (`System`/`Background`) is a daemon/SSH
    *     context with no GUI domain.
@@ -1037,7 +1031,7 @@ export class SimCtlClient implements SimCtl {
       return true;
     }
 
-    const override = process.env.AUTOMOBILE_IOS_HEADLESS;
+    const override = readEnvRaw(ENV.IOS_HEADLESS);
     if (override !== undefined) {
       return override === "true" || override === "1";
     }

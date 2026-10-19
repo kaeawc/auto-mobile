@@ -414,7 +414,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   /** Advances for accepted hierarchies and full boundaries, including contextless frames. */
   private readonly frameContextGenerations = new Map<string, number>();
   // Live pushes and device/session invalidation share this one initial-frame generation.
-  private readonly liveFrameGenerations = new Map<string, number>();
+  protected readonly liveFrameGenerations = new Map<string, number>();
   private nextFrameGeneration = 0;
   // A full boundary can fence capture-only/removed serials without retaining map entries.
   private untrackedLiveFrameGeneration = 0;

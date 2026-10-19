@@ -1,7 +1,6 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -92,21 +91,17 @@ const ANDROID_SPEC = {
 };
 
 /** The boot's process handle: `kill` is what stops the cold-booted device. */
-class RecordingBootHandle extends EventEmitter {
-  readonly pid = 4242;
-  exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
-  killed = false;
-
+class RecordingBootHandle extends FakeChildProcess {
   /** A stopped device is no longer listed as booted. */
   constructor(private readonly onKill: () => void) {
     super();
+    this.pid = 4242;
   }
 
   /** A device that ignores every signal: it keeps running until `exit` is called. */
   ignoresSignals = false;
 
-  kill(): boolean {
+  override kill(): boolean {
     this.killed = true;
     if (!this.ignoresSignals) {
       this.exit();
@@ -117,7 +112,10 @@ class RecordingBootHandle extends EventEmitter {
   exit(): void {
     this.onKill();
     this.exitCode = 0;
-    queueMicrotask(() => this.emit("exit", 0, null));
+    queueMicrotask(() => {
+      this.emit("exit", 0, null);
+      this.emit("close", 0, null);
+    });
   }
 }
 
@@ -248,8 +246,8 @@ describe.each([
       devices.setBootedDevices("android", []);
       devices.setBootedDevices("ios", []);
     });
-    devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-    devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+    devices.setMockChildProcess(avd.name, bootHandle);
+    devices.setMockChildProcess(simulator.name, bootHandle);
     // Every boot below is admitted through the real gates, at a limit of one device a platform.
     gates = new RealBootGatesOverFakeFleet(devices, timer, 1);
     ownership = new ClaimOwnership();
@@ -718,7 +716,7 @@ describe.each([
       "startDevice createIfMissing cancelled after the bind deletes the AVD it created",
       async () => {
         devices.setDeviceImages("android", []);
-        devices.setMockChildProcess(created.name, bootHandle as unknown as ChildProcess);
+        devices.setMockChildProcess(created.name, bootHandle);
         setDeviceToolsDependencies({
           deviceCreationGateFactory: () => new FakeDeviceCreationGate(true),
           deviceProvisionerFactory: () => ({

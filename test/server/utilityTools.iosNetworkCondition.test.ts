@@ -13,7 +13,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
+import { FakeNetworkFilterBridge, type FakeRuleCommand } from "../fakes/FakeNetworkFilterBridge";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -66,7 +66,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
    * delivery of the apply is fenced. Exact reset revisions are not pinned: each
    * restore-target capture allocates one.
    */
-  const expectFencedResets = (expected: string[]) => {
+  const expectFencedResets = (expected: FakeRuleCommand[]) => {
     expect(bridge.ruleCalls.map((entry) => entry.command)).toEqual(expected);
     expect(bridge.ruleCalls.every((entry) => entry.ownership.owner === SESSION)).toBe(true);
     const revisions = bridge.ruleCalls.map((entry) => entry.ownership.revision);

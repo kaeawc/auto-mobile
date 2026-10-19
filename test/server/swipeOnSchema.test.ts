@@ -12,7 +12,7 @@ const interactionDeps: InteractionToolDependencies = {};
 const scope = { elementId: "list", container: { text: "Panel", index: 0 } };
 for (const field of ["container", "lookFor"] as const) {
   test(`${field} accepts a recursive scope and every selection strategy`, () => {
-    for (const selectionStrategy of ["first", "random", "unique"]) {
+    for (const selectionStrategy of ["first", "random", "unique"] as const) {
       const selector = { text: "Target", container: scope, selectionStrategy };
       expect(swipeOnSchema.parse({ direction: "down", [field]: selector })[field]).toEqual(
         selector,

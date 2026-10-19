@@ -114,7 +114,7 @@ describe("addDeviceTargetingToSchema", () => {
     const withDefault = extendedWithPlatform.safeParse({ bundleId: "com.example.app" });
     expect(withDefault.success).toBe(true);
     if (withDefault.success) {
-      expect(withDefault.data.platform).toBe("android");
+      expect<unknown>(withDefault.data.platform).toBe("android");
     }
 
     const withExplicit = extendedWithPlatform.safeParse({
@@ -123,7 +123,7 @@ describe("addDeviceTargetingToSchema", () => {
     });
     expect(withExplicit.success).toBe(true);
     if (withExplicit.success) {
-      expect(withExplicit.data.platform).toBe("ios");
+      expect<unknown>(withExplicit.data.platform).toBe("ios");
     }
   });
 });

@@ -1,19 +1,19 @@
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Fake ChildProcess for testing without spawning real processes
  * Simulates process lifecycle: spawn -> running -> exit
  */
-export class FakeChildProcess
-  extends EventEmitter
-  implements Partial<ChildProcessWithoutNullStreams>
-{
+export class FakeChildProcess extends EventEmitter implements ChildProcess {
   stdout: Readable;
   stderr: Readable;
   stdin: Writable;
+  stdio: ChildProcess["stdio"];
+  spawnargs: string[] = [];
+  spawnfile = "";
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
@@ -53,6 +53,11 @@ export class FakeChildProcess
     // Deterministic fake pid: a fake must not reach for real randomness. A
     // process-wide counter gives every instance a distinct, reproducible pid.
     this.pid = FakeChildProcess.nextPid++;
+    this.stdio = [this.stdin, this.stdout, this.stderr, undefined, undefined];
+  }
+
+  [Symbol.dispose](): void {
+    this.kill();
   }
 
   private static nextPid = 1000;
@@ -127,7 +132,7 @@ export class FakeChildProcess
   /**
    * Simulate process exit
    */
-  simulateExit(code: number = 0, signal: NodeJS.Signals | null = null): void {
+  simulateExit(code: number | null = 0, signal: NodeJS.Signals | null = null): void {
     this.timer.setTimeout(() => {
       this.exitCode = code;
       this.signalCode = signal;

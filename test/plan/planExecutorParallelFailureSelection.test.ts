@@ -77,10 +77,12 @@ async function runInOrder(
   if (delayedTrack) {
     // Hold the sibling before its first abort check, exercising the real
     // executeDeviceTrack catch that returns the -1 sentinel on cancellation.
-    const executeTrack = executor["executeDeviceTrack"].bind(executor);
-    Object.defineProperty(executor, "executeDeviceTrack", {
+    const executeTrack = executor.planDeviceTrackExecutor.executeDeviceTrack.bind(
+      executor.planDeviceTrackExecutor,
+    );
+    Object.defineProperty(executor.planDeviceTrackExecutor, "executeDeviceTrack", {
       value: async (...args: Parameters<typeof executeTrack>) => {
-        if (args[0] === delayedTrack) {
+        if (args[0].device === delayedTrack) {
           started.get(delayedTrack)!.resolve();
           await releases.get(delayedTrack)!.promise;
         }

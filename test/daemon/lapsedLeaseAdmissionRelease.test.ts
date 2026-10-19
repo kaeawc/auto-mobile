@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -46,7 +47,7 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
     started = [];
     await sessionManager.createSession(SESSION, DEVICE_ID, "android");
     expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER_TOKEN)).toBe("claimed");
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION);
   });
 
   afterEach(() => {
@@ -197,7 +198,7 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
   async function lapseOwnerLease(sessionId: string): Promise<void> {
     const sessionManager = daemon.getSessionManager();
     expect(await sessionManager.claimLivenessOwnership(sessionId, OWNER_TOKEN)).toBe("claimed");
-    sessionManager.recordHeartbeat(sessionId);
+    await deliverDaemonHeartbeat(sessionManager, sessionId);
     timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
     expect(sessionManager.getSessionLeaseState(sessionId)?.phase).toBe("lapsed");
   }

@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -79,7 +80,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       });
     }
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     monitor.start();
   }
 

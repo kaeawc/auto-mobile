@@ -22,9 +22,16 @@ class WaitForToolRedactionTest {
   private class FixedResultClient(private val result: String) : AutoMobileAgent.MCPClient {
     override fun isConnected() = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String = result
 
@@ -35,9 +42,16 @@ class WaitForToolRedactionTest {
   private class FailingClient : AutoMobileAgent.MCPClient {
     override fun isConnected() = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String =
       throw AssertionError(
@@ -142,12 +156,19 @@ class WaitForToolRedactionTest {
   private class ThrowingClient(private val message: String) : AutoMobileAgent.MCPClient {
     override fun isConnected() = true
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String =
-      throw RuntimeException(message)
+      throw IllegalStateException(message)
 
     override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> = emptyList()
   }

@@ -13,7 +13,8 @@ import {
   runWithoutDaemonLifecycle,
   type ReportedOwnerHold,
 } from "../proxyLivenessRecovery";
-import { DaemonBoundSessionExpiredError, daemonInternalErrors } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
+import { HeldSessionNotFoundError } from "./HeldSessionNotFoundError";
 import type { HeldSessionHeartbeatOutcomes } from "./HeldSessionHeartbeatOutcomes";
 import type { HeldSessionLosses } from "./HeldSessionLosses";
 import type { HeartbeatKeeperPort } from "./HeartbeatKeeper";
@@ -24,8 +25,6 @@ import {
   type NotFoundAnswerOutcome,
 } from "./notFoundDecision";
 import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
-
-const { HeldSessionNotFoundError } = daemonInternalErrors;
 
 const NO_HANDOFFS: ReadonlySet<string> = new Set();
 

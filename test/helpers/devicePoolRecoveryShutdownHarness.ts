@@ -280,10 +280,6 @@ export interface DaemonDeferredRecoverySweepInternals {
   trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
 }
 
-export interface DevicePoolProcessExitInternals {
-  trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
-}
-
 export function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {
   const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);

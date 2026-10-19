@@ -1,9 +1,9 @@
 import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
+import type { Socket } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { Socket } from "node:net";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -148,16 +148,21 @@ export class ProcessTimer implements Timer {
 }
 
 /** One end of an in-process connection; what it writes arrives as `data` on its peer. */
-class SocketEnd extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
+class SocketEnd extends FakeSocket {
   peer!: SocketEnd;
 
-  setTimeout(): this {
-    return this;
-  }
-
-  write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean {
+  override write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean;
+  override write(
+    data: string | Uint8Array,
+    encoding?: BufferEncoding,
+    callback?: (error?: Error | null) => void,
+  ): boolean;
+  override write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
     if (this.destroyed || this.peer.destroyed) {
       callback?.(new Error("in-memory socket is closed"));
       return false;
@@ -167,14 +172,13 @@ class SocketEnd extends EventEmitter {
     return true;
   }
 
-  end(): this {
+  override end(): this {
     return this.destroy();
   }
 
-  destroy(): this {
+  override destroy(): this {
     if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
+      super.destroy();
       this.peer.destroy();
     }
     return this;
@@ -252,7 +256,7 @@ export class InMemoryControlSocket {
     this.daemonEnds.add(daemonEnd);
     daemonEnd.on("close", () => this.daemonEnds.delete(daemonEnd));
     this.connectionIds.enqueue(connectionId);
-    this.accept(daemonEnd as unknown as Socket);
+    this.accept(daemonEnd);
     return clientEnd;
   }
 

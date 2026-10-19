@@ -11,6 +11,7 @@ const GUARDED_FILES = [
   "src/features/action/TerminateApp.ts",
   "src/features/action/UninstallApp.ts",
   "src/features/action/InstallApp.ts",
+  "src/features/action/IosAppInstaller.ts",
   "src/features/action/RestoreSnapshot.ts",
   "src/features/database/DatabaseInspector.ts",
   "src/utils/ContentHashProvider.ts",

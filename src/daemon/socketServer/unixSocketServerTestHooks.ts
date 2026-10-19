@@ -20,5 +20,7 @@ export interface UnixSocketServerTestHooks {
     sessionWasActiveBeforeForward: boolean,
     response: unknown,
   ): void;
+  /** The MCP client key a socket session is currently bound to, if any. */
+  boundMcpClientFor(socketSessionId: string): { sessionUuid?: string } | undefined;
   requireCurrentFrameContext(deviceId: string, frameContext: string, action: string): void;
 }

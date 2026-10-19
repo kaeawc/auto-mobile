@@ -68,9 +68,14 @@ export const elementIdTextFieldsSchema = z
   })
   .strict();
 
+/** The slice of `z.RefinementCtx` the selector refinement reports through. */
+export interface SelectorIssueSink {
+  addIssue(issue: { code: "custom"; message: string }): void;
+}
+
 export const validateElementIdTextSelector = (
   value: { elementId?: string; text?: string },
-  ctx: z.RefinementCtx,
+  ctx: SelectorIssueSink,
   message: string = "Provide exactly one of elementId or text",
 ): void => {
   const hasElementId = value.elementId !== undefined;

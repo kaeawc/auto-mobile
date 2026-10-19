@@ -438,6 +438,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hashViewHierarchy: this.hashViewHierarchy.bind(this),
       replaceObservationHierarchy: this.replaceObservationHierarchy.bind(this),
       verifyFocusedInputTarget: this.verifyFocusedInputTarget.bind(this),
+      handleElementNotFound: this.handleElementNotFound.bind(this),
       executeAndroidLongPress: this.executeAndroidLongPress.bind(this),
       executeiOSTap: this.executeiOSTap.bind(this),
       executeiOSTapWithCoordinates: this.executeiOSTapWithCoordinates.bind(this),

@@ -74,6 +74,9 @@ export interface IosSdkEventIngestor extends SdkEventIngestor {
   recordLayoutTelemetryEvent(hierarchy: ViewHierarchyResult): void;
 }
 
+/** The slice of `NavigationScreenshotManager` the ingestor stores screenshots through. */
+export type NavigationScreenshotStore = Pick<NavigationScreenshotManager, "storeScreenshot">;
+
 /** Injected dependencies for {@link DefaultIosSdkEventIngestor}. */
 export interface IosSdkEventIngestorDeps {
   /** The iOS device/simulator UDID that owns these events. */
@@ -90,6 +93,8 @@ export interface IosSdkEventIngestorDeps {
   failureRecorder?: FailureRecorderService;
   /** Whether navigation screenshots are enabled; defaults to server config. */
   navigationScreenshotsEnabled?: () => boolean;
+  /** Stores captured navigation screenshots; defaults to the shared manager. */
+  navigationScreenshotStore?: NavigationScreenshotStore;
 }
 
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
@@ -105,6 +110,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly telemetryRecorderOverride?: IosTelemetryRecorder;
   private readonly failureRecorderOverride?: FailureRecorderService;
   private readonly navigationScreenshotsEnabled: () => boolean;
+  private readonly navigationScreenshotStoreOverride?: NavigationScreenshotStore;
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
@@ -116,6 +122,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     this.failureRecorderOverride = deps.failureRecorder;
     this.navigationScreenshotsEnabled =
       deps.navigationScreenshotsEnabled ?? (() => serverConfig.isNavigationScreenshotsEnabled());
+    this.navigationScreenshotStoreOverride = deps.navigationScreenshotStore;
   }
 
   /**
@@ -617,7 +624,8 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     try {
       const result = await this.captureScreenshot(3000);
       if (result?.data) {
-        const screenshotManager = NavigationScreenshotManager.getInstance();
+        const screenshotManager =
+          this.navigationScreenshotStoreOverride ?? NavigationScreenshotManager.getInstance();
         const bytes = Buffer.from(result.data, "base64");
         return await screenshotManager.storeScreenshot(
           applicationId,

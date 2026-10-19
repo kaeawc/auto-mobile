@@ -1,3 +1,4 @@
+import type { ViewHierarchyNode } from "../../models";
 /**
  * Shared pure helpers used by both the Android and iOS notification UI
  * detectors. Extracted from `systemTrayHelpers.ts` so the detectors do
@@ -164,3 +165,22 @@ export const nodeHasIosNotificationCenterHint = (node: any): boolean => {
     (hint) => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint),
   );
 };
+
+/** Resource identity for notification inventory diagnostics (never selector matching). */
+export const notificationResourceId = (node: ViewHierarchyNode): string =>
+  rawResourceId(getNodeProperties(node));
+
+// A tray scroll keeps animating after `input swipe` returns. Poll until two
+// consecutive observations match instead of trusting the first frame, bounded
+// so a tray whose content never quiets (progress text, chronometers) still
+// makes progress.
+export const SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS = 1500;
+
+export const SYSTEM_TRAY_SCROLL_IDLE_POLL_MS = 150;
+
+export const NOTIFICATION_TITLE_FIELD_IDS = [
+  "title",
+  "title_big",
+  "conversation_text",
+  "notification_title",
+];

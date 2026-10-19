@@ -1,3 +1,15 @@
+import { readActiveNotificationKeysForApp as readActiveKeys } from "./systemTrayNotificationList";
+import { NOTIFICATION_TITLE_FIELD_IDS } from "./notificationHints";
+export {
+  NOTIFICATION_TITLE_FIELD_IDS,
+  SYSTEM_TRAY_SCROLL_IDLE_POLL_MS,
+  SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS,
+} from "./notificationHints";
+import {
+  readTrayNotificationFields as readNotificationFields,
+  listSystemTrayNotifications as listNotifications,
+  type TrayNotificationListContext,
+} from "./systemTrayNotificationList";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { rawContentDesc, rawNodeValue, rawResourceId } from "../utility/elementProperties";
@@ -11,7 +23,7 @@ import { pollObserveUntil } from "../observe/ObservePoll";
 import { diffObserveResult, isSameObservationScreen } from "../observe/output/ObserveResultOutput";
 import { isStabilityDiffEmpty } from "../observe/SettleObserve";
 import type { Timer } from "../../utils/SystemTimer";
-import { waitForScrollIdle } from "../../utils/scrollIdle";
+
 import { defaultTimer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { shellQuote } from "../../utils/shellQuote";
@@ -22,7 +34,6 @@ import {
   ObserveResult,
   ViewHierarchyResult,
   ViewHierarchyNode,
-  isTruthy,
 } from "../../models";
 import type { ObserveScreenExecuteOptions } from "../observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../observe/ObserveScreen";
@@ -37,14 +48,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import type { IosGestureResult } from "./IosNotificationUIDetector";
-import {
-  attributeRowByDumpsys,
-  intersectDumpsysRecordsForRow,
-  parseActiveNotificationKeysForApp,
-  parseDumpsysNotificationRecords,
-  type DumpsysNotificationRecord,
-} from "./notificationDumpsys";
-import { errorMessage } from "../../utils/describeUnknownError";
+
 import {
   SYSTEM_TRAY_PACKAGE,
   SYSTEM_TRAY_RESOURCE_ID_HINTS,
@@ -54,7 +58,6 @@ import {
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
   getHierarchyRoots,
   getNodeProperties,
-  traverseForHint,
 } from "./notificationHints";
 import type { ProgressCallback } from "../../server/toolRegistry";
 import type { SystemTrayNotificationArgs } from "./systemTrayTypes";
@@ -212,12 +215,6 @@ const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 // connection push) re-fires a heads-up that can collapse the shade or race the initial
 // expand; without re-expanding, the poll loop would sit on a closed shade until timeout.
 const SYSTEM_TRAY_REEXPAND_INTERVAL_MS = 1000;
-// A tray scroll keeps animating after `input swipe` returns. Poll until two
-// consecutive observations match instead of trusting the first frame, bounded
-// so a tray whose content never quiets (progress text, chronometers) still
-// makes progress.
-const SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS = 1500;
-const SYSTEM_TRAY_SCROLL_IDLE_POLL_MS = 150;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 // Re-export shared constant so existing callers (interactionTools.ts) keep working.
 export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS =
@@ -299,7 +296,7 @@ export const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => 
   return resolvedAwaitTimeout;
 };
 
-const observeSystemTray = (
+export const observeSystemTray = (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
   signal?: AbortSignal,
@@ -515,7 +512,7 @@ export const resolveAppLabel = async (
   }
 };
 
-const createSubHierarchy = (node: ViewHierarchyNode): ViewHierarchyResult => {
+export const createSubHierarchy = (node: ViewHierarchyNode): ViewHierarchyResult => {
   return {
     hierarchy: {
       node,
@@ -615,7 +612,9 @@ const getNotificationGroupChildrenContainer = (
     return matchesNotificationResourceId(resourceId, "notification_children_container");
   }) ?? null;
 
-const getNotificationGroupHeader = (groupNode: ViewHierarchyNode): ViewHierarchyNode | null => {
+export const getNotificationGroupHeader = (
+  groupNode: ViewHierarchyNode,
+): ViewHierarchyNode | null => {
   const groupChildren = getDirectChildNodes(groupNode);
   const header = groupChildren.find((child: ViewHierarchyNode) => {
     const props = getNodeProperties(child);
@@ -865,7 +864,7 @@ export const resolveNotificationGroupExpansionState = (
 export const isNotificationGroupExpanded = (groupNode: ViewHierarchyNode): boolean =>
   resolveNotificationGroupExpansionState(groupNode) === "expanded";
 
-const collectNotificationCandidates = (
+export const collectNotificationCandidates = (
   viewHierarchy: ViewHierarchyResult,
 ): SystemTrayNotificationCandidate[] => {
   const candidates: SystemTrayNotificationCandidate[] = [];
@@ -941,7 +940,7 @@ const buildNormalizedSearchTexts = (texts: string[]): NormalizedSearchText[] => 
     .map((text) => ({ text, normalized: text.toLowerCase() }));
 };
 
-const extractNodeTextCandidates = (node: ViewHierarchyNode): string[] => {
+export const extractNodeTextCandidates = (node: ViewHierarchyNode): string[] => {
   const props = getNodeProperties(node);
   if (!props) {
     return [];
@@ -1495,7 +1494,7 @@ const findBestNotificationMatch = (
   return selectBestNotificationMatch(matches);
 };
 
-const waitForSystemTrayOpen = async (
+export const waitForSystemTrayOpen = async (
   detector: NotificationUIDetector,
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
@@ -1778,14 +1777,9 @@ interface NotificationGroupIdentity {
   childTitles: string[];
 }
 
-const NOTIFICATION_TITLE_FIELD_IDS = [
-  "title",
-  "title_big",
-  "conversation_text",
-  "notification_title",
-];
-
-const findHeaderAppLabel = (header: ViewHierarchyNode | null | undefined): string | undefined => {
+export const findHeaderAppLabel = (
+  header: ViewHierarchyNode | null | undefined,
+): string | undefined => {
   const props = getNodeProperties(header);
   const resourceId = rawResourceId(props).toLowerCase();
   if (resourceId.includes("app_name_text")) {
@@ -2552,550 +2546,8 @@ export const clearIosSystemTrayNotifications = async (
   return { swipeCount, dismissedCount: swipeCount, stalled: false };
 };
 
-/** Which evidence class attributed a listed row to its app (#6875). */
-export type TrayOwnershipEvidence = "header" | "dumpsys";
-
-export interface ListedTrayNotification {
-  id: string | null;
-  appId: string;
-  appLabel: string | null;
-  title: string | null;
-  body: string | null;
-  actions: string[];
-  texts: string[];
-  inGroup: boolean;
-  ownership: TrayOwnershipEvidence;
-}
-
-const ACTION_FIELD_IDS = ["action0", "action1", "action2", "action_text"];
-
-// Chrome SystemUI renders around the posted content: action buttons (and their
-// container) plus the row's own expand/dismiss/feedback controls. Their labels
-// come from the framework or from a `Notification.Action`, never from the
-// extras `dumpsys` correlates against, so counting them as correlation content
-// only lets an unrelated app whose title happens to read "Reply" make a
-// header-less row look ambiguous (#6875).
-const NON_CONTENT_ROW_IDS = new Set([
-  ...ACTION_FIELD_IDS,
-  "actions",
-  "action_list_margin_target",
-  "smart_reply_container",
-  "expand_button",
-  "expand_button_touch_container",
-  "feedback",
-  "close_button",
-  "snooze_button",
-  // Timer chrome: SystemUI renders the running chronometer value and the post
-  // timestamp itself, so neither appears in the extras `dumpsys` correlates
-  // against, and the chronometer's value changes between observations.
-  "chronometer",
-  "time",
-  "time_divider",
-]);
-
-// Chrome is inherited: everything below an action container or a row control
-// is chrome too.
-const isRowContent = (parentIsContent: boolean, id: string): boolean =>
-  parentIsContent && !NON_CONTENT_ROW_IDS.has(id);
-
-// Read semantic Android notification fields, preserving custom-layout text as a
-// fallback. A group header must not inherit fields from its sibling child rows.
-const readTrayNotificationFields = (root: ViewHierarchyNode) => {
-  const childRows = new Set(
-    collectNotificationCandidates(createSubHierarchy(root)).map((candidate) => candidate.node),
-  );
-  childRows.delete(root);
-  const fields = {
-    appLabel: null as string | null,
-    title: null as string | null,
-    bodies: [] as string[],
-    actions: [] as string[],
-    texts: [] as string[],
-    // `texts` minus SystemUI's own chrome: what the posting app actually
-    // supplied, and the only text ownership correlation may rely on.
-    contentTexts: [] as string[],
-  };
-  // Chrome labels stay reported, but never become correlation evidence.
-  const recordTexts = (candidates: string[], content: boolean): void => {
-    fields.texts.push(...candidates);
-    if (content) {
-      fields.contentTexts.push(...candidates);
-    }
-  };
-  const assignSemanticField = (id: string, text: string): void => {
-    if (["app_name_text", "app_name"].includes(id)) {
-      fields.appLabel = text;
-    }
-    if (NOTIFICATION_TITLE_FIELD_IDS.includes(id)) {
-      fields.title = text;
-    }
-    if (["text", "big_text", "text2", "notification_text"].includes(id)) {
-      fields.bodies.push(text);
-    }
-    if (ACTION_FIELD_IDS.includes(id)) {
-      fields.actions.push(text);
-    }
-  };
-  // Each MessagingStyle layout is an alternate rendering of the conversation.
-  // Preserve repeated message nodes within one layout; select the fullest
-  // layout instead of deduplicating message values across compact/expanded UI.
-  const messageLayouts: string[][] = [[]];
-  const pending = [{ node: root, messages: messageLayouts[0], content: true }];
-  while (pending.length) {
-    const entry = pending.shift()!;
-    const { node } = entry;
-    let { messages } = entry;
-    const props = getNodeProperties(node);
-    if (!props) {
-      continue;
-    }
-    const id = rawResourceId(props).split("/").pop() ?? "";
-    if (childRows.has(node)) {
-      continue;
-    }
-    if (id === "messaging_linear_layout") {
-      messages = [];
-      messageLayouts.push(messages);
-    }
-    // `content-desc` (and the iOS accessibility label) routinely carry text the
-    // rendered `text` omits, so keep every candidate rather than the first.
-    const candidates = extractNodeTextCandidates(node);
-    const content = isRowContent(entry.content, id);
-    recordTexts(candidates, content);
-    const text = candidates[0];
-    if (text) {
-      assignSemanticField(id, text);
-      if (id === "message_text") {
-        messages.push(text);
-      }
-    }
-    const children = [node.node]
-      .flat()
-      .filter((child): child is ViewHierarchyNode => Boolean(child));
-    pending.push(...children.map((node: ViewHierarchyNode) => ({ node, messages, content })));
-  }
-  const messages = messageLayouts.reduce((fullest, layout) =>
-    layout.length > fullest.length ? layout : fullest,
-  );
-  fields.bodies = messages.length ? messages : [...new Set(fields.bodies)];
-  return fields;
-};
-
-interface TrayObservedRow {
-  // An observed row has no attribution yet: ownership is decided per request.
-  notification: Omit<ListedTrayNotification, "appId" | "ownership">;
-  // The row's app-supplied text, carried beside the reported fields so
-  // correlation never sees SystemUI's chrome (#6875).
-  correlationTexts: string[];
-  // The app-label text rendered under the row's structural notification-header
-  // node (distinct from title/body content), used only as fail-closed evidence
-  // for content-less custom layouts; null when no structural header node is present.
-  headerAppLabel: string | null;
-  bounds?: Element["bounds"];
-}
-
-const readTrayNotifications = (hierarchy: ViewHierarchyResult): TrayObservedRow[] => {
-  const notifications: TrayObservedRow[] = [];
-  for (const candidate of collectNotificationCandidates(hierarchy)) {
-    const fields = readTrayNotificationFields(candidate.node);
-    const label =
-      fields.appLabel ||
-      (candidate.groupNode ? readTrayNotificationFields(candidate.groupNode).appLabel : null);
-    const headerAppLabel =
-      findHeaderAppLabel(getNotificationGroupHeader(candidate.groupNode ?? candidate.node)) ?? null;
-    const nodeId = getNodeProperties(candidate.node)?.["unique-id"];
-    notifications.push({
-      bounds: candidate.element?.bounds,
-      correlationTexts: [...new Set(fields.contentTexts)],
-      headerAppLabel,
-      notification: {
-        id: typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null,
-        appLabel: label,
-        title: fields.title,
-        body: fields.bodies.join("\n") || null,
-        actions: [...new Set(fields.actions)],
-        texts: [...new Set(fields.texts)],
-        inGroup: Boolean(candidate.groupNode),
-      },
-    });
-  }
-  return notifications;
-};
-
-// Unchanged neighbors can measure the viewport's movement. Their text is only
-// an alignment anchor: an updated row need not have equal text to reconcile.
-const trayRowAnchor = (row: TrayObservedRow): string => {
-  const notification = row.notification;
-  return (
-    notification.id ??
-    JSON.stringify([
-      notification.appLabel,
-      notification.title,
-      notification.body,
-      notification.actions,
-    ])
-  );
-};
-
-const trayRowsAlign = (
-  previous: TrayObservedRow,
-  current: TrayObservedRow,
-  deltaY: number,
-): boolean => {
-  if (previous.notification.id !== null || current.notification.id !== null) {
-    return (
-      previous.notification.id !== null && previous.notification.id === current.notification.id
-    );
-  }
-  const left = previous.bounds;
-  const right = current.bounds;
-  if (!left || !right) {
-    return false;
-  }
-  return (
-    previous.notification.appLabel === current.notification.appLabel &&
-    previous.notification.inGroup === current.notification.inGroup &&
-    left.left === right.left &&
-    left.right === right.right &&
-    Math.abs(left.top - right.top - deltaY) <= 1
-  );
-};
-
-// Prefer stable node IDs. Otherwise reconcile ordered row positions after
-// accounting for scroll translation, rather than using changing row contents
-// as identity. Without continuity evidence, retain rows conservatively.
-const trayPageOverlap = (previous: TrayObservedRow[], current: TrayObservedRow[]): number => {
-  for (let count = Math.min(previous.length, current.length); count > 0; count--) {
-    const left = previous.slice(-count);
-    const right = current.slice(0, count);
-    const anchor = left.findIndex(
-      (row, index) =>
-        row.bounds &&
-        right[index].bounds &&
-        // A semantic match alone cannot prove that a repeated notification is
-        // the same row. Require another aligned row or a native identity.
-        (count > 1 || row.notification.id !== null) &&
-        trayRowAnchor(row) === trayRowAnchor(right[index]),
-    );
-    if (anchor < 0) {
-      if (
-        left.every(
-          (row, index) =>
-            row.notification.id !== null && row.notification.id === right[index].notification.id,
-        )
-      ) {
-        return count;
-      }
-      continue;
-    }
-    const deltaY = left[anchor].bounds!.top - right[anchor].bounds!.top;
-    if (left.every((row, index) => trayRowsAlign(row, right[index], deltaY))) {
-      return count;
-    }
-  }
-  return 0;
-};
-
-// SystemUI reports the tray's scroll boundary through the existing hierarchy.
-// `true` means examine actions; `false` and omitted (pre-API-33) both mean end.
-const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
-  getHierarchyRoots(hierarchy).some((root) =>
-    traverseForHint(root, (node) => {
-      const props = getNodeProperties(node);
-      if (!props) {
-        return false;
-      }
-      const resourceId = rawResourceId(props);
-      if (!matchesNotificationResourceId(resourceId, "notification_stack_scroller")) {
-        return false;
-      }
-      if (!isTruthy(props.scrollable)) {
-        return true;
-      }
-      return Array.isArray(props.actions) && !props.actions.includes("scroll_forward");
-    }),
-  );
-
-// SystemUI omits the per-row app-name header for the Silent (low-importance)
-// section, so those rows carry no ownership evidence in the shade at all. The
-// notification service does know who posted them; `--noredact` is what exposes
-// the extras values the rendered row can be correlated against. A redacted or
-// unavailable dump yields no records, which leaves such rows unattributed
-// rather than attributed by guess.
-// The aggregate unredacted dump of every posted notification routinely exceeds
-// the child process's 1 MiB default stdout buffer, which rejects the read
-// outright and leaves every header-less row unattributed.
-
-const readDumpsysNotificationOutput = async (
-  adb: SystemTrayAdb,
-  signal?: AbortSignal,
-): Promise<string | undefined> => {
-  try {
-    const result = await adb.executeCommand("shell dumpsys notification --noredact", {
-      maxBuffer: DUMPSYS_MAX_BUFFER,
-      noRetry: true,
-      signal,
-    });
-    return result.stdout;
-  } catch (error) {
-    signal?.throwIfAborted();
-    logger.warn(
-      `[systemTray] could not read dumpsys notification evidence: ${errorMessage(error)}`,
-      error,
-    );
-    return undefined;
-  }
-};
-
-const readDumpsysNotificationRecords = async (
-  adb: SystemTrayAdb,
-  signal?: AbortSignal,
-): Promise<DumpsysNotificationRecord[] | undefined> => {
-  const output = await readDumpsysNotificationOutput(adb, signal);
-  return output === undefined ? undefined : parseDumpsysNotificationRecords(output);
-};
-
-/** Read stable active notification identities for one Android package. */
-export const readActiveNotificationKeysForApp = async (
-  device: BootedDevice,
-  appId: string,
-  signal?: AbortSignal,
-): Promise<string[] | undefined> => {
-  const output = await readDumpsysNotificationOutput(
-    getSystemTrayDependencies().adbFactory(device),
-    signal,
-  );
-  return output === undefined ? undefined : parseActiveNotificationKeysForApp(output, appId);
-};
-
-type TrayRowAttribution = TrayOwnershipEvidence | "other" | "unknown";
-
-const isContentlessCustomLayout = (record: DumpsysNotificationRecord): boolean =>
-  record.hasCustomLayout && record.titles.length === 0 && record.bodies.length === 0;
-
-// The before snapshot is only evidence when it precedes every swipe. Once a
-// read fails, a later page must not retry it: a post-swipe dump stored as
-// "before" would present the requested package as the stable owner of a row
-// retained from an earlier page after a competitor left during the swipe.
-type TrayBeforeSnapshot =
-  | { status: "not-attempted" }
-  | { status: "unavailable" }
-  | { status: "records"; records: DumpsysNotificationRecord[] };
-
-const attributeTrayRow = (
-  row: TrayObservedRow,
-  appId: string,
-  appLabel: string | null,
-  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
-  afterRecords: readonly DumpsysNotificationRecord[],
-): TrayRowAttribution => {
-  if (row.notification.appLabel !== null) {
-    return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
-  }
-  const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
-  // Some custom RemoteViews (for example Clock timers) expose neither title
-  // nor text extras, but render their app label in the row's own notification
-  // header chrome. That structural label cannot be spoofed by same-named
-  // title/body content elsewhere in the row, and is evidence when a requested
-  // record is content-less custom layout; absent header evidence
-  // remains fail-closed for ambiguous or opaque records (#6875).
-  if (
-    appLabel !== null &&
-    row.headerAppLabel === appLabel &&
-    requestedRecords.length > 0 &&
-    requestedRecords.some(isContentlessCustomLayout)
-  ) {
-    return "header";
-  }
-  const owner = attributeRowByDumpsys(
-    intersectDumpsysRecordsForRow(beforeRecords, afterRecords, new Set(row.correlationTexts)),
-    new Set(row.correlationTexts),
-  );
-  if (owner === null) {
-    return "unknown";
-  }
-  return owner === appId ? "dumpsys" : "other";
-};
-
-// Keep every app's rows available to align pages, then expose only rows an
-// evidence class actually attributes. Message text is not ownership evidence,
-// so a row nothing can attribute is counted rather than claimed or hidden:
-// "0 notifications" must stay distinguishable from "0 rows we could not read".
-const attributeTrayRows = (
-  rows: TrayObservedRow[],
-  appId: string,
-  appLabel: string | null,
-  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
-  afterRecords: readonly DumpsysNotificationRecord[],
-): { notifications: ListedTrayNotification[]; unattributedRows: number } => {
-  const notifications: ListedTrayNotification[] = [];
-  const nativeIds = new Map<string, number>();
-  let unattributedRows = 0;
-  for (const row of rows) {
-    const attribution = attributeTrayRow(row, appId, appLabel, beforeRecords, afterRecords);
-    if (attribution === "unknown") {
-      unattributedRows++;
-      continue;
-    }
-    if (attribution === "other") {
-      continue;
-    }
-    const notification = { ...row.notification, appId, ownership: attribution };
-    const previousIndex = notification.id === null ? undefined : nativeIds.get(notification.id);
-    if (previousIndex !== undefined) {
-      notifications[previousIndex] = notification;
-    } else {
-      if (notification.id !== null) {
-        nativeIds.set(notification.id, notifications.length);
-      }
-      notifications.push(notification);
-    }
-  }
-  return { notifications, unattributedRows };
-};
-
-/** The list pass cannot read an open notification shade. */
-export class NotificationShadeNotOpenError extends ActionableError {}
-
-/** Bounded UI inventory, in encounter order, with no inferred posting times. */
-// eslint-disable-next-line complexity -- bounded scan coordinates shade state, pagination, and overlap.
-export const listSystemTrayNotifications = async (
-  device: BootedDevice,
-  appId: string,
-  appLabel: string | null,
-  awaitTimeoutMs: number,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
-): Promise<{
-  notifications: ListedTrayNotification[];
-  unattributedRows: number;
-  observation: ObserveResult;
-  swipes: number;
-  order: "encounter";
-}> => {
-  if (device.platform !== "android") {
-    throw new ActionableError("systemTray list is supported only on Android.");
-  }
-  signal?.throwIfAborted();
-  const detector = createNotificationUIDetector(device, getSystemTrayDependencies, signal);
-  const { adbFactory, observeScreenFactory, timer } = getSystemTrayDependencies();
-  // Collapsing resets SystemUI's scroll position; every bounded scan starts at
-  // the top even when a previous list left the shade open at its tail.
-  await detector.collapseTray();
-  signal?.throwIfAborted();
-  await detector.expandTray();
-  let observation = await waitForSystemTrayOpen(
-    detector,
-    observeScreenFactory(device),
-    await detector.getObservationTimestamp(),
-    awaitTimeoutMs,
-    signal,
-  );
-  const rows: TrayObservedRow[] = [];
-  let previousNotifications: TrayObservedRow[] = [];
-  let beforeSnapshot: TrayBeforeSnapshot = { status: "not-attempted" };
-  let swipes = 0;
-  while (true) {
-    signal?.throwIfAborted();
-    if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
-      throw new NotificationShadeNotOpenError(
-        "Notification shade is not open; cannot list notifications.",
-      );
-    }
-    const pageNotifications = readTrayNotifications(observation.viewHierarchy);
-    const overlap = trayPageOverlap(previousNotifications, pageNotifications);
-    rows.splice(rows.length - overlap, overlap, ...pageNotifications);
-    previousNotifications = pageNotifications;
-    // Capture as soon as a page needs correlation, before another swipe can
-    // remove a competing notification from the authoritative snapshot (#6921).
-    // Attempt it at most once: a failed read stays unavailable for the scan.
-    if (
-      beforeSnapshot.status === "not-attempted" &&
-      pageNotifications.some((row) => row.notification.appLabel === null)
-    ) {
-      const records = await readDumpsysNotificationRecords(adbFactory(device), signal);
-      beforeSnapshot =
-        records === undefined ? { status: "unavailable" } : { status: "records", records };
-    }
-    if (swipes === 3 || trayAtScrollEnd(observation.viewHierarchy)) {
-      break;
-    }
-    const { width, height } = observation.screenSize;
-    const x = Math.floor(width / 2);
-    const startY = Math.floor((height - observation.systemInsets.bottom) * 0.85);
-    const endY = Math.floor(Math.max(observation.systemInsets.top, height * 0.35));
-    await adbFactory(device).executeCommand(
-      `shell input swipe ${x} ${startY} ${x} ${endY} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`,
-      { signal },
-    );
-    swipes++;
-    // Reconcile pages against a settled viewport: a mid-fling frame has not
-    // translated its rows by a single consistent offset yet, so overlap
-    // detection against it duplicates or drops notifications.
-    observation = await waitForScrollIdle(
-      await observeSystemTray(
-        observeScreenFactory(device),
-        await detector.getObservationTimestamp(),
-        signal,
-      ),
-      {
-        observe: async () =>
-          observeSystemTray(
-            observeScreenFactory(device),
-            await detector.getObservationTimestamp(),
-            signal,
-          ),
-        timer,
-        maxWaitMs: SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS,
-        pollIntervalMs: SYSTEM_TRAY_SCROLL_IDLE_POLL_MS,
-        logPrefix: "[systemTray]",
-        signal,
-      },
-    );
-  }
-  signal?.throwIfAborted();
-  // Only pay for the dump when the shade actually rendered a row the header
-  // rule cannot attribute.
-  const hasHeaderlessRows = rows.some((row) => row.notification.appLabel === null);
-  const beforeRecords = beforeSnapshot.status === "records" ? beforeSnapshot.records : undefined;
-  if (hasHeaderlessRows && beforeRecords === undefined) {
-    logger.debug(
-      "[systemTray] before dumpsys snapshot unavailable; falling back to after-only evidence.",
-    );
-  }
-  const afterRecords = hasHeaderlessRows
-    ? ((await readDumpsysNotificationRecords(adbFactory(device), signal)) ?? [])
-    : [];
-  const { notifications, unattributedRows } = attributeTrayRows(
-    rows,
-    appId,
-    appLabel,
-    beforeRecords,
-    afterRecords,
-  );
-  // Partial attribution stays useful; only zero attributed rows plus positive
-  // posting evidence is unsafe to present as a confident empty list (#6875).
-  const requestedRecords = afterRecords.filter((record) => record.pkg === appId);
-  const hasUnmatchedRequestedRecords =
-    beforeRecords !== undefined && requestedRecords.length > 0 && notifications.length === 0;
-  signal?.throwIfAborted();
-  await detector.collapseTray();
-  signal?.throwIfAborted();
-  observation = await observeSystemTray(
-    observeScreenFactory(device),
-    await detector.getObservationTimestamp(),
-    signal,
-  );
-  if (hasUnmatchedRequestedRecords) {
-    throw new ActionableError(
-      requestedRecords.every(isContentlessCustomLayout)
-        ? `Notification records for ${appId} have no title/text extras to correlate with shade rows (custom layout).`
-        : `Notification records for ${appId} could not be correlated with shade rows.`,
-    );
-  }
-  return { notifications, unattributedRows, observation, swipes, order: "encounter" };
-};
-
+export { NotificationShadeNotOpenError } from "./systemTrayNotificationList";
+export type { ListedTrayNotification, TrayOwnershipEvidence } from "./systemTrayNotificationList";
 /** Verify label ownership against a successful, fresh installed-package inventory. */
 export const resolveUniqueTrayAppLabel = async (
   device: BootedDevice,
@@ -3131,3 +2583,31 @@ export const resolveUniqueTrayAppLabel = async (
   }
   return label;
 };
+
+const trayListingContext: TrayNotificationListContext = {
+  collectNotificationCandidates,
+  createSubHierarchy,
+  extractNodeTextCandidates,
+  getNotificationGroupHeader,
+  findHeaderAppLabel,
+  observeSystemTray,
+  waitForSystemTrayOpen,
+  getSystemTrayDependencies,
+};
+const readTrayNotificationFields = (node: ViewHierarchyNode) =>
+  readNotificationFields(node, trayListingContext);
+export const listSystemTrayNotifications = (
+  device: BootedDevice,
+  appId: string,
+  appLabel: string | null,
+  awaitTimeoutMs: number,
+  _progress?: ProgressCallback,
+  signal?: AbortSignal,
+) => listNotifications({ device, appId, appLabel, awaitTimeoutMs, signal }, trayListingContext);
+
+export const readActiveNotificationKeysForApp = (
+  device: BootedDevice,
+  appId: string,
+  signal?: AbortSignal,
+): Promise<string[] | undefined> =>
+  readActiveKeys(getSystemTrayDependencies().adbFactory(device), appId, signal);

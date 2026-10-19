@@ -143,7 +143,7 @@ describe("PlanExecutor result boundary warnings", () => {
       const failure =
         boundary === "step"
           ? spyOn(executor, "executeStep").mockRejectedValue(error)
-          : spyOn(executor, "executeDeviceTrack").mockRejectedValue(error);
+          : spyOn(executor.planDeviceTrackExecutor, "executeDeviceTrack").mockRejectedValue(error);
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const result = await executor.executePlan(

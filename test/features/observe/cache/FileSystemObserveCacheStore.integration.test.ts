@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "path";
 import os from "os";
@@ -15,11 +16,12 @@ import { logger } from "../../../../src/utils/logger";
 import type { ObserveResult } from "../../../../src/models";
 
 function makeResult(label: string): ObserveResult {
-  return {
+  return buildObserveResult({
+    observationId: label,
     updatedAt: label,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  };
+  });
 }
 
 describe("FileSystemObserveCacheStore", function () {

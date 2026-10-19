@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyResult } from "../../../../src/models";
@@ -31,7 +32,7 @@ function observation(
   viewHierarchy: ViewHierarchyResult,
   platform: "android" | "ios",
 ): ObserveResult {
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 402, height: 874 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -47,7 +48,7 @@ function observation(
             components: { bundleId: "com.example" },
           }
         : undefined,
-  };
+  });
 }
 
 type Json = Record<string, unknown>;

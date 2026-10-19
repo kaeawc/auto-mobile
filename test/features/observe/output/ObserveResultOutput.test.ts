@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
@@ -171,7 +172,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("preserves an SDK-backed screen identity while compacting observation output", () => {
-      const observe: ObserveResult = {
+      const observe: ObserveResult = buildObserveResult({
         updatedAt: 1,
         screenSize: { width: 100, height: 200 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -185,7 +186,7 @@ describe("sanitizeObserveResult", () => {
             navigationRoute: "SettingsTab",
           },
         },
-      };
+      });
 
       expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(
         observe.screenIdentity,
@@ -471,7 +472,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("keeps view-id when it differs from resource-id", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -485,7 +486,7 @@ describe("sanitizeObserveResult", () => {
             }),
           },
         },
-      };
+      });
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
       expect(out.viewHierarchy!.hierarchy!.node!["view-id"]).toBe("distinct-uuid");
@@ -536,7 +537,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("omits default-false booleans and empty-string fields (synthetic)", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -554,7 +555,7 @@ describe("sanitizeObserveResult", () => {
             }),
           },
         },
-      };
+      });
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
       const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
@@ -571,21 +572,22 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("drops enabled when true but preserves enabled=false (default-true convention)", () => {
-      const makeObs = (enabled: string): ObserveResult => ({
-        updatedAt: 0,
-        screenSize: { width: 1, height: 1 },
-        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: {
-          hierarchy: {
-            node: createFlatNodeForTest({
-              enabled: enabled,
-              "resource-id": "id/keep",
-              node: [],
-              $: {},
-            }),
+      const makeObs = (enabled: string): ObserveResult =>
+        buildObserveResult({
+          updatedAt: 0,
+          screenSize: { width: 1, height: 1 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: {
+            hierarchy: {
+              node: createFlatNodeForTest({
+                enabled: enabled,
+                "resource-id": "id/keep",
+                node: [],
+                $: {},
+              }),
+            },
           },
-        },
-      });
+        });
 
       const enabledTrue = sanitizeObserveResult(makeObs("true"), DROP_NONE);
       const enabledFalse = sanitizeObserveResult(makeObs("false"), DROP_NONE);
@@ -795,7 +797,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("bounds compaction is a no-op for nodes that carry no bounds", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -804,7 +806,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ "resource-id": "id/no-bounds", node: [], $: {} }),
           },
         },
-      };
+      });
       const out = sanitizeObserveResult(obs, COMPACT);
       const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
       expect(node.bounds).toBeUndefined();
@@ -840,7 +842,7 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("composes with trimNodes and dropElements (tuple bounds + trimmed attrs + no elements)", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -858,7 +860,7 @@ describe("sanitizeObserveResult", () => {
           },
         },
         elements: { clickable: [], scrollable: [], text: [], media: [] },
-      };
+      });
       const out = sanitizeObserveResult(obs, {
         dropElements: true,
         trimNodes: true,
@@ -1284,7 +1286,7 @@ describe("sanitizeObserveResult", () => {
   describe("default-false boolean drop table (P3)", () => {
     /** Trim one synthetic node carrying `attrs` and return the surviving attrs. */
     function trimmedNode(attrs: Record<string, unknown>): Record<string, unknown> {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -1293,7 +1295,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ class: "android.view.View", ...attrs, node: [], $: {} }),
           },
         },
-      };
+      });
       return flatNodeAttributes(
         sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!.node,
       );
@@ -1350,7 +1352,7 @@ describe("sanitizeObserveResult", () => {
     function compactNodeBounds(input: unknown): unknown {
       // `bounds` is deliberately off-model (malformed shapes), so it enters through an open record.
       const malformed: Record<string, unknown> = { bounds: input };
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -1359,7 +1361,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ "resource-id": "r", ...malformed, node: [], $: {} }),
           },
         },
-      };
+      });
       return Reflect.get(
         sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node!,
         "bounds",
@@ -1414,12 +1416,12 @@ describe("sanitizeObserveResult", () => {
     // D6: the old diff "tuple-vs-tuple" characterization is folded here — the
     // shape contract lives with the compactor, not the diff.
     test("systemInsets (a {top,bottom,left,right} object) is never compacted", () => {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
         viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ "resource-id": "r" }) } },
-      };
+      });
       expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({
         top: 5,
         bottom: 6,
@@ -1540,7 +1542,7 @@ describe("sanitizeObserveResult", () => {
   // drop multi-byte, astral (surrogate-pair), or zero-width text.
   describe("unicode text preservation (A10)", () => {
     function trimmedCompactNode(attrs: Record<string, unknown>): Record<string, unknown> {
-      const obs: ObserveResult = {
+      const obs: ObserveResult = buildObserveResult({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -1549,7 +1551,7 @@ describe("sanitizeObserveResult", () => {
             node: createFlatNodeForTest({ "resource-id": "r", ...attrs, node: [], $: {} }),
           },
         },
-      };
+      });
       return flatNodeAttributes(sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node);
     }
 
@@ -1674,14 +1676,14 @@ describe("sanitizeObserveResult", () => {
 
     // Boundary: a reduction applied to an observation LACKING its target field
     // must be a no-op — never grow the payload.
-    const BARE: ObserveResult = {
+    const BARE: ObserveResult = buildObserveResult({
       updatedAt: 0,
       screenSize: { width: 1, height: 1 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
         hierarchy: { node: createFlatNodeForTest({ "resource-id": "r", node: [], $: {} }) },
       },
-    };
+    });
 
     test("compact on a bounds-free observation does not grow it", () => {
       const compacted = sanitizeObserveResult(BARE, COMPACT);

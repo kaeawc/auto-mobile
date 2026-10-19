@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
@@ -93,7 +94,7 @@ test("production observe identification passes the Duo flag on an unstamped cach
     throw new Error("Expected real observe feature");
   }
   observe["identifyCapture"](
-    { viewHierarchy: hierarchy, screenSize: { width: 951, height: 669 } },
+    buildObserveResult({ viewHierarchy: hierarchy, screenSize: { width: 951, height: 669 } }),
     "cached-ok",
   );
   expect(getHierarchySnapshot(hierarchy)?.hierarchy.screenWidth).toBe(951);

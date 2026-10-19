@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import {
   wasHierarchyReadDuringCall,
   withObservationReadScope,
@@ -39,31 +41,36 @@ import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 
 const device = { name: "resolution", deviceId: "resolution", platform: "android" } as const;
-const observation = (left: number, settled: boolean, isFresh = true): ObserveResult => ({
-  updatedAt: 1000,
-  screenSize: { width: 1080, height: 2400 },
-  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  activeWindow: { appId: "com.example.app", activityName: "Main", layoutSeqSum: 0 },
-  settled,
-  freshness: { isFresh, verified: isFresh, warning: isFresh ? undefined : "Wrong foreground app" },
-  viewHierarchy: createHierarchyForTest({
-    packageName: "com.example.app",
-    screenWidth: 1080,
-    screenHeight: 2400,
-    hierarchy: {
-      node: {
-        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-        node: [
-          {
-            text: "Back",
-            clickable: true,
-            bounds: { left, top: 158, right: left + 126, bottom: 284 },
-          },
-        ],
-      },
+const observation = (left: number, settled: boolean, isFresh = true): ObserveResult =>
+  buildObserveResult({
+    updatedAt: 1000,
+    screenSize: { width: 1080, height: 2400 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    activeWindow: { appId: "com.example.app", activityName: "Main", layoutSeqSum: 0 },
+    settled,
+    freshness: {
+      isFresh,
+      verified: isFresh,
+      warning: isFresh ? undefined : "Wrong foreground app",
     },
-  }),
-});
+    viewHierarchy: createHierarchyForTest({
+      packageName: "com.example.app",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            {
+              text: "Back",
+              clickable: true,
+              bounds: { left, top: 158, right: left + 126, bottom: 284 },
+            },
+          ],
+        },
+      },
+    }),
+  });
 
 afterEach(() => {
   displayTransitions.reset(device.deviceId);
@@ -147,7 +154,7 @@ describe("tapOn cached element resolution", () => {
     launch.awaitIdle = new FakeAwaitIdle();
     launch.window = new FakeWindow();
     h.adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    h.adb.setCommandResponse("shell am start --user 0", { stdout: "Starting: Intent", stderr: "" });
+    h.adb.setCommandResponse("shell am start --user 0", createExecResult("Starting: Intent", ""));
     const launched = await launch.execute("com.example.app", {
       clearAppData: false,
       coldBoot: false,

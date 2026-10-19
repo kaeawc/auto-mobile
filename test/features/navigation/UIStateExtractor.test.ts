@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, spyOn, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ObserveResult } from "../../../src/models";
@@ -126,12 +127,12 @@ describe("UIStateExtractor (iOS hierarchy)", () => {
       ],
     };
 
-    const observation: ObserveResult = {
+    const observation: ObserveResult = buildObserveResult({
       updatedAt: 0,
       screenSize: { width: 0, height: 0 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy,
-    };
+    });
 
     const state = new UIStateExtractor().extractFromObservation(observation);
 

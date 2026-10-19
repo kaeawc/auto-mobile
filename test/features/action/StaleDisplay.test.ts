@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -59,10 +60,13 @@ function harness(scenario: Scenario, platform: "android" | "ios" = "android") {
   const observe = new FakeObserveScreen();
   observe.setObserveResult(screen);
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
+      'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
+      "",
+    ),
+  );
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const targetDevice = { ...device, platform };

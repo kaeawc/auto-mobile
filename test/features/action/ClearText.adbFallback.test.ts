@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ClearText,
@@ -693,7 +694,7 @@ test("iOS clear warns and preserves the failure result when CtrlProxy throws", a
       undefined,
       new FakeTimer(),
     );
-    const result = await action["executeiOSClearText"]({ updatedAt: 0 });
+    const result = await action["executeiOSClearText"](buildObserveResult({ updatedAt: 0 }));
     expect(result).toEqual({ success: false, error: String(error) });
     expect(
       loggerCallsWithPrefix(warning.mock.calls, "[ClearText] CtrlProxy iOS exception:"),
@@ -726,7 +727,9 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
       timer,
     );
     action.observeScreen = new FakeObserveScreen();
-    expect(await action["executeiOSClearText"]({ updatedAt: 0 }, controller.signal)).toEqual({
+    expect(
+      await action["executeiOSClearText"](buildObserveResult({ updatedAt: 0 }), controller.signal),
+    ).toEqual({
       success: false,
       retryable: false,
       error,

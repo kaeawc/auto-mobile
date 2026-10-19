@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -136,7 +137,9 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
   }
   action.observedInteraction = (callback) =>
     callback(
-      recordObservationRead({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+      recordObservationRead(
+        buildObserveResult({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+      ),
     );
   const execute = (options: Partial<TapOnElementOptions> = {}) => {
     const request = {
@@ -580,10 +583,12 @@ test.each([true, false])(
       });
       tap.observedInteraction = (callback) =>
         callback(
-          recordObservationRead({
-            viewHierarchy: hierarchy,
-            screenSize: { width: 500, height: 500 },
-          }),
+          recordObservationRead(
+            buildObserveResult({
+              viewHierarchy: hierarchy,
+              screenSize: { width: 500, height: 500 },
+            }),
+          ),
         );
       const result = await tap.execute({
         action: "tap",

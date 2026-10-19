@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
@@ -24,7 +25,7 @@ async function flush(): Promise<void> {
 function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   const sockets: FakeWebSocket[] = [];
   const sent: string[][] = [];

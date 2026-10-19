@@ -195,7 +195,6 @@
 1	src/models/describeUnknownError.ts	auto-mobile(catch-convention)
 1	src/models/describeUnknownError.ts	oxlint-disable(auto-mobile/no-inline-error-normalize)
 1	src/models/describeUnknownError.ts	oxlint-disable-no-reason(auto-mobile/no-inline-error-normalize)
-1	src/server/deviceToolsProvisioning.ts	eslint(max-lines-per-function)
 1	src/utils/ContentHashProvider.ts	eslint(max-classes-per-file)
 1	src/utils/IdGenerator.ts	eslint(max-classes-per-file)
 1	src/utils/PerformanceTracker.ts	eslint(max-classes-per-file)

@@ -1,3 +1,4 @@
+import { taskEligibleByName } from "../../src/server/tasks/toolCallTasks";
 import {
   afterAll,
   afterEach,
@@ -65,7 +66,7 @@ const CAPTURE = "__tasks_relay_capture__";
 /** The device-binding tool the proxy binds a session from: a fake boot behind a gate. */
 const START_DEVICE = "startDevice";
 const BOOTED_SESSION = "tasks-relay-booted-session";
-const ELIGIBLE = new Set([ECHO, WAIT, START_DEVICE]);
+const ELIGIBLE = taskEligibleByName(new Set([ECHO, WAIT, START_DEVICE]));
 const DECLARED_META = {
   "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS_EXTENSION_ID]: {} } },
 };

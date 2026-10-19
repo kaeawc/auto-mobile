@@ -32,6 +32,7 @@ import type {
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
+import type { AccessibilityHierarchyRequest } from "../../src/utils/interfaces/DeviceService";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import type { DragRequest } from "../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
@@ -790,9 +791,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getHierarchy");

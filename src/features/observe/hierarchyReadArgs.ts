@@ -70,26 +70,10 @@ export interface ResolvedAccessibilityHierarchyRead {
   readOptions?: number | HierarchyReadOptions;
 }
 
-/** Normalizes the options form and the deprecated positional form of `getAccessibilityHierarchy`. */
+/** Normalizes the `getAccessibilityHierarchy` request into the values the readers consume. */
 export function resolveAccessibilityHierarchyArgs(
-  perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
-  skipWaitForFresh?: boolean,
-  minTimestamp?: number,
-  disableAllFiltering?: boolean,
-  signal?: AbortSignal,
-  readOptions?: number | HierarchyReadOptions,
+  request: AccessibilityHierarchyRequest = {},
 ): ResolvedAccessibilityHierarchyRead {
-  if (!isRequestObject(perfOrRequest)) {
-    return {
-      perf: perfOrRequest as PerformanceTracker | undefined,
-      skipWaitForFresh,
-      minTimestamp,
-      disableAllFiltering,
-      signal,
-      readOptions,
-    };
-  }
-  const request = perfOrRequest as AccessibilityHierarchyRequest;
   const { timeoutMs, requireFreshExtraction } = request;
   return {
     perf: request.perf,

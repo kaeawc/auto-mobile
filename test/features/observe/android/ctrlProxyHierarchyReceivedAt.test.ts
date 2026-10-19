@@ -168,7 +168,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       } as AccessibilityHierarchy,
     });
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(result).not.toBeNull();
     expect(result!.updatedAt).toBe(deviceUpdatedAt); // device timestamp preserved
@@ -192,7 +195,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     });
 
     // Glance path (skipWaitForFresh) so the fresh cache entry is served directly.
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(result).not.toBeNull();
     expect(result!.receivedAt).toBe(receivedAt);
@@ -217,7 +223,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       } as AccessibilityHierarchy,
     });
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(syncSpy).toHaveBeenCalledTimes(1);
     expect(result).not.toBeNull();
@@ -237,7 +246,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     });
     h.setProbeError(new Error("dumpsys unavailable"));
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(result!.packageName).toBe("com.test.app");
     expect(h.getProbeCommand()).toBe("shell dumpsys activity processes");
@@ -263,7 +275,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       } as AccessibilityHierarchy,
     });
 
-    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(syncSpy).toHaveBeenCalledTimes(1);
     expect(result!.packageName).toBe("com.current.app");
@@ -295,7 +310,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     h.setCached({ hierarchy: cachedTree, receivedAt: 100, fresh: true });
 
     let deviceRequests = 0;
-    const cacheHit = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const cacheHit = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     expect(cacheHit?.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
@@ -315,7 +333,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       deviceRequests += 1;
       return { hierarchy: freshTree };
     });
-    const syncSuccess = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    const syncSuccess = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     expect(syncSuccess?.fresh).toBe(true);
     expect(deviceRequests).toBeGreaterThan(0);
 
@@ -325,12 +346,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
       deviceRequests += 1;
       return null;
     });
-    const cachedFallback = await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      true,
-      0,
-    );
+    const cachedFallback = await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
     expect(cachedFallback?.fresh).toBe(false);
     expect(deviceRequests).toBe(2);
   });

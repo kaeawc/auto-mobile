@@ -305,17 +305,16 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_multi_finger_swipe",
     builder: "CtrlProxyGestures.requestMultiFingerSwipe",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
-        15.5,
-        25.25,
-        35.75,
-        46.5,
-        3,
-        450,
-        5000,
-        undefined,
-        24.5,
-      ),
+      new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+        x1: 15.5,
+        y1: 25.25,
+        x2: 35.75,
+        y2: 46.5,
+        fingerCount: 3,
+        duration: 450,
+        timeoutMs: 5000,
+        fingerSpacing: 24.5,
+      }),
   },
   {
     name: "request_set_text",
@@ -830,7 +829,14 @@ describe("iOS integer millisecond request boundary", () => {
         name: "multi",
         builder: "multi",
         invoke: (h) =>
-          new CtrlProxyGestures(h.context).requestMultiFingerSwipe(1, 2, 3, 4, 3, 250.5),
+          new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            fingerCount: 3,
+            duration: 250.5,
+          }),
       },
     ];
     for (const spec of specs) {

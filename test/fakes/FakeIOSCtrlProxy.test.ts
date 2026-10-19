@@ -293,20 +293,18 @@ describe("FakeIOSCtrlProxy multi-finger swipe dispatch", () => {
     onDispatch?: () => void,
     beforeSend?: () => void,
   ) =>
-    proxy.requestMultiFingerSwipe(
-      1,
-      2,
-      3,
-      4,
-      3,
-      300,
-      undefined,
-      undefined,
-      10,
+    proxy.requestMultiFingerSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      fingerCount: 3,
+      duration: 300,
+      fingerSpacing: 10,
       signal,
       onDispatch,
       beforeSend,
-    );
+    });
 
   test("runs the display fence before recording the gesture and reports onDispatch", async () => {
     const proxy = new FakeIOSCtrlProxy();

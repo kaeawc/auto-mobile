@@ -7,13 +7,10 @@ import {
 import { ActionableError } from "../../src/models/ActionableError";
 import type { NavigationGraphSummary } from "../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../src/utils/logger";
-import {
-  DeviceDataStreamSocketServer,
-  type NavigationGraphStreamData,
-} from "../../src/daemon/deviceDataStreamSocketServer";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { ackFrameSchema } from "../helpers/wireMessageSchemas";
+import { ackFrameSchema, navigationGraphFrameSchema } from "../helpers/wireMessageSchemas";
 
 const EMPTY_SUMMARY: NavigationGraphSummary = {
   appId: null,
@@ -161,11 +158,7 @@ describe("createNavigationGraphRequestHandler", () => {
         JSON.stringify({ id: "req-empty", command: "request_navigation_graph" }),
       );
 
-      const msgs = socket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        navigationGraph?: NavigationGraphStreamData;
-      }>();
+      const msgs = socket.getWrittenMessages(navigationGraphFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("navigation_update");
       expect(msgs[0].id).toBe("req-empty");

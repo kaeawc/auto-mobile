@@ -40,6 +40,7 @@ import {
   FakeH264Source,
   type RecordedWhipRequest,
 } from "../helpers/webrtcFakes";
+import { webRtcStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";
 
 const ANDROID: BootedDevice = {
   deviceId: "emulator-5554",
@@ -178,7 +179,7 @@ afterEach(() => {
 });
 
 function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
-  const messages = socket.getWrittenMessages<WebRtcStreamSocketResponse>();
+  const messages = socket.getWrittenMessages(webRtcStreamResponseFrameSchema);
   return messages[messages.length - 1];
 }
 
@@ -499,14 +500,14 @@ describe("WebRtcStreamSocketServer", () => {
 
     expect(calls).toEqual(["await:first", "stop:first"]);
     expect(
-      socket.getWrittenMessages<WebRtcStreamSocketResponse>().map((response) => response.id),
+      socket.getWrittenMessages(webRtcStreamResponseFrameSchema).map((response) => response.id),
     ).toEqual(["stop"]);
 
     releaseAwait(descriptor("first"));
     await flushMicrotasks();
     expect(calls).toEqual(["await:first", "stop:first", "await:second"]);
     expect(
-      socket.getWrittenMessages<WebRtcStreamSocketResponse>().map((response) => response.id),
+      socket.getWrittenMessages(webRtcStreamResponseFrameSchema).map((response) => response.id),
     ).toEqual(["stop", "first", "second", "list"]);
   });
 

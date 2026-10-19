@@ -42,12 +42,17 @@ import {
 import {
   ackDeviceFrameSchema,
   ackFrameSchema,
+  buildContextFrameSchema,
   codeFrameSchema,
   deviceErrorFrameSchema,
   deviceFrameSchema,
+  deviceRoutingFrameSchema,
   deviceSessionFrameSchema,
+  deviceStreamFrameSchema,
   errorFrameSchema,
+  hierarchyFrameSchema,
   hierarchyUpdateFrameSchema,
+  navigationGraphFrameSchema,
   observeFrameSchema,
   packageFileFrameSchema,
   requiredErrorFrameSchema,
@@ -1297,11 +1302,7 @@ describe("DeviceDataStreamSocketServer", () => {
       await server.processLineForTest(requestSocket, requestLine);
 
       // Requesting socket should receive the navigation_update
-      const msgs = requestSocket.getWrittenMessages<{
-        id?: string;
-        type: string;
-        navigationGraph?: NavigationGraphStreamData;
-      }>();
+      const msgs = requestSocket.getWrittenMessages(navigationGraphFrameSchema);
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("navigation_update");
       expect(msgs[0].id).toBe("req-1");
@@ -1310,7 +1311,7 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].navigationGraph?.edges).toHaveLength(1);
 
       // Other subscriber should NOT receive anything
-      const otherMsgs = socket1.getWrittenMessages();
+      const otherMsgs = socket1.getWrittenMessages(deviceStreamFrameSchema);
       expect(otherMsgs).toHaveLength(0);
     });
 
@@ -1407,7 +1408,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      expect(socket.getWrittenMessages()).toEqual([
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toEqual([
         {
           id: "sub-invalid-session",
           type: "error",
@@ -1491,7 +1492,7 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      expect(socket.getWrittenMessages()).toEqual([
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toEqual([
         {
           id: "sub-blank-session",
           type: "error",
@@ -1622,13 +1623,13 @@ describe("DeviceDataStreamSocketServer", () => {
       try {
         server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340);
         expect(payloadDecodes()).toBe(1);
-        const [defaultMessage] = socket.getWrittenMessages<Record<string, unknown>>();
+        const [defaultMessage] = socket.getWrittenMessages(deviceStreamFrameSchema);
 
         socket.resetWrittenData();
         fromSpy.mockClear();
         server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340, {}, { decodedImage });
         expect(payloadDecodes()).toBe(0);
-        const [decodedMessage] = socket.getWrittenMessages<Record<string, unknown>>();
+        const [decodedMessage] = socket.getWrittenMessages(deviceStreamFrameSchema);
 
         expect(decodedMessage).toEqual(defaultMessage);
         expect(decodedMessage).toMatchObject({
@@ -1682,7 +1683,7 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const [jpegMessage, webpMessage, garbageMessage] =
-        socket.getWrittenMessages<Record<string, unknown>>();
+        socket.getWrittenMessages(deviceStreamFrameSchema);
       expect(jpegMessage).toMatchObject({ screenWidth: 37, screenHeight: 53 });
       expect(jpegMessage).not.toHaveProperty("captureSequence");
       expect(webpMessage).toMatchObject({ screenWidth: 37, screenHeight: 53 });
@@ -1741,7 +1742,7 @@ describe("DeviceDataStreamSocketServer", () => {
         screenshotFallback: false,
       });
 
-      const [message] = socket.getWrittenMessages<Record<string, unknown>>();
+      const [message] = socket.getWrittenMessages(deviceStreamFrameSchema);
       expect(message).toMatchObject({
         type: "screenshot_update",
         screenshotBase64: "legacy-frame",
@@ -1776,7 +1777,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-1", frame("a"));
 
-      const [message] = socket.getWrittenMessages<any>();
+      const [message] = socket.getWrittenMessages(hierarchyFrameSchema);
       expect(message.type).toBe("hierarchy_update");
       expect(message.hierarchyDiff).toEqual({
         hasBaseline: false,
@@ -1793,7 +1794,7 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushHierarchyUpdate("device-1", frame("a"));
       server.pushHierarchyUpdate("device-1", frame("b"));
 
-      const messages = socket.getWrittenMessages<any>();
+      const messages = socket.getWrittenMessages(hierarchyFrameSchema);
       expect(messages).toHaveLength(2);
       expect(messages[1].hierarchyDiff).toEqual({
         hasBaseline: true,
@@ -1813,9 +1814,11 @@ describe("DeviceDataStreamSocketServer", () => {
 
       // The post-reconnect frame is diffed against a fresh baseline, not the
       // pre-drop tree, so it reports no baseline rather than a spurious change.
-      const messages = socket.getWrittenMessages<any>();
+      const messages = socket.getWrittenMessages(deviceStreamFrameSchema);
       const hierarchyMessages = messages.filter((m) => m.type === "hierarchy_update");
-      expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff.hasBaseline).toBe(false);
+      expect(hierarchyMessages[hierarchyMessages.length - 1].hierarchyDiff?.hasBaseline).toBe(
+        false,
+      );
     });
 
     it("forgets a device frame context when the connection is lost", () => {
@@ -1857,7 +1860,7 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const [h1, s1, h2, s2] = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .filter((m) => m.type === "hierarchy_update" || m.type === "screenshot_update");
 
       expect(h1.captureSequence).toBe(1);
@@ -1892,13 +1895,13 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
       // The published geometry is the frame's real size, not the stale claim, so a client that
       // falls back to it maps through the pixels it is actually rendering.
-      expect(screenshot.screenWidth).toBe(720);
-      expect(screenshot.screenHeight).toBe(1560);
+      expect(screenshot?.screenWidth).toBe(720);
+      expect(screenshot?.screenHeight).toBe(1560);
     });
 
     it("omits the capture identity for callers whose geometry has no tracked capture", () => {
@@ -1910,9 +1913,9 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
     });
 
     it("accepts a landscape claim against a native-portrait frame (orientation swap)", () => {
@@ -1935,13 +1938,13 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBe(captureSequence);
+      expect(screenshot?.captureSequence).toBe(captureSequence);
       // The MEASURED dimensions are still what gets published, so a client maps through the pixels
       // it actually renders rather than the claim.
-      expect(screenshot.screenWidth).toBe(1170);
-      expect(screenshot.screenHeight).toBe(2532);
+      expect(screenshot?.screenWidth).toBe(1170);
+      expect(screenshot?.screenHeight).toBe(2532);
     });
 
     it("still rejects a scale change that happens to preserve aspect", () => {
@@ -1961,9 +1964,9 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
     });
 
     it("still rejects dimensions unrelated to the claim", () => {
@@ -1982,9 +1985,9 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
     });
 
     it("omits the capture identity for a frame with a malformed header", () => {
@@ -2008,9 +2011,9 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
     });
 
     it("omits the capture identity for a frame whose dimensions cannot be measured", () => {
@@ -2029,11 +2032,11 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
       // Unmeasurable: fall back to the caller's claim for display, but never pair on it.
-      expect(screenshot.screenWidth).toBe(1080);
+      expect(screenshot?.screenWidth).toBe(1080);
     });
 
     it("omits the capture identity until a hierarchy has been pushed", () => {
@@ -2042,9 +2045,9 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
     });
 
     it("keeps a screenshot bound to the capture it was REQUESTED under, not the newest one", () => {
@@ -2071,10 +2074,10 @@ describe("DeviceDataStreamSocketServer", () => {
       );
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBe(screenA);
-      expect(screenshot.captureSequence).not.toBe(screenB);
+      expect(screenshot?.captureSequence).toBe(screenA);
+      expect(screenshot?.captureSequence).not.toBe(screenB);
     });
 
     it("never reuses a capture identity after a reconnect", () => {
@@ -2088,7 +2091,7 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushHierarchyUpdate("device-1", frame("c"));
 
       const ids = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .filter((m) => m.type === "hierarchy_update")
         .map((m) => m.captureSequence);
 
@@ -2105,9 +2108,9 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340);
 
       const screenshot = socket
-        .getWrittenMessages<any>()
+        .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
-      expect(screenshot.captureSequence).toBeUndefined();
+      expect(screenshot?.captureSequence).toBeUndefined();
     });
 
     it("does not mutate the caller's hierarchy when annotating", () => {
@@ -2815,7 +2818,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.onDeviceConnectionLost("emulator-5554");
 
-      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toHaveLength(0);
     });
   });
 
@@ -2850,7 +2853,7 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-1" });
       server.pushHierarchyUpdate("ios-1", iosFrame());
 
-      const [message] = socket.getWrittenMessages<any>();
+      const [message] = socket.getWrittenMessages(hierarchyFrameSchema);
       expect(message.type).toBe("hierarchy_update");
       expect(message.coordinateSpace).toBe("px");
       expect(message.nativeScale).toBe(3);
@@ -2893,7 +2896,7 @@ describe("DeviceDataStreamSocketServer", () => {
       delete legacy.pixelHeight;
       server.pushHierarchyUpdate("ios-legacy", legacy);
 
-      const [message] = socket.getWrittenMessages<any>();
+      const [message] = socket.getWrittenMessages(hierarchyFrameSchema);
       expect(message.coordinateSpace).toBeUndefined();
       expect(message.nativeScale).toBeUndefined();
       // Point-space bounds and dims pass through unchanged.
@@ -2922,7 +2925,7 @@ describe("DeviceDataStreamSocketServer", () => {
       };
       server.pushHierarchyUpdate("android-1", androidFrame);
 
-      const [message] = socket.getWrittenMessages<any>();
+      const [message] = socket.getWrittenMessages(hierarchyFrameSchema);
       expect(message.coordinateSpace).toBe("px");
       expect(message.data.hierarchy.node.$.bounds).toEqual({
         left: 0,
@@ -2947,18 +2950,22 @@ describe("DeviceDataStreamSocketServer", () => {
           nativeScale: 3,
         },
       );
-      const shot = socket.getWrittenMessages<any>().find((m) => m.type === "screenshot_update");
-      expect(shot.coordinateSpace).toBe("px");
-      expect(shot.nativeScale).toBe(3);
-      expect(shot.captureSequence).toBe(seq);
+      const shot = socket
+        .getWrittenMessages(deviceStreamFrameSchema)
+        .find((m) => m.type === "screenshot_update");
+      expect(shot?.coordinateSpace).toBe("px");
+      expect(shot?.nativeScale).toBe(3);
+      expect(shot?.captureSequence).toBe(seq);
     });
 
     it("omits coordinateSpace on a screenshot from a legacy (non-px) caller", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-legacy" });
       server.pushScreenshotUpdate("ios-legacy", pngFrame(1170, 2532), 1170, 2532, {}, {});
-      const shot = socket.getWrittenMessages<any>().find((m) => m.type === "screenshot_update");
-      expect(shot.coordinateSpace).toBeUndefined();
-      expect(shot.nativeScale).toBeUndefined();
+      const shot = socket
+        .getWrittenMessages(deviceStreamFrameSchema)
+        .find((m) => m.type === "screenshot_update");
+      expect(shot?.coordinateSpace).toBeUndefined();
+      expect(shot?.nativeScale).toBeUndefined();
     });
   });
 
@@ -2994,36 +3001,23 @@ describe("DeviceDataStreamSocketServer", () => {
         );
 
         const screenshot = socket
-          .getWrittenMessages<any>()
+          .getWrittenMessages(deviceStreamFrameSchema)
           .find((m) => m.type === "screenshot_update");
         if (vector.expectedMatch === 1) {
-          expect(screenshot.captureSequence).toBe(captureSequence);
+          expect(screenshot?.captureSequence).toBe(captureSequence);
         } else {
-          expect(screenshot.captureSequence).toBeUndefined();
+          expect(screenshot?.captureSequence).toBeUndefined();
         }
       });
     }
   });
 
   describe("device build-context frames", () => {
-    interface BuildFrame {
-      type: string;
-      deviceId?: string;
-      deviceSessionUuid?: string | null;
-      packageId?: string;
-      timestamp?: number;
-      buildKey?: {
-        packageId: string;
-        versionCode: number;
-        versionKey?: string;
-        contentHash: string;
-      } | null;
-    }
     const keyA = { packageId: "app.a", versionCode: 1, contentHash: "hash-a" };
     const keyB = { packageId: "app.b", versionCode: 0, versionKey: "1.2.3", contentHash: "hash-b" };
     const buildFrames = (socket: FakeSocket) =>
       socket
-        .getWrittenMessages<BuildFrame>()
+        .getWrittenMessages(buildContextFrameSchema)
         .filter((frame) => frame.type === "device_build_context");
     async function subscribe(deviceSessionUuid?: string): Promise<FakeSocket> {
       const socket = new FakeSocket();
@@ -3157,7 +3151,7 @@ describe("DeviceDataStreamSocketServer", () => {
         "device-a",
       );
       const oldFrames = all.socket
-        .getWrittenMessages<BuildFrame>()
+        .getWrittenMessages(buildContextFrameSchema)
         .filter((frame) => frame.type !== "device_build_context");
       expect(oldFrames.map((frame) => frame.type)).toEqual([
         "hierarchy_update",
@@ -3171,15 +3165,7 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   describe("deviceSessionUuid routing (#5259)", () => {
-    interface Frame {
-      type: string;
-      deviceId?: string;
-      deviceSessionUuid?: string | null;
-      successorSessionUuid?: string;
-      platform?: string;
-      navigationGraph?: NavigationGraphStreamData;
-    }
-    const frames = (socket: FakeSocket) => socket.getWrittenMessages<Frame>();
+    const frames = (socket: FakeSocket) => socket.getWrittenMessages(deviceRoutingFrameSchema);
     const hierarchy = {
       hierarchy: { node: { $: {}, node: [] } },
     };
@@ -3721,7 +3707,7 @@ describe("DeviceDataStreamSocketServer", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(socket.getWrittenMessages()).toEqual([]);
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toEqual([]);
       expect(completeRegistration).toBeDefined();
       completeRegistration!();
       await request;
@@ -4257,7 +4243,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-1", frame("a"));
 
-      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toHaveLength(0);
     });
 
     it("drops them for all-device subscribers too, not just the previous epoch's", () => {
@@ -4267,8 +4253,8 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-1", frame("a"));
 
-      expect(socket.getWrittenMessages()).toHaveLength(0);
-      expect(all.socket.getWrittenMessages()).toHaveLength(0);
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toHaveLength(0);
+      expect(all.socket.getWrittenMessages(deviceStreamFrameSchema)).toHaveLength(0);
     });
 
     it("keeps routing every other device's frames", () => {
@@ -4277,7 +4263,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-2", frame("a"));
 
-      expect(socket.getWrittenMessages()).toHaveLength(1);
+      expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toHaveLength(1);
     });
 
     it("resumes routing under the same uuid once the quarantine lifts", () => {
@@ -4516,7 +4502,7 @@ it("a released or expired observer's subscriptions and storage observers end wit
     await Promise.resolve();
   }
 
-  expect(observer.getWrittenMessages()).toEqual([
+  expect(observer.getWrittenMessages(deviceStreamFrameSchema)).toEqual([
     {
       type: "error",
       success: false,
@@ -4603,7 +4589,7 @@ describe("device-session release ends observation streams (#11130)", () => {
     emitRelease("session-a");
     server.pushHierarchyUpdate("emulator-5554", hierarchy);
 
-    expect(socketA.getWrittenMessages()).toEqual([
+    expect(socketA.getWrittenMessages(deviceStreamFrameSchema)).toEqual([
       {
         type: "error",
         success: false,
@@ -4694,7 +4680,7 @@ it("registered observer request_observation passes both auth layers on unowned a
       sessionUuid: "desktop",
     }),
   );
-  expect(socket.getWrittenMessages()).toEqual([
+  expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toEqual([
     { id: "observe", type: "subscription_response", success: true },
   ]);
   expect(captures).toBe(1);
@@ -4709,7 +4695,7 @@ it("registered observer request_observation passes both auth layers on unowned a
     }),
   );
   expect(captures).toBe(2);
-  expect(socket.getWrittenMessages()).toEqual([
+  expect(socket.getWrittenMessages(deviceStreamFrameSchema)).toEqual([
     { id: "watch-held", type: "subscription_response", success: true },
   ]);
   socket.resetWrittenData();

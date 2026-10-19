@@ -13,6 +13,7 @@ import {
   type DeviceSessionResolver,
 } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { subscribeReplyFrameSchema } from "../helpers/wireMessageSchemas";
 
 interface SubscribeReply {
   id?: string;
@@ -112,7 +113,7 @@ async function subscribe(
     socket,
     JSON.stringify({ id: "sub-1", command: "subscribe", ...request }),
   );
-  const messages = socket.getWrittenMessages<SubscribeReply>();
+  const messages = socket.getWrittenMessages(subscribeReplyFrameSchema);
   return messages[messages.length - 1];
 }
 

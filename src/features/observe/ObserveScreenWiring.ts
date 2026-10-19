@@ -1,5 +1,5 @@
 import type { BootedDevice, ObserveResult } from "../../models";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { IdGenerator } from "../../utils/IdGenerator";
@@ -105,12 +105,13 @@ export function createObserveScreenWiring(sources: ObserveScreenWiringSources) {
           dependencies?.onAvailabilityLost ??
           (device.platform === "android"
             ? (reason) => {
-                const daemonState = dependencies?.daemonState ?? DaemonState.getInstance();
-                if (daemonState.isInitialized()) {
-                  daemonState
-                    .getSessionManager()
-                    .invalidateAutomationReadinessForDevice(device.deviceId, reason);
-                }
+                const daemonState = dependencies?.daemonState;
+                const sessionManager = daemonState
+                  ? daemonState.isInitialized()
+                    ? daemonState.getSessionManager()
+                    : undefined
+                  : defaultDaemonContext.sessionManager();
+                sessionManager?.invalidateAutomationReadinessForDevice(device.deviceId, reason);
               }
             : undefined),
       });

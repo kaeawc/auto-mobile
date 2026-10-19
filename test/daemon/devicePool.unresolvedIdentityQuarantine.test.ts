@@ -100,16 +100,16 @@ describe("DevicePool", () => {
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let retryCalls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         retryCalls++;
         if (retryCalls === 1) {
           fakeDeviceManager.bootedDevices = [secondOmission];
-          return await getBootedDevicesDetailed(platform, options);
+          return await getBootedDevicesDetailed(platform);
         }
         finalRetryStarted.resolve();
         await releaseFinalRetry.promise;
         fakeDeviceManager.bootedDevices = [recovered];
-        return await getBootedDevicesDetailed(platform, options);
+        return await getBootedDevicesDetailed(platform);
       };
 
       const reconciliation = devicePool.reconcileDiscoveryObservation(
@@ -157,9 +157,9 @@ describe("DevicePool", () => {
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let retryCalls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         retryCalls++;
-        return await getBootedDevicesDetailed(platform, options);
+        return await getBootedDevicesDetailed(platform);
       };
 
       await devicePool.reconcileDiscoveryObservation(
@@ -191,7 +191,7 @@ describe("DevicePool", () => {
       const releaseB = Promise.withResolvers<void>();
       const discover = fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let calls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         const call = ++calls;
         if (call === 1) {
           enteredA.resolve();
@@ -202,7 +202,7 @@ describe("DevicePool", () => {
           await releaseB.promise;
         }
         fakeDeviceManager.bootedDevices = [unresolved(device.deviceId)];
-        return discover(platform, options);
+        return discover(platform);
       };
       const cycleA = devicePool.reconcileDiscoveryObservation(
         [unresolved(device.deviceId)],
@@ -271,9 +271,9 @@ describe("DevicePool", () => {
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
       let retryCalls = 0;
-      fakeDeviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      fakeDeviceManager.getBootedDevicesDetailed = async (platform) => {
         retryCalls++;
-        return await getBootedDevicesDetailed(platform, options);
+        return await getBootedDevicesDetailed(platform);
       };
 
       await devicePool.reconcileDiscoveryObservation(

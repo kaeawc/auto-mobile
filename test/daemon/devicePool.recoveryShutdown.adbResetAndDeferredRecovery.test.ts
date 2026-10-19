@@ -533,11 +533,17 @@ test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async
     captured.adbServerResetSession = sessions.getSession("session") ?? undefined;
     captured.adbServerResetRecoveryGeneration = oldRecord.generation;
     let resolved = false;
+    const reservationSettled = Promise.withResolvers<void>();
     internals.adbServerResetRecoveryReservations.set(original.name, {
+      deviceId: original.deviceId,
+      image,
+      cancelled: false,
+      settled: reservationSettled.promise,
       sessionId: "session",
       recoveryGeneration: oldRecord.generation,
       resolve: () => {
         resolved = true;
+        reservationSettled.resolve();
       },
     });
 

@@ -46,7 +46,15 @@ const test = warmedTests(() => {
 });
 
 /** true: TalkBack on, null: state unknown; default off. */
-function harness(ctrlProxy: boolean, targetDevice = device, talkBack: boolean | null = false) {
+function harness(
+  ctrlProxy: boolean,
+  targetDevice = device,
+  talkBack: boolean | null = false,
+  tappers: Pick<
+    NonNullable<ConstructorParameters<typeof TapAnyElement>[2]>,
+    "androidTapper" | "iosTapper"
+  > = {},
+) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const transitions = new FakeDisplayTransitionReader();
@@ -71,6 +79,7 @@ function harness(ctrlProxy: boolean, targetDevice = device, talkBack: boolean | 
   }
   const talkBackDriver = new FakeTalkBackNavigationDriver();
   const deps = {
+    ...tappers,
     timer,
     hierarchyCapture: capture,
     displayTransitions: transitions,
@@ -179,10 +188,14 @@ test("tapAny wrong-panel retry capture fails stale without another dispatch", as
 });
 
 test("tapAny single-display omitted display retains default dispatch path", async () => {
-  const h = harness(false, { ...device, displays: undefined });
   const points: number[] = [];
-  Reflect.set(h.action, "executeAndroidTap", async (_action: string, x: number) => {
-    points.push(x);
+  const h = harness(false, { ...device, displays: undefined }, false, {
+    androidTapper: {
+      executeAndroidTap: async (_action, x) => {
+        points.push(x);
+      },
+      retryAndroidTapIfNoChange: async () => {},
+    },
   });
   h.action.testHooks.setRefreshViewHierarchy(async () => null);
   expect((await h.action.execute({ action: "tap" })).success).toBe(true);
@@ -241,10 +254,13 @@ test("tapAny live pinned panel disappearance preserves typed pin details without
 
 for (const unavailable of [false, true]) {
   test(`tapAny iOS display validates the live panel before input, unavailable=${unavailable}`, async () => {
-    const h = harness(false, { ...device, platform: "ios" });
     let taps = 0;
-    Reflect.set(h.action, "executeIosTap", async () => {
-      taps++;
+    const h = harness(false, { ...device, platform: "ios" }, false, {
+      iosTapper: {
+        executeIosTap: async () => {
+          taps++;
+        },
+      },
     });
     const execute = spyOn(h.observe, "execute").mockImplementation(async (options) => {
       expect(options?.display).toBe("cover");

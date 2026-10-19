@@ -1144,11 +1144,16 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       appTools.configure("listApps", {
         queryInstalledApps: async (options) => {
           queried.push(options.deviceId!);
-          return {
+          const content: AppsQueryResourceContent = {
+            query: options,
+            observationComplete: true,
             totalCount: 0,
             installedCount: 0,
-            apps: [],
-          } as unknown as AppsQueryResourceContent;
+            deviceCount: 1,
+            lastUpdated: "2026-01-01T00:00:00.000Z",
+            devices: [],
+          };
+          return content;
         },
       });
       const response = await call("listApps", { platform: "android", deviceId: held.deviceId });

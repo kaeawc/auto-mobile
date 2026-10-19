@@ -656,7 +656,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "test/server/databaseIos.test.ts",
     "test/server/databaseResourcesPagination.test.ts",
     "test/server/deviceTools.killDevice.test.ts",
-    "test/server/unissuedSessionBoundConnection.integration.test.ts",
   ];
 
   test("every file that installs a CtrlProxy getInstance mock is inventoried", () => {

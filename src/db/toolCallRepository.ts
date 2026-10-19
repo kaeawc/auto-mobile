@@ -27,8 +27,17 @@ export class ToolCallRepository {
     insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
   };
 
-  constructor(db?: Kysely<Database>) {
+  /** `retentionMaxRows` lets tests observe the amortized sweep at a small cap. */
+  constructor(
+    db?: Kysely<Database>,
+    private readonly retentionMaxRows: number = TOOL_CALL_RETENTION_MAX_ROWS,
+  ) {
     this.db = db ?? null;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
   }
 
   private getDb(): Kysely<Database> {
@@ -62,12 +71,14 @@ export class ToolCallRepository {
   // inserts (#6464), mirroring the other RowCapTable repositories so retention
   // does not add a scan to the hot insert path.
   private async cleanupRetention(): Promise<void> {
-    await runAmortizedRetention(this.retentionState, () => this.pruneToRowCap());
+    await runAmortizedRetention(this.retentionState, () =>
+      this.pruneToRowCap(this.retentionMaxRows),
+    );
   }
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap
   // without inserting 10k rows.
-  async pruneToRowCap(maxRows: number = TOOL_CALL_RETENTION_MAX_ROWS): Promise<void> {
+  private async pruneToRowCap(maxRows: number = TOOL_CALL_RETENTION_MAX_ROWS): Promise<void> {
     try {
       await pruneTableByRowCap(this.getDb(), "tool_calls", maxRows);
     } catch (error) {

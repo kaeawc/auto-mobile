@@ -10,10 +10,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice } from "../../../src/models";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { UIState } from "../../../src/utils/interfaces/NavigationGraph";
-import {
-  createHierarchyForTest,
-  createObserveResultForTest,
-} from "../observe/observeScreenTestBuilders";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";

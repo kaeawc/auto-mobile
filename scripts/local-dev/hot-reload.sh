@@ -46,6 +46,15 @@
 # shellcheck disable=SC2031
 set -euo pipefail
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+    RUN_STATUS=0
+    "$@" || RUN_STATUS=$?
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 export PROJECT_ROOT
@@ -921,7 +930,8 @@ unified_watch_loop() {
     next_ts_hash="$(hash_ts_state)"
     if [[ "${next_ts_hash}" != "${LAST_TS_HASH}" ]]; then
       log_info "[TypeScript] Change detected. Rebuilding and reloading MCP daemon..."
-      if build_typescript; then
+      run_capture_status build_typescript
+      if (( RUN_STATUS == 0 )); then
         reload_mcp_daemon
       fi
       LAST_TS_HASH="${next_ts_hash}"
@@ -1021,7 +1031,8 @@ fi
 log_info "=== AutoMobile Unified Hot-Reload ==="
 
 # Setup desktop app
-if setup_desktop_app; then
+run_capture_status setup_desktop_app
+if (( RUN_STATUS == 0 )); then
   DESKTOP_APP_ENABLED=true
   log_info "Desktop app setup complete."
 else
@@ -1029,7 +1040,8 @@ else
 fi
 
 # Setup Android
-if setup_android; then
+run_capture_status setup_android
+if (( RUN_STATUS == 0 )); then
   ANDROID_ENABLED=true
   log_info "Android setup complete."
 else
@@ -1037,7 +1049,8 @@ else
 fi
 
 # Setup iOS
-if setup_ios; then
+run_capture_status setup_ios
+if (( RUN_STATUS == 0 )); then
   IOS_ENABLED=true
   log_info "iOS setup complete."
 else

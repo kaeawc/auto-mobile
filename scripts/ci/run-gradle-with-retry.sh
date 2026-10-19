@@ -35,6 +35,7 @@ die() {
   exit 1
 }
 
+# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
@@ -48,16 +49,27 @@ if [[ "${1:-}" == "--" ]]; then
   shift
 fi
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+  RUN_STATUS=0
+  "$@" || RUN_STATUS=$?
+}
+
 if [[ $# -eq 0 ]]; then
   usage
   die "missing Gradle command"
 fi
 
-if ! is_positive_integer "$MAX_ATTEMPTS"; then
+run_capture_status is_positive_integer "$MAX_ATTEMPTS"
+if (( RUN_STATUS != 0 )); then
   die "GRADLE_RETRY_MAX_ATTEMPTS must be a positive integer"
 fi
 
-if ! is_positive_integer "$RETRY_DELAY_SECONDS"; then
+run_capture_status is_positive_integer "$RETRY_DELAY_SECONDS"
+if (( RUN_STATUS != 0 )); then
   die "GRADLE_RETRY_DELAY_SECONDS must be a positive integer"
 fi
 
@@ -66,6 +78,7 @@ fi
 
 mkdir -p "$LOG_DIR"
 
+# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 is_retryable_gradle_failure() {
   local log_file="$1"
   local retryable_pattern
@@ -95,6 +108,7 @@ purge_resolved_module_cache() {
   fi
 }
 
+# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 has_refresh_dependencies_flag() {
   local arg
 
@@ -115,6 +129,7 @@ stop_gradle_daemon() {
   fi
 }
 
+# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 run_gradle_command() {
   local log_file="$1"
   shift
@@ -135,13 +150,14 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
   log_file="${LOG_DIR}/gradle-attempt-${attempt}.log"
   log "Running Gradle attempt ${attempt}/${MAX_ATTEMPTS}: ${command[*]}"
 
-  if run_gradle_command "$log_file" "${command[@]}"; then
+  run_capture_status run_gradle_command "$log_file" "${command[@]}"
+  if (( RUN_STATUS == 0 )); then
     if [[ "$attempt" -gt 1 ]]; then
       log "Gradle succeeded after retry."
     fi
     exit 0
   else
-    exit_code=$?
+    exit_code="$RUN_STATUS"
   fi
 
   if [[ "$attempt" -eq "$MAX_ATTEMPTS" ]]; then
@@ -149,7 +165,8 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
     exit "$exit_code"
   fi
 
-  if ! is_retryable_gradle_failure "$log_file"; then
+  run_capture_status is_retryable_gradle_failure "$log_file"
+  if (( RUN_STATUS != 0 )); then
     log "Failure did not match Maven/plugin repository retry patterns."
     exit "$exit_code"
   fi
@@ -171,7 +188,8 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
     purge_resolved_module_cache
   fi
 
-  if ! has_refresh_dependencies_flag "${command[@]}"; then
+  run_capture_status has_refresh_dependencies_flag "${command[@]}"
+  if (( RUN_STATUS != 0 )); then
     command+=("--refresh-dependencies")
   fi
 

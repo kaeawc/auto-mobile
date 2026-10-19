@@ -155,7 +155,7 @@ STUB
     delay=$((delay * 2))
   done
   local operation_count step_timeout_minutes
-  operation_count=$(grep -cE '^[[:space:]]*(run|try)_with_retry "' "$SCRIPT")
+  operation_count=$(grep -cE '^[[:space:]]*(run_capture_status )?(run|try)_with_retry "[^$]' "$SCRIPT")
   step_timeout_minutes=$(grep -oE 'timeout-minutes: [0-9]+' "$SCRIPT" | head -1 | grep -oE '[0-9]+$')
   [ "$operation_count" -eq 6 ]
   local worst_case=$((operation_count * (attempts * (cmd_timeout + kill_grace) + delays)))

@@ -9,6 +9,7 @@ import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { Session } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { sendRawSocketRequest } from "./helpers/socketRequest";
 
 /**
@@ -32,6 +33,9 @@ function fakeSession(sessionId: string, assignedDevice: string): Session {
     heartbeatTimeoutMs: 10_000,
     heartbeatTimeoutSource: "default",
     hasReceivedHeartbeat: false,
+    activityGeneration: 0,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
   };
 }
 
@@ -117,20 +121,15 @@ describe("UnixSocketServer device read lane (#10969)", () => {
       { bindLock: { acquire: () => true, release: () => {} } },
     );
     server.deviceReadToolCallClassifier = (name) => READ_TOOLS.has(name);
-    server.mcpClientFactory = async () => ({
-      listTools: async () => ({ tools: [] }),
-      callTool: async (request: unknown) => {
-        const args = (request as { arguments: Record<string, unknown> }).arguments;
-        const tag = String(args.tag);
-        started.push(tag);
-        await blockers.get(tag)?.promise;
-        return { content: [] };
-      },
-      listResources: async () => ({ resources: [] }),
-      readResource: async () => ({ contents: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async (request) => {
+          const tag = String(request.arguments?.tag);
+          started.push(tag);
+          await blockers.get(tag)?.promise;
+          return { content: [] };
+        },
+      });
     await server.start();
   });
 

@@ -23,6 +23,14 @@ import { shellQuote } from "../../utils/shellQuote";
  */
 export const ROTATION_READ_FLOOR_MS = 1000;
 
+/** Frame counters carried between stability checks; null when none were recorded yet. */
+export interface UiStabilityBaseline {
+  missedVsync: number | null;
+  slowUiThread: number | null;
+  frameDeadlineMissed: number | null;
+  totalFrames: number | null;
+}
+
 export class Idle {
   private adb: AdbExecutor;
   private timer: Timer;
@@ -210,10 +218,8 @@ export class Idle {
       // Take immediate measurement with no previous state
       return await this.getUiStability(
         packageName,
-        null, // No previous missed vsync
-        null, // No previous slow UI thread
-        null, // No previous frame deadline missed
-        null, // No previous total frames
+        // No previous frame counters
+        { missedVsync: null, slowUiThread: null, frameDeadlineMissed: null, totalFrames: null },
         false, // Not first log since we just reset
         perf,
       );
@@ -578,23 +584,24 @@ export class Idle {
   /**
    * Check UI stability metrics and return calculation results
    * @param packageName - Package name of the app to monitor
-   * @param prevMissedVsync - Previous missed vsync count
-   * @param prevSlowUiThread - Previous slow UI thread count
-   * @param prevFrameDeadlineMissed - Previous frame deadline missed count
+   * @param baseline - Previous frame counters (null when none recorded)
    * @param firstGfxInfoLog - Whether this is the first gfx info log
    * @param perf - Optional performance tracker
    * @returns Object containing stability check results and updated state
    */
   async getUiStability(
     packageName: string,
-    prevMissedVsync: number | null,
-    prevSlowUiThread: number | null,
-    prevFrameDeadlineMissed: number | null,
-    prevTotalFrames: number | null,
+    baseline: UiStabilityBaseline,
     firstGfxInfoLog: boolean,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<UiStabilityResult> {
+    const {
+      missedVsync: prevMissedVsync,
+      slowUiThread: prevSlowUiThread,
+      frameDeadlineMissed: prevFrameDeadlineMissed,
+      totalFrames: prevTotalFrames,
+    } = baseline;
     try {
       // For system packages, use a simpler approach
       if (this.isSystemLauncher(packageName)) {

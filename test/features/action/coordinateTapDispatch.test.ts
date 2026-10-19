@@ -33,17 +33,10 @@ describe("dispatchAndroidCoordinateTap", () => {
         },
       };
 
-      const pending = dispatchAndroidCoordinateTap(
-        client,
-        adb,
-        10,
-        20,
-        10,
-        undefined,
-        controller.signal,
-        undefined,
+      const pending = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, {
+        signal: controller.signal,
         onTapDelivered,
-      );
+      });
 
       await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
       await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
@@ -61,17 +54,11 @@ describe("dispatchAndroidCoordinateTap", () => {
       requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
     };
 
-    const pending = dispatchAndroidCoordinateTap(
-      client,
-      adb,
-      10,
-      20,
-      10,
-      undefined,
-      controller.signal,
-      () => {},
+    const pending = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, {
+      signal: controller.signal,
+      assertCurrent: () => {},
       onTapDelivered,
-    );
+    });
 
     await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
@@ -94,17 +81,7 @@ describe("dispatchAndroidCoordinateTap", () => {
         }),
       };
 
-      const pending = dispatchAndroidCoordinateTap(
-        client,
-        adb,
-        10,
-        20,
-        10,
-        undefined,
-        undefined,
-        undefined,
-        onTapDelivered,
-      );
+      const pending = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, { onTapDelivered });
 
       if (route === "failed ADB") {
         await expect(pending).rejects.toThrow("Synthetic fallback failure");
@@ -130,7 +107,7 @@ describe("dispatchAndroidCoordinateTap", () => {
         },
       };
 
-      const request = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, frameContext);
+      const request = dispatchAndroidCoordinateTap(client, adb, 10, 20, 10, { frameContext });
 
       await expect(request).rejects.toBeInstanceOf(ActionableError);
       await expect(request).rejects.toThrow(
@@ -177,16 +154,9 @@ describe("dispatchAndroidCoordinateTap", () => {
         requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
       };
 
-      await dispatchAndroidCoordinateTap(
-        client,
-        adb,
-        10,
-        20,
-        20000,
-        undefined,
-        undefined,
-        fenced ? () => {} : undefined,
-      );
+      await dispatchAndroidCoordinateTap(client, adb, 10, 20, 20000, {
+        assertCurrent: fenced ? () => {} : undefined,
+      });
 
       expect(adb.getCommandCalls()[0].timeoutMs).toBeGreaterThanOrEqual(22000);
     },

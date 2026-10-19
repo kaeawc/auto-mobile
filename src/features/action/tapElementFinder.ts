@@ -16,6 +16,7 @@ import {
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import { logger } from "../../utils/logger";
+import type { ResolutionAction } from "../../models/ResolutionAction";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 
 const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], TextSelectionIntent> =
@@ -34,6 +35,12 @@ export interface TapElementFinderDeps {
 }
 
 /** Resolves a tap selector to an element in a captured hierarchy. Never reads the device. */
+interface TapSelectionContext {
+  intentAction: ResolutionAction;
+  lookupAction: ResolutionAction;
+  selectionIntent: TextSelectionIntent;
+}
+
 export class TapElementFinder {
   constructor(private readonly deps: TapElementFinderDeps) {}
 
@@ -113,6 +120,54 @@ export class TapElementFinder {
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
+    const ctx = this.selectionContext(options);
+    const { text, elementId } = options;
+    const result = (selection: ElementSelectionResult) => ({ selection, containerFound });
+
+    if (text) {
+      return result(
+        options.sibling
+          ? this.selectVariantOrSiblingOrMiss(options, () =>
+              this.selectSiblingText(options, viewHierarchy, text, ctx),
+            )
+          : this.selectPartialText(options, viewHierarchy, text, ctx),
+      );
+    }
+
+    if (options.textAny) {
+      const textAnyResult = this.selectTextAny(options, viewHierarchy, ctx);
+      if (textAnyResult) {
+        return result(textAnyResult);
+      }
+    }
+
+    if (elementId) {
+      return result(
+        options.sibling
+          ? this.selectVariantOrSiblingOrMiss(options, () =>
+              this.selectSiblingElementId(options, viewHierarchy, elementId, ctx),
+            )
+          : this.selectElementId(options, viewHierarchy, elementId, ctx),
+      );
+    }
+
+    return result(
+      this.deps.elementSelector().select(
+        viewHierarchy,
+        { testTag: requireTestTag(options) },
+        {
+          container: options.container,
+          screenSizeOptions: options.screenSizeOptions,
+          strategy: options.selectionStrategy,
+          intentAction: ctx.lookupAction,
+          selectionIntent: ctx.selectionIntent,
+          index: options.index,
+        },
+      ),
+    );
+  }
+
+  private selectionContext(options: TapVerificationOptions): TapSelectionContext {
     const intentAction =
       options.action === "longPress"
         ? "long-press"
@@ -126,183 +181,140 @@ export class TapElementFinder {
         : options.action === "focus"
           ? "focus-input"
           : "inspect";
-    const selectionIntent = this.selectionIntentFor(options);
+    return { intentAction, lookupAction, selectionIntent: this.selectionIntentFor(options) };
+  }
 
-    const text = options.text;
-    if (text) {
-      if (options.sibling) {
-        return {
-          selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.deps.elementSelector().select(
-              viewHierarchy,
-              { sibling: { text } },
-              {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                fuzzyMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction,
-                selectionIntent,
-                index: options.index,
-              },
-            ),
-          ),
-          containerFound,
-        };
-      }
+  private selectSiblingText(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    text: string,
+    ctx: TapSelectionContext,
+  ): ElementSelectionResult {
+    return this.deps.elementSelector().select(
+      viewHierarchy,
+      { sibling: { text } },
+      {
+        container: options.container,
+        screenSizeOptions: options.screenSizeOptions,
+        fuzzyMatch: true,
+        caseSensitive: false,
+        strategy: options.selectionStrategy,
+        intentAction: ctx.intentAction,
+        selectionIntent: ctx.selectionIntent,
+        index: options.index,
+      },
+    );
+  }
 
-      return {
-        selection: this.deps.elementSelector().select(
-          viewHierarchy,
-          { text },
-          {
-            container: options.container,
-            screenSizeOptions: options.screenSizeOptions,
-            partialMatch: true,
-            caseSensitive: false,
-            strategy: options.selectionStrategy,
-            intentAction: lookupAction,
-            allowHintFallback: options.action === "tap" || options.action === "focus",
-            index: options.index,
-            selectionIntent,
-          },
-        ),
-        containerFound,
-      };
-    }
+  private selectPartialText(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    text: string,
+    ctx: TapSelectionContext,
+  ): ElementSelectionResult {
+    return this.deps.elementSelector().select(
+      viewHierarchy,
+      { text },
+      {
+        container: options.container,
+        screenSizeOptions: options.screenSizeOptions,
+        partialMatch: true,
+        caseSensitive: false,
+        strategy: options.selectionStrategy,
+        intentAction: ctx.lookupAction,
+        allowHintFallback: options.action === "tap" || options.action === "focus",
+        index: options.index,
+        selectionIntent: ctx.selectionIntent,
+      },
+    );
+  }
 
-    if (options.textAny) {
-      let lastSelection: ElementSelectionResult | null = null;
-      let offScreenSelection: ElementSelectionResult | null = null;
-      const screenSize = this.deps.tapPoints.getScreenSizeFromHierarchy(
-        viewHierarchy,
-        options.screenSizeOptions,
+  private selectSiblingElementId(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    elementId: string,
+    ctx: TapSelectionContext,
+  ): ElementSelectionResult {
+    return this.deps.elementSelector().select(
+      viewHierarchy,
+      { sibling: { elementId } },
+      {
+        container: options.container,
+        screenSizeOptions: options.screenSizeOptions,
+        partialMatch: false,
+        strategy: options.selectionStrategy,
+        intentAction: ctx.intentAction,
+        index: options.index,
+      },
+    );
+  }
+
+  private selectElementId(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    elementId: string,
+    ctx: TapSelectionContext,
+  ): ElementSelectionResult {
+    return this.deps.elementSelector().select(
+      viewHierarchy,
+      { elementId },
+      {
+        container: options.container,
+        screenSizeOptions: options.screenSizeOptions,
+        partialMatch: false,
+        strategy: options.selectionStrategy,
+        intentAction: ctx.lookupAction,
+        index: options.index,
+      },
+    );
+  }
+
+  /** Returns null when `textAny` is empty so the caller falls through to the other selectors. */
+  private selectTextAny(
+    options: TapVerificationOptions,
+    viewHierarchy: ViewHierarchyResult,
+    ctx: TapSelectionContext,
+  ): ElementSelectionResult | null {
+    let lastSelection: ElementSelectionResult | null = null;
+    let offScreenSelection: ElementSelectionResult | null = null;
+    const screenSize = this.deps.tapPoints.getScreenSizeFromHierarchy(
+      viewHierarchy,
+      options.screenSizeOptions,
+    );
+    for (const text of options.textAny ?? []) {
+      const selection = this.selectVariantOrSiblingOrMiss(options, () =>
+        options.sibling
+          ? this.selectSiblingText(options, viewHierarchy, text, ctx)
+          : this.selectPartialText(options, viewHierarchy, text, ctx),
       );
-      for (const text of options.textAny) {
-        const selection = options.sibling
-          ? this.selectVariantOrSiblingOrMiss(options, () =>
-              this.deps.elementSelector().select(
-                viewHierarchy,
-                { sibling: { text } },
-                {
-                  container: options.container,
-                  screenSizeOptions: options.screenSizeOptions,
-                  fuzzyMatch: true,
-                  caseSensitive: false,
-                  strategy: options.selectionStrategy,
-                  intentAction,
-                  selectionIntent,
-                  index: options.index,
-                },
-              ),
-            )
-          : this.selectVariantOrSiblingOrMiss(options, () =>
-              this.deps.elementSelector().select(
-                viewHierarchy,
-                { text },
-                {
-                  container: options.container,
-                  screenSizeOptions: options.screenSizeOptions,
-                  partialMatch: true,
-                  caseSensitive: false,
-                  strategy: options.selectionStrategy,
-                  intentAction: lookupAction,
-                  allowHintFallback: options.action === "tap" || options.action === "focus",
-                  index: options.index,
-                  selectionIntent,
-                },
-              ),
-            );
-        lastSelection = selection;
-        if (selection.element) {
-          if (
-            this.deps.tapPoints.isElementTapTargetOffScreen(
-              selection,
-              viewHierarchy,
-              screenSize,
-              options,
-            )
-          ) {
-            offScreenSelection = selection;
-            continue;
-          }
-          return { selection, containerFound };
-        }
+      lastSelection = selection;
+      if (!selection.element) {
+        continue;
       }
-
-      if (offScreenSelection) {
-        return {
-          selection: { ...offScreenSelection, element: null },
-          containerFound,
-        };
-      }
-
-      if (lastSelection) {
-        if (options.selectionStrategy === "unique") {
-          throw new TapTargetUnavailableError(
-            `Target not found${options.container ? " within container" : ""}: no textAny variant matched`,
-            "not-found",
-          );
-        }
-        return { selection: lastSelection, containerFound };
-      }
-    }
-
-    const elementId = options.elementId;
-    if (elementId) {
-      if (options.sibling) {
-        return {
-          selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.deps.elementSelector().select(
-              viewHierarchy,
-              { sibling: { elementId } },
-              {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                partialMatch: false,
-                strategy: options.selectionStrategy,
-                intentAction,
-                index: options.index,
-              },
-            ),
-          ),
-          containerFound,
-        };
-      }
-
-      return {
-        selection: this.deps.elementSelector().select(
+      if (
+        this.deps.tapPoints.isElementTapTargetOffScreen(
+          selection,
           viewHierarchy,
-          { elementId },
-          {
-            container: options.container,
-            screenSizeOptions: options.screenSizeOptions,
-            partialMatch: false,
-            strategy: options.selectionStrategy,
-            intentAction: lookupAction,
-            index: options.index,
-          },
-        ),
-        containerFound,
-      };
+          screenSize,
+          options,
+        )
+      ) {
+        offScreenSelection = selection;
+        continue;
+      }
+      return selection;
     }
 
-    return {
-      selection: this.deps.elementSelector().select(
-        viewHierarchy,
-        { testTag: requireTestTag(options) },
-        {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          selectionIntent,
-          index: options.index,
-        },
-      ),
-      containerFound,
-    };
+    if (offScreenSelection) {
+      return { ...offScreenSelection, element: null };
+    }
+    if (lastSelection && options.selectionStrategy === "unique") {
+      throw new TapTargetUnavailableError(
+        `Target not found${options.container ? " within container" : ""}: no textAny variant matched`,
+        "not-found",
+      );
+    }
+    return lastSelection;
   }
 
   selectionIntentFor(options: TapOnElementOptions): TextSelectionIntent {

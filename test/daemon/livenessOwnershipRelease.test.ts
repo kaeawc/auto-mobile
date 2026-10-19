@@ -400,14 +400,22 @@ describe("deliberate liveness ownership release", () => {
       if (lapsed) {
         timer.advanceTime(LEASE + SUSPECT_GRACE_MS + 1);
       }
-      const method = releaseFirst ? "releaseLivenessOwnership" : "claimLivenessOwnership";
-      const original = manager[method].bind(manager);
-      const spy = spyOn(manager, method).mockImplementation(async (...args) => {
-        const result = await original(...args);
+      // Suspends the first operation's response after it has taken effect.
+      const suspend = async <T>(result: Promise<T>): Promise<T> => {
+        const value = await result;
         entered.resolve();
         await resume.promise;
-        return result;
-      });
+        return value;
+      };
+      const originalRelease = manager.releaseLivenessOwnership.bind(manager);
+      const originalClaim = manager.claimLivenessOwnership.bind(manager);
+      const spy = releaseFirst
+        ? spyOn(manager, "releaseLivenessOwnership").mockImplementation((...args) =>
+            suspend(originalRelease(...args)),
+          )
+        : spyOn(manager, "claimLivenessOwnership").mockImplementation((...args) =>
+            suspend(originalClaim(...args)),
+          );
       try {
         const first = releaseFirst ? release() : claim("next");
         await entered.promise;

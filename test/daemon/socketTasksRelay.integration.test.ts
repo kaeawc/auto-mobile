@@ -15,9 +15,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, type DaemonMethodCallOptions } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
+import type { Session } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import {
@@ -184,22 +186,44 @@ class RecordingDaemonClient extends DaemonClient {
 
   override callDaemonMethod(
     method: string,
-    params: Record<string, any>,
-    ...rest: DropFirstTwo<Parameters<DaemonClient["callDaemonMethod"]>>
+    params: Record<string, any> = {},
+    options?: DaemonMethodCallOptions,
   ): Promise<any> {
     this.methods.push({ method, params });
-    return super.callDaemonMethod(method, params, ...rest);
+    return super.callDaemonMethod(method, params, options);
   }
 }
 
 type DropFirstTwo<T extends unknown[]> = T extends [unknown, unknown, ...infer Rest] ? Rest : never;
 
-function fakeDaemonState() {
+function bootedSession(sessionId: string): Session {
+  return {
+    sessionId,
+    assignedDevice: "emulator-5554",
+    platform: "android",
+    createdAt: 0,
+    lastUsedAt: 0,
+    activityGeneration: 0,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    cacheData: {},
+    lastHeartbeat: 0,
+    sessionTimeoutMs: 60_000,
+    heartbeatTimeoutMs: 60_000,
+    heartbeatTimeoutSource: "default",
+    hasReceivedHeartbeat: true,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
+  };
+}
+
+function fakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => sessionId === BOOTED_SESSION,
       // The session the fake boot minted is live, so the proxy's binding heartbeat is answered.
-      getSession: (sessionId: string) => (sessionId === BOOTED_SESSION ? { sessionId } : null),
+      getSession: (sessionId: string) =>
+        sessionId === BOOTED_SESSION ? bootedSession(sessionId) : null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
@@ -209,6 +233,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 

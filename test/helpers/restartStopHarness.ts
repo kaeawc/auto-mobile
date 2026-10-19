@@ -133,12 +133,11 @@ export function restartStopHarness() {
       timer.reset();
       expect(timer.getPendingTimeoutCount()).toBe(0);
     });
-    const iosStop = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      stop: async () => {},
-    } as unknown as IOSCtrlProxyManager);
+    const iosStop = spyOn(IOSCtrlProxyManager.prototype, "stop").mockResolvedValue(undefined);
     const iosRetire = spyOn(IOSCtrlProxyClient, "retireInstance").mockResolvedValue(undefined);
     cleanups.push(() => {
       iosStop.mockRestore();
+      IOSCtrlProxyManager.registry.closeAll();
       iosRetire.mockRestore();
     });
     await setVideoRecordingManagerDependencies({

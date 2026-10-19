@@ -2,9 +2,6 @@ import type { DeviceManagerSimCtl } from "../../src/devices/deviceUtils";
 
 type Operation = Exclude<keyof DeviceManagerSimCtl, "getSimulatorListingChecked">;
 
-/** Stubs may be looser than the real signatures (fewer params, `null` for a process handle). */
-type LooseOverrides = Partial<Record<keyof DeviceManagerSimCtl, (...args: never[]) => unknown>>;
-
 function unstubbed(name: Operation): never {
   throw new TypeError(`fakeDeviceManagerSimctl.${name} is not stubbed`);
 }
@@ -15,7 +12,9 @@ function unstubbed(name: Operation): never {
  * the partial objects this replaces. The optional `getSimulatorListingChecked` is never filled in:
  * the manager branches on its presence.
  */
-export function fakeDeviceManagerSimctl(overrides: LooseOverrides = {}): DeviceManagerSimCtl {
+export function fakeDeviceManagerSimctl(
+  overrides: Partial<DeviceManagerSimCtl> = {},
+): DeviceManagerSimCtl {
   const notStubbed = {
     isAvailable: () => unstubbed("isAvailable"),
     listSimulatorImages: () => unstubbed("listSimulatorImages"),
@@ -26,5 +25,5 @@ export function fakeDeviceManagerSimctl(overrides: LooseOverrides = {}): DeviceM
     killSimulator: () => unstubbed("killSimulator"),
     waitForSimulatorReady: () => unstubbed("waitForSimulatorReady"),
   } satisfies Pick<DeviceManagerSimCtl, Operation>;
-  return { ...notStubbed, ...overrides } as DeviceManagerSimCtl;
+  return { ...notStubbed, ...overrides };
 }

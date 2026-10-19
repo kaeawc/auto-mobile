@@ -14,8 +14,12 @@ import {
   loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
+import {
+  observeResultFromWire,
+  type WireHierarchyNodeSlot,
+  type WireObserveResult,
+} from "../../../../src/features/observe/output/observeResultWire";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
-import { partialFixtureArray } from "../../../helpers/partialFixture";
 import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
 import {
   createFlatNodeForTest,
@@ -42,9 +46,7 @@ beforeAll(() => {
  */
 
 /** Normalize a `node` slot (single or array, as real captures vary) to array. */
-function toNodeArray(
-  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined,
-): ViewHierarchyNode[] {
+function toNodeArray(node: WireHierarchyNodeSlot | undefined): ViewHierarchyNode[] {
   if (!node) {
     return [];
   }
@@ -490,13 +492,14 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("preserves duplicate view-id when referenced by occludedByViewId", () => {
-      const obs: ObserveResult = {
+      const wire: WireObserveResult = {
+        ...createObserveResultForTest(),
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixtureArray([
+            node: [
               {
                 "resource-id": "id/covered",
                 "view-id": "id/covered",
@@ -516,12 +519,12 @@ describe("sanitizeObserveResult", () => {
                 node: [],
                 $: {},
               },
-            ]),
+            ],
           },
         },
       };
 
-      const out = sanitizeObserveResult(obs, DROP_NONE);
+      const out = sanitizeObserveResult(observeResultFromWire(wire), DROP_NONE);
       const [covered, overlay, unreferenced] = toNodeArray(out.viewHierarchy!.hierarchy!.node).map(
         flatNodeAttributes,
       );
@@ -808,13 +811,14 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("compacts bounds on an array-shaped root and nested children", () => {
-      const obs: ObserveResult = {
+      const wire: WireObserveResult = {
+        ...createObserveResultForTest(),
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixtureArray([
+            node: [
               {
                 "resource-id": "a",
                 bounds: { left: 1, top: 2, right: 3, bottom: 4 },
@@ -823,11 +827,11 @@ describe("sanitizeObserveResult", () => {
                 ],
               },
               { "resource-id": "b", bounds: { left: 9, top: 10, right: 11, bottom: 12 } },
-            ]),
+            ],
           },
         },
       };
-      const out = sanitizeObserveResult(obs, COMPACT);
+      const out = sanitizeObserveResult(observeResultFromWire(wire), COMPACT);
       const rootNodes = toNodeArray(out.viewHierarchy!.hierarchy!.node);
       const roots = rootNodes.map(flatNodeAttributes);
       expect(roots[0].bounds).toEqual([1, 2, 3, 4]);

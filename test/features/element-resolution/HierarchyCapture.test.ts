@@ -24,7 +24,7 @@ import {
 } from "../../../src/features/utility/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
-import { createObserveResultForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 
 const hierarchy = (left: number): ViewHierarchyResult => ({
   updatedAt: 100 + left,

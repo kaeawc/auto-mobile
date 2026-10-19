@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { DefaultActiveWindowAttributionReconciler } from "../../../src/features/observe/ActiveWindowAttribution";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
-import { createHierarchyForTest, createObserveResultForTest } from "./observeScreenTestBuilders";
+import { createHierarchyForTest } from "./observeScreenTestBuilders";
+import { createObserveResultForTest } from "./flatHierarchyBuilders";
 
 test.each(["overlay", "backStack"] as const)(
   "%s recapture preserves the original observation when hierarchy capture throws",

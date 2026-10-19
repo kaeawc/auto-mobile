@@ -35,7 +35,7 @@ import {
   createStatelessMcpServer,
   type StatelessMcpServerBase,
 } from "./statelessMcpServerFactory";
-import { releaseDaemonTaskLeases } from "../server/tasks/daemonTaskManager";
+import { releaseDaemonTaskLeases } from "./tasks/daemonTaskManager";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";

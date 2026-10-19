@@ -169,8 +169,8 @@ import {
 } from "../features/toolSelection/toolSelectionControl";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { isCreateTaskResult } from "../server/tasks/mcpTasksExtension";
-import type { TaskRelayFrame, TaskRelayMethod } from "../server/tasks/taskRelay";
+import { isCreateTaskResult } from "./tasks/mcpTasksExtension";
+import type { TaskRelayFrame, TaskRelayMethod } from "./tasks/taskRelay";
 import { TaskSessionBindings } from "./proxy/TaskSessionBindings";
 import {
   ToolCallForwarder,

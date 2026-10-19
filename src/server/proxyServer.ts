@@ -60,8 +60,8 @@ import {
   isCreateTaskResult,
   missingTasksCapabilityError,
   requestDeclaresTasks,
-} from "./tasks/mcpTasksExtension";
-import { toRelayedProtocolError, isRelayedJsonRpcError } from "./tasks/taskRelay";
+} from "../daemon/tasks/mcpTasksExtension";
+import { toRelayedProtocolError, isRelayedJsonRpcError } from "../daemon/tasks/taskRelay";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";

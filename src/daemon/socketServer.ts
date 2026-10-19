@@ -265,7 +265,7 @@ import {
 } from "./socketServer/errorFrames";
 import type { UnixSocketServerTestHooks } from "./socketServer/unixSocketServerTestHooks";
 import { indeterminateInputError } from "./socketServer/forwardFailures";
-import { isTaskRelayMethod, parseTaskRelayFrame } from "../server/tasks/taskRelay";
+import { isTaskRelayMethod, parseTaskRelayFrame } from "./tasks/taskRelay";
 import {
   callForwardedTool,
   forwardTaskRequest,

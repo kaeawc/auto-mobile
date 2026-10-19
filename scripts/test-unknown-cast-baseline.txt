@@ -137,7 +137,7 @@
 2	test/server/interactionTools.tapOnMessage.test.ts
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
-6	test/server/inventorySurfaceParity.test.ts
+1	test/server/inventorySurfaceParity.test.ts
 1	test/server/restartReservationOwnerOtherAvdOnReservedSerial.test.ts
 1	test/server/restartReservationStartAdmission.test.ts
 2	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts
@@ -145,7 +145,6 @@
 1	test/setup/fixedCtrlProxyPortFetchGuard.ts
 1	test/setup/realDeviceToolSpawnGuard.test.ts
 1	test/setup/testPreload.ts
-2	test/utils/ChildProcessTracker.test.ts
 1	test/utils/DeviceSessionManager.createIfMissing.test.ts
 3	test/utils/DeviceSessionManager.test.ts
 1	test/utils/FileDownloader.integration.test.ts

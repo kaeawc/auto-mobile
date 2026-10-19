@@ -23,6 +23,7 @@ import { displayTransitions } from "../../../src/features/observe/DisplayTransit
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { hasWrongWindowEvidence } from "../../../src/features/observe/observationFreshness";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -590,12 +591,13 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       packageName: "com.google.android.settings.intelligence",
       userId: 0,
     });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout:
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(
         "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: dev.jasonpearson.automobile.ctrlproxy}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+        "",
+      ),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -634,11 +636,13 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     );
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: com.example.app}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(
+        "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: com.example.app}\n",
+        "",
+      ),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -685,11 +689,13 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     );
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Not Responding: com.example.app}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(
+        "  mCurrentFocus=Window{8ddaeb2 u0 Application Not Responding: com.example.app}\n",
+        "",
+      ),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -708,11 +714,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       viewHierarchy.configureHierarchy(incompleteFrameworkDialogHierarchy(now));
       const fakeAdb = new FakeAdbExecutor();
       fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
-      fakeAdb.setCommandResponse("dumpsys window", {
-        stdout: `  mCurrentFocus=Window{8ddaeb2 u0 ${focusTitle} example.app}\n`,
-        stderr: "",
-        exitCode: 0,
-      });
+      fakeAdb.setCommandResponse(
+        "dumpsys window",
+        createExecResult(`  mCurrentFocus=Window{8ddaeb2 u0 ${focusTitle} example.app}\n`, ""),
+      );
 
       const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
         skipScreenshot: true,
@@ -733,11 +738,13 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     viewHierarchy.configureHierarchy(incompleteFrameworkDialogHierarchy(now));
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.systemui", userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 com.android.systemui/.MainActivity}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(
+        "  mCurrentFocus=Window{8ddaeb2 u0 com.android.systemui/.MainActivity}\n",
+        "",
+      ),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -782,11 +789,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     viewHierarchy.configureHierarchy(incompleteFrameworkDialogHierarchy(now));
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: example.app}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 Application Error: example.app}\n", ""),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -827,11 +833,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     );
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.systemui", userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Application Error: example.app}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 Application Error: example.app}\n", ""),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -868,11 +873,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       packageName: "com.google.android.settings.intelligence",
       userId: 0,
     });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 android/.SearchActivity}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 android/.SearchActivity}\n", ""),
+    );
 
     const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
       skipScreenshot: true,
@@ -1064,7 +1068,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(viewHierarchy.getCallCount()).toBe(2);
     expect(viewHierarchy.getCalls()[1]?.minTimestamp).toBe(now + 1);
     expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Connected devices");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Connected devices");
     expect(result.wakefulness).toBe("Awake");
   });
 
@@ -1156,7 +1160,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.activeWindow?.activityName).toBe(
       "com.android.settings.homepage.SettingsHomepageActivity",
     );
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Settings home");
     expect(result.freshness?.verified).toBe(false);
     expect(result.freshness?.isFresh).toBe(false);
     expect(result.freshness?.warning).toContain("disagree about the current activity");
@@ -1954,7 +1958,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.isFresh).toBe(false);
     expect(result.freshness?.warning).toContain("disagree about the current activity");
     // The original A hierarchy is preserved (not replaced by an unusable recapture).
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Settings home");
     // Temporal confirmation was attempted: initial capture plus the recapture read.
     expect(viewHierarchy.getCallCount()).toBe(2);
   });
@@ -2039,7 +2043,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.isFresh).toBe(false);
     expect(result.freshness?.warning).toContain("disagree about the current activity");
     // The original A hierarchy is preserved (not replaced by an unusable recapture).
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Settings home");
   });
 
   test("resolves a genuine bootstrap A->B skew to B's fresh hierarchy when the recapture confirms it (#6088)", async () => {
@@ -2076,7 +2080,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     expect(viewHierarchy.getCallCount()).toBe(2);
     // The published tree is the recaptured B tree, paired with B's name.
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Sub settings");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Sub settings");
     expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
     expect(result.activeWindow?.layoutSeqSum).toBe(3478);
     expect(result.freshness?.verified).toBe(true);
@@ -2180,7 +2184,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     expect(viewHierarchy.getCallCount()).toBe(2);
     // The published tree is the recaptured shade tree...
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Notifications");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Notifications");
     // ...and the window names the surface on top, never the occluded app's activity.
     expect(result.activeWindow?.appId).toBe("com.android.systemui");
     expect(result.activeWindow?.activityName).toBe("");
@@ -2270,7 +2274,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     const result = await screen.execute({ skipScreenshot: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Swipe up to unlock");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Swipe up to unlock");
     expect(result.activeWindow?.appId).toBe("com.android.systemui");
     expect(result.deviceLock?.locked).toBe(true);
     expect(result.deviceLock?.keyguardShowing).toBe(true);
@@ -2802,11 +2806,10 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n", ""),
+    );
 
     const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -2868,11 +2871,10 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
     // If the code still read mCurrentFocus against the stale shade tree, this
     // would confirm the (already-gone) shade. It must not be trusted.
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n", ""),
+    );
 
     const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -2880,7 +2882,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     // The recapture ran (initial capture + one recapture).
     expect(viewHierarchy.getCallCount()).toBe(2);
     // The published tree is the fresh app tree, not the stale shade.
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App content");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("App content");
     // Attribution agrees with the fresh tree: the app, not a SystemUI overlay.
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
     expect(result.activeWindow?.systemOverlay).toBeUndefined();
@@ -2909,18 +2911,17 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 NotificationShade}\n", ""),
+    );
 
     const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
     // The published shade tree is the recaptured one, paired with the overlay.
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Fresh shade");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Fresh shade");
     expect(result.activeWindow?.appId).toBe("com.android.systemui");
     expect(result.activeWindow?.systemOverlay).toBe(true);
     expect(result.activeWindow?.activityName).toBe("");
@@ -2952,11 +2953,10 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
       { locked: false, keyguardShowing: false, secure: false },
       { locked: true, keyguardShowing: true, secure: true },
     ]);
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: "  mCurrentFocus=Window{8ddaeb2 u0 Keyguard}\n",
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult("  mCurrentFocus=Window{8ddaeb2 u0 Keyguard}\n", ""),
+    );
 
     const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -3086,7 +3086,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
 
     // The recapture ran and the fresh app tree is published, no overlay.
     expect(viewHierarchy.getCallCount()).toBe(2);
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App content");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("App content");
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
     expect(result.activeWindow?.systemOverlay).toBeUndefined();
     // The stale 4096 sampled with the shade window read must NOT be published
@@ -3172,7 +3172,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App B content");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("App B content");
     // Published window is B's re-derived identity, NOT A's stale window with only
     // the appId swapped: A's 7000 must not survive onto the fresh B tree.
     expect(result.activeWindow?.appId).toBe(APP_B);
@@ -3207,7 +3207,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
     expect(viewHierarchy.getCallCount()).toBe(2);
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Screen B");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Screen B");
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
     expect(result.activeWindow?.systemOverlay).toBeUndefined();
     // The lagged foregroundActivity A must NOT be published against the B tree.
@@ -3247,11 +3247,10 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(`  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`, ""),
+    );
 
     const screen = createObserveScreenForTest(
       androidDevice,
@@ -3278,7 +3277,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
 
     // Initial capture + suspect recapture + the bounded re-capture.
     expect(viewHierarchy.getCallCount()).toBe(3);
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Details B");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("Details B");
     // The back stack sampled at A must not be published against B's tree: it is
     // dropped to unknown rather than recording A's depth/task against B's node.
     expect(result.backStack).toBeUndefined();
@@ -3310,11 +3309,10 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
     // mCurrentFocus names the app: the shade closed during the dumpsys read.
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(`  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`, ""),
+    );
 
     const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -3323,7 +3321,7 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
     expect(viewHierarchy.getCallCount()).toBe(3);
     // The published tree is the converged app tree, NOT the fresh shade paired
     // with the app's attribution (the #6091 gap-2 incoherence).
-    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("App content");
+    expect(result.viewHierarchy?.hierarchy.node?.node?.[0]?.text).toBe("App content");
     expect(result.activeWindow?.appId).toBe(OCCLUDED_APP);
     expect(result.activeWindow?.systemOverlay).toBeUndefined();
   });
@@ -3341,11 +3339,10 @@ describe("ObserveScreen focused SystemUI overlay attribution (issue #6078)", () 
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: OCCLUDED_APP, userId: 0 });
-    fakeAdb.setCommandResponse("dumpsys window", {
-      stdout: `  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`,
-      stderr: "",
-      exitCode: 0,
-    });
+    fakeAdb.setCommandResponse(
+      "dumpsys window",
+      createExecResult(`  mCurrentFocus=Window{1a2b3c u0 ${OCCLUDED_ACTIVITY}}\n`, ""),
+    );
 
     const screen = makePrototypeScreen(viewHierarchy, fakeAdb, timer);
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });

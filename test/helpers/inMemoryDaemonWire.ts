@@ -1,4 +1,3 @@
-import type { Client } from "@modelcontextprotocol/client";
 import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
@@ -405,61 +404,60 @@ export function loopbackMcpClientFactory(
   callTool: LoopbackToolCall,
   timer: Timer,
 ): McpClientFactory {
-  return async (boundSessionUuid) =>
-    ({
-      callTool: async (
-        params: { name: string; arguments?: Record<string, unknown> },
-        options?: { signal?: AbortSignal; timeout?: number },
-      ) => {
-        const args = { ...params.arguments };
-        if (args.sessionUuid === undefined && boundSessionUuid !== undefined) {
-          args.sessionUuid = boundSessionUuid;
-        }
-        const signal = options?.signal;
-        signal?.throwIfAborted();
-        // The MCP client gives up on a request two ways: the daemon aborts it (the caller's
-        // cancel, or a progress-capable call's deadline), or its own request timeout passes
-        // (every other call's deadline). Either way it rejects at once and tells the server,
-        // whose handler sees its request signal abort and may still be running.
-        const request = new AbortController();
-        let stop = () => {};
-        const gaveUp = new Promise<never>((_resolve, reject) => {
-          const giveUp = (reason: unknown) => {
-            request.abort(reason);
-            reject(reason);
-          };
-          const abort = () => giveUp(signal?.reason);
-          signal?.addEventListener("abort", abort, { once: true });
-          const timeoutMs = options?.timeout;
-          const timeout =
-            timeoutMs === undefined
-              ? undefined
-              : timer.setTimeout(
-                  () =>
-                    giveUp(
-                      new McpError(ErrorCode.RequestTimeout, "Request timed out", {
-                        timeout: timeoutMs,
-                      }),
-                    ),
-                  timeoutMs,
-                );
-          stop = () => {
-            signal?.removeEventListener("abort", abort);
-            if (timeout !== undefined) {
-              timer.clearTimeout(timeout);
-            }
-          };
-        });
-        try {
-          return await Promise.race([callTool(params.name, args, request.signal), gaveUp]);
-        } finally {
-          stop();
-        }
-      },
-      listTools: async () => ({ tools: [] }),
-      listResources: async () => ({ resources: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      readResource: async () => ({ contents: [] }),
-      close: async () => {},
-    }) as unknown as Client;
+  return async (boundSessionUuid) => ({
+    callTool: async (
+      params: { name: string; arguments?: Record<string, unknown> },
+      options?: { signal?: AbortSignal; timeout?: number },
+    ) => {
+      const args = { ...params.arguments };
+      if (args.sessionUuid === undefined && boundSessionUuid !== undefined) {
+        args.sessionUuid = boundSessionUuid;
+      }
+      const signal = options?.signal;
+      signal?.throwIfAborted();
+      // The MCP client gives up on a request two ways: the daemon aborts it (the caller's
+      // cancel, or a progress-capable call's deadline), or its own request timeout passes
+      // (every other call's deadline). Either way it rejects at once and tells the server,
+      // whose handler sees its request signal abort and may still be running.
+      const request = new AbortController();
+      let stop = () => {};
+      const gaveUp = new Promise<never>((_resolve, reject) => {
+        const giveUp = (reason: unknown) => {
+          request.abort(reason);
+          reject(reason);
+        };
+        const abort = () => giveUp(signal?.reason);
+        signal?.addEventListener("abort", abort, { once: true });
+        const timeoutMs = options?.timeout;
+        const timeout =
+          timeoutMs === undefined
+            ? undefined
+            : timer.setTimeout(
+                () =>
+                  giveUp(
+                    new McpError(ErrorCode.RequestTimeout, "Request timed out", {
+                      timeout: timeoutMs,
+                    }),
+                  ),
+                timeoutMs,
+              );
+        stop = () => {
+          signal?.removeEventListener("abort", abort);
+          if (timeout !== undefined) {
+            timer.clearTimeout(timeout);
+          }
+        };
+      });
+      try {
+        return await Promise.race([callTool(params.name, args, request.signal), gaveUp]);
+      } finally {
+        stop();
+      }
+    },
+    listTools: async () => ({ tools: [] }),
+    listResources: async () => ({ resources: [] }),
+    listResourceTemplates: async () => ({ resourceTemplates: [] }),
+    readResource: async () => ({ contents: [] }),
+    close: async () => {},
+  });
 }

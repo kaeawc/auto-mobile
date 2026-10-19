@@ -1,14 +1,11 @@
 import { holderOf } from "./deviceBinding";
 import type { SessionBrokerService } from "./sessionBroker/service";
 import type { SessionBrokerProtocolErrorCode } from "../devices/sessionBrokerResult";
-import { SESSION_BROKER_CAPABILITY } from "./sessionBroker/hostConfig";
 import {
-  handleAbandonBrokerSessionRequest,
-  bindBrokerRegistration,
-  handlePrepareBrokerSession,
-  handleBrokerSessionStatus,
-  handleReleaseBrokerSession,
-} from "./sessionBroker/handlers";
+  SESSION_BROKER_CAPABILITY,
+  SESSION_BROKER_EXPORT_CAPABILITY,
+} from "./sessionBroker/hostConfig";
+import { bindBrokerRegistration, BROKER_DAEMON_METHOD_HANDLERS } from "./sessionBroker/handlers";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { BindingInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -591,7 +588,9 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
-          ...(state.isSessionBrokerMode?.() ? [SESSION_BROKER_CAPABILITY] : []),
+          ...(state.isSessionBrokerMode?.()
+            ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
+            : []),
         ],
       },
     };
@@ -607,7 +606,7 @@ export async function handleDaemonRequest(
   return handleInitializedDaemonRequest(request, state, executions, signal, context);
 }
 
-type InitializedDaemonMethodHandler = (
+export type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions: ReleaseCutExecutions | undefined,
@@ -618,21 +617,7 @@ type InitializedDaemonMethodHandler = (
 /** Socket daemon methods served once the daemon is initialized, by method name. */
 const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonMethodHandler> =
   new Map<string, InitializedDaemonMethodHandler>([
-    [
-      "daemon/prepareSession",
-      (request, state, _executions, signal, context) =>
-        handlePrepareBrokerSession(request, state, signal, context.socketSessionId),
-    ],
-    [
-      "daemon/sessionRequestStatus",
-      (request, state, _executions, _signal, context) =>
-        handleBrokerSessionStatus(request, state, context.socketSessionId),
-    ],
-    [
-      "daemon/abandonSessionRequest",
-      (request, state) => handleAbandonBrokerSessionRequest(request, state),
-    ],
-    ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
+    ...BROKER_DAEMON_METHOD_HANDLERS,
     [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],
     [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
     [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],

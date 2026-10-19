@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
@@ -14,12 +14,20 @@ import {
   bindBrokerRegistration,
   handleAbandonBrokerSessionRequest,
   handleBrokerSessionStatus,
+  handleGetSessionExport,
+  handleAcknowledgeSessionExport,
   handlePrepareBrokerSession,
   handleReleaseBrokerSession,
 } from "../../../src/daemon/sessionBroker/handlers";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
-import type { BrokerRequestRecord } from "../../../src/daemon/sessionBroker/store";
+import {
+  SessionExportIdentityMismatchError,
+  type BrokerExportIdentity,
+  type BrokerRequestRecord,
+} from "../../../src/daemon/sessionBroker/store";
+import { sessionRequestFingerprint } from "../../../src/daemon/sessionBroker/requestIdentity";
+import { handleDaemonRequest } from "../../../src/daemon/daemonRequestHandlers";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { SessionBrokerResult } from "../../../src/devices/sessionBrokerResult";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
@@ -79,6 +87,7 @@ function request(params: unknown): DaemonRequest {
 }
 
 class HandlerBroker extends SessionBroker {
+  prepareError: Error | undefined;
   prepareResult = result("request-1", "failed");
   ownedStatusError: Error | undefined;
   readonly statuses = new Map<string, SessionBrokerResult>();
@@ -87,6 +96,7 @@ class HandlerBroker extends SessionBroker {
     config: SessionConfig;
     token: string;
     signal?: AbortSignal;
+    export?: BrokerExportIdentity;
   }> = [];
   readonly statusCalls: Array<{ requestId: string; token: string }> = [];
   readonly abandonCalls: Array<{ requestId: string; token: string }> = [];
@@ -112,8 +122,17 @@ class HandlerBroker extends SessionBroker {
     config: SessionConfig,
     token: string,
     signal?: AbortSignal,
+    exportIdentity?: BrokerExportIdentity,
   ): Promise<SessionBrokerResult> {
-    this.prepareCalls.push({ config, token, signal });
+    this.prepareCalls.push({
+      config,
+      token,
+      signal,
+      ...(exportIdentity ? { export: exportIdentity } : {}),
+    });
+    if (this.prepareError) {
+      return Promise.reject(this.prepareError);
+    }
     return Promise.resolve(this.prepareResult);
   }
 
@@ -209,6 +228,141 @@ describe("session broker daemon handlers", () => {
 
   afterEach(async () => {
     await registry.close();
+  });
+
+  const exportIdentity = { prepareId: "prepare-id", requestDigest: "digest" };
+  const exportParams = { ...exportIdentity, livenessOwnerToken: TOKEN };
+
+  async function seedExport() {
+    const config = sessionConfig();
+    await registry.sessionBrokerStore(SCOPE).recordPreAdmissionFailure(
+      {
+        requestId: config.requestId,
+        parameters: config,
+        fingerprint: sessionRequestFingerprint(config, TOKEN),
+        owner: OWNER,
+        export: exportIdentity,
+      },
+      { code: "catalog_failure", message: "catalog unavailable", retryable: false },
+    );
+  }
+
+  test("prepare accepts and forwards a strict bounded export identity; mismatch is an RPC rejection", async () => {
+    expect(
+      await handlePrepareBrokerSession(
+        request({ config: sessionConfig(), livenessOwnerToken: TOKEN, export: exportIdentity }),
+        state,
+      ),
+    ).toMatchObject({ success: true });
+    expect(broker.prepareCalls[0].export).toEqual(exportIdentity);
+    broker.prepareError = new SessionExportIdentityMismatchError();
+    expect(
+      await handlePrepareBrokerSession(
+        request({ config: sessionConfig(), livenessOwnerToken: TOKEN, export: exportIdentity }),
+        state,
+        undefined,
+        "export-mismatch",
+      ),
+    ).toMatchObject({ success: false, code: "session_export_identity_mismatch" });
+    expect(scopes.get("export-mismatch")?.sessionUuids.size).toBe(0);
+    for (const identity of [
+      { ...exportIdentity, extra: true },
+      { ...exportIdentity, prepareId: "" },
+      { ...exportIdentity, requestDigest: "" },
+      { ...exportIdentity, prepareId: "x".repeat(257) },
+      { ...exportIdentity, requestDigest: "x".repeat(257) },
+    ]) {
+      expect(
+        await handlePrepareBrokerSession(
+          request({ config: sessionConfig(), livenessOwnerToken: TOKEN, export: identity }),
+          state,
+        ),
+      ).toMatchObject({ success: false, code: "session_config_invalid" });
+    }
+    expect(broker.prepareCalls).toHaveLength(2);
+  });
+
+  test("export socket methods dispatch proof and ack and leave the connection binding untouched", async () => {
+    await seedExport();
+    for (const method of ["daemon/getSessionExport", "daemon/acknowledgeSessionExport"]) {
+      scopes.bind("export-socket", { scopeKey: SCOPE, sessionUuids: [SESSION] });
+      const response = await handleDaemonRequest(
+        { ...request(exportParams), method },
+        state,
+        undefined,
+        undefined,
+        { socketSessionId: "export-socket" },
+      );
+      expect(response).toMatchObject({
+        success: true,
+        result:
+          method === "daemon/getSessionExport"
+            ? {
+                contractVersion: 1,
+                ...exportIdentity,
+                acknowledged: false,
+                result: { outcome: "failed", failure: { code: "catalog_failure" } },
+              }
+            : { prepareId: exportIdentity.prepareId, outcome: "acknowledged" },
+      });
+      // The connection keeps exactly the grant it already held.
+      expect(scopes.get("export-socket")).toEqual({
+        scopeKey: SCOPE,
+        sessionUuids: new Set([SESSION]),
+      });
+    }
+  });
+
+  test("reading a ready export never binds its session to the socket", async () => {
+    const proof = {
+      contractVersion: 1 as const,
+      ...exportIdentity,
+      acknowledged: false,
+      result: result("request-1", "ready", SESSION),
+    };
+    spyOn(broker, "getExport").mockResolvedValue(proof);
+    const response = await handleGetSessionExport(request(exportParams), state);
+    expect(response).toEqual({ success: true, result: proof });
+    expect(scopes.get("proof-only")).toBeUndefined();
+  });
+
+  test("export handlers reject malformed or unauthorized queries and acknowledge unknown identities", async () => {
+    await seedExport();
+    for (const handler of [handleGetSessionExport, handleAcknowledgeSessionExport]) {
+      for (const params of [
+        { ...exportParams, extra: true },
+        { ...exportParams, prepareId: "" },
+        { ...exportParams, requestDigest: "" },
+        { ...exportParams, prepareId: "x".repeat(257) },
+        { ...exportParams, requestDigest: "x".repeat(257) },
+        { ...exportParams, livenessOwnerToken: "" },
+      ]) {
+        scopes.bind("invalid-export", { scopeKey: SCOPE, sessionUuids: [SESSION] });
+        expect(await handler(request(params), state)).toMatchObject({
+          success: false,
+          code: "session_config_invalid",
+        });
+        expect(scopes.get("invalid-export")?.sessionUuids.size).toBe(1);
+      }
+      for (const params of [
+        { ...exportParams, requestDigest: "wrong" },
+        { ...exportParams, livenessOwnerToken: "wrong" },
+      ]) {
+        expect(await handler(request(params), state)).toMatchObject({
+          success: false,
+          code: "session_export_identity_mismatch",
+        });
+      }
+    }
+    expect(
+      await handleGetSessionExport(request({ ...exportParams, prepareId: "missing" }), state),
+    ).toMatchObject({ success: false, code: "session_export_not_found" });
+    expect(
+      await handleAcknowledgeSessionExport(
+        request({ ...exportParams, prepareId: "missing" }),
+        state,
+      ),
+    ).toEqual({ success: true, result: { prepareId: "missing", outcome: "unknown_export" } });
   });
 
   test("prepare and request status preserve the same typed transient failure", async () => {

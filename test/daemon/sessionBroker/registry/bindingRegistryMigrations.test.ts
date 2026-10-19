@@ -3,6 +3,7 @@ import { Database as Sqlite } from "bun:sqlite";
 import { Kysely, sql, type Generated } from "kysely";
 import { Migrator } from "kysely/migration";
 import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
+import * as brokerExports010 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_19_010_session_broker_exports";
 import * as freeStop003 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_10_003_free_device_stop_state";
 import * as freeDeletion004 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_12_004_free_device_deletion";
 import * as bindingRegistry000 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_09_000_binding_registry";
@@ -49,7 +50,7 @@ describe("binding registry migrations", () => {
         db,
         provider: bindingRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(10);
+      expect(migrations).toHaveLength(11);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
       await migrateBindingRegistry(db, ":memory:");
@@ -62,6 +63,69 @@ describe("binding registry migrations", () => {
       await db.destroy();
     }
   });
+  test("migration 010 creates a unique request link with a foreign key and drops cleanly", async () => {
+    const db = new Kysely<BindingRegistryDatabase>({
+      dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
+    });
+    try {
+      await migrateBindingRegistry(db, ":memory:");
+      const columns = await sql<{
+        name: string;
+      }>`SELECT name FROM pragma_table_info('session_broker_exports')`.execute(db);
+      expect(columns.rows.map((column) => column.name)).toEqual([
+        "prepare_id",
+        "request_id",
+        "request_digest",
+        "created_at_ms",
+        "acknowledged_at_ms",
+      ]);
+      expect(
+        (
+          await sql<{
+            table: string;
+            from: string;
+            to: string;
+          }>`SELECT "table", "from", "to" FROM pragma_foreign_key_list('session_broker_exports')`.execute(
+            db,
+          )
+        ).rows,
+      ).toMatchObject([{ table: "session_broker_requests", from: "request_id", to: "request_id" }]);
+      await sql`INSERT INTO session_broker_requests (request_id, fingerprint, parameters_json, owner_json, state) VALUES ('request', 'fp', '{}', '{}', 'failed')`.execute(
+        db,
+      );
+      await db
+        .insertInto("session_broker_exports")
+        .values({
+          prepare_id: "prepare",
+          request_id: "request",
+          request_digest: "digest",
+          created_at_ms: 1,
+          acknowledged_at_ms: null,
+        })
+        .execute();
+      await expect(
+        db
+          .insertInto("session_broker_exports")
+          .values({
+            prepare_id: "second",
+            request_id: "request",
+            request_digest: "digest",
+            created_at_ms: 1,
+            acknowledged_at_ms: null,
+          })
+          .execute(),
+      ).rejects.toThrow("UNIQUE");
+      await brokerExports010.down(db);
+      expect(
+        (await db.introspection.getTables()).some(
+          (table) => table.name === "session_broker_exports",
+        ),
+      ).toBe(false);
+    } finally {
+      await db.destroy();
+    }
+  });
+
   test("migration 007 preserves legacy failure receipts with nonretryable null defaults", async () => {
     const db = new Kysely<BindingRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),

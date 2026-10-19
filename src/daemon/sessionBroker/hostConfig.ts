@@ -6,6 +6,7 @@ import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 
 /** Operator configuration, never a session requester input. */
 export const SESSION_BROKER_HOST_CONFIG_ENV = ENV_SPECS.SESSION_BROKER_CONFIG.name;
+export const SESSION_BROKER_EXPORT_CAPABILITY = "session-broker-export/v1";
 export const SESSION_BROKER_CAPABILITY = "session-broker/v1";
 
 /** One private allocation scope in the host-wide registry; no caller chooses these values. */

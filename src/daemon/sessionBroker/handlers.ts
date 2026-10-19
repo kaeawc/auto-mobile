@@ -1,13 +1,31 @@
 import { z } from "zod";
+import { SessionExportIdentityMismatchError } from "./store";
 import { parseSessionConfig } from "../../devices/sessionConfig";
 import { SESSION_OWNER_EXITED_CODE } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { DaemonRequest } from "../types";
-import type { DaemonMethodResult, DaemonStateAccess } from "../daemonRequestHandlers";
+import type {
+  DaemonMethodResult,
+  DaemonStateAccess,
+  InitializedDaemonMethodHandler,
+} from "../daemonRequestHandlers";
 
 const ownerToken = z.string().min(1);
-const prepareParams = z.object({ config: z.unknown(), livenessOwnerToken: ownerToken }).strict();
+const exportIdentity = z
+  .object({
+    prepareId: z.string().min(1).max(256),
+    requestDigest: z.string().min(1).max(256),
+  })
+  .strict();
+const exportParams = exportIdentity.extend({ livenessOwnerToken: ownerToken }).strict();
+const prepareParams = z
+  .object({
+    config: z.unknown(),
+    livenessOwnerToken: ownerToken,
+    export: exportIdentity.optional(),
+  })
+  .strict();
 const statusParams = z
   .object({ requestId: z.string().min(1), livenessOwnerToken: ownerToken })
   .strict();
@@ -48,7 +66,17 @@ export async function handlePrepareBrokerSession(
     logger.warn(`Session broker rejected invalid configuration: ${errorMessage(error)}`);
     return { success: false, code: "session_config_invalid", error: errorMessage(error) };
   }
-  const result = await service.broker.prepare(config, parsed.data.livenessOwnerToken, signal);
+  let result;
+  try {
+    result = await service.broker.prepare(
+      config,
+      parsed.data.livenessOwnerToken,
+      signal,
+      parsed.data.export,
+    );
+  } catch (error) {
+    return exportRejection(error);
+  }
   if (!signal?.aborted) {
     bind(
       state,
@@ -58,6 +86,64 @@ export async function handlePrepareBrokerSession(
     );
   }
   return { success: true, result: { ...result } };
+}
+
+export async function handleGetSessionExport(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  return handleSessionExport(request, state, false);
+}
+
+export async function handleAcknowledgeSessionExport(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  return handleSessionExport(request, state, true);
+}
+
+async function handleSessionExport(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  acknowledge: boolean,
+): Promise<DaemonMethodResult> {
+  const service = state.getSessionBrokerService?.();
+  if (!service) {
+    return unavailable();
+  }
+  // Reading proof or releasing its pin neither grants nor revokes this connection's device
+  // control, so the existing binding is deliberately left untouched.
+  const parsed = exportParams.safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      code: "session_config_invalid",
+      error: "prepareId, requestDigest and livenessOwnerToken are required",
+    };
+  }
+  const { prepareId, requestDigest, livenessOwnerToken } = parsed.data;
+  try {
+    const result = acknowledge
+      ? await service.broker.acknowledgeExport(prepareId, requestDigest, livenessOwnerToken)
+      : await service.broker.getExport(prepareId, requestDigest, livenessOwnerToken);
+    return result
+      ? { success: true, result: { ...result } }
+      : {
+          success: false,
+          code: "session_export_not_found",
+          error: "No session export has that prepare identity",
+        };
+  } catch (error) {
+    return exportRejection(error);
+  }
+}
+
+function exportRejection(error: unknown): DaemonMethodResult {
+  if (!(error instanceof SessionExportIdentityMismatchError)) {
+    throw error;
+  }
+  logger.warn(`Session broker rejected export identity: ${errorMessage(error)}`);
+  return { success: false, code: error.code, error: errorMessage(error) };
 }
 
 export async function handleBrokerSessionStatus(
@@ -196,3 +282,27 @@ function unavailable(): DaemonMethodResult {
     error: "Session-broker mode is not available in this provider",
   };
 }
+
+/** Session-broker socket dispatch shares the initialized daemon context. */
+export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMethodHandler]> = [
+  [
+    "daemon/prepareSession",
+    (request, state, _executions, signal, context) =>
+      handlePrepareBrokerSession(request, state, signal, context.socketSessionId),
+  ],
+  ["daemon/getSessionExport", (request, state) => handleGetSessionExport(request, state)],
+  [
+    "daemon/acknowledgeSessionExport",
+    (request, state) => handleAcknowledgeSessionExport(request, state),
+  ],
+  [
+    "daemon/sessionRequestStatus",
+    (request, state, _executions, _signal, context) =>
+      handleBrokerSessionStatus(request, state, context.socketSessionId),
+  ],
+  [
+    "daemon/abandonSessionRequest",
+    (request, state) => handleAbandonBrokerSessionRequest(request, state),
+  ],
+  ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
+];

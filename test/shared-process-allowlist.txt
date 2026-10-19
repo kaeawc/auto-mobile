@@ -16,6 +16,7 @@ test/cli/helpSchema.test.ts
 test/cli/iosNetworkFilter.test.ts
 test/cli/removedTools.test.ts
 test/cli/versionFlag.test.ts
+test/config/alwaysLoadTools.test.ts
 test/config/env.test.ts
 test/contracts/adbExecutor.test.ts
 test/contracts/androidCtrlProxy.test.ts
@@ -268,7 +269,7 @@ test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionBroker/admission.test.ts
 test/daemon/sessionBroker/connectionScope.test.ts
 test/daemon/sessionBroker/deviceNaming.test.ts
-test/daemon/sessionBroker/handlers.test.ts
+test/daemon/sessionBroker/exports.test.ts
 test/daemon/sessionBroker/hostConfig.test.ts
 test/daemon/sessionBroker/iosBaselineReset.test.ts
 test/daemon/sessionBroker/persistedIdentity.test.ts
@@ -606,6 +607,7 @@ test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts
 test/features/device/virtualDeviceCapabilities.test.ts
+test/features/deviceLifecycle/deviceLifecycleServerHost.test.ts
 test/features/element-resolution/ConsumerAgreement.test.ts
 test/features/element-resolution/DeviceHierarchyCapture.test.ts
 test/features/element-resolution/ElementResolver.acceptance.test.ts
@@ -1678,6 +1680,7 @@ test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
 test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
 test/utils/ios-cmdline-tools/simctlRuntimes.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
+test/utils/ios-cmdline-tools/simulatorLaunchHandle.test.ts
 test/utils/iosCtrlProxyOverride.test.ts
 test/utils/iosSimulatorContinuity.test.ts
 test/utils/logPruner.test.ts

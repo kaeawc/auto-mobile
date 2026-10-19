@@ -152,7 +152,7 @@ function adapterHarness(commands: string[], timeoutMs?: number) {
     },
   };
   const adapter = new AndroidSavedPrototypeRestoreDevice(
-    { deviceId: "serial", name: "Android", platform: "android", isEmulator: true },
+    { deviceId: "serial", name: "Android", platform: "android" },
     timer,
     async () => {
       calls.push("resolve");

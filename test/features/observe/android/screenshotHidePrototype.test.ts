@@ -19,7 +19,6 @@ import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 const device: BootedDevice = {
   deviceId: "screenshot-hide-prototype",
   platform: "android",
-  isEmulator: true,
   name: "Android",
 };
 

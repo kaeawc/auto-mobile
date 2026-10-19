@@ -26,7 +26,9 @@ import { harness as displayHarness } from "./displaySwipeHarness";
 
 const textObservation: ObserveResult = {
   ...textCapture,
-  timestamp: 0,
+  updatedAt: 0,
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1080, height: 2400 },
   systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
 };

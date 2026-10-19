@@ -58,7 +58,7 @@ describe("NavigateTo", () => {
         toolCallLog.push({ toolName: "tapOn", args });
 
         // Simulate navigation by recording a navigation event
-        const targetScreen = navigationMap.get(args.text);
+        const targetScreen = args.text === undefined ? undefined : navigationMap.get(args.text);
         if (targetScreen) {
           await fakeGraph.recordNavigationEvent({
             destination: targetScreen,
@@ -107,7 +107,14 @@ describe("NavigateTo", () => {
           ["SettingsScreen", 200],
           ["HomeScreen", 300],
         ] as const) {
-          await fakeGraph.recordNavigationEvent({ destination, timestamp });
+          await fakeGraph.recordNavigationEvent({
+            destination,
+            timestamp,
+            source: "TEST",
+            arguments: {},
+            metadata: {},
+            sequenceNumber: 0,
+          });
         }
         navigationMap.set("Settings", "SettingsScreen");
         navigateTo = new NavigateTo(device, fakeAdbFactory, {
@@ -363,7 +370,7 @@ describe("NavigateTo", () => {
       await navigateTo.execute(
         { targetScreen: "Screen2", platform: "android" },
         async (current, total, message) => {
-          progressUpdates.push({ current, total, message });
+          progressUpdates.push({ current, total: total ?? 0, message: message ?? "" });
         },
       );
 
@@ -487,10 +494,15 @@ describe("NavigateTo", () => {
       });
 
       let pressButtonArgs: Record<string, unknown> | undefined;
-      ToolRegistry.register("pressButton", "pressButton", {}, async (args) => {
-        pressButtonArgs = args;
-        return { success: true };
-      });
+      ToolRegistry.register(
+        "pressButton",
+        "pressButton",
+        z.object({}).passthrough(),
+        async (args) => {
+          pressButtonArgs = args;
+          return { success: true };
+        },
+      );
       const screenWaiter: ScreenTransitionWaiter = {
         waitForScreen: async (screenName) => screenName === "HomeScreen",
       };
@@ -543,7 +555,7 @@ describe("NavigateTo", () => {
         backPresses: 1,
         reason: "test recommendation",
       });
-      ToolRegistry.register("pressButton", "pressButton", {}, async () => ({
+      ToolRegistry.register("pressButton", "pressButton", z.object({}).passthrough(), async () => ({
         success: false,
         error: "back unavailable",
       }));
@@ -617,7 +629,7 @@ describe("NavigateTo", () => {
       const result = await navigateTo.execute(
         { targetScreen: "TargetScreen", platform: "android" },
         async (_current, _total, message) => {
-          progressMessages.push(message);
+          progressMessages.push(message ?? "");
         },
       );
 
@@ -676,7 +688,10 @@ describe("NavigateTo", () => {
       }
     });
 
-    test.each([{ path: [] }, { path: [toolEdge("HomeScreen", "OtherScreen")] }])(
+    test.each<{ path: NavigationEdge[] }>([
+      { path: [] },
+      { path: [toolEdge("HomeScreen", "OtherScreen")] },
+    ])(
       "does not claim arrival when the path does not end at the requested target: %j",
       async ({ path }) => {
         setPath(path);
@@ -833,10 +848,15 @@ describe("NavigateTo", () => {
         targetScreen: "TargetScreen",
       });
       let backPresses = 0;
-      ToolRegistry.register("pressButton", "Fake back tool", {}, async () => {
-        backPresses++;
-        return { success: true };
-      });
+      ToolRegistry.register(
+        "pressButton",
+        "Fake back tool",
+        z.object({}).passthrough(),
+        async () => {
+          backPresses++;
+          return { success: true };
+        },
+      );
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       navigateTo = new NavigateTo(device, fakeAdbFactory, {
@@ -877,7 +897,12 @@ describe("NavigateTo", () => {
       };
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      ToolRegistry.register("pressButton", "Fake back tool", {}, async () => ({ success: true }));
+      ToolRegistry.register(
+        "pressButton",
+        "Fake back tool",
+        z.object({}).passthrough(),
+        async () => ({ success: true }),
+      );
       navigateTo = new NavigateTo(device, fakeAdbFactory, {
         screenWaiter,
         navigationManager: fakeGraph,

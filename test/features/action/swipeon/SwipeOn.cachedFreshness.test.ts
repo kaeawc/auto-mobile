@@ -22,7 +22,9 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
   let restoreClient: ReturnType<typeof spyOn>;
 
   const observation = (isFresh?: boolean): ObserveResult => ({
-    timestamp: 1000,
+    updatedAt: 1000,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: { hierarchy: {} },

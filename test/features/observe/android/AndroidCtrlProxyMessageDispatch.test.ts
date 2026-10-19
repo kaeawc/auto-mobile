@@ -22,7 +22,6 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   const device: BootedDevice = {
     deviceId: "dispatch-test-device",
     platform: "android",
-    isEmulator: true,
     name: "Dispatch Test Device",
   };
   let timer: FakeTimer;

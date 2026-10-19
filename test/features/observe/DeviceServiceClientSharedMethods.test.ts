@@ -11,7 +11,6 @@ import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket"
 const device: BootedDevice = {
   deviceId: "shared-methods-test-device",
   platform: "android",
-  isEmulator: true,
   name: "Shared methods test device",
 };
 

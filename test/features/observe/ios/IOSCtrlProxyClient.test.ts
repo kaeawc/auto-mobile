@@ -235,15 +235,15 @@ describe("IOSCtrlProxyClient", function () {
   const createCapturingConnectionTimeoutWebSocketFactory = (
     timer: FakeTimer,
   ): {
-    factory: (url: string) => FakeWebSocket;
-    getSocket: () => FakeWebSocket | null;
+    factory: (url: string) => CapturingWebSocket;
+    getSocket: () => CapturingWebSocket | null;
     getCreatedSocketCount: () => number;
   } => {
-    const sockets: FakeWebSocket[] = [];
+    const sockets: CapturingWebSocket[] = [];
 
     return {
       factory: (url: string) => {
-        const socket = new FakeWebSocket(url, "timeout", 60000, timer);
+        const socket = new CapturingWebSocket(url, "timeout", 60000, timer);
         sockets.push(socket);
         return socket;
       },
@@ -312,9 +312,9 @@ describe("IOSCtrlProxyClient", function () {
 
   // The socket helpers wait on microtasks, not real turns: auto-advance fires a
   // pending request deadline whenever the test yields the event loop.
-  const waitForSocket = async (
-    getSocket: () => FakeWebSocket | null,
-  ): Promise<FakeWebSocket | null> => {
+  const waitForSocket = async <Socket extends FakeWebSocket>(
+    getSocket: () => Socket | null,
+  ): Promise<Socket | null> => {
     for (let attempt = 0; attempt < 100; attempt++) {
       const socket = getSocket();
       if (socket) {

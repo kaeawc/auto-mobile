@@ -36,7 +36,7 @@ export function frame({
 } = {}): ObserveResult {
   return {
     observationId: text,
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: { key, role: "external", posture: "unknown", generation: 1 },
     screenSize: { width: 200, height: 200 },

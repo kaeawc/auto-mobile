@@ -40,7 +40,7 @@ async function harness(commands: string[]) {
   const timer = new FakeTimer();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "mock-rules-test", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "mock-rules-test", platform: "android", name: "Android" },
     new FakeAdbExecutor(),
     {
       webSocketFactory: () => socket,

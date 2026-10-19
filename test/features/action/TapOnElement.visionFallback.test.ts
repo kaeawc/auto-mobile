@@ -22,7 +22,9 @@ const enabledVisionConfig: VisionFallbackConfig = {
 const device = { name: "test-device", platform: "android", id: "emulator-5554" } as any;
 
 const createObserveResult = (): ObserveResult => ({
-  timestamp: Date.now(),
+  updatedAt: Date.now(),
+  observationId: "test-observation",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: { hierarchy: { node: [] } } as any,

@@ -37,7 +37,6 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
     testDevice = {
       deviceId: "test-device-close-fallback",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
     AndroidCtrlProxyManager.resetInstances();

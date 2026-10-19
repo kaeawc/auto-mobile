@@ -754,18 +754,21 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   });
 
   // iOS keys carry no input-method package, so a text selector still resolves the key.
-  test.each(layerCases)('text "q" taps the keyboard key ($name)', async ({ layer, prototype }) => {
-    const { result, points } = await executeAt("q", {
-      ...registeredIos(registeredKeyboardCapture({ prototype })),
-      layer,
-    });
-    expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
-    expect(result.element["view-id"]).toBe(keyQ.elementId);
-    expect(points).toEqual([keyQ.point]);
-  });
+  test.each([...layerCases])(
+    'text "q" taps the keyboard key ($name)',
+    async ({ layer, prototype }) => {
+      const { result, points } = await executeAt("q", {
+        ...registeredIos(registeredKeyboardCapture({ prototype })),
+        layer,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.element["view-id"]).toBe(keyQ.elementId);
+      expect(points).toEqual([keyQ.point]);
+    },
+  );
 
-  test.each(layerCases)(
+  test.each([...layerCases])(
     "an app q sharing the key's bounds stays refused ($name)",
     async ({ layer, prototype }) => {
       const { result, points, actionError } = await executeAt("q", {

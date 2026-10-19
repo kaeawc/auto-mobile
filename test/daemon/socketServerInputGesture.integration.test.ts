@@ -131,7 +131,12 @@ describe("UnixSocketServer input/gesture*", () => {
       gestureId: "g1",
       point: { x: 100.5, y: 200.25 },
     });
-    expect(requestGestureStart).toHaveBeenCalledWith("g1", 100.5, 200.25, 1234);
+    expect(requestGestureStart).toHaveBeenCalledWith({
+      gestureId: "g1",
+      x: 100.5,
+      y: 200.25,
+      timeoutMs: 1234,
+    });
 
     expect(move.success).toBe(true);
     expect(requestGestureMove).toHaveBeenCalledWith("g1", 100.5, 400, 1234);

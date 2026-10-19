@@ -1,4 +1,5 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
@@ -288,7 +289,9 @@ describe("TapAnyElement Android gesture dispatch", () => {
     const adbTapCountAtRequest: number[] = [];
     const semanticCalls: string[] = [];
     const service = {
-      requestTapCoordinates: async (x: number, y: number, duration?: number) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, duration } = request;
+
         adbTapCountAtRequest.push(
           adb.getCommandCalls().filter((call) => call.command.includes("input touchscreen tap"))
             .length,

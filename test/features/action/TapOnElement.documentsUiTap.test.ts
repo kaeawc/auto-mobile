@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, test, spyOn } from "bun:test";
 import type { Element } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -20,7 +21,7 @@ function createTap(
   const adb = new FakeAdbClient();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const gestures: unknown[] = [];
+  const gestures: TapCoordinatesRequest[] = [];
   const service = new FakeCtrlProxy(timer);
   service.setSupportsNodeActionSelectors(options.supported ?? true);
   service.setActionResult({ success: options.success ?? true, action: "click", totalTimeMs: 1 });
@@ -28,13 +29,13 @@ function createTap(
     service.setFailureMode("requestNodeAction", new Error("Runner disconnected"));
   }
   const requestTap = service.requestTapCoordinates.bind(service);
-  service.requestTapCoordinates = async (...args) => {
-    gestures.push(args);
+  service.requestTapCoordinates = async (request) => {
+    gestures.push(request);
     if (options.dispatchedTapFails) {
-      args[6]?.();
+      request.onDispatch?.();
       return { success: false, totalTimeMs: 1, error: "Tap timed out after 5000ms" };
     }
-    return requestTap(...args);
+    return requestTap(request);
   };
   const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
   let tap: TapOnElement;
@@ -142,7 +143,7 @@ describe("DocumentsUI row activation (#6335)", () => {
       await execute(tap, { ...row, "resource-id": id });
       expect(service.getNodeActionHistory()).toHaveLength(0);
       expect(gestures).toEqual([
-        [540, 380, 10, undefined, undefined, undefined, expect.any(Function)],
+        expect.objectContaining({ x: 540, y: 380, duration: 10, onDispatch: expect.any(Function) }),
       ]);
       expect(adb.getAllCommands()).toHaveLength(0);
     });

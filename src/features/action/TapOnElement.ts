@@ -623,14 +623,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             "Container-scoped semantic link activation requires a stable native owner identity",
         };
       }
-      const result = await this.accessibilityService.requestActivateAccessibilityLink(
+      const result = await this.accessibilityService.requestActivateAccessibilityLink({
         text,
         occurrence,
         selector,
-        undefined,
-        undefined,
         signal,
-      );
+      });
       confirmActivation(result, () => {
         AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
       });
@@ -647,14 +645,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       const result = await IOSCtrlProxyClient.getInstance(
         this.device,
-      ).requestActivateAccessibilityLink(
+      ).requestActivateAccessibilityLink({
         text,
         occurrence,
-        ownerResourceId as string | undefined,
-        undefined,
-        undefined,
+        ownerResourceId: ownerResourceId as string | undefined,
         signal,
-      );
+      });
       confirmActivation(result, () => invalidateIosCacheOnSuccess(this.device, { success: true }));
       invalidateIosCacheOnSuccess(this.device, result);
       // The runner's "first of N candidate owners" note must reach the caller (#10082).

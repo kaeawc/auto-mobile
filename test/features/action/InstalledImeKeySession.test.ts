@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { expect, spyOn, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { ImeSessionFocusLostError } from "../../../src/features/action/ImeSessionFocusLostError";
@@ -611,10 +612,10 @@ test("a stale layout rejects the bound tap without fallback and still restores",
 });
 
 test("default tap sends the captured frame context once and fails closed", async () => {
-  const calls: unknown[][] = [];
+  const calls: TapCoordinatesRequest[] = [];
   const client = {
-    requestTapCoordinates: async (...args: unknown[]) => {
-      calls.push(args);
+    requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+      calls.push(request);
       return { success: false, error: "stale frame context" };
     },
   };
@@ -622,7 +623,7 @@ test("default tap sends the captured frame context once and fails closed", async
     success: false,
     error: "stale frame context",
   });
-  expect(calls).toEqual([[120, 420, 10, undefined, undefined, "frame-one"]]);
+  expect(calls).toEqual([{ x: 120, y: 420, duration: 10, frameContext: "frame-one" }]);
   expect(await tapFrameBoundImeKey(client, { x: 120, y: 420, frameContext: "" })).toEqual({
     success: false,
     error: "The IME key observation has no frame context.",

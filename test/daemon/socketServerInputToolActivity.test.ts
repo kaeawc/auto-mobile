@@ -70,7 +70,7 @@ beforeEach(() => {
   spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) =>
-      ack(args[6]),
+      ack(args[0].onDispatch),
     requestSwipe: (request: Parameters<AndroidCtrlProxyClient["requestSwipe"]>[0]) =>
       ack(request.onDispatch),
   });

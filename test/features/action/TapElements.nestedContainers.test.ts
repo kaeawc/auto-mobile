@@ -1,4 +1,5 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -103,7 +104,9 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
   const nativeActions: string[] = [];
   const coordinateTaps: { x: number; y: number }[] = [];
   const accessibilityService = {
-    requestTapCoordinates: async (x: number, y: number) => {
+    requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+      const { x, y } = request;
+
       coordinateTaps.push({ x, y });
       return { success: true, totalTimeMs: 1 };
     },

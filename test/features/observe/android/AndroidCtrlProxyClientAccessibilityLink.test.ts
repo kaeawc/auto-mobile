@@ -50,17 +50,15 @@ describe("Android semantic link activation outcomes", () => {
     });
     let dispatchCount = 0;
     try {
-      const pending = client.requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-        () => {
+      const pending = client.requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+        onDispatch: () => {
           dispatchCount++;
         },
-      );
+      });
       await written;
       if (mode === "timeout") {
         timer.advanceTime(5000);
@@ -114,14 +112,12 @@ describe("Android semantic link activation outcomes", () => {
     });
     const send = spyOn(socket, "send");
     try {
-      const pending = client.requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-      );
+      const pending = client.requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       for (let i = 0; i < 30; i++) {
         await Promise.resolve();
       }

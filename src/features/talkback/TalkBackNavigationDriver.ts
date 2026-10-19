@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type {
@@ -20,12 +21,7 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
    * @param y - Y coordinate
    * @param durationMs - Duration of the tap in milliseconds
    */
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    durationMs: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult>;
 
   /** Dispatch both activation taps in one device request. */
   requestDoubleTapCoordinates(
@@ -71,21 +67,15 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
     return this.accessibilityService.requestCurrentFocus();
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    durationMs: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.accessibilityService.requestTapCoordinates(
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const { x, y, duration: durationMs = 10, onDispatch } = request;
+
+    return this.accessibilityService.requestTapCoordinates({
       x,
       y,
-      durationMs,
-      undefined,
-      undefined,
-      undefined,
+      duration: durationMs,
       onDispatch,
-    );
+    });
   }
 
   async requestDoubleTapCoordinates(

@@ -106,7 +106,10 @@ const iosCases: IosCase[] = [
   ["requestSetText", (c) => c.requestSetText("hello")],
   ["requestClipboard", (c) => c.requestClipboard("get")],
   ["requestVoiceOverActivate", (c) => c.requestVoiceOverActivate("OK", "activate")],
-  ["requestActivateAccessibilityLink", (c) => c.requestActivateAccessibilityLink("Terms", 0)],
+  [
+    "requestActivateAccessibilityLink",
+    (c) => c.requestActivateAccessibilityLink({ text: "Terms", occurrence: 0 }),
+  ],
   ["requestHierarchySync", (c) => c.requestHierarchySync()],
 ];
 

@@ -338,7 +338,7 @@ export class TalkBackTapStrategy {
 
     if (action === "doubleTap") {
       fence?.assertCurrent();
-      const result = await this.requestTapCoordinates(driver, x, y, tapDuration, true);
+      const result = await this.dispatchDriverTap(driver, x, y, tapDuration, true);
       if (!result.success) {
         return {
           success: false,
@@ -361,7 +361,7 @@ export class TalkBackTapStrategy {
     // activate the focused element. Let callers continue to their last resort.
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const result = await this.requestTapCoordinates(driver, x, y, tapDuration);
+    const result = await this.dispatchDriverTap(driver, x, y, tapDuration);
     if (!result.success) {
       return {
         success: false,
@@ -394,7 +394,7 @@ export class TalkBackTapStrategy {
   ): Promise<TalkBackTapResult> {
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const focusResult = await this.requestTapCoordinates(driver, x, y, 50);
+    const focusResult = await this.dispatchDriverTap(driver, x, y, 50);
     if (!focusResult.success) {
       return {
         success: false,
@@ -557,13 +557,7 @@ export class TalkBackTapStrategy {
     // grow with reply latency the way two separate requests did (#9562).
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence.assertCurrent();
-    const activation = await this.requestTapCoordinates(
-      driver,
-      center.x,
-      center.y,
-      tapDuration,
-      true,
-    );
+    const activation = await this.dispatchDriverTap(driver, center.x, center.y, tapDuration, true);
 
     if (!activation.success) {
       assertLive();
@@ -595,7 +589,7 @@ export class TalkBackTapStrategy {
     return { success: true, method: "focus-navigation", warnings: [TALKBACK_ACTIVATION_WARNING] };
   }
 
-  private async requestTapCoordinates(
+  private async dispatchDriverTap(
     driver: TalkBackNavigationDriver,
     x: number,
     y: number,
@@ -610,7 +604,7 @@ export class TalkBackTapStrategy {
       };
       result = doubleTap
         ? await driver.requestDoubleTapCoordinates(x, y, onDispatch)
-        : await driver.requestTapCoordinates(x, y, durationMs, onDispatch);
+        : await driver.requestTapCoordinates({ x, y, duration: durationMs, onDispatch });
     } catch (error) {
       if (dispatched) {
         throw indeterminateTapError(errorMessage(error));

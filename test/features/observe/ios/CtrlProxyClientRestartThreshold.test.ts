@@ -124,7 +124,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         RealCtrlProxyWebSocketInTestError,
       );
     }
-    await expect(client.requestTapCoordinates(10, 20)).rejects.toBeInstanceOf(
+    await expect(client.requestTapCoordinates({ x: 10, y: 20 })).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
     await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));

@@ -1,3 +1,5 @@
+import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
+import type { GestureStartRequest } from "./CtrlProxyGestures";
 /**
  * The thin, positional-signature delegating facades of `AndroidCtrlProxyClient` (gestures, text,
  * certificates, storage, focus, prototypes, highlights), extracted from the client (#11846). Every
@@ -82,22 +84,21 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestSwipe(request);
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    // Deliberate Android-specific override: taps default to a 10ms press, not the
-    // delegate's cross-platform 0ms default. This is the one intentional divergence,
-    // not restated drift — see issue #3505.
-    duration: number = 10,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestTapCoordinates(
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const {
+      x,
+      y,
+      duration = 10,
+      timeoutMs,
+      perf,
+      frameContext,
+      onDispatch,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
+
+    return this.gestures.requestTapCoordinates({
       x,
       y,
       duration,
@@ -108,7 +109,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       onDispatch,
       displayId,
       beforeSend,
-    );
+    });
   }
 
   /** Double tap (TalkBack activation, tapOn/tapAny/tapAt) with device-side double-tap timing. */
@@ -192,17 +193,11 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
   // chained into a single continued AccessibilityService gesture by the runner.
-  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
-  async requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureStart(
+
+  async requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult> {
+    const { gestureId, x, y, timeoutMs, perf, displayId, beforeSend } = request;
+
+    return this.gestures.requestGestureStart({
       gestureId,
       x,
       y,
@@ -210,7 +205,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       perf,
       displayId,
       beforeSend,
-    );
+    });
   }
 
   async requestGestureMove(

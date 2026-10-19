@@ -95,7 +95,7 @@ describe("IOSCtrlProxyClient golden replay (Settings, tap General)", () => {
     // The recorded General row spans x 16-386, y 380-432; the capture tapped its centre.
     expect(labels(before!.hierarchy.hierarchy)).toContain("General");
 
-    const tap = await client.requestTapCoordinates(201, 406);
+    const tap = await client.requestTapCoordinates({ x: 201, y: 406 });
     expect(tap.success).toBe(true);
     const after = await client.requestHierarchySync();
 

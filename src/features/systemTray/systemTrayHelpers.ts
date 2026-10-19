@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { rawContentDesc, rawNodeValue, rawResourceId } from "../utility/elementProperties";
@@ -93,15 +94,7 @@ export interface SystemTrayAdb {
 
 export interface SystemTrayIosClient {
   requestSwipe(request: SwipeRequest): Promise<IosGestureResult>;
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-  ): Promise<IosGestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
 }
 
 export interface SystemTrayDependencies {

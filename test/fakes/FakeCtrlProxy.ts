@@ -1,3 +1,5 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { AndroidActivateAccessibilityLinkRequest } from "../../src/features/observe/android/AndroidActionDispatcher";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
@@ -109,18 +111,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   getGestureRequestLog(): Array<Record<string, unknown> & { type: string }> {
     return this.gestureRequestLog.map((request) => ({ ...request }));
   }
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration = 10,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    _frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const { x, y, duration = 10, onDispatch, signal, displayId, beforeSend } = request;
+
     beforeSend?.();
     this.checkFailure("tap");
     this.tapHistory.push({
@@ -1192,14 +1185,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const { selector, timeoutMs = 5000, signal, onDispatch } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("requestActivateAccessibilityLink");
     this.checkFailure("requestActivateAccessibilityLink");

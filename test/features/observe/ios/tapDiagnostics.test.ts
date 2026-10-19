@@ -81,11 +81,11 @@ describe("iOS opt-in tap diagnostics", () => {
       environment.setEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY", strategy);
       const { sent, gestures } = gestureHarness(environment);
       logger.setLogLevel(LogLevel.INFO);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(JSON.parse(sent[0])).not.toHaveProperty("tapStrategy");
       expect(JSON.parse(sent[0])).not.toHaveProperty("diagnostics");
       logger.setLogLevel(LogLevel.DEBUG);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(JSON.parse(sent[1])).toMatchObject({
         diagnostics: true,
         tapStrategy: strategy,
@@ -105,10 +105,10 @@ describe("iOS opt-in tap diagnostics", () => {
       const read = spyOn(environment, "getEnvVar");
       const { sent, gestures } = gestureHarness(environment);
       logger.setLogLevel(LogLevel.INFO);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(read).not.toHaveBeenCalled();
       logger.setLogLevel(LogLevel.DEBUG);
-      await gestures.requestTapCoordinates(443, 202);
+      await gestures.requestTapCoordinates({ x: 443, y: 202 });
       expect(JSON.parse(sent[1])).not.toHaveProperty("tapStrategy");
       expect(JSON.parse(sent[1]).diagnostics).toBe(true);
     } finally {
@@ -119,7 +119,7 @@ describe("iOS opt-in tap diagnostics", () => {
   test("debug off leaves the exact default wire JSON unchanged", async () => {
     logger.setLogLevel(LogLevel.INFO);
     const { sent, gestures } = gestureHarness();
-    await gestures.requestTapCoordinates(443, 202, 50);
+    await gestures.requestTapCoordinates({ x: 443, y: 202, duration: 50 });
     const wire = sent[0];
     const request: { requestId: string } = JSON.parse(wire);
     expect(wire).toBe(
@@ -292,7 +292,7 @@ describe("iOS opt-in tap diagnostics", () => {
 test("double tap adds only the optional doubleTap flag to the ordinary tap wire", async () => {
   logger.setLogLevel(LogLevel.INFO);
   const { gestures, sent } = gestureHarness();
-  await gestures.requestTapCoordinates(12.5, 24.25, 50);
+  await gestures.requestTapCoordinates({ x: 12.5, y: 24.25, duration: 50 });
   await gestures.requestDoubleTapCoordinates(12.5, 24.25, 5000);
   const single = JSON.parse(sent[0]!);
   const double = JSON.parse(sent[1]!);

@@ -1,3 +1,5 @@
+import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
+import type { AndroidActivateAccessibilityLinkRequest } from "./AndroidActionDispatcher";
 import { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
 import type {
   InteractionEvent,
@@ -300,18 +302,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult>;
 
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(request: DragRequest): Promise<A11yDragResult>;
 
@@ -413,13 +404,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   supportsCommand(name: string): Promise<boolean>;
 
   requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult>;
 
   supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
@@ -2297,18 +2282,12 @@ export class AndroidCtrlProxyClient
     return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
   }
 
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestActivateAccessibilityLink(
+    const { text, occurrence, selector, timeoutMs, perf, signal, onDispatch } = request;
+
+    return this.getActionDispatcher().requestActivateAccessibilityLink({
       text,
       occurrence,
       selector,
@@ -2316,7 +2295,7 @@ export class AndroidCtrlProxyClient
       perf,
       signal,
       onDispatch,
-    );
+    });
   }
 
   requestClipboard(

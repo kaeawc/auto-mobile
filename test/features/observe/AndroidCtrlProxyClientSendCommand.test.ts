@@ -122,15 +122,15 @@ const methods: Method[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, signal, onDispatch) =>
-      h.client.requestActivateAccessibilityLink(
-        " link ",
-        2,
+      h.client.requestActivateAccessibilityLink({
+        text: " link ",
+        occurrence: 2,
         selector,
-        50,
+        timeoutMs: 50,
         perf,
         signal,
         onDispatch,
-      ),
+      }),
     frame: (requestId) =>
       ctrlProxyRequests.requestActivateAccessibilityLink({
         requestId,

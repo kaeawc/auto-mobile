@@ -4935,16 +4935,15 @@ export class UnixSocketServer {
               signal,
               remainingTimeoutMs,
               (fenced, onDispatch) =>
-                client.requestTapCoordinates(
-                  args.x,
-                  args.y,
-                  args.duration,
-                  remainingTimeoutMs,
-                  undefined,
-                  args.frameContext,
+                client.requestTapCoordinates({
+                  x: args.x,
+                  y: args.y,
+                  duration: args.duration,
+                  timeoutMs: remainingTimeoutMs,
+                  frameContext: args.frameContext,
                   onDispatch,
-                  fenced,
-                ),
+                  signal: fenced,
+                }),
               dispatching,
             );
           }
@@ -4970,16 +4969,15 @@ export class UnixSocketServer {
             signal,
             gestureTimeoutMs,
             (fenced, onDispatch) =>
-              iosClient.requestTapCoordinates(
+              iosClient.requestTapCoordinates({
                 x,
                 y,
-                args.duration,
-                gestureTimeoutMs,
-                undefined,
-                args.frameContext,
-                fenced,
+                duration: args.duration,
+                timeoutMs: gestureTimeoutMs,
+                frameContext: args.frameContext,
+                signal: fenced,
                 onDispatch,
-              ),
+              }),
             dispatching,
           );
         },
@@ -5369,13 +5367,14 @@ export class UnixSocketServer {
     args: { gestureId: string; x: number; y: number; cancel: boolean },
     timeoutMs: number,
   ) {
+    const { gestureId, x, y, cancel } = args;
     switch (kind) {
       case "start":
-        return client.requestGestureStart(args.gestureId, args.x, args.y, timeoutMs);
+        return client.requestGestureStart({ gestureId, x, y, timeoutMs });
       case "move":
-        return client.requestGestureMove(args.gestureId, args.x, args.y, timeoutMs);
+        return client.requestGestureMove(gestureId, x, y, timeoutMs);
       case "end":
-        return client.requestGestureEnd(args.gestureId, args.x, args.y, args.cancel, timeoutMs);
+        return client.requestGestureEnd(gestureId, x, y, cancel, timeoutMs);
     }
   }
 

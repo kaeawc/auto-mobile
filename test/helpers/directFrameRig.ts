@@ -1,3 +1,4 @@
+import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
@@ -82,7 +83,9 @@ export interface DeviceClientFake {
   updateService?: () => Promise<void>;
   onDeviceCall?: (deviceId: string, method: string) => void;
   requestGestureEnd?: () => Promise<{ success: boolean }>;
-  requestGestureStart?: (gestureId: string) => Promise<{ success: boolean; error?: string }>;
+  requestGestureStart?: (
+    request: GestureStartRequest,
+  ) => Promise<{ success: boolean; error?: string }>;
   setPreference?: (...args: unknown[]) => Promise<void>;
   clearPreferenceStore?: (...args: unknown[]) => Promise<void>;
   /** Awaited by every device discovery before it answers. */
@@ -134,9 +137,9 @@ export function createDirectFrameRig(
     };
     return {
       getScreenScaleMetadata: () => null,
-      requestGestureStart: async (gestureId: string) => {
+      requestGestureStart: async (request: GestureStartRequest) => {
         called("start");
-        return (await client.requestGestureStart?.(gestureId)) ?? { success: true };
+        return (await client.requestGestureStart?.(request)) ?? { success: true };
       },
       requestGestureMove: async () => {
         called("move");

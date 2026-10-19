@@ -131,7 +131,13 @@ const methods: RequestMethod[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, s) =>
-      h.client.requestActivateAccessibilityLink("link", 1, undefined, LONG_TIMEOUT_MS, perf, s),
+      h.client.requestActivateAccessibilityLink({
+        text: "link",
+        occurrence: 1,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestClipboard",
@@ -180,7 +186,14 @@ const methods: RequestMethod[] = [
   {
     name: "requestTapCoordinates",
     invoke: (h, s) =>
-      h.client.requestTapCoordinates(1, 2, 50, LONG_TIMEOUT_MS, perf, undefined, undefined, s),
+      h.client.requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestDoubleTapCoordinates",
@@ -208,7 +221,14 @@ const methods: RequestMethod[] = [
   {
     name: "requestGestureStart",
     abortable: false,
-    invoke: (h) => h.client.requestGestureStart("g", 1, 2, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestGestureStart({
+        gestureId: "g",
+        x: 1,
+        y: 2,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+      }),
   },
   {
     name: "requestGestureMove",

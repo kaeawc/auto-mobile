@@ -756,17 +756,15 @@ describe("CtrlProxyVoiceOver", function () {
         const controller = new AbortController();
         let dispatchCount = 0;
         try {
-          const pending = client.requestActivateAccessibilityLink(
-            "Terms",
-            0,
-            undefined,
-            5000,
-            undefined,
-            controller.signal,
-            () => {
+          const pending = client.requestActivateAccessibilityLink({
+            text: "Terms",
+            occurrence: 0,
+            timeoutMs: 5000,
+            signal: controller.signal,
+            onDispatch: () => {
               dispatchCount++;
             },
-          );
+          });
           const socket = await waitForSocket(getSocket);
           await waitForSocketOpen(socket);
           await waitForSentMessages(socket);
@@ -821,14 +819,12 @@ describe("CtrlProxyVoiceOver", function () {
         });
       const controller = new AbortController();
       const reason = new Error("cancelled before connection");
-      const pending = new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-      );
+      const pending = new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       controller.abort(reason);
       finish(true);
       // An unfixed delegate sends despite cancellation; settle it so the regression fails promptly.
@@ -854,7 +850,11 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const resultPromise = client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -886,7 +886,11 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const resultPromise = client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -924,7 +928,11 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestActivateAccessibilityLink("T", 0, "x");
+        const resultPromise = client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -978,7 +986,11 @@ describe("CtrlProxyVoiceOver", function () {
           }),
         );
 
-        const result = await client.requestActivateAccessibilityLink("T", 0, "x");
+        const result = await client.requestActivateAccessibilityLink({
+          text: "T",
+          occurrence: 0,
+          ownerResourceId: "x",
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain(
           "runner does not support request_activate_accessibility_link",

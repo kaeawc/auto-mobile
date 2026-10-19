@@ -104,13 +104,13 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
     return { success: true, totalTimeMs: 0, action: "runner" };
   };
   spyOn(android, "requestTapCoordinates").mockImplementation(
-    (_x, _y, _duration, _timeout, _perf, _context, dispatch, signal) => send(signal, dispatch),
+    ({ onDispatch: dispatch, signal: signal }) => send(signal, dispatch),
   );
   spyOn(android, "requestSwipe").mockImplementation(({ signal, onDispatch }) =>
     send(signal, onDispatch),
   );
   spyOn(ios, "requestTapCoordinates").mockImplementation(
-    (_x, _y, _duration, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),
+    ({ signal: signal, onDispatch: dispatch }) => send(signal, dispatch),
   );
   spyOn(ios, "requestDrag").mockImplementation(({ signal, onDispatch }) =>
     send(signal, onDispatch),

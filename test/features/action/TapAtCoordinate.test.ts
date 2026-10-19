@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -373,24 +374,16 @@ describe("TapAtCoordinate", () => {
       }
       return { success: true };
     };
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: (_x, _y, _duration, _timeout, _perf, frameContext, onDispatch) =>
-        request(frameContext, onDispatch),
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: (tap: TapCoordinatesRequest) =>
+        request(tap.frameContext, tap.onDispatch),
     };
     // The iOS client takes its abort signal before the dispatch marker.
     const iosClient: IosCoordinateTapClient = {
       requestDoubleTapCoordinates: (_x, _y, _timeout, frame, _signal, onDispatch) =>
         request(frame, onDispatch),
-      requestTapCoordinates: (
-        _x,
-        _y,
-        _duration,
-        _timeout,
-        _perf,
-        frameContext,
-        _signal,
-        onDispatch,
-      ) => request(frameContext, onDispatch),
+      requestTapCoordinates: (tap: TapCoordinatesRequest) =>
+        request(tap.frameContext, tap.onDispatch),
     };
     const tapAt = new TapAtCoordinate(device, adb, {
       timer,
@@ -457,8 +450,10 @@ describe("TapAtCoordinate", () => {
     }
     let runnerDelivered = 0;
     const frames: Array<string | undefined> = [];
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext: frame, onDispatch } = request;
+
         frames.push(frame);
         if (frames.length === 2) {
           // No onDispatch: the runner proves this tap was never sent, so fallback is safe.
@@ -566,8 +561,10 @@ describe("TapAtCoordinate", () => {
     let current = "epoch:2";
     let delivered = 0;
     const frames: Array<string | undefined> = [];
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext: frame, onDispatch } = request;
+
         frames.push(frame);
         onDispatch?.();
         if (frame !== undefined && frame !== current) {
@@ -623,7 +620,9 @@ describe("TapAtCoordinate", () => {
       let invalidations = 0;
       const frames: Array<string | undefined> = [];
       const client: CoordinateTapClient = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { frameContext: frame } = request;
+
           frames.push(frame);
           delivered++;
           if (delivered === abortAfter) {
@@ -1086,7 +1085,9 @@ describe("TapAtCoordinate", () => {
     const reference = capture.reference;
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return dispatches.length === 1
           ? { success: false, error: "Stale frame context for input/tap" }
@@ -1130,7 +1131,9 @@ describe("TapAtCoordinate", () => {
     const reference = capture.reference;
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return { success: false, error: "Stale frame context for input/tap" };
       },
@@ -1192,8 +1195,10 @@ describe("TapAtCoordinate", () => {
   test.each([false, true])(
     "classifies explicit-display tap failure (dispatched %s)",
     async (dispatched) => {
-      const client: CoordinateTapClient<() => void> = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { onDispatch } = request;
+
           if (dispatched) {
             onDispatch?.();
           }
@@ -1236,17 +1241,9 @@ describe("TapAtCoordinate", () => {
       timer.enableAutoAdvance();
       const client = {
         supportsCommand: async () => ctrlProxy,
-        requestTapCoordinates: async (
-          _x: number,
-          _y: number,
-          _duration?: number,
-          _timeout?: number,
-          _perf?: unknown,
-          _frame?: string,
-          _onDispatch?: () => void,
-          _signal?: AbortSignal,
-          displayId?: number,
-        ) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { displayId } = request;
+
           expect(displayId).toBe(2);
           return { success: false, error: "Not connected" };
         },
@@ -1303,19 +1300,10 @@ describe("TapAtCoordinate", () => {
     "explicit display does not fall back after %s failure",
     async (failure) => {
       const controller = new AbortController();
-      const client: CoordinateTapClient<() => void> = {
-        requestTapCoordinates: async (
-          _x,
-          _y,
-          _duration,
-          _timeout,
-          _perf,
-          _frame,
-          _onDispatch,
-          _signal,
-          _display,
-          beforeSend,
-        ) => {
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { beforeSend } = request;
+
           if (failure === "abort") {
             controller.abort();
           } else if (failure !== "stale frame") {
@@ -1473,7 +1461,9 @@ describe("TapAtCoordinate", () => {
   test("reports the clamped Android pixel when dispatch fails at the screen edge", async () => {
     const dispatched: Array<{ x: number; y: number }> = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (x, y) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y } = request;
+
         dispatched.push({ x, y });
         throw new Error("native tap failed");
       },
@@ -2034,7 +2024,9 @@ describe("TapAtCoordinate", () => {
   test("re-observes and retries one Android stale-frame rejection when the frame token advances and targeting layout is unchanged", async () => {
     const dispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (x, y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, frameContext } = request;
+
         dispatches.push({ x, y, frameContext });
         return dispatches.length === 1
           ? {
@@ -2084,7 +2076,9 @@ describe("TapAtCoordinate", () => {
   test("rejects a stale-frame retry when its observation detects a fold", async () => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return dispatches.length === 1
           ? {
@@ -2129,7 +2123,9 @@ describe("TapAtCoordinate", () => {
     async ({ location, capture }) => {
       const dispatches: string[] = [];
       const client: CoordinateTapClient = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { frameContext } = request;
+
           dispatches.push(frameContext ?? "missing");
           return dispatches.length === 1
             ? {
@@ -2163,7 +2159,9 @@ describe("TapAtCoordinate", () => {
   test("refuses a stale-frame retry when the refreshed frame token is the rejected token", async () => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return dispatches.length === 1
           ? {
@@ -2203,7 +2201,9 @@ describe("TapAtCoordinate", () => {
   ])("preserves stale rejection after a genuine Android $label", async ({ refreshed }) => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return {
           success: false,
@@ -2231,7 +2231,9 @@ describe("TapAtCoordinate", () => {
   test("bounds Android stale-frame recovery to one retry", async () => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
-      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { frameContext } = request;
+
         dispatches.push(frameContext ?? "missing");
         return {
           success: false,
@@ -2309,8 +2311,10 @@ describe("TapAtCoordinate TalkBack", () => {
     observeScreen.setObserveResult(observation(10, 10));
     const transitions = new FakeDisplayTransitionReader();
     const plainCalls: number[][] = [];
-    const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (x, y, duration = 0) => {
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, duration = 0 } = request;
+
         plainCalls.push([x, y, duration]);
         return { success: true };
       },
@@ -2523,7 +2527,16 @@ describe("TapAtCoordinate TalkBack", () => {
     const controller = new AbortController();
     const frames: (string | undefined)[] = [];
     spyOn(h.client, "requestTapCoordinates").mockImplementation(
-      async (x, y, duration, _timeout, _perf, frame, onDispatch, signal, displayId, beforeSend) => {
+      async ({
+        x: x,
+        y: y,
+        duration: duration,
+        frameContext: frame,
+        onDispatch: onDispatch,
+        signal: signal,
+        displayId: displayId,
+        beforeSend: beforeSend,
+      }) => {
         expect([x, y, duration]).toEqual([1, 2, 50]);
         expect(signal).toBe(controller.signal);
         expect(displayId).toBeUndefined();
@@ -2555,7 +2568,7 @@ describe("TapAtCoordinate TalkBack", () => {
   test("default focus transport never retries a dispatched request with a lost reply", async () => {
     const h = setup(true, androidDevice, true);
     const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+      async ({ onDispatch: onDispatch }) => {
         onDispatch?.();
         throw new Error("Stale frame context mentioned in a lost reply");
       },
@@ -2618,18 +2631,15 @@ describe("TapAtCoordinate TalkBack", () => {
       const controller = new AbortController();
       const frames: (string | undefined)[] = [];
       const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-        async (
-          x,
-          y,
-          duration,
-          _timeout,
-          _perf,
-          frame,
-          onDispatch,
-          signal,
-          _displayId,
-          beforeSend,
-        ) => {
+        async ({
+          x: x,
+          y: y,
+          duration: duration,
+          frameContext: frame,
+          onDispatch: onDispatch,
+          signal: signal,
+          beforeSend: beforeSend,
+        }) => {
           expect([x, y, duration]).toEqual([1, 2, 50]);
           expect(signal).toBe(controller.signal);
           expect(beforeSend).toBeFunction();
@@ -2679,7 +2689,7 @@ describe("TapAtCoordinate TalkBack", () => {
         display: { key: "0", role: "unknown", generation: 7 },
       });
       const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-        async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+        async ({ onDispatch: onDispatch }) => {
           onDispatch?.();
           if (phase === "dispatched") {
             throw new Error("Stale frame context in a lost reply");
@@ -2727,7 +2737,7 @@ describe("TapAtCoordinate TalkBack", () => {
       ]);
       const frames: (string | undefined)[] = [];
       const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
-        async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+        async ({ frameContext: frame, onDispatch: onDispatch }) => {
           frames.push(frame);
           onDispatch?.();
           return { success: false, error: `Stale frame context: ${frame}` };

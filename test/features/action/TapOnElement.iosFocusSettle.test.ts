@@ -74,6 +74,10 @@ async function focusOnIos(
     settlesPostTapChange: false,
     verifiesRefreshedDisplay: false,
     promotesClickableAncestor: false,
+    settlesFocusChangeAfterTap: true,
+    rethrowsKeyboardOcclusion: false,
+    applyRefreshedObservationRotation: (...args) =>
+      iosClip.applyRefreshedObservationRotation(...args),
     longPressDurationMs: 1000,
   };
   const device: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "sim" };

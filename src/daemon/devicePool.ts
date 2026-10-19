@@ -8693,6 +8693,8 @@ export class DevicePool {
       rehydrationReservations: this.rehydrationReservations,
       intentionalShutdowns: this.intentionalShutdowns,
       isReservedForShutdown: (device: PooledDevice) => this.isReservedForShutdown(device),
+      reserveShutdownSessionIdentity: (deviceId: string) =>
+        this.reserveShutdownSessionIdentity(deviceId),
       restartReadiness: this.deviceReservations.restartReadiness,
       cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
         () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),

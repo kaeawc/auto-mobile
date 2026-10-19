@@ -3,7 +3,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   ForwardLeaseForeignDeviceOwnership,

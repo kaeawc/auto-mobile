@@ -8,7 +8,7 @@ import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRe
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";

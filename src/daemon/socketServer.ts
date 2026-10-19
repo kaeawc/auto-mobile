@@ -170,7 +170,7 @@ import {
   deviceAlreadyAssignedToAnotherSessionError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
-import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
+import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
 import { ToolRegistry } from "../server/toolRegistry";
 import {
   assertFrameTargetIdentityProven,

@@ -8,7 +8,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { SessionManager } from "../../src/daemon/sessionManager";

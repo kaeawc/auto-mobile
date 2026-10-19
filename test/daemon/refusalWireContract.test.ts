@@ -38,7 +38,7 @@ import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
 import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
 import * as sessionManager from "../../src/daemon/sessionManager";
-import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
+import * as sessionOwnership from "../../src/models/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
 import * as provisioning from "../../src/devices/exactDeviceProvisioning";
 import * as provisionDeviceError from "../../src/devices/ProvisionDeviceError";
@@ -46,8 +46,10 @@ import * as provisionDeviceCreateRejected from "../../src/devices/ProvisionDevic
 import * as deviceBootTimeout from "../../src/devices/DeviceBootTimeoutError";
 import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
+import * as inputOwnedError from "../../src/models/InputDeviceOwnedError";
+import * as deviceAssignedToBinding from "../../src/models/DeviceAssignedToBindingError";
 import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
 import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
@@ -141,14 +143,16 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/daemonMcpProxy": daemonProxy,
   "daemon/proxy/daemonErrors": daemonErrors,
   "daemon/sessionManager": sessionManager,
-  "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
+  "models/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
   "devices/exactDeviceProvisioning": provisioning,
   "devices/ProvisionDeviceError": provisionDeviceError,
   "devices/ProvisionDeviceCreateRejectedError": provisionDeviceCreateRejected,
   "devices/deviceBootService": deviceBoot,
   "devices/DeviceBootTimeoutError": deviceBootTimeout,
-  "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
+  "models/deviceAcquisitionRefusals": acquisitionRefusals,
+  "models/InputDeviceOwnedError": inputOwnedError,
+  "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
   "daemon/inputDeviceOwnership": inputOwnership,
   "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,

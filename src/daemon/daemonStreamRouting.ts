@@ -7,7 +7,7 @@ import type { NavigationGraphStreamSource } from "../features/navigation/Navigat
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import { holderOf } from "./deviceBinding";
 import type { DeviceDataStreamSocketServer } from "./deviceDataStreamSocketServer";
 import type { PooledDevice } from "./devicePool";

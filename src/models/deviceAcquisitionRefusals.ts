@@ -1,6 +1,6 @@
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import { ActionableError } from "../models/ActionableError";
-import { InputDeviceOwnedError } from "./inputDeviceOwnership";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "./deviceSessionRecovery";
+import { ActionableError } from "./ActionableError";
+import { InputDeviceOwnedError } from "./InputDeviceOwnedError";
 
 /**
  * A device whose previous session is still finishing its release cleanup (restores, recording

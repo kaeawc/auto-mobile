@@ -22,7 +22,7 @@ import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
 
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/models/deviceAcquisitionRefusals";
 
 const context = { toolName: "observe", source: "MCP" } as const;
 

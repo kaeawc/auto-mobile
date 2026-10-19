@@ -171,8 +171,8 @@ import {
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
-} from "./deviceAcquisitionRefusals";
-import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
+} from "../models/deviceAcquisitionRefusals";
+import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
 import { DAEMON_SESSION_NOT_ACTIVE_CODE, DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,

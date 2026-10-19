@@ -3,7 +3,7 @@ import type { Platform } from "../models";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import type { PooledDevice } from "./devicePool";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 

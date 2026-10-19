@@ -1,4 +1,4 @@
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../daemon/deviceAcquisitionRefusals";
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../models/deviceAcquisitionRefusals";
 import { ActionableError } from "../models";
 
 /** Shared retry evidence for an emulator whose AVD identity cannot be proved. */

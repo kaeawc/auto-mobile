@@ -1,6 +1,6 @@
 import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import { daemonShuttingDownMcpOutcome } from "../../../daemon/daemonShutdownOutcome";
-import { SessionReleasedDuringCreationError } from "../../../daemon/deviceAcquisitionRefusals";
+import { SessionReleasedDuringCreationError } from "../../../models/deviceAcquisitionRefusals";
 import {
   DaemonSessionCreationRejectedError,
   TerminalSessionError,

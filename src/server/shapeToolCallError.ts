@@ -57,7 +57,7 @@ import {
   SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_RELEASED_DURING_CREATION_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
-} from "../daemon/deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 
 export interface ToolCallErrorContext {
   toolName: string;

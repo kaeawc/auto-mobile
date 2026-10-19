@@ -20,7 +20,7 @@ import {
   DeviceTransportOfflineError,
   DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
   SessionCreationTimeoutError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";

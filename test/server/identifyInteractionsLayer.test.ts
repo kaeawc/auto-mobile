@@ -31,7 +31,7 @@ async function identify(result: ObserveResult, args: Record<string, unknown>) {
       timer: new FakeTimer(),
       createScreen: () => ({
         execute: screen.execute.bind(screen),
-        executeDeviceRead: screen.execute.bind(screen),
+        executeDeviceRead: () => screen.execute(),
         captureScreenshot: screen.captureScreenshot.bind(screen),
         appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
         getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),

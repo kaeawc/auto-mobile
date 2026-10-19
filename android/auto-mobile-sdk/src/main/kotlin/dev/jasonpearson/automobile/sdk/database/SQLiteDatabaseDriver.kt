@@ -2,7 +2,10 @@ package dev.jasonpearson.automobile.sdk.database
 
 import android.content.Context
 import android.database.Cursor
+import android.database.CursorIndexOutOfBoundsException
+import android.database.StaleDataException
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteReadOnlyDatabaseException
 import android.system.ErrnoException
 import android.system.Os
@@ -700,9 +703,17 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       }
     } catch (e: SQLiteReadOnlyDatabaseException) {
       if (mapReadOnlyFailureToPolicyError) throw DatabaseError.MutationNotAllowed()
-      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
-    } catch (e: Exception) {
-      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
+      throw databaseError(e)
+    } catch (e: SQLiteException) {
+      throw databaseError(e)
+    } catch (e: IllegalStateException) {
+      throw databaseError(e)
+    } catch (e: IllegalArgumentException) {
+      throw databaseError(e)
+    } catch (e: StaleDataException) {
+      throw databaseError(e)
+    } catch (e: CursorIndexOutOfBoundsException) {
+      throw databaseError(e)
     }
 
     return SQLExecutionResult.Query(columns = columns, rows = rows)
@@ -727,8 +738,12 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       // separate SELECT changes() call on a potentially different connection.
       val rowsAffected = db.compileStatement(query).executeUpdateDelete()
       return SQLExecutionResult.Mutation(rowsAffected = rowsAffected)
-    } catch (e: Exception) {
-      throw DatabaseError.SqlError(e.message ?: "Unknown SQL error")
+    } catch (e: SQLiteException) {
+      throw databaseError(e)
+    } catch (e: IllegalStateException) {
+      throw databaseError(e)
+    } catch (e: IllegalArgumentException) {
+      throw databaseError(e)
     }
   }
 
@@ -775,10 +790,20 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
       }
       openDatabases[path] = CachedDatabase(db, identity)
       return db
-    } catch (e: Exception) {
-      throw DatabaseError.SqlError("Failed to open database: ${e.message}")
+    } catch (e: SQLiteException) {
+      throw databaseError(e, "Failed to open database: ")
+    } catch (e: IllegalStateException) {
+      throw databaseError(e, "Failed to open database: ")
+    } catch (e: IllegalArgumentException) {
+      throw databaseError(e, "Failed to open database: ")
     }
   }
+
+  // Keep the existing message-only protocol error while sharing it across typed catches.
+  private fun databaseError(error: Exception, prefix: String? = null): DatabaseError.SqlError =
+    DatabaseError.SqlError(
+      if (prefix == null) error.message ?: "Unknown SQL error" else "$prefix${error.message}",
+    )
 
   private fun fileIdentity(path: String): FileIdentity? =
     try {
@@ -793,7 +818,10 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
   private fun closeDatabase(db: SQLiteDatabase) {
     try {
       if (db.isOpen) db.close()
-    } catch (error: Exception) {
+    } catch (error: SQLiteException) {
+      // Cleanup failure must not prevent eviction or closing the remaining handles.
+      Log.w("SQLiteDatabaseDriver", "Failed to close database", error)
+    } catch (error: IllegalStateException) {
       // Cleanup failure must not prevent eviction or closing the remaining handles.
       Log.w("SQLiteDatabaseDriver", "Failed to close database", error)
     }
@@ -810,10 +838,16 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
     // the WAL write connection. compileStatement().execute() bypasses that check.
     try {
       db.compileStatement("PRAGMA busy_timeout=5000").execute()
-    } catch (_: RuntimeException) {
+    } catch (_: SQLiteException) {
       db.rawQuery("PRAGMA busy_timeout=5000", null).use { cursor ->
         while (cursor.moveToNext()) {
           // Exhaust the cursor so SQLite applies the pragma on Robolectric.
+        }
+      }
+    } catch (_: IllegalStateException) {
+      db.rawQuery("PRAGMA busy_timeout=5000", null).use { cursor ->
+        while (cursor.moveToNext()) {
+          // Preserve the query fallback for a connection closed during statement execution.
         }
       }
     }

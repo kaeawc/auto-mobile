@@ -2,7 +2,7 @@
 # Best-effort Android emulator diagnostics collection for CI failures.
 set -euo pipefail
 
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../ios/run_with_timeout.sh"
 
 adb_timeout_seconds="${AUTOMOBILE_EMULATOR_DIAGNOSTICS_TIMEOUT_SECONDS:-10}"

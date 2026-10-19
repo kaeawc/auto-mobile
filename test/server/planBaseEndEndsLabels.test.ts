@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { toolPayload } from "../helpers/toolResponse";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
@@ -60,7 +62,7 @@ interface LongPlan {
   /** Replace what each step does after it reached the label's device (1-based step number). */
   setStep(step: (number: number) => Promise<void>): void;
   /** Run a three-step plan on label B under a plan call with this request deadline. */
-  run(planDeadlineMs?: number): Promise<PlanRunResult>;
+  run(planDeadlineMs?: number): Promise<PlanRunResult & { details?: unknown }>;
 }
 
 const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async (): Promise<void> => {
@@ -141,26 +143,34 @@ const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async ()
         const deadline = hunt.timer.now() + planDeadlineMs;
         executionTracker.setExecutionDeadline(planExecution.id, () => deadline);
         try {
-          const response: { structuredContent?: PlanRunResult; content: Array<{ text: string }> } =
-            await runWithToolSelectionContext(
-              {
-                execution: {
-                  executionId: planExecution.id,
-                  startTime: planExecution.startTime,
-                },
+          const response = await runWithToolSelectionContext(
+            {
+              execution: {
+                executionId: planExecution.id,
+                startTime: planExecution.startTime,
               },
-              () =>
-                ToolRegistry.getTool("executePlan")!.handler({
-                  planContent: twoDevicePlan(["B", "B", "B"]),
-                  startStep: 0,
-                  platform: "ios",
-                  sessionUuid: BASE,
-                  deviceAllocationTimeoutMs: 1_000,
-                  abortStrategy: "immediate",
-                  [INTERNAL_MCP_SESSION_PARAM]: OWNER,
-                }),
-            );
-          return response.structuredContent ?? JSON.parse(response.content[0].text);
+            },
+            () =>
+              ToolRegistry.getTool("executePlan")!.handler({
+                planContent: twoDevicePlan(["B", "B", "B"]),
+                startStep: 0,
+                platform: "ios",
+                sessionUuid: BASE,
+                deviceAllocationTimeoutMs: 1_000,
+                abortStrategy: "immediate",
+                [INTERNAL_MCP_SESSION_PARAM]: OWNER,
+              }),
+          );
+          return z
+            .object({
+              success: z.boolean().optional(),
+              error: z.string().optional(),
+              code: z.string().optional(),
+              retryable: z.boolean().optional(),
+              details: z.unknown().optional(),
+            })
+            .passthrough()
+            .parse(toolPayload(response));
         } finally {
           executionTracker.endExecution(planExecution.id);
         }
@@ -368,7 +378,8 @@ for (const reason of ["cleanup-expired", "heartbeat-timeout"] as const) {
       await sessionManager.releaseSession(BASE, reason);
       const ended = sessionManager.peekTerminalAnswerForEndedSession(BASE)!;
       expect(
-        planBaseEndFields(BASE, false, { index: 0, tool: "observe", error: String(ended) }).details,
+        planBaseEndFields(BASE, false, { stepIndex: 0, tool: "observe", error: String(ended) })
+          .details,
       ).toEqual({
         sessionUuid: BASE,
         reason,

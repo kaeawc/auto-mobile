@@ -10,6 +10,7 @@ import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { logger } from "../../utils/logger";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -401,6 +402,7 @@ export class LaunchApp extends BaseVisualChange {
       );
     } catch (error) {
       this.assertLaunchNotAborted(signal);
+      rethrowDeviceTransportUnavailable(error);
       logger.warn(
         `[LaunchApp] Could not confirm ${packageName} is still installed after the launcher intent failed: ${errorMessage(error)}`,
         error,

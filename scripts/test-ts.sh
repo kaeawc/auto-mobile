@@ -62,7 +62,7 @@ if [[ "${RUNNER_OS:-}" == "macOS" && "$cores" -ge 3 ]]; then
 fi
 
 unit_workers="${AUTOMOBILE_UNIT_TEST_WORKERS:-$default_workers}"
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 per_test_timeout_ms="$(bun_test_timeout_ms "$runner_os")"
 case "$mode" in
@@ -98,7 +98,19 @@ if ! [[ "$isolated_chunk_size" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
 fi
 validate_positive_integer "AUTOMOBILE_TEST_TIMEOUT_MS" "$per_test_timeout_ms"
 
+# Capture an expected failure explicitly, preserving the caller's errexit option.
+# The command runs in this shell so its result variables remain available.
+run_capture_status() {
+  local caller_options="$-" captured_status
+  set +e
+  "$@"
+  captured_status=$?
+  if [[ "$caller_options" == *e* ]]; then set -e; fi
+  RUN_STATUS=$captured_status
+}
+
 run_test_command() {
+  local caller_options="$-"
   if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
     validate_positive_integer \
       "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
@@ -112,7 +124,7 @@ run_test_command() {
   fi
 
   if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
-    # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+    # shellcheck source=scripts/ios/run_with_timeout.sh
     source "$ROOT/scripts/ios/run_with_timeout.sh"
     local start_seconds
     local elapsed_seconds
@@ -122,7 +134,7 @@ run_test_command() {
     set +e
     run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$@"
     status=$?
-    set -e
+    if [[ "$caller_options" == *e* ]]; then set -e; fi
     elapsed_seconds=$(($(date +%s) - start_seconds))
     if [[ "$status" -eq 124 && ( "$mode" == "stress" || "$mode" == "coverage" ) ]]; then
       local mode_label
@@ -296,17 +308,16 @@ discover_unit_test_files() {
 }
 
 # Markdown backticks are literal formatting, not shell substitutions.
-# shellcheck disable=SC2016
 randomized_failure_summary() {
   local status="$?"
   if [[ "$status" -ne 0 && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       printf '### Randomized unit lane failed (exit %s)\n\n' "$status"
-      printf 'Seed: `%s`\n\n' "$AUTOMOBILE_UNIT_RANDOM_SEED"
-      printf 'Reproduce the same unit file list:\n```bash\n'
+      printf "Seed: \`%s\`\n\n" "$AUTOMOBILE_UNIT_RANDOM_SEED"
+      printf "Reproduce the same unit file list:\n\`\`\`bash\n"
       printf 'AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_RANDOM_SEED=%s bash scripts/test-ts.sh unit\n' "$AUTOMOBILE_UNIT_RANDOM_SEED"
-      printf '```\nEquivalent Bun invocation (explicit unit files):\n```bash\n'
-      printf 'bun test --randomize --seed=%s <files>\n```\n' "$AUTOMOBILE_UNIT_RANDOM_SEED"
+      printf "\`\`\`\nEquivalent Bun invocation (explicit unit files):\n\`\`\`bash\n"
+      printf "bun test --randomize --seed=%s <files>\n\`\`\`\n" "$AUTOMOBILE_UNIT_RANDOM_SEED"
     } >> "$GITHUB_STEP_SUMMARY"
   fi
 }
@@ -429,9 +440,9 @@ run_runner_calibration() {
   fi
   # Best effort: a failed or stalled probe only loses this sample; it must
   # never fail or stall the shard, so its status is reported and dropped.
-  # shellcheck disable=SC2310 # Deliberate: a probe failure must not exit the shard.
-  if ! run_with_timeout "$UNIT_CALIBRATION_TIMEOUT_SECONDS" \
-    bun "$ROOT/scripts/lib/runner-calibration.ts" probe "$out" "$label"; then
+  run_capture_status run_with_timeout "$UNIT_CALIBRATION_TIMEOUT_SECONDS" \
+    bun "$ROOT/scripts/lib/runner-calibration.ts" probe "$out" "$label"
+  if [[ "$RUN_STATUS" -ne 0 ]]; then
     printf 'test-ts: runner calibration probe failed (%s); continuing without this sample\n' "$label" >&2
   fi
 }
@@ -464,76 +475,76 @@ launch_unit_shard() {
     return 0
   fi
 
-  (
-    shard_started="$(date +%s)"
-    timing_log="$shard_root/timing-shard-${shard}.ndjson"
-    # These exports intentionally belong to the unit-shard subshell.
-    # shellcheck disable=SC2030
-    export AUTOMOBILE_TEST_TIMING_LOG="$timing_log"
-    # shellcheck disable=SC2030
-    export AUTOMOBILE_WATCHDOG_TIMING_LOG="$timing_log"
-    export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt"
-    # shellcheck disable=SC2030
-    export AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}"
-    export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
-    local calibration_file="${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}/calibration-${shard_mode}-shard-${shard}.tsv"
-    local calibration_label="${shard_mode} shard ${shard_number} attempt ${attempt}"
-    shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
-    if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
-      shard_args+=(
-        --reporter junit
-        --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
-      )
-    fi
-    configure_unit_shard_groups "$shard"
-    local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
-    if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
-      # One child owns the sequential loop: the watchdog bounds ALL chunks,
-      # including startup/report work, and still signals their process group.
-      shard_args=(bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
-        "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
-      if [[ -n "$chunk_deadline" ]]; then
-        shard_budget=$((chunk_deadline - $(date +%s)))
-        if [[ "$shard_budget" -le 0 ]]; then
-          # The lane deadline passed during discovery/launch, so the watchdog
-          # never runs. Leave the snapshot it would have written (write-then-
-          # rename, never an empty or partial file) so the artifact says why.
-          snapshot_tmp="${AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE}.tmp.$$"
-          printf 'chunk deadline expired before %s started (budget %ss; discovery or startup consumed it)\n' \
-            "$AUTOMOBILE_WATCHDOG_LABEL" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" > "$snapshot_tmp"
-          mv -f "$snapshot_tmp" "$AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE"
-          exit 124
-        fi
+  # Command-scoped exports keep the parent integration defaults independent.
+  AUTOMOBILE_TEST_TIMING_LOG="$shard_root/timing-shard-${shard}.ndjson" \
+  AUTOMOBILE_WATCHDOG_TIMING_LOG="$shard_root/timing-shard-${shard}.ndjson" \
+  AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt" \
+  AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}" \
+  AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 \
+    run_unit_shard_attempt > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
+  pids[shard]=$!
+}
+
+# Runs in the background shell launched above; reads the launcher's dynamic locals.
+run_unit_shard_attempt() {
+  shard_started="$(date +%s)"
+  timing_log="$shard_root/timing-shard-${shard}.ndjson"
+  local calibration_file="${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}/calibration-${shard_mode}-shard-${shard}.tsv"
+  local calibration_label="${shard_mode} shard ${shard_number} attempt ${attempt}"
+  shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
+  if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
+    shard_args+=(
+      --reporter junit
+      --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
+    )
+  fi
+  configure_unit_shard_groups "$shard"
+  local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
+  if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+    # One child owns the sequential loop: the watchdog bounds ALL chunks,
+    # including startup/report work, and still signals their process group.
+    shard_args=(bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
+      "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
+    if [[ -n "$chunk_deadline" ]]; then
+      shard_budget=$((chunk_deadline - $(date +%s)))
+      if [[ "$shard_budget" -le 0 ]]; then
+        # The lane deadline passed during discovery/launch, so the watchdog
+        # never runs. Leave the snapshot it would have written (write-then-
+        # rename, never an empty or partial file) so the artifact says why.
+        snapshot_tmp="${AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE}.tmp.$$"
+        printf 'chunk deadline expired before %s started (budget %ss; discovery or startup consumed it)\n' \
+          "$AUTOMOBILE_WATCHDOG_LABEL" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" > "$snapshot_tmp"
+        mv -f "$snapshot_tmp" "$AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE"
+        exit 124
       fi
     fi
-    run_runner_calibration "$calibration_file" "$calibration_label start"
-    if [[ -n "$shard_budget" ]]; then
-      validate_positive_integer \
-        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
-        "$shard_budget"
-      shard_status=0
-      set +e
-      run_with_timeout "$shard_budget" \
-        ${shard_args[@]+"${shard_args[@]}"} \
-        ${shard_files[@]+"${shard_files[@]}"}
-      shard_status=$?
-      set -e
-    else
-      shard_status=0
+  fi
+  run_runner_calibration "$calibration_file" "$calibration_label start"
+  if [[ -n "$shard_budget" ]]; then
+    validate_positive_integer \
+      "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
+      "$shard_budget"
+    shard_status=0
+    set +e
+    run_with_timeout "$shard_budget" \
       ${shard_args[@]+"${shard_args[@]}"} \
-        ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
-    fi
-    # The parent reaps shards by polling, after the end probe and timing
-    # summary, so its clock would overstate the test run (#10583). Record this
-    # attempt's own test wall time before the end probe and timing summary.
-    printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
-    run_runner_calibration "$calibration_file" "$calibration_label end"
-    if [[ -s "$timing_log" ]]; then
-      bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
-    fi
-    exit "$shard_status"
-  ) > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
-  pids[shard]=$!
+      ${shard_files[@]+"${shard_files[@]}"}
+    shard_status=$?
+    set -e
+  else
+    shard_status=0
+    ${shard_args[@]+"${shard_args[@]}"} \
+      ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
+  fi
+  # The parent reaps shards by polling, after the end probe and timing
+  # summary, so its clock would overstate the test run (#10583). Record this
+  # attempt's own test wall time before the end probe and timing summary.
+  printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
+  run_runner_calibration "$calibration_file" "$calibration_label end"
+  if [[ -s "$timing_log" ]]; then
+    bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
+  fi
+  exit "$shard_status"
 }
 
 # Best effort, bounded lookup of this shard's exact attempt. Missing/failed
@@ -548,10 +559,14 @@ unit_shard_is_contended() {
   if [[ "$contended_probe_key" != "$shard:${shard_attempts[$shard]}" ]]; then
     contended_probe_key="$shard:${shard_attempts[$shard]}"
     contended_slowdown=""
-    # shellcheck disable=SC2310 # Lookup failure means no usable calibration.
-    if ! contended_slowdown="$(run_with_timeout "$UNIT_CALIBRATION_TIMEOUT_SECONDS" \
+    local lookup_status caller_options="$-"
+    set +e
+    contended_slowdown="$(run_with_timeout "$UNIT_CALIBRATION_TIMEOUT_SECONDS" \
       bun "$ROOT/scripts/lib/runner-calibration.ts" shard-attempt-slowdown \
-      "${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}" "shard-$shard" "${shard_attempts[$shard]}" 2>/dev/null)"; then
+      "${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}" "shard-$shard" "${shard_attempts[$shard]}" 2>/dev/null)"
+    lookup_status=$?
+    if [[ "$caller_options" == *e* ]]; then set -e; fi
+    if [[ "$lookup_status" -ne 0 ]]; then
       contended_slowdown=""
       return 1
     fi
@@ -623,9 +638,9 @@ unit_shard_should_retry() {
   if [[ "$status" -ne 124 ]] && ! [[ "$status" -ge 129 && "$status" -le 192 ]]; then
     return 1
   fi
-  # shellcheck disable=SC2310 # Predicate intentionally handles lookup failure.
-  if [[ "$status" -eq 124 ]] && unit_shard_is_contended "$shard"; then
-    return 1
+  if [[ "$status" -eq 124 ]]; then
+    run_capture_status unit_shard_is_contended "$shard"
+    if [[ "$RUN_STATUS" -eq 0 ]]; then return 1; fi
   fi
   if [[ -n "$lane_cap" ]]; then
     elapsed=$(($(date +%s) - lane_start))
@@ -698,8 +713,8 @@ finish_unit_shard() {
   fi
   shard_statuses[shard]="$status"
   if [[ "$status" -eq 124 ]]; then
-    # shellcheck disable=SC2310 # No sample retains the ordinary timeout diagnostic.
-    if unit_shard_is_contended "$shard"; then
+    run_capture_status unit_shard_is_contended "$shard"
+    if [[ "$RUN_STATUS" -eq 0 ]]; then
       report_contended_unit_shard "$shard" "$suffix"
     fi
     printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget%s\n' "$shard_mode" "$number" "$suffix" >&2
@@ -781,7 +796,7 @@ run_windows_integration_shards() {
     echo "Safe-tier list not found: ${tier_file}" >&2
     return 2
   fi
-  # shellcheck source=scripts/lib/integration-safe-tier.sh disable=SC1091
+  # shellcheck source=scripts/lib/integration-safe-tier.sh
   source "$ROOT/scripts/lib/integration-safe-tier.sh"
   while IFS= read -r path; do
     if [[ -f "$path" ]]; then
@@ -853,7 +868,7 @@ run_unit_shards() {
     validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
     chunk_deadline=$(($(date +%s) + AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS))
   fi
-  # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+  # shellcheck source=scripts/ios/run_with_timeout.sh
   source "$ROOT/scripts/ios/run_with_timeout.sh"
 
   rm -rf "$shard_root"
@@ -944,12 +959,14 @@ run_unit_shards() {
       shard_status=0
       wait "${pids[$index]}" || shard_status=$?
       if [[ "$shard_mode" == unit && "$shard_status" -eq 124 ]]; then
-        # shellcheck disable=SC2310 # Missing/below-threshold calibration is expected.
-        unit_shard_is_contended "$index" || true
+        run_capture_status unit_shard_is_contended "$index"
         report_unit_timeout_summary "$index"
       fi
-      # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
-      if [[ "${shard_attempts[$index]}" -eq 1 ]] && unit_shard_should_retry "$index" "$shard_status"; then
+      RUN_STATUS=1
+      if [[ "${shard_attempts[$index]}" -eq 1 ]]; then
+        run_capture_status unit_shard_should_retry "$index" "$shard_status"
+      fi
+      if [[ "$RUN_STATUS" -eq 0 ]]; then
         retry_unit_shard "$index" "$shard_status"
         retry_shards+=("$index")
         still_pending+=("$index")
@@ -1080,11 +1097,8 @@ case "$mode" in
     if [[ "$runner_os" != "Windows" ]]; then
       mkdir -p scratch
       # These assignments run in the parent shell, independent of unit shards.
-      # shellcheck disable=SC2031
       export AUTOMOBILE_TEST_TIMING_LOG="${AUTOMOBILE_TEST_TIMING_LOG:-scratch/integration-file-timings-$$.ndjson}"
-      # shellcheck disable=SC2031
       export AUTOMOBILE_WATCHDOG_TIMING_LOG="${AUTOMOBILE_WATCHDOG_TIMING_LOG:-$AUTOMOBILE_TEST_TIMING_LOG}"
-      # shellcheck disable=SC2031
       export AUTOMOBILE_WATCHDOG_LABEL="${AUTOMOBILE_WATCHDOG_LABEL:-integration test}"
       integration_args+=(--no-orphans --preload "$ROOT/test/setup/fileTimingProbe.ts")
     fi
@@ -1188,14 +1202,12 @@ case "$mode" in
         transport_status=0
         # A failed process may still write a useful JUnit report. Run the
         # remaining files unless the caller explicitly requested fail-fast.
-        # shellcheck disable=SC2310
-        if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_test_command \
+        AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$transport_suite_timeout" run_capture_status run_test_command \
           "${integration_args[@]}" \
           test/server/proxyServerTransportFailure.integration.test.ts \
-          "${transport_args[@]+"${transport_args[@]}"}"; then
-          :
-        else
-          transport_status=$?
+          "${transport_args[@]+"${transport_args[@]}"}"
+        transport_status="$RUN_STATUS"
+        if [[ "${transport_status}" -ne 0 ]]; then
           if [[ "$fail_fast" == true ]]; then
             if [[ -n "$report_outfile" && -f "$report_dir/transport.xml" ]]; then
               cp "$report_dir/transport.xml" "$report_outfile"
@@ -1256,13 +1268,9 @@ case "$mode" in
               file_args[report_arg_index]="${report_arg_prefix}${file_report}"
             fi
             file_status=0
-            # shellcheck disable=SC2310
-            if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$file_timeout" run_test_command \
-              "${integration_args[@]}" "$integration_file" "${file_args[@]+"${file_args[@]}"}"; then
-              :
-            else
-              file_status=$?
-            fi
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$file_timeout" run_capture_status run_test_command \
+              "${integration_args[@]}" "$integration_file" "${file_args[@]+"${file_args[@]}"}"
+            file_status="$RUN_STATUS"
             if [[ -n "$report_outfile" && -f "$file_report" ]]; then
               per_file_reports+=("$file_report")
             fi
@@ -1273,15 +1281,11 @@ case "$mode" in
             main_index=$((main_index + 1))
           done
         else
-          # shellcheck disable=SC2310
-          if AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_test_command \
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$integration_remaining" run_capture_status run_test_command \
             "${integration_args[@]}" \
             "${main_targets[@]}" \
-            "${main_args[@]+"${main_args[@]}"}"; then
-            :
-          else
-            main_status=$?
-          fi
+            "${main_args[@]+"${main_args[@]}"}"
+          main_status="$RUN_STATUS"
         fi
         if [[ -n "$report_outfile" && "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
           if (( ${#per_file_reports[@]} > 0 )); then
@@ -1419,7 +1423,7 @@ case "$mode" in
           export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${coverage_shard}/${coverage_shards}"
         fi
         if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
-          # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+          # shellcheck source=scripts/ios/run_with_timeout.sh
           source "$ROOT/scripts/ios/run_with_timeout.sh"
           run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "${coverage_chunks[@]}"
         else

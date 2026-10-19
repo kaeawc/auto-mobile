@@ -61,11 +61,11 @@ import { FakeToolSelectionProfileProvenanceLoader } from "../fakes/FakeToolSelec
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
-import type {
-  BindingExecOwner,
-  BindingRegistry,
-} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingExecOwner } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import {
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { McpClientFactory } from "../../src/daemon/socketServer";
 import { toolErrorResult, type WireFixture } from "../daemon/helpers/desktopWireHarness";
 import {
@@ -449,7 +449,7 @@ export class LivenessScenario {
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
   private readonly bindingsEnabled: boolean;
   private readonly proxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
-  private bindings: BindingRegistry | undefined;
+  private bindings: SqliteBindingRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
   private readonly deviceNames: Record<string, string>;

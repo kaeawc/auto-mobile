@@ -15,9 +15,6 @@ import { releasedRowStatus } from "./releaseReasons";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import { SupersededRowReasserts } from "./supersededRowReasserts";
 
-/** In-process refusal; unlike a SQL miss it needs no peer/generation reclassification. */
-export class TerminalReleaseGenerationRefusedError extends DeviceSessionRowNotReleasableError {}
-
 export const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 
 export interface DesiredReleaseRow {

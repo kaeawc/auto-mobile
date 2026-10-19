@@ -12,7 +12,7 @@ import { VoiceOverToggle } from "../../src/features/accessibility/VoiceOverToggl
 import type { BootedDevice } from "../../src/models";
 import type { VoiceOverResult } from "../../src/models/AccessibilityResult";
 import { ActionableError } from "../../src/models/ActionableError";
-import { accessibilityDetector } from "../../src/features/accessibility/AccessibilityDetector";
+import { accessibilityDetector } from "../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../src/features/accessibility/IosVoiceOverDetector";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";

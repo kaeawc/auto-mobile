@@ -37,6 +37,7 @@ const EXCLUDED_FILES = new Set([
   "decisions/ios-user-files-provider.md",
   "decisions/mcp-sdk-v2-split-packages.md",
   "decisions/prototype-request-retrofit.md",
+  "decisions/types-bun-test-typecheck.md",
 ]);
 // Copied files mirror root documents (lychee/deploy copy CHANGELOG.md into
 // docs/), so their release-note text, which can legitimately mention "TODOs",

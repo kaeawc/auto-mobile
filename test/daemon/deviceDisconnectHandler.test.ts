@@ -8,7 +8,7 @@ import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import type { DeviceInfo } from "../../src/models";
-import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainUntil } from "../helpers/fakeTimerStepping";

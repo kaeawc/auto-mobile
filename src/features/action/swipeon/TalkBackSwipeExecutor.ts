@@ -24,7 +24,7 @@ import type { AccessibilityNodeSelector } from "../../observe/android/types";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   type AccessibilityDetector,
-} from "../../accessibility/interfaces/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import {
@@ -385,16 +385,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     throwIfAborted(signal);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     gestureOptions?.displayFence?.assertCurrent();
-    const a11yResult = await this.accessibilityService.requestTwoFingerSwipe(
+    const a11yResult = await this.accessibilityService.requestTwoFingerSwipe({
       x1,
       y1,
       x2,
       y2,
       duration,
       offset,
-      5000,
-      perf || new NoOpPerformanceTracker(),
-    );
+      timeoutMs: 5000,
+      perf: perf || new NoOpPerformanceTracker(),
+    });
     throwIfAborted(signal);
 
     if (a11yResult.success) {

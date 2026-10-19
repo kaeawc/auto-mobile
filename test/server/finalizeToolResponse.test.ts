@@ -20,6 +20,7 @@ import {
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { GFXINFO_DUMP_MARKER } from "../../src/features/observe/output/ObserveResultOutput";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import type { LayoutWarning } from "../../src/models/ObservationInsets";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
@@ -4729,14 +4730,14 @@ describe("finalizeToolResponse — scope-then-cap for layoutWarnings (issue #507
     // One in-region node (top) plus 120 out-of-region nodes (bottom), each distinct bounds.
     const inRegionBounds = { left: 0, top: 100, right: 200, bottom: 160 };
     const outNodes = Array.from({ length: 120 }, (_, i) => ({
-      "resource-id": `com.example:id/out_${i}`,
+      $: { "resource-id": `com.example:id/out_${i}` },
       bounds: { left: 0, top: 1300 + i, right: 200, bottom: 1360 + i },
     }));
     const mkWarning = (
-      bounds: Record<string, number>,
+      bounds: LayoutWarning["element"]["bounds"],
       severity: "warning" | "info",
       overflow: number,
-    ): any => ({
+    ): LayoutWarning => ({
       type: "important-content-under-inset",
       severity,
       element: { bounds },
@@ -4748,18 +4749,19 @@ describe("finalizeToolResponse — scope-then-cap for layoutWarnings (issue #507
       overlapPercent: 100,
       confidence: "medium",
     });
-    const obs = {
+    const obs: ObserveResult = {
+      ...loadAndroidHomeObserve().observe,
       updatedAt: 1,
       screenSize: { width: W, height: H },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      activeWindow: { appId: "com.example" },
+      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
         hierarchy: {
           node: {
-            "resource-id": "com.example:id/root",
+            $: { "resource-id": "com.example:id/root" },
             bounds: { left: 0, top: 0, right: W, bottom: H },
-            node: [{ text: "in", bounds: inRegionBounds }, ...outNodes],
+            node: [{ $: { text: "in" }, bounds: inRegionBounds }, ...outNodes],
           },
         },
       },
@@ -4772,7 +4774,7 @@ describe("finalizeToolResponse — scope-then-cap for layoutWarnings (issue #507
           ...outNodes.map((n) => mkWarning(n.bounds, "warning", 999)),
         ],
       },
-    } as unknown as ObserveResult;
+    };
 
     const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
       name: "observe",

@@ -40,7 +40,10 @@ describe("PrototypeEventCoordinator", () => {
   });
 
   test("accepted events record telemetry once with their owning scope", () => {
-    const recorded: { scope: typeof scope; event: ReturnType<typeof event> }[] = [];
+    const recorded: {
+      scope: Parameters<PrototypeEventCoordinator["show"]>[0];
+      event: ReturnType<typeof event>;
+    }[] = [];
     coordinator = new PrototypeEventCoordinator(timer, store, {
       recordPrototypeEvent: (origin, pushed) => recorded.push({ scope: origin, event: pushed }),
     });

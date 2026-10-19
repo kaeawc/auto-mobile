@@ -1,5 +1,0 @@
-# AutoMobile typecheck baseline (issue #3001) -- see scripts/typecheck-baseline.sh
-# generated-with: tsgo 7.0.0-dev.20260707.2
-src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
-src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.
-# swap-fp: 27,45 :: src/db/database.ts: error TS2307: Cannot find module 'bun:sqlite' or its corresponding type declarations.

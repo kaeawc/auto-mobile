@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { TalkBackToggle } from "../../../src/features/accessibility/TalkBackToggle";
 import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
 import type { ScreenReaderRestoreState } from "../../../src/features/accessibility/ScreenReaderRestore";

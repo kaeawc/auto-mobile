@@ -56,7 +56,15 @@ describe("iOS storage write dispatch hooks", () => {
         } else {
           const ws = h.context.getWebSocket()!;
           if (failure === "closed") {
-            ws.readyState = 3;
+            h.context.getWebSocket = () => ({
+              readyState: 3,
+              send: ws.send.bind(ws),
+              close: ws.close.bind(ws),
+              ping: ws.ping.bind(ws),
+              terminate: ws.terminate.bind(ws),
+              on: ws.on.bind(ws),
+              removeAllListeners: ws.removeAllListeners.bind(ws),
+            });
           } else {
             ws.send = () => {
               throw new Error("send failed");

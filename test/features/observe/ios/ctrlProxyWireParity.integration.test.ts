@@ -174,7 +174,7 @@ function readSwiftRequestTypeRawValues(): string[] {
 
 describe("iOS control-proxy — RequestType contract coverage", () => {
   test("IOS_KNOWN_REQUEST_TYPES matches the transcribed Swift rawValue list", () => {
-    expect([...IOS_KNOWN_REQUEST_TYPES].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
+    expect<unknown>([...IOS_KNOWN_REQUEST_TYPES].sort()).toEqual([...SWIFT_REQUEST_TYPES].sort());
   });
 
   test("no duplicate discriminators", () => {

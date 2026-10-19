@@ -20,6 +20,9 @@ import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCache
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { pinDialogTree } from "../helpers/pinDialogTree";
+import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
+import type { ViewHierarchyResult } from "../../src/models";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const android: BootedDevice = { deviceId: "saved-android", platform: "android", name: "Fake" };
@@ -44,7 +47,9 @@ describe("prototype saved actions", () => {
   let restore: () => void;
   let dispose: () => void;
   let connected: boolean;
+  let dialog: ViewHierarchyResult;
   function setup() {
+    dialog = pinDialogTree(["Cancel", "Add to home screen"]);
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     proxy = new FakeCtrlProxy(timer);
@@ -61,6 +66,7 @@ describe("prototype saved actions", () => {
       store: new InMemoryPrototypeStatusStore(timer),
       timer,
       clock: timer,
+      anchorHierarchyCaptureFactory: () => new FakeHierarchyCapture(() => dialog, "android", timer),
       assetFileReader: reader,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
       lifecycle: {
@@ -116,9 +122,23 @@ describe("prototype saved actions", () => {
     expect(output.warning).not.toContain("autoConfirm");
     expect(proxy.pinRequests).toEqual([{ id: "demo", icon: "logo" }]);
   });
-  test("autoConfirm adds the not-implemented reminder", async () => {
+  test("autoConfirm taps the dialog and reports pinned once listSaved confirms", async () => {
     proxy.setPinResult({ success: true, pin: { id: "demo", status: "requested" } });
-    expect((await save({ pin: true, autoConfirm: true })).warning).toContain("#12266");
+    proxy.setListSavedResult({
+      success: true,
+      savedPrototypes: [{ id: "demo", label: "demo", slug: "demo", savedAt: 1, pinned: true }],
+    });
+    const output = await save({ pin: true, autoConfirm: true });
+    expect(output).toMatchObject({ success: true, saved, pinned: "pinned" });
+    expect(adb.getExecutedCommands()).toContain("shell input tap 250 130");
+  });
+  test("autoConfirm stays pending with a reason when the dialog is unrecognized", async () => {
+    dialog = pinDialogTree(["Cancel", "Place"]);
+    proxy.setPinResult({ success: true, pin: { id: "demo", status: "requested" } });
+    const output = await save({ pin: true, autoConfirm: true });
+    expect(output.pinned).toBe("pending");
+    expect(output.warning).toContain("confirmation_unrecognized");
+    expect(adb.getExecutedCommands().filter((c) => c.includes("input tap"))).toEqual([]);
   });
   test("already pinned reports pinned", async () => {
     proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });

@@ -920,11 +920,15 @@ describe("Explore", () => {
         );
         expect(result.interactionsPerformed).toBe(1);
         expect(launch).toHaveBeenCalledTimes(1);
-        const [launchedPackage, launchOptions] = launch.mock.calls[0];
+        const [launchedPackage, ...launchArgs] = launch.mock.calls[0];
+        const launchOptions: unknown = launchArgs[0];
         expect(launchedPackage).toBe("com.test.app");
         expect(launchOptions).toMatchObject({ clearAppData: false, coldBoot: false });
         // toEqual treats any two AbortSignals as equal; identity proves the caller's signal flowed through.
-        expect(launchOptions?.signal).toBe(controller.signal);
+        if (typeof launchOptions !== "object" || !launchOptions || !("signal" in launchOptions)) {
+          throw new Error("Expected launch options");
+        }
+        expect(launchOptions.signal).toBe(controller.signal);
         expect(back).not.toHaveBeenCalled();
         expect(recoverySeams().consecutiveOutOfAppCount).toBe(0);
         expect(result.stopReason).toBe("Reached max interactions limit (1)");

@@ -157,13 +157,17 @@ async function setupTapPipeline(withClientNotifications = false) {
   let restoreClientSpy: (() => void) | undefined;
   let a11y: FakeA11y | undefined;
   if (withClientNotifications) {
-    const client = {
-      ensureConnected: async () => true,
-      getSupportedCommands: async () => [],
-      notifyRecordingStarted: () => notificationCounts.started++,
-      notifyRecordingStopped: () => notificationCounts.stopped++,
-      onInteraction: () => () => notificationCounts.unsubscribed++,
-      onDisplayTransition: undefined,
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, { timer });
+    client.ensureConnected = async () => true;
+    client.getSupportedCommands = async () => [];
+    client.notifyRecordingStarted = () => {
+      notificationCounts.started++;
+    };
+    client.notifyRecordingStopped = () => {
+      notificationCounts.stopped++;
+    };
+    client.onInteraction = () => () => {
+      notificationCounts.unsubscribed++;
     };
     const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     restoreClientSpy = () => clientSpy.mockRestore();
@@ -191,6 +195,7 @@ async function setupTapPipeline(withClientNotifications = false) {
 
 function toNodeAxes(axes: TouchAxes) {
   return {
+    kind: "touch" as const,
     axisXMin: axes.xMin,
     axisXMax: axes.xMax,
     axisYMin: axes.yMin,

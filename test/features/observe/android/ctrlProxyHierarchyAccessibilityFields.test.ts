@@ -76,6 +76,9 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
     const elements = new DefaultObserveElementCollector().collect(converted, "android");
     expect(elements?.clickable?.[0]["hint-text"]).toBe("First name");
     const projection = Object.create(ViewHierarchy.prototype) as ViewHierarchy;
+    if (!converted.hierarchy.node) {
+      throw new Error("Expected converted root");
+    }
     expect(projection.cleanNodeProperties(converted.hierarchy.node)).toHaveProperty(
       "hint-text",
       "First name",
@@ -123,6 +126,9 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
           bounds: { left: 0, top: 0, right: 200, bottom: 40 },
         },
       });
+      if (!converted.hierarchy.node) {
+        throw new Error("Expected converted root");
+      }
       for (const key of fields) {
         expect(Object.hasOwn(converted.hierarchy.node, key)).toBe(false);
       }
@@ -136,10 +142,13 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
       expect(converted.hierarchy.node).toHaveProperty(key, value);
       // cleanNodeProperties is a pure projection; no ViewHierarchy transport/DB is constructed.
       const projection = Object.create(ViewHierarchy.prototype) as ViewHierarchy;
+      if (!converted.hierarchy.node) {
+        throw new Error("Expected converted root");
+      }
       expect(projection.cleanNodeProperties(converted.hierarchy.node)).toHaveProperty(key, value);
       const collector = new DefaultObserveElementCollector();
-      expect(projectSkeleton(collector.collect(converted, "android")).skeleton).toEqual(
-        projectSkeleton(collector.collect(convert(filledField), "android")).skeleton,
+      expect(projectSkeleton(collector.collect(converted, "android")!).skeleton).toEqual(
+        projectSkeleton(collector.collect(convert(filledField), "android")!).skeleton,
       );
     },
   );
@@ -147,7 +156,7 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
   test("existing skeleton keeps filled text as the label and carries the converted hint as sublabel (#9346)", () => {
     const collector = new DefaultObserveElementCollector();
     const skeleton = (text: string) =>
-      projectSkeleton(collector.collect(convert({ ...filledField, text }), "android")).skeleton;
+      projectSkeleton(collector.collect(convert({ ...filledField, text }), "android")!).skeleton;
     expect(skeleton("Ada")).toEqual([
       {
         elementId: "first-name",

@@ -3,9 +3,9 @@ import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import {
   EmulatorProcessLifecycle,
-  EmulatorProcessOutputTail,
   type EmulatorProcessLifecyclePoolPort,
 } from "../../src/daemon/emulatorProcessLifecycle";
+import { EmulatorProcessOutputTail } from "../../src/daemon/EmulatorProcessOutputTail";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

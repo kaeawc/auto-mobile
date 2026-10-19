@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { OpenURL } from "../../../src/features/action/OpenURL";
@@ -85,7 +86,7 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
   // dispatch is the only part under test here.
   const stubObservedInteraction = () => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(observeResultStub),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
   };
@@ -139,7 +140,7 @@ describe("openLink passes the URL to simctl as its own argv element (issue #4213
 
   const stubObservedInteraction = () => {
     const spy = spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(
-      async (block) => block(observeResultStub),
+      runBlockWith(observeResultStub),
     );
     restores.push(() => spy.mockRestore());
   };

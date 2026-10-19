@@ -1064,7 +1064,7 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
     expect(builderNames.length).toBe(54);
     const covered = new Set(cases.map((row) => row.builder));
-    expect([...covered].sort()).toEqual([...builderNames].sort());
+    expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });
 });
 
@@ -1127,7 +1127,7 @@ test("saved prototype error codes match Kotlin", () => {
     "unsupported_format",
     "internal_error",
   ];
-  expect(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
+  expect<unknown>(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
   for (const code of kotlinCodes) {
     expect(isSavedPrototypeErrorCode(code)).toBe(true);
   }

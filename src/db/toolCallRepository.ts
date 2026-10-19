@@ -8,11 +8,20 @@ import {
   runAmortizedRetention,
 } from "./rowCapRetention";
 
-interface ToolCallRecord {
+export interface ToolCallRecord {
   toolName: string;
   timestamp: string;
   sessionUuid?: string | null;
   durationMs?: number | null;
+  status?: "success" | "failure";
+  errorType?: string | null;
+  errorMessage?: string | null;
+  deviceId?: string | null;
+}
+
+/** Keep the message head and include the ellipsis within the 500-character bound. */
+export function boundToolCallErrorMessage(message: string): string {
+  return message.length > 500 ? `${message.slice(0, 499)}…` : message;
 }
 
 // `tool_calls` receives one insert per MCP tool call for the life of the
@@ -54,6 +63,13 @@ export class ToolCallRepository {
         tool_name: record.toolName,
         timestamp: record.timestamp,
         session_uuid: record.sessionUuid ?? null,
+        status: record.status ?? "success",
+        error_type: record.errorType ?? null,
+        error_message:
+          record.errorMessage === undefined || record.errorMessage === null
+            ? null
+            : boundToolCallErrorMessage(record.errorMessage),
+        device_id: record.deviceId ?? null,
         duration_ms:
           record.durationMs === undefined || record.durationMs === null
             ? null

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   resolveSwipeDirection,
+  resolveSwipeDirectionRaw,
   SCROLL_TO_FINGER_DIRECTION,
 } from "../../../../src/features/action/swipeon/swipeOnUtils";
 import { SwipeDirection } from "../../../../src/models";
@@ -17,7 +18,7 @@ describe("SCROLL_TO_FINGER_DIRECTION", () => {
 describe("resolveSwipeDirection", () => {
   describe("missing direction", () => {
     it("returns an error when direction is undefined", () => {
-      const result = resolveSwipeDirection({ direction: undefined });
+      const result = resolveSwipeDirectionRaw({ direction: undefined });
       expect(result.error).toBe("direction is required");
       expect(result.direction).toBeUndefined();
     });
@@ -110,7 +111,9 @@ describe("resolveSwipeDirection", () => {
     });
 
     it("reports the missing-direction error verbatim", () => {
-      expect(resolveSwipeDirection({ direction: undefined }).error).toBe("direction is required");
+      expect(resolveSwipeDirectionRaw({ direction: undefined }).error).toBe(
+        "direction is required",
+      );
     });
   });
 });

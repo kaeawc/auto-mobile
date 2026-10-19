@@ -4467,7 +4467,7 @@ describe("SendKeys post-action capture boundary", () => {
         expect(final.observation).toMatchObject({
           observationId: expectedId,
           screenshotPath: `${expectedId}.png`,
-          screenshotCapturedAt: 123,
+          screenshotCapturedAt: new Date(123).toISOString(),
           settled: scenario === "imeAction",
         });
         expect(final.commands).toEqual(beforeGate.commands);

@@ -39,13 +39,14 @@ const containerElement = (b: ElementBounds): Element => ({ bounds: b }) as Eleme
 const observe = (
   screenSize: { width: number; height: number },
   insets: { top: number; right: number; bottom: number; left: number },
-): ObserveResult =>
-  ({
-    timestamp: 0,
-    screenSize,
-    systemInsets: insets,
-    viewHierarchy: { hierarchy: {} },
-  }) as ObserveResult;
+): ObserveResult => ({
+  updatedAt: 0,
+  observationId: "test",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+  screenSize,
+  systemInsets: insets,
+  viewHierarchy: { hierarchy: {} },
+});
 
 const emptyHierarchy: ViewHierarchyResult = { hierarchy: {} };
 

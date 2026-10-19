@@ -33,7 +33,7 @@ export class FakeScrollElementResolver implements Pick<ElementResolver, "resolve
     const roots = snapshot.nodes
       .filter((node) => node.parentIndex === undefined)
       .map((node) => node.source);
-    const hierarchy = { hierarchy: { node: { node: roots } } };
+    const hierarchy = { hierarchy: { node: roots.length === 1 ? roots[0] : { node: roots } } };
     const element =
       selector.text !== undefined
         ? this.lookup.findElementByText(hierarchy, selector.text, selector.container)

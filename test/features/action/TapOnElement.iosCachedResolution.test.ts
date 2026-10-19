@@ -3,7 +3,7 @@ import { iosHierarchyAcquisition } from "../../../src/features/observe/ios/types
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { freshTapHierarchy } from "../../../src/features/action/freshTapHierarchy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
-import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import { TapAnyElement as RealTapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
 import type {
   XCTestHierarchy,
@@ -89,8 +89,8 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
   tap.observeScreen = observe;
   tap.awaitIdle = new FakeAwaitIdle();
   tap.window = new FakeWindow();
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   if (tap instanceof TapOnElement) {
     tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
       observation: current,
@@ -189,10 +189,11 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     test("forced refresh preserves the sync acquisition marker", async () => {
       const h = harness(tool);
       try {
-        h.sync.mockResolvedValue({
+        const syncResult = {
           hierarchy: raw(10),
-          [iosHierarchyAcquisition]: "device",
-        });
+          [iosHierarchyAcquisition]: "device" as const,
+        };
+        h.sync.mockResolvedValue(syncResult);
         const markers: unknown[] = [];
         if (h.tap instanceof TapOnElement) {
           const refresh = h.tap.refreshViewHierarchy.bind(h.tap);
@@ -344,3 +345,22 @@ test("Android fresh-tap failure text stays byte-identical", async () => {
       "Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service while TalkBack is on. Observe again and check that the accessibility service is running.",
   });
 });
+
+/** Exposes the inherited protected bookkeeping seams to this test harness. */
+class TapAnyElement extends RealTapAnyElement {
+  override get testHooks() {
+    return {
+      ...super.testHooks,
+      setTerminalScreenshotCapture: (
+        capture: (observation: ObserveResult | undefined) => Promise<void>,
+      ) => {
+        this.captureTerminalObservationScreenshot = capture;
+      },
+      setDeferredPredictionRecorder: (
+        record: (result: unknown, observation: ObserveResult) => Promise<void>,
+      ) => {
+        this.recordDeferredPredictionOutcome = record;
+      },
+    };
+  }
+}

@@ -115,7 +115,7 @@ describe("ToolRegistry post-action capture scope", () => {
         expect(final.observation).toMatchObject({
           observationId: h.captures[0].observationId,
           screenshotPath: `${h.captures[0].observationId}.png`,
-          screenshotCapturedAt: 123,
+          screenshotCapturedAt: new Date(123).toISOString(),
           settled: scenario === "imeAction",
         });
         const text = (response as { content: Array<{ text: string }> }).content[0].text;

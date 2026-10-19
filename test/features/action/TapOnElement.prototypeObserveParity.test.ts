@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { TapOnElement, type TapOnElementOptions } from "../../../src/features/action/TapOnElement";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { ownWindows } from "../../../src/features/observe/ownWindowFocus";

@@ -69,7 +69,7 @@ function createCommand(scenario: Scenario) {
   };
   hierarchy.insets = scenario.insets;
   const shown = scenario.prototypeShown ?? scenario.prototypeOwnsControl;
-  const capturedRoot = hierarchy.hierarchy;
+  const capturedRoot = hierarchy.hierarchy.node;
   hierarchy.windows = shown
     ? [
         {

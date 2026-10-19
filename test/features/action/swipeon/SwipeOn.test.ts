@@ -220,10 +220,12 @@ describe("SwipeOn boomerang", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
+    observationId: "swipe-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    updatedAt: Date.now(),
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: null,
+    viewHierarchy: undefined,
   });
 
   const createSwipeOn = () => {

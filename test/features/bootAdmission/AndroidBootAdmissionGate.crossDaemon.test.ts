@@ -41,7 +41,7 @@ function incomplete(error: unknown, code = "failed"): void {
   if (error instanceof AndroidBootedDeviceDiscoveryIncompleteError) {
     expect(error.code).toBe("discovery_incomplete");
     expect(error.retryable).toBe(true);
-    expect(error.discoveryError?.code).toBe(code);
+    expect<unknown>(error.discoveryError?.code).toBe(code);
     expect(error.message).toMatch(/registry|admission.lock/);
   }
 }

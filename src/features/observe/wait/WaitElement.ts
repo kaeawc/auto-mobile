@@ -284,7 +284,7 @@ export const findWaitForElement = (
   };
   if (waitFor.textAny) {
     for (const text of waitFor.textAny) {
-      const candidate = resolve({ text, match: waitFor.textMatch })[0];
+      const candidate = resolve({ text })[0];
       if (candidate) {
         return candidate.element!;
       }

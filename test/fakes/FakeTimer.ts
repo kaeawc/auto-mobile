@@ -21,6 +21,32 @@ interface PendingSleep {
   seq: number;
 }
 
+/** The handle a FakeTimer returns: a structurally complete `NodeJS.Timeout` that coerces to its numeric id. */
+class FakeTimerHandle implements NodeJS.Timeout {
+  /** Node's `Timeout` exposes its callback; the fake's lives in the pending list instead. */
+  _onTimeout: () => void = () => {};
+  constructor(readonly id: number) {}
+  ref(): this {
+    return this;
+  }
+  unref(): this {
+    return this;
+  }
+  hasRef(): boolean {
+    return true;
+  }
+  refresh(): this {
+    return this;
+  }
+  close(): this {
+    return this;
+  }
+  [Symbol.toPrimitive](): number {
+    return this.id;
+  }
+  [Symbol.dispose](): void {}
+}
+
 /**
  * Pending timeout information
  */
@@ -411,7 +437,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: fires asynchronously at its scheduled fake time (but can be cancelled).
    */
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextTimeoutId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextTimeoutId);
     this.nextTimeoutId++;
     this.pendingTimeouts.push({
       id,
@@ -437,7 +463,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: reschedules itself at each fake interval until cancelled.
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextIntervalId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextIntervalId);
     this.nextIntervalId++;
     this.pendingIntervals.push({
       id,

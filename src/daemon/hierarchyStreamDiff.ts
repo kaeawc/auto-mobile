@@ -32,9 +32,23 @@ export interface HierarchyDiffSummary {
   removed: number;
 }
 
-export interface HierarchyDiffResult {
+/**
+ * A node as the on-device XML->JSON delivers it: `node` is an array for 2+ children, but a single
+ * child arrives as a bare object and a childless node can surface an empty `{}` placeholder.
+ * `ViewHierarchyNode` is assignable to it.
+ */
+export type WireHierarchyNode = Omit<ViewHierarchyNode, "node"> & {
+  node?: ViewHierarchyNode["node"] | WireHierarchyNode | Record<string, never>;
+};
+
+/** The slice of a hierarchy frame the diff reads. `ViewHierarchyResult` is assignable to it. */
+export interface WireHierarchyFrame {
+  hierarchy?: { node?: WireHierarchyNode };
+}
+
+export interface HierarchyDiffResult<R extends WireHierarchyFrame = ViewHierarchyResult> {
   /** Deep clone of the current hierarchy with added/changed nodes annotated. */
-  hierarchy: ViewHierarchyResult;
+  hierarchy: R;
   summary: HierarchyDiffSummary;
 }
 
@@ -57,7 +71,7 @@ function boundsSignature(value: unknown): string {
 }
 
 /** Attributes compared to decide whether a node at a stable tree position changed. */
-function nodeSignature(node: ViewHierarchyNode): string {
+function nodeSignature(node: WireHierarchyNode): string {
   // Keep the stream diff's existing nested-attribute projection for flat nodes.
   const attrs = node.$ === undefined || node.$ === null ? {} : nodeAttributes(node);
   const get = (...keys: string[]): string => {
@@ -87,7 +101,7 @@ function nodeSignature(node: ViewHierarchyNode): string {
   ].join("\u0000");
 }
 
-function children(node: ViewHierarchyNode): ViewHierarchyNode[] {
+function children(node: WireHierarchyNode): WireHierarchyNode[] {
   // A node's children arrive as an array for 2+, but the on-device XML→JSON serializes a SINGLE
   // child as a bare object (and a childless node can even surface an empty `{}`). Left unnormalized,
   // `for (const c of node.node)` throws "{} is not iterable" — which silently killed the whole
@@ -107,7 +121,7 @@ function children(node: ViewHierarchyNode): ViewHierarchyNode[] {
   return Object.keys(kids).length > 0 ? [kids] : [];
 }
 
-function markState(node: ViewHierarchyNode, state: HierarchyNodeDiffState): void {
+function markState(node: WireHierarchyNode, state: HierarchyNodeDiffState): void {
   // Nodes may arrive without a populated `$` (defensive); create it so the marker
   // survives serialization to the client.
   if (node.$ === undefined || node.$ === null) {
@@ -117,7 +131,7 @@ function markState(node: ViewHierarchyNode, state: HierarchyNodeDiffState): void
 }
 
 /** Stamp every node in an added subtree as `added` and count them. */
-function markSubtreeAdded(node: ViewHierarchyNode): number {
+function markSubtreeAdded(node: WireHierarchyNode): number {
   markState(node, "added");
   let count = 1;
   for (const child of children(node)) {
@@ -127,7 +141,7 @@ function markSubtreeAdded(node: ViewHierarchyNode): number {
 }
 
 /** Count every node in a removed subtree (it is absent from the current frame). */
-function countSubtree(node: ViewHierarchyNode): number {
+function countSubtree(node: WireHierarchyNode): number {
   let count = 1;
   for (const child of children(node)) {
     count += countSubtree(child);
@@ -144,8 +158,8 @@ function countSubtree(node: ViewHierarchyNode): number {
  * "this moved" signal for a layout inspector.
  */
 function walk(
-  previous: ViewHierarchyNode,
-  current: ViewHierarchyNode,
+  previous: WireHierarchyNode,
+  current: WireHierarchyNode,
   summary: HierarchyDiffSummary,
 ): void {
   if (nodeSignature(previous) !== nodeSignature(current)) {
@@ -178,10 +192,10 @@ function walk(
  * baseline). When there is no baseline — first frame, or `previous`/either root
  * node is absent — nothing is annotated and `summary.hasBaseline` is false.
  */
-export function annotateHierarchyDiff(
-  previous: ViewHierarchyResult | null,
-  current: ViewHierarchyResult,
-): HierarchyDiffResult {
+export function annotateHierarchyDiff<R extends WireHierarchyFrame>(
+  previous: R | null,
+  current: R,
+): HierarchyDiffResult<R> {
   const hierarchy = structuredClone(current);
   const summary: HierarchyDiffSummary = {
     hasBaseline: false,

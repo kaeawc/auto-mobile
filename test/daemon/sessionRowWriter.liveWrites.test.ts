@@ -20,6 +20,7 @@ const record = {
   expiresAtMs: 10_000,
   sessionTimeoutMs: 10_000,
   heartbeatTimeoutMs: 1000,
+  hasReceivedHeartbeat: false,
 };
 
 test("the writer issues create, activity and ownership statements against persistence", async () => {

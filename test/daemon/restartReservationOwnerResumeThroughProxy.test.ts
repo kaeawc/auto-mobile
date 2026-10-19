@@ -211,7 +211,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     await s.loseDevice(label, DEVICE);
     expect(manager.getSession(base)).not.toBeNull();
     expect(manager.getSession(label)).toBeNull();
-    expect(manager.ownershipSessionUuid(label, false)).toBe(base);
+    expect(manager.ownershipSessionUuid(label)).toBe(base);
     expect(manager.getBaseSessionOfDerivedLabel(label)).toBe(base);
     expect(reservations(s).get(label)?.ownerLivenessToken).toBe(OWNER_TOKEN);
     return { s, base, label, connection, otherLabel, siblingLabel };
@@ -420,7 +420,7 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
       OWNER_TOKEN,
     );
     try {
-      await drainMicrotasks();
+      await drainMicrotasks(256);
       expect(reservations(s).get(label)).toEqual(before);
       pool.releaseMcpSessionBindings("closed-label-restore");
     } finally {

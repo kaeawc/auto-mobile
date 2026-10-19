@@ -263,7 +263,7 @@ describe("LivenessRecovery states", () => {
     expect(h.recovery.busyEpisode()).not.toBe(first);
   });
 
-  test.each([DAEMON_STALLED_CODE, PROXY_STALLED_CODE])(
+  test.each([DAEMON_STALLED_CODE, PROXY_STALLED_CODE] satisfies LivenessStallCode[])(
     "%s: a session-awaited answer ends recovery without a handover",
     async (code) => {
       const h = harness({ outcomeFor: () => "session-awaited" });

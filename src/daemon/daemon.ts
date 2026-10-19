@@ -111,10 +111,8 @@ import type {
   BindingExecOwnerLiveness,
   BindingJournalOwner,
 } from "./sessionBroker/registry/bindingRegistry";
-import {
-  BindingJournalInFlight,
-  type BindingJournalRedriveLoop,
-} from "./sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "./sessionBroker/registry/bindingJournal";
+import type { BindingJournalRedriveLoop } from "./sessionBroker/registry/BindingJournalRedriveLoop";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,

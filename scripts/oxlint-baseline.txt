@@ -86,7 +86,6 @@
 1	src/features/action/swipeon/ScrollUntilVisible.ts	auto-mobile(max-class-lines)
 1	src/features/action/swipeon/ScrollUntilVisible.ts	eslint(complexity)
 1	src/features/action/swipeon/ScrollUntilVisible.ts	eslint(max-lines-per-function)
-1	src/features/action/swipeon/SwipeOn.ts	oxlint-disable(max-lines-per-function)
 1	src/features/observe/DeviceServiceClient.ts	auto-mobile(max-class-lines)
 1	src/features/observe/TakeScreenshot.ts	eslint(max-params)
 1	src/features/observe/android/AndroidActionDispatcher.ts	oxlint-disable(max-params)

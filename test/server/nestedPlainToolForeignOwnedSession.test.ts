@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -99,7 +99,7 @@ describe("a nested plain control call naming a session another connection owns (
   const refusalCode = (result: StepExecutionResult): unknown =>
     (result.sourceError as InputDeviceOwnedError | undefined)?.code;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -167,7 +167,19 @@ describe("a nested plain control call naming a session another connection owns (
       probe(SET_TOOL_ENABLED_TOOL_NAME),
     );
     executor = new DefaultPlanStepExecutor<RegisteredTool>(ToolRegistry, () => true, timer);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     ToolRegistry.clearTools();
@@ -188,7 +200,7 @@ describe("a nested plain control call naming a session another connection owns (
   });
 
   describe("while serving another connection", () => {
-    test("killDevice naming the owner's session is refused before the kill", async () => {
+    arranged("killDevice naming the owner's session is refused before the kill", async () => {
       const error = await nested(OTHER, "killDevice", { device: held, sessionUuid: HOLDER });
 
       expect(manager.killed).toEqual([]);
@@ -196,31 +208,40 @@ describe("a nested plain control call naming a session another connection owns (
       expect(error?.message).toContain(`session ${HOLDER} is owned by another connected client`);
     });
 
-    test("force overrides the holder check, not the naming of the owner's session", async () => {
-      const named = await nested(OTHER, "killDevice", {
-        device: held,
-        force: true,
-        sessionUuid: HOLDER,
-      });
+    arranged(
+      "force overrides the holder check, not the naming of the owner's session",
+      async () => {
+        const named = await nested(OTHER, "killDevice", {
+          device: held,
+          force: true,
+          sessionUuid: HOLDER,
+        });
 
-      expect(named?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect(named?.message).toContain("leave sessionUuid out");
-      expect(manager.killed).toEqual([]);
+        expect(named?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(named?.message).toContain("leave sessionUuid out");
+        expect(manager.killed).toEqual([]);
 
-      await nested(OTHER, "killDevice", { device: held, force: true });
+        await nested(OTHER, "killDevice", { device: held, force: true });
 
-      expect(manager.killed).toEqual([held.deviceId]);
-    });
+        expect(manager.killed).toEqual([held.deviceId]);
+      },
+    );
 
-    test("a plain control step whose schema carries sessionUuid is refused, typed", async () => {
-      const result = await runStep({ tool: PLAIN_CONTROL, params: { sessionUuid: HOLDER } }, OTHER);
+    arranged(
+      "a plain control step whose schema carries sessionUuid is refused, typed",
+      async () => {
+        const result = await runStep(
+          { tool: PLAIN_CONTROL, params: { sessionUuid: HOLDER } },
+          OTHER,
+        );
 
-      expect(result.status).toBe("failed");
-      expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect(probeRuns).toEqual([]);
-    });
+        expect(result.status).toBe("failed");
+        expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+        expect(probeRuns).toEqual([]);
+      },
+    );
 
-    test("a killDevice step is refused: its undeclared sessionUuid names nothing", async () => {
+    arranged("a killDevice step is refused: its undeclared sessionUuid names nothing", async () => {
       const result = await runStep(
         { tool: "killDevice", params: { device: held, sessionUuid: HOLDER } },
         OTHER,
@@ -231,19 +252,22 @@ describe("a nested plain control call naming a session another connection owns (
       expect(manager.killed).toEqual([]);
     });
 
-    test("a plain read and setToolEnabled naming the owner's session are not refused", async () => {
-      expect(await nested(OTHER, PLAIN_READ, { sessionUuid: HOLDER })).toBeUndefined();
-      expect(
-        await nested(OTHER, SET_TOOL_ENABLED_TOOL_NAME, { sessionUuid: HOLDER }),
-      ).toBeUndefined();
+    arranged(
+      "a plain read and setToolEnabled naming the owner's session are not refused",
+      async () => {
+        expect(await nested(OTHER, PLAIN_READ, { sessionUuid: HOLDER })).toBeUndefined();
+        expect(
+          await nested(OTHER, SET_TOOL_ENABLED_TOOL_NAME, { sessionUuid: HOLDER }),
+        ).toBeUndefined();
 
-      expect(probeRuns).toEqual([
-        `${PLAIN_READ}:${HOLDER}`,
-        `${SET_TOOL_ENABLED_TOOL_NAME}:${HOLDER}`,
-      ]);
-    });
+        expect(probeRuns).toEqual([
+          `${PLAIN_READ}:${HOLDER}`,
+          `${SET_TOOL_ENABLED_TOOL_NAME}:${HOLDER}`,
+        ]);
+      },
+    );
 
-    test("a plain control step under the plan's own session runs on that session", async () => {
+    arranged("a plain control step under the plan's own session runs on that session", async () => {
       const result = await runStep(
         { tool: PLAIN_CONTROL, params: { sessionUuid: HOLDER } },
         OTHER,
@@ -254,29 +278,32 @@ describe("a nested plain control call naming a session another connection owns (
       expect(probeRuns).toEqual([`${PLAIN_CONTROL}:plan-session`]);
     });
 
-    test("once the owner has disconnected the nested killDevice reaches the device", async () => {
-      DaemonState.getInstance().getDevicePool().releaseMcpSessionBindings(OWNER);
+    arranged(
+      "once the owner has disconnected the nested killDevice reaches the device",
+      async () => {
+        DaemonState.getInstance().getDevicePool().releaseMcpSessionBindings(OWNER);
 
-      await nested(OTHER, "killDevice", { device: held, sessionUuid: HOLDER });
+        await nested(OTHER, "killDevice", { device: held, sessionUuid: HOLDER });
 
-      expect(manager.killed).toEqual([held.deviceId]);
-    });
+        expect(manager.killed).toEqual([held.deviceId]);
+      },
+    );
   });
 
-  test("the owner's own nested killDevice naming its session reaches the device", async () => {
+  arranged("the owner's own nested killDevice naming its session reaches the device", async () => {
     await nested(OWNER, "killDevice", { device: held, sessionUuid: HOLDER });
 
     expect(manager.killed).toEqual([held.deviceId]);
   });
 
-  test("the owner's own plain control step naming its session runs", async () => {
+  arranged("the owner's own plain control step naming its session runs", async () => {
     const result = await runStep({ tool: PLAIN_CONTROL, params: { sessionUuid: HOLDER } }, OWNER);
 
     expect(result.status).toBe("completed");
     expect(probeRuns).toEqual([`${PLAIN_CONTROL}:${HOLDER}`]);
   });
 
-  test("a nested call with no originating connection is left to the holder check", async () => {
+  arranged("a nested call with no originating connection is left to the holder check", async () => {
     await nested(undefined, "killDevice", { device: held, sessionUuid: HOLDER });
 
     expect(manager.killed).toEqual([held.deviceId]);

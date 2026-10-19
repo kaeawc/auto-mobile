@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
@@ -35,43 +35,64 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
   const aliveChild = (): ChildProcess => new EventEmitter() as unknown as ChildProcess;
 
   let pool: DevicePool;
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     pool = await build();
-  });
+  }
 
-  it("keeps the alive emulator process on a liveness-miss removal and clears it on exit", async () => {
-    const child = aliveChild();
-    await internals(pool).trackStartedDeviceProcess(androidDevice, child);
-    const device = pool.getDevice("emulator-5554")!;
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    it(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
-    await pool.removeDevice("emulator-5554", true, device, { keepTrackedProcess: true });
+  arranged(
+    "keeps the alive emulator process on a liveness-miss removal and clears it on exit",
+    async () => {
+      const child = aliveChild();
+      await internals(pool).trackStartedDeviceProcess(androidDevice, child);
+      const device = pool.getDevice("emulator-5554")!;
 
-    expect(internals(pool).startedDeviceProcesses.get("emulator-5554")).toBe(child);
-    child.emit("exit", 0, null);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(internals(pool).startedDeviceProcesses.has("emulator-5554")).toBe(false);
-    expect(internals(pool).startedDeviceProcessOutput.has("emulator-5554")).toBe(false);
-  });
+      await pool.removeDevice("emulator-5554", true, device, { keepTrackedProcess: true });
 
-  it("keeps the alive emulator process when missing-device eviction removes the entry", async () => {
-    const child = aliveChild();
-    await internals(pool).trackStartedDeviceProcess(androidDevice, child);
-    const device = pool.getDevice("emulator-5554")!;
+      expect(internals(pool).startedDeviceProcesses.get("emulator-5554")).toBe(child);
+      child.emit("exit", 0, null);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(internals(pool).startedDeviceProcesses.has("emulator-5554")).toBe(false);
+      expect(internals(pool).startedDeviceProcessOutput.has("emulator-5554")).toBe(false);
+    },
+  );
 
-    await internals(pool).evictMissingPooledDevice(device, "missing device during liveness check");
+  arranged(
+    "keeps the alive emulator process when missing-device eviction removes the entry",
+    async () => {
+      const child = aliveChild();
+      await internals(pool).trackStartedDeviceProcess(androidDevice, child);
+      const device = pool.getDevice("emulator-5554")!;
 
-    expect(pool.getDevice("emulator-5554")).toBeNull();
-    expect(internals(pool).startedDeviceProcesses.get("emulator-5554")).toBe(child);
-  });
+      await internals(pool).evictMissingPooledDevice(
+        device,
+        "missing device during liveness check",
+      );
 
-  it("forgets the tracked process on deliberate retirement", async () => {
+      expect(pool.getDevice("emulator-5554")).toBeNull();
+      expect(internals(pool).startedDeviceProcesses.get("emulator-5554")).toBe(child);
+    },
+  );
+
+  arranged("forgets the tracked process on deliberate retirement", async () => {
     await internals(pool).trackStartedDeviceProcess(androidDevice, aliveChild());
     await pool.removeDevice("emulator-5554");
     expect(internals(pool).startedDeviceProcesses.has("emulator-5554")).toBe(false);
   });
 
-  it("drops released-device captures for a removed device", async () => {
+  arranged("drops released-device captures for a removed device", async () => {
     const device = pool.getDevice("emulator-5554")!;
     device.sessionId = "s1";
     internals(pool).captureReleasedDevice("s1", "emulator-5554");
@@ -83,7 +104,7 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
     expect(internals(pool).releasedDeviceCaptures.size).toBe(0);
   });
 
-  it("clears the start deadline timer when lifecycle reserve throws", async () => {
+  arranged("clears the start deadline timer when lifecycle reserve throws", async () => {
     const reserveError = new Error("reserve failed");
     pool = await build({
       lifecycleCoordinator: {

@@ -6,6 +6,7 @@ import {
   DefaultIosSdkEventIngestor,
   type IosTelemetryRecorder,
   type NavigationEventSink,
+  type NavigationScreenshotStore,
 } from "../../../../src/features/observe/ios/IosSdkEventIngestor";
 import type { SdkEvent } from "../../../../src/features/observe/interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "../../../../src/features/observe/ios/types";
@@ -13,18 +14,17 @@ import type { ViewHierarchyResult } from "../../../../src/models";
 import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
 import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { NavigationScreenshotManager } from "../../../../src/features/navigation/NavigationScreenshotManager";
-import {
-  DefaultAndroidSdkEventIngestor,
-  type AndroidTelemetryRecorder,
-} from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
+import { DefaultAndroidSdkEventIngestor } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 
 import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
 
 const DEVICE_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
-interface CapturedCall {
-  event: Record<string, unknown>;
+type RecordKey = Extract<keyof IosTelemetryRecorder, `record${string}`>;
+type EventOf<K extends RecordKey> = Parameters<IosTelemetryRecorder[K]>[0];
+
+interface CapturedCall<Event> {
+  event: Event;
   contextAtCall: { deviceId: string | null; sessionId: string | null };
 }
 
@@ -32,17 +32,17 @@ interface CapturedCall {
  * Capturing telemetry recorder double. Records each call together with the
  * device context active at call-time so tests can assert context save/restore.
  */
-class CapturingTelemetryRecorder {
+class CapturingTelemetryRecorder implements IosTelemetryRecorder {
   context: { deviceId: string | null; sessionId: string | null } = {
     deviceId: "prev-device",
     sessionId: "prev-session",
   };
-  network: CapturedCall[] = [];
-  logs: CapturedCall[] = [];
-  os: CapturedCall[] = [];
-  navigation: CapturedCall[] = [];
-  storage: CapturedCall[] = [];
-  layout: CapturedCall[] = [];
+  network: CapturedCall<EventOf<"recordNetworkEvent">>[] = [];
+  logs: CapturedCall<EventOf<"recordLogEvent">>[] = [];
+  os: CapturedCall<EventOf<"recordOsEvent">>[] = [];
+  navigation: CapturedCall<EventOf<"recordNavigationEvent">>[] = [];
+  storage: CapturedCall<EventOf<"recordStorageEvent">>[] = [];
+  layout: CapturedCall<EventOf<"recordLayoutEvent">>[] = [];
 
   getContext(): { deviceId: string | null; sessionId: string | null } {
     return this.context;
@@ -52,36 +52,36 @@ class CapturingTelemetryRecorder {
     this.context = { deviceId, sessionId };
   }
 
-  private capture(bucket: CapturedCall[], event: Record<string, unknown>): void {
+  private capture<Event>(bucket: CapturedCall<Event>[], event: Event): void {
     bucket.push({ event, contextAtCall: { ...this.context } });
   }
 
-  async recordNetworkEvent(event: Record<string, unknown>): Promise<void> {
+  async recordNetworkEvent(event: EventOf<"recordNetworkEvent">): Promise<void> {
     this.capture(this.network, event);
   }
-  async recordLogEvent(event: Record<string, unknown>): Promise<void> {
+  async recordLogEvent(event: EventOf<"recordLogEvent">): Promise<void> {
     this.capture(this.logs, event);
   }
-  async recordOsEvent(event: Record<string, unknown>): Promise<void> {
+  async recordOsEvent(event: EventOf<"recordOsEvent">): Promise<void> {
     this.capture(this.os, event);
   }
-  async recordNavigationEvent(event: Record<string, unknown>): Promise<void> {
+  async recordNavigationEvent(event: EventOf<"recordNavigationEvent">): Promise<void> {
     this.capture(this.navigation, event);
   }
-  async recordStorageEvent(event: Record<string, unknown>): Promise<void> {
+  async recordStorageEvent(event: EventOf<"recordStorageEvent">): Promise<void> {
     this.capture(this.storage, event);
   }
-  async recordLayoutEvent(event: Record<string, unknown>): Promise<void> {
+  async recordLayoutEvent(event: EventOf<"recordLayoutEvent">): Promise<void> {
     this.capture(this.layout, event);
   }
 }
 
 class CapturingNavigationSink implements NavigationEventSink {
-  recorded: Array<Record<string, unknown>> = [];
+  recorded: NavigationEvent[] = [];
   screenshotUpdates: Array<{ appId: string; screenName: string; path: string | null }> = [];
 
   async recordNavigationEvent(event: NavigationEvent): Promise<void> {
-    this.recorded.push(event as unknown as Record<string, unknown>);
+    this.recorded.push(event);
   }
 
   async updateNodeScreenshot(
@@ -113,7 +113,7 @@ describe("DefaultIosSdkEventIngestor", () => {
       timer: overrides.timer ?? new FakeTimer(),
       getNavigationGraphManager: () => navSink,
       captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
-      telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+      telemetryRecorder: recorder,
       failureRecorder,
       navigationScreenshotsEnabled: overrides.navigationScreenshotsEnabled ?? (() => false),
     });
@@ -291,7 +291,7 @@ describe("DefaultIosSdkEventIngestor", () => {
       getNavigationScreenSource: () => ({ getCurrentScreen: () => null }),
       parseStackTrace: () => [],
       now: () => 1000,
-      telemetryRecorder: androidRecorder as unknown as AndroidTelemetryRecorder,
+      telemetryRecorder: androidRecorder,
       failureRecorder,
     });
     await android.recordSdkEvent(
@@ -669,20 +669,18 @@ describe("DefaultIosSdkEventIngestor", () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       const calls: string[] = [];
       const graphWrite = Promise.withResolvers<void>();
-      const screenshotManagerSpy = spyOn(
-        NavigationScreenshotManager,
-        "getInstance",
-      ).mockReturnValue({
+      const navigationScreenshotStore: NavigationScreenshotStore = {
         storeScreenshot: async () => {
           calls.push("store");
           return "/screens/com.app/Home.webp";
         },
-      } as unknown as NavigationScreenshotManager);
+      };
       const subject = new DefaultIosSdkEventIngestor({
         deviceId: DEVICE_ID,
         timer: new FakeTimer(),
-        telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+        telemetryRecorder: recorder,
         failureRecorder,
+        navigationScreenshotStore,
         getNavigationGraphManager: () => {
           calls.push("graph");
           return {
@@ -745,7 +743,6 @@ describe("DefaultIosSdkEventIngestor", () => {
           sessionId: "prev-session",
         });
       } finally {
-        screenshotManagerSpy.mockRestore();
         warning.mockRestore();
       }
     },
@@ -805,30 +802,27 @@ describe("DefaultIosSdkEventIngestor", () => {
    * telemetry URI that points at it is built by the graph manager, scoped by that app (#5851).
    */
   test("a stored navigation screenshot is attached to the named app's node (#10195)", async () => {
-    const screenshotManagerSpy = spyOn(NavigationScreenshotManager, "getInstance").mockReturnValue({
+    const navigationScreenshotStore: NavigationScreenshotStore = {
       storeScreenshot: async () => "/screens/com.app/Home.webp",
-    } as unknown as NavigationScreenshotManager);
-    try {
-      const withScreenshots = new DefaultIosSdkEventIngestor({
-        deviceId: DEVICE_ID,
-        getNavigationGraphManager: () => navSink,
-        captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({
-          success: true,
-          data: "AAAA",
-          format: "png",
-        }),
-        telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
-        failureRecorder,
-        navigationScreenshotsEnabled: () => true,
-      });
+    };
+    const withScreenshots = new DefaultIosSdkEventIngestor({
+      deviceId: DEVICE_ID,
+      getNavigationGraphManager: () => navSink,
+      captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({
+        success: true,
+        data: "AAAA",
+        format: "png",
+      }),
+      telemetryRecorder: recorder,
+      failureRecorder,
+      navigationScreenshotsEnabled: () => true,
+      navigationScreenshotStore,
+    });
 
-      await withScreenshots.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
+    await withScreenshots.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
 
-      expect(navSink.screenshotUpdates).toHaveLength(1);
-      expect(recorder.navigation).toHaveLength(0);
-    } finally {
-      screenshotManagerSpy.mockRestore();
-    }
+    expect(navSink.screenshotUpdates).toHaveLength(1);
+    expect(recorder.navigation).toHaveLength(0);
   });
 
   test("handled_exception routes to failure recorder as non-fatal", async () => {
@@ -924,15 +918,27 @@ describe("DefaultIosSdkEventIngestor", () => {
       // ADD-2 live bug: the restore used to sit after the JSON.stringify+record
       // inside the try, so a synchronous throw between setContext(iOS) and the
       // restore skipped it, leaving the shared context pinned to the iOS udid and
-      // permanently mis-attributing later Android telemetry. A BigInt in the
+      // permanently mis-attributing later Android telemetry. A throwing getter in the
       // hierarchy makes the internal JSON.stringify throw synchronously — after
       // setContext(iOS) has already run.
-      const unserializable = {
-        hierarchy: { node: [{ $: { bad: BigInt(1) } }] },
+      const unserializable: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            node: [
+              {
+                $: {
+                  get text(): string {
+                    throw new TypeError("not serializable");
+                  },
+                },
+              },
+            ],
+          },
+        },
         packageName: "com.app",
         windows: [],
         updatedAt: 1,
-      } as unknown as ViewHierarchyResult;
+      };
       // Must not throw (telemetry is best-effort) ...
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
@@ -976,7 +982,7 @@ describe("DefaultIosSdkEventIngestor", () => {
         deviceId: DEVICE_ID,
         getNavigationGraphManager: () => navSink,
         captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
-        telemetryRecorder: new RestoreThrows() as unknown as IosTelemetryRecorder,
+        telemetryRecorder: new RestoreThrows(),
         failureRecorder,
         navigationScreenshotsEnabled: () => false,
       });

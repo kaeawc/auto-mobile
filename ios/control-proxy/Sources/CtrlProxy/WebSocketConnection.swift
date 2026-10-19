@@ -177,24 +177,28 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
                     return
                 }
 
-                // Only the WebSocket-upgrade branch consumes bytes left in inboundBuffer
-                // after the slice (a frame pipelined with the upgrade request, #5678); the
-                // HTTP branches send-then-cancel, discarding any residual (AC4).
-                if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
-                    self.handleWebSocketUpgrade(request)
-                } else if request.contains("GET /health") {
-                    self.handleHealthCheck()
-                } else if request.contains("POST /sdk-events") {
-                    self.handleSdkEventsPost(request)
-                } else if request.contains("GET /sdk-events") {
-                    self.handleSdkEventsGet()
-                } else {
-                    let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
-                    self.channel.send(response) { [weak self] _ in
-                        self?.channel.cancel()
-                    }
-                }
+                self.handleHTTPRequest(request)
             }
+    }
+
+    private func handleHTTPRequest(_ request: String) {
+        // Only the WebSocket-upgrade branch consumes bytes left in inboundBuffer
+        // after the slice (a frame pipelined with the upgrade request, #5678); the
+        // HTTP branches send-then-cancel, discarding any residual (AC4).
+        if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
+            handleWebSocketUpgrade(request)
+        } else if request.contains("GET /health") {
+            handleHealthCheck()
+        } else if request.contains("POST /sdk-events") {
+            handleSdkEventsPost(request)
+        } else if request.contains("GET /sdk-events") {
+            handleSdkEventsGet()
+        } else {
+            let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+            channel.send(response) { [weak self] _ in
+                self?.channel.cancel()
+            }
+        }
     }
 
     private func rejectHTTPRequest(_ rejection: WebSocketFraming.HTTPRequestRejection) {

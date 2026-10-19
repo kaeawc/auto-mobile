@@ -60,10 +60,6 @@ test/ctrlProxy/RunnerReadinessService.test.ts TS2353 2
 test/ctrlProxy/RunnerReadinessService.test.ts TS7006 11
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts TS18048 17
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts TS2488 2
-test/daemon/devicePool.assignMultipleDevices.recovery.test.ts TS2322 1
-test/daemon/devicePool.assignMultipleDevices.test.ts TS2322 19
-test/daemon/devicePool.refreshDevices.test.ts TS2322 2
-test/daemon/devicePool.refreshDevices.test.ts TS2739 2
 test/daemon/socketServerToolCapabilities.integration.test.ts TS2352 2
 test/db/bunSqliteDialect.integration.test.ts TS2769 1
 test/db/databaseMigrationLockReopen.integration.test.ts TS2345 2
@@ -135,8 +131,6 @@ test/features/action/TapOnElement.accessibilityLink.test.ts TS2322 3
 test/features/action/TapOnElement.accessibilityLink.test.ts TS2740 1
 test/features/action/TapOnElement.cachedResolution.test.ts TS2322 5
 test/features/action/TapOnElement.disabledElement.test.ts TS2322 1
-test/features/action/TapOnElement.ensureChecked.test.ts TS2322 1
-test/features/action/TapOnElement.ensureChecked.test.ts TS2559 1
 test/features/action/TapOnElement.ensureCheckedClockSkew.test.ts TS2769 1
 test/features/action/TapOnElement.extendedSelectors.test.ts TS2322 1
 test/features/action/TapOnElement.imeOcclusion.test.ts TS2322 1
@@ -154,9 +148,8 @@ test/features/action/TapOnElement.prototypeUnderSystemBars.test.ts TS2322 1
 test/features/action/TapOnElement.retryIfNoChange.test.ts TS2322 1
 test/features/action/TapOnElement.selectionStrategy.test.ts TS2322 3
 test/features/action/TapOnElement.selectionStrategy.test.ts TS2339 2
-test/features/action/TapOnElement.selectionStrategy.test.ts TS2345 1
 test/features/action/TapOnElement.selectionStrategy.test.ts TS2559 9
-test/features/action/TapOnElement.selectionStrategy.test.ts TS2739 3
+test/features/action/TapOnElement.selectionStrategy.test.ts TS2739 1
 test/features/action/TapOnElement.talkback.test.ts TS2322 1
 test/features/action/TapOnElement.toolDispatch.test.ts TS2769 1
 test/features/action/TapOnElement.visibleMatch.test.ts TS2322 1
@@ -199,7 +192,6 @@ test/features/observe/android/AndroidCtrlProxyClientRequestSettlement.test.ts TS
 test/features/observe/android/ctrlProxyHierarchyAccessibilityFields.test.ts TS2769 1
 test/features/observe/android/screenshotHidePrototype.test.ts TS4104 1
 test/features/observe/ios/CtrlProxyStructure.test.ts TS2345 1
-test/features/observe/ios/IOSCtrlProxyClient.test.ts TS2345 5
 test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts TS2345 3
 test/features/observe/ios/gesturePhaseDiagnostics.test.ts TS2322 1
 test/features/observe/nodeCleaners.property.test.ts TS2367 1
@@ -234,7 +226,6 @@ test/helpers/androidDisabledControlCapture.ts TS2741 1
 test/helpers/bindingRegistryContract.ts TS2769 3
 test/helpers/daemonHeartbeatHandler.ts TS2322 1
 test/helpers/deviceLikeAndroidHierarchy.ts TS2353 1
-test/helpers/devicePoolSuite.ts TS2416 3
 test/helpers/directFrameRig.ts TS2345 1
 test/helpers/fakeServerContext.ts TS2352 1
 test/helpers/livenessScenarioHarness.ts TS2322 1
@@ -271,7 +262,6 @@ test/lint/ctrlProxyGetInstanceRestore.test.ts TS2345 1
 test/lint/deviceBindingSingleReader.test.ts TS2339 1
 test/lint/deviceBindingSingleReader.test.ts TS2345 4
 test/lint/deviceBindingSingleReader.test.ts TS2367 1
-test/lint/deviceToolsKillDeviceImportCasing.test.ts TS2345 1
 test/lint/envRegistry.test.ts TS2322 1
 test/lint/fakeHygiene.test.ts TS2339 2
 test/lint/livenessActivityClockSeparation.test.ts TS2345 1
@@ -348,14 +338,6 @@ test/server/deviceTools.cancelDuringCrossDaemonClaim.test.ts TS2769 1
 test/server/deviceTools.createIfMissing.test.ts TS18046 1
 test/server/deviceTools.deleteDeviceTypedRefusals.test.ts TS2345 2
 test/server/deviceTools.queuedStartAlreadyRunning.test.ts TS2322 1
-test/server/deviceTools.startDevice.test.ts TS18046 53
-test/server/deviceTools.startDevice.test.ts TS2322 21
-test/server/deviceTools.startDevice.test.ts TS2345 2
-test/server/deviceTools.startDevice.test.ts TS2554 15
-test/server/deviceTools.startDevice.test.ts TS2571 1
-test/server/deviceTools.startDevice.test.ts TS2739 1
-test/server/deviceTools.startDevice.test.ts TS2741 2
-test/server/deviceTools.startDevice.test.ts TS7006 30
 test/server/deviceTools.undeliveredAcquisition.test.ts TS2345 1
 test/server/deviceTools.undeliveredAcquisition.test.ts TS2540 2
 test/server/deviceTools.undeliveredAcquisition.test.ts TS2769 1
@@ -539,12 +521,8 @@ test/server/videoRecordingManager.test.ts TS2769 2
 test/server/videoRecordingSessionlessFanoutHeldDevice.test.ts TS2353 1
 test/shutdownCleanup.test.ts TS2769 3
 test/stress/memory-leak.stress.test.ts TS2722 2
-test/utils/DeviceSessionManager.createIfMissing.test.ts TS2673 5
 test/utils/DeviceSessionManager.physicalScanBudget.test.ts TS18048 3
 test/utils/DeviceSessionManager.pinScanFailure.test.ts TS18048 1
-test/utils/DeviceSessionManager.test.ts TS2339 1
-test/utils/DeviceSessionManager.test.ts TS2352 1
-test/utils/DeviceSessionManager.test.ts TS2540 1
 test/utils/ExecSeam.test.ts TS2322 1
 test/utils/FileDownloader.integration.test.ts TS2769 1
 test/utils/KeepScreenAwakeManager.test.ts TS2769 3
@@ -582,7 +560,6 @@ test/utils/android-cmdline-tools/EmulatorProcessStop.group.test.ts TS2769 2
 test/utils/android-cmdline-tools/EmulatorReadinessPoller.test.ts TS2339 1
 test/utils/android-cmdline-tools/EmulatorReadinessPoller.test.ts TS2352 1
 test/utils/android-cmdline-tools/runAndroidCommand.test.ts TS2339 1
-test/utils/contentHashProvider.test.ts TS2554 4
 test/utils/coreSimulatorDeviceSetEnvConstant.test.ts TS2339 1
 test/utils/coreSimulatorDeviceSetEnvConstant.test.ts TS2345 3
 test/utils/ctrlProxyDownloadControl.property.test.ts TS2367 1
@@ -637,6 +614,4 @@ test/utils/structuralUtils.characterization.test.ts TS2345 2
 test/utils/structuralUtils.characterization.test.ts TS2769 1
 test/utils/structuralUtils.characterization.test.ts TS7006 1
 test/utils/toolFailureSignal.test.ts TS2769 3
-test/utils/toolUtils.property.test.ts TS2345 1
-test/utils/toolUtilsStructuredField.test.ts TS2769 1
 test/vision/ClaudeVisionClient.test.ts TS2769 1

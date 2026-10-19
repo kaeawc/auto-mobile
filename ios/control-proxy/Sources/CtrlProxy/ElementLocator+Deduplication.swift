@@ -76,8 +76,8 @@ extension ElementLocator {
 
             // Build key from className + bounds
             let key: String
-            if let cls = child.className, let b = child.bounds {
-                key = "\(cls)|\(b.left),\(b.top),\(b.right),\(b.bottom)"
+            if let cls = child.className, let bounds = child.bounds {
+                key = "\(cls)|\(bounds.left),\(bounds.top),\(bounds.right),\(bounds.bottom)"
             } else if let cls = child.className {
                 key = "\(cls)|nobounds"
             } else {

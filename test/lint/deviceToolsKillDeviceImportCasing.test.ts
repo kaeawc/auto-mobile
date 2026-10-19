@@ -20,7 +20,7 @@ function stringLiteralValue(value: unknown): string | undefined {
   return typeof value.value === "string" ? value.value : undefined;
 }
 
-function relativeImports(source: AstNode): string[] {
+function relativeImports(source: unknown): string[] {
   const imports: string[] = [];
   const seen = new WeakSet<object>();
   const visit = (value: unknown): void => {
@@ -70,8 +70,14 @@ describe("deviceTools.killDevice import casing (issue #6060)", () => {
   // casing check: do it once here.
   let pollutingSuite: AstNode;
   beforeAll(() => {
-    pollutingSuite = parseSync(POLLUTING_SUITE, readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"))
-      .program as unknown as AstNode;
+    const { program } = parseSync(
+      POLLUTING_SUITE,
+      readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"),
+    );
+    if (!isAstNode(program)) {
+      throw new TypeError("Parser did not return an AST program");
+    }
+    pollutingSuite = program;
   });
 
   test("uses the repository filename's exact casing", () => {

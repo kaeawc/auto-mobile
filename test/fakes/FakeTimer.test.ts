@@ -281,3 +281,20 @@ test("injected event drain settles nested work before the next due event", async
   expect(events).toEqual(["first@10", "nested@11", "last@20"]);
   expect(timer.now()).toBe(30);
 });
+
+test("fake handles keep identity, numeric IDs and cancellation on the fake clock", () => {
+  const timer = new FakeTimer();
+  const calls: string[] = [];
+  const timeout = timer.setTimeout(() => calls.push("timeout"), 10);
+  const interval = timer.setInterval(() => calls.push("interval"), 5);
+  expect(Number(timeout)).toBe(1);
+  expect(Number(interval)).toBe(1_000_000);
+  expect(timeout).not.toBe(interval);
+  timer.clearTimeout(timeout);
+  timer.advanceTime(5);
+  interval[Symbol.dispose]();
+  timer.advanceTime(10);
+  expect(calls).toEqual(["interval"]);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(timer.getPendingIntervalCount()).toBe(0);
+});

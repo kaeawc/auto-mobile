@@ -22,6 +22,8 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import type { CtrlProxySyncedHierarchy } from "../../src/features/observe/ios/types";
+import type { ScreenScaleMetadata } from "../../src/models/ScreenScaleMetadata";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   createAndroidTestClient,
@@ -37,6 +39,10 @@ import {
   sendRequest,
   sendRequestAfterConnect,
 } from "./helpers/inputSocketHarness";
+
+async function emptySyncedHierarchy(): Promise<CtrlProxySyncedHierarchy> {
+  return { hierarchy: { updatedAt: 0, packageName: "", hierarchy: {} } };
+}
 
 describe("UnixSocketServer input/tap", () => {
   let socketPath: string;
@@ -80,7 +86,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     const createMcpClient = mock(async () => {
@@ -138,7 +144,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     spyOnAndroidClientInstance(androidDevice, {
@@ -177,7 +183,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(async () => {
       tapStarted();
       await tapReleased;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
@@ -207,7 +213,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     spyOnAndroidClientInstance(androidDevice, {
@@ -246,10 +252,10 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
-    const fetchHierarchy = mock(async () => ({ hierarchy: {} }));
+    const fetchHierarchy = mock(emptySyncedHierarchy);
     spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
@@ -285,7 +291,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     spyOnAndroidClientInstance(androidDevice, {
@@ -312,10 +318,10 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
-    const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
+    const fetchHierarchy = mock(emptySyncedHierarchy); // success, no metadata => legacy
     spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
@@ -346,7 +352,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     const fetchHierarchy = mock(async () => null); // not connected / timed out -> FAILURE
@@ -375,7 +381,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     const fetchHierarchy = mock(async () => {
@@ -408,14 +414,14 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
-    let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
+    let scale: ScreenScaleMetadata | null = null;
     const fetchHierarchy = mock(async () => {
       fakeTimer.advanceTime(20_000);
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
-      return { hierarchy: {} };
+      return emptySyncedHierarchy();
     });
     spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
@@ -450,14 +456,14 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
-    let scale: { nativeScale: number } | null = null;
+    let scale: ScreenScaleMetadata | null = null;
     const fetchHierarchy = mock(async () => {
       fakeTimer.advanceTime(31_000); // exceeds the 30s budget
-      scale = { nativeScale: 3 };
-      return { hierarchy: {} };
+      scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
+      return emptySyncedHierarchy();
     });
     spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
@@ -486,7 +492,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     spyOnIosTestClientInstance(iosDevice, {
@@ -516,13 +522,13 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
-    let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
+    let scale: ScreenScaleMetadata | null = null;
     const fetchHierarchy = mock(async () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
-      return { hierarchy: {} };
+      return emptySyncedHierarchy();
     });
     spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
@@ -553,15 +559,15 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
-    let scale: { nativeScale: number; pixelWidth: number; pixelHeight: number } | null = null;
+    let scale: ScreenScaleMetadata | null = null;
     const fetchHierarchy = mock(async () => {
       // Simulate #4548 receipt-based retention populating the scale during the fetch. The probe
       // SUCCEEDS (returns a hierarchy); the scale is now known.
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
-      return { hierarchy: {} };
+      return emptySyncedHierarchy();
     });
     spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
@@ -598,7 +604,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     spyOnIosTestClientInstance(iosDevice, {
@@ -625,7 +631,7 @@ describe("UnixSocketServer input/tap", () => {
     const requestTapCoordinates = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
         args[0].onDispatch?.();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
     );
     spyOnAndroidClientInstance(androidDevice, {
@@ -688,7 +694,7 @@ describe("UnixSocketServer input/tap", () => {
         fakeTimer.setTimeout(resolve, 40);
       });
       inFlight -= 1;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
@@ -731,7 +737,7 @@ describe("UnixSocketServer input/tap", () => {
       if (callCount === 1) {
         await blockingPromise;
       }
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     });
     spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,

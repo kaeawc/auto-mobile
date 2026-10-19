@@ -1,4 +1,3 @@
-import type { Socket } from "node:net";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
@@ -20,11 +19,21 @@ export function isExpectedPeerClose(error: Error): boolean {
   );
 }
 
-/** The slice of `net.Socket` a connection drives; tests pass a plain emitter. */
-export type ControlConnectionSocket = Pick<
-  Socket,
-  "on" | "setTimeout" | "destroy" | "destroyed" | "writableLength"
->;
+/**
+ * The slice of `net.Socket` a connection drives; tests pass a plain emitter. Methods return
+ * `unknown` because only their side effects matter; a `Pick` of `Socket` would force every fake to
+ * return a real `Socket`.
+ */
+export interface ControlConnectionSocket {
+  readonly destroyed: boolean;
+  readonly writableLength: number;
+  on(event: "data", listener: (data: Buffer | string) => void): unknown;
+  on(event: "close", listener: (hadError: boolean) => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "timeout" | "drain" | "pause" | "end" | "finish", listener: () => void): unknown;
+  setTimeout(timeout: number): unknown;
+  destroy(): unknown;
+}
 
 export type ControlConnectionTraceEvent =
   | "socket_drain"

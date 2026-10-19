@@ -14,7 +14,6 @@
 1	src/ctrlProxy/RunnerReadinessService.ts	eslint(max-classes-per-file)
 1	src/daemon/DaemonLauncher.ts	oxlint-disable(auto-mobile/no-raw-promise-race)
 1	src/daemon/McpTimeoutError.ts	eslint(max-classes-per-file)
-1	src/daemon/client.ts	auto-mobile(max-class-lines)
 1	src/daemon/client.ts	eslint(max-classes-per-file)
 1	src/daemon/client.ts	eslint(max-params)
 1	src/daemon/daemon.ts	auto-mobile(max-class-lines)

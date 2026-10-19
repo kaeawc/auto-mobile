@@ -4,7 +4,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

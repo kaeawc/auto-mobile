@@ -14,10 +14,11 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -93,11 +94,11 @@ class ImeControllerTest {
     override fun isRunning() = running
 
     override suspend fun broadcastWithPerfSync(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
+      messageBuilder: (perfTiming: JsonElement?) -> String,
     ) {
-      frames += type to buildJsonObject(buildContent)
+      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
+      val type = frame.getValue("type").jsonPrimitive.content
+      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming", "requestId"))
     }
 
     override suspend fun broadcastSetKeyboardProfileResult(

@@ -18,7 +18,7 @@ import { REGISTRY_RETRY_MAX_DELAY_MS } from "../../../../src/daemon/sessionBroke
 import { fixedBackoff } from "../../../../src/utils/Backoff";
 import { SUSPECT_GRACE_MS } from "../../../../src/daemon/livenessOwnerLease";
 import { logger } from "../../../../src/utils/logger";
-import { sessionOwnershipLostPayload } from "../../../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../../../src/daemon/deviceSessionResult";
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../../fakes/FakeTimer";

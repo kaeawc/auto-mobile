@@ -176,6 +176,7 @@
     <ID>LongMethod:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer$internal suspend fun handleClientMessage</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer$private fun tryStart: Boolean</ID>
+    <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>LongParameterList:CaCertificateController.kt:CaCertificateController</ID>
     <ID>LongParameterList:CaCertificateController.kt:CaCertificateController$private suspend fun broadcastCaCertResult</ID>
     <ID>LongParameterList:ClipboardController.kt:ClipboardController$private suspend fun broadcastClipboardResult</ID>
@@ -186,7 +187,6 @@
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastPackageEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun handledExceptionEventResponse: HandledExceptionEvent</ID>
-    <ID>LongParameterList:CtrlProxy.kt:internal fun packageEventJson: JsonObject</ID>
     <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun setPreference</ID>
     <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun showPrototype</ID>
     <ID>LongParameterList:CtrlProxyIme.kt:CtrlProxyIme$fun commitText</ID>
@@ -239,7 +239,15 @@
     <ID>LongParameterList:PrototypeSpecContent.kt:internal fun prototypeContentDescription: String?</ID>
     <ID>LongParameterList:PrototypeStorageSession.kt:PrototypeStorageSession</ID>
     <ID>LongParameterList:PrototypeSwipeRow.kt:@Composable private fun androidx.compose.foundation.layout.BoxScope.PrototypeSwipeButtons</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun caCertResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun clipboardResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun commitTextResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun deviceOwnerStatusResultFrame: String</ID>
     <ID>LongParameterList:ResultFrames.kt:internal fun dragResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun imeActionResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun insertTextResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun keyboardProfilesResultFrame: String</ID>
+    <ID>LongParameterList:ResultFrames.kt:internal fun packageEventFrame: String</ID>
     <ID>LongParameterList:ResultFrames.kt:internal fun pinchResultFrame: String</ID>
     <ID>LongParameterList:ResultFrames.kt:internal fun prototypeResultFrame: String</ID>
     <ID>LongParameterList:ResultFrames.kt:internal fun swipeResultFrame: String</ID>
@@ -339,6 +347,7 @@
     <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:AnrReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:EventBatchReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkCapabilitiesDiscovery.kt:error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SdkControlController.kt:SdkControlController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:FrameMetricsSnapshotReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:NavigationEventReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:RecompositionSnapshotReceiver$e: Exception</ID>

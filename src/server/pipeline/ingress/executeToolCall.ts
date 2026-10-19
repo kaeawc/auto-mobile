@@ -20,7 +20,7 @@ import { holdsOwnerHeartbeatLease } from "../../../daemon/sessionBroker/provisio
 import {
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../deviceSessionResult";
+} from "../../../daemon/deviceSessionResult";
 import { executionTracker, subscribeRequestCancellation } from "../../../daemon/executionTracker";
 import {
   isControlCallOnNamedSession,
@@ -41,7 +41,7 @@ import {
 import type { McpToolCallExtra, McpToolCallResult, ToolCall } from "../../toolCallDispatch";
 import { formatToolParamError } from "../../toolParamError";
 import { ToolRegistry, toolHasOutputSchema } from "../../toolRegistry";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import {

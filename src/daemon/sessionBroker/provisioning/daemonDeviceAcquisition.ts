@@ -25,15 +25,13 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
 import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
+import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
 import {
-  DeviceManagerBindingInventory,
   GateBindingBootCapacity,
-  PoolBindingDeviceClaims,
-  ToolBindingProvisioner,
   type BindingBootCapacityAssertion,
-  type BindingClaimPool,
-  type BindingToolInvoker,
-} from "./reconcilerPorts";
+} from "./GateBindingBootCapacity";
+import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDeviceClaims";
+import { ToolBindingProvisioner, type BindingToolInvoker } from "./reconcilerPorts";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -55,6 +53,7 @@ import {
   withLiveExecutionSessions,
   type LiveExecutionSessions,
 } from "../registry/ownerLiveness";
+import { daemonToolRegistry } from "../../toolRegistryPort";
 
 export interface DaemonBrokerDeviceAcquisitionOptions {
   registry: () => Promise<BindingRegistry>;
@@ -120,8 +119,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
  * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
  */
 export const defaultBindingToolInvoker: BindingToolInvoker = async (name, args, signal) => {
-  const { ToolRegistry } = await import("../../../server/toolRegistry");
-  return await ToolRegistry.callInternal(name, args, undefined, signal);
+  return await daemonToolRegistry().callInternal(name, args, undefined, signal);
 };
 
 export interface DaemonBrokerDeviceAcquisitionHandle {

@@ -5,7 +5,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";

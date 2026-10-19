@@ -16,7 +16,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { releasedSessionNotFoundFields } from "../../src/daemon/types";
 import { sessionReleaseReasonTraits } from "../../src/daemon/releaseReasons";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 

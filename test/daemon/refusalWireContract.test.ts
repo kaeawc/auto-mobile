@@ -60,12 +60,22 @@ import * as deviceBootTimeout from "../../src/devices/DeviceBootTimeoutError";
 import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
+import * as sessionReleasedDuringCreation from "../../src/models/SessionReleasedDuringCreationError";
+import * as deviceShuttingDown from "../../src/models/DeviceShuttingDownError";
+import * as sessionCreationTimeout from "../../src/models/SessionCreationTimeoutError";
+import * as retryableDeviceAcquisition from "../../src/models/RetryableDeviceAcquisitionError";
+import * as deviceOwnedByOtherDaemon from "../../src/models/DeviceOwnedByOtherDaemonError";
+import * as deviceCleanupInProgress from "../../src/models/DeviceCleanupInProgressError";
+import * as deviceUnhealthy from "../../src/models/DeviceUnhealthyError";
+import * as deviceTransportOffline from "../../src/models/DeviceTransportOfflineError";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
 import * as inputOwnedError from "../../src/models/InputDeviceOwnedError";
 import * as deviceAssignedToBinding from "../../src/models/DeviceAssignedToBindingError";
 import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
-import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
+import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
+import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
 import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
 import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
@@ -76,7 +86,7 @@ import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
-import * as toolUnavailable from "../../src/server/toolUnavailableError";
+import * as toolUnavailable from "../../src/daemon/toolUnavailableError";
 import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
@@ -176,13 +186,21 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "devices/ProvisionDeviceCreateRejectedError": provisionDeviceCreateRejected,
   "devices/deviceBootService": deviceBoot,
   "devices/DeviceBootTimeoutError": deviceBootTimeout,
-  "models/deviceAcquisitionRefusals": acquisitionRefusals,
+  "models/SessionReleasedDuringCreationError": sessionReleasedDuringCreation,
+  "models/DeviceShuttingDownError": deviceShuttingDown,
+  "models/SessionCreationTimeoutError": sessionCreationTimeout,
+  "models/RetryableDeviceAcquisitionError": retryableDeviceAcquisition,
+  "models/DeviceOwnedByOtherDaemonError": deviceOwnedByOtherDaemon,
+  "models/DeviceCleanupInProgressError": deviceCleanupInProgress,
+  "models/DeviceUnhealthyError": deviceUnhealthy,
+  "models/DeviceTransportOfflineError": deviceTransportOffline,
   "models/InputDeviceOwnedError": inputOwnedError,
   "models/DeviceAssignedToBindingError": deviceAssignedToBinding,
   "daemon/inputDeviceOwnership": inputOwnership,
   "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
-  "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
+  "server/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
+  "server/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
   "server/planExecutionInProgressRefusal": planLockRefusal,
   "server/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
   "daemon/McpTimeoutError": mcpTimeouts,
@@ -193,7 +211,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,
-  "server/toolUnavailableError": toolUnavailable,
+  "daemon/toolUnavailableError": toolUnavailable,
   "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
 };
 

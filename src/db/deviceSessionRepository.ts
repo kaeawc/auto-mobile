@@ -1,3 +1,13 @@
+import { DeviceSessionNotActiveError } from "./DeviceSessionNotActiveError";
+export { DeviceSessionNotActiveError } from "./DeviceSessionNotActiveError";
+import { DeviceSessionRowChangedError } from "./DeviceSessionRowChangedError";
+export { DeviceSessionRowChangedError } from "./DeviceSessionRowChangedError";
+import { DeviceSessionTerminallyReleasedError } from "./DeviceSessionTerminallyReleasedError";
+export { DeviceSessionTerminallyReleasedError } from "./DeviceSessionTerminallyReleasedError";
+import { DeviceSessionRowNotRewritableError } from "./DeviceSessionRowNotRewritableError";
+export { DeviceSessionRowNotRewritableError } from "./DeviceSessionRowNotRewritableError";
+import { DeviceSessionRowNotReleasableError } from "./DeviceSessionRowNotReleasableError";
+export { DeviceSessionRowNotReleasableError } from "./DeviceSessionRowNotReleasableError";
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
   ignoresManagedExecutionIdleDeadline,
@@ -11,7 +21,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { Platform } from "../models";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { ActionableError, toActionableError } from "../models/ActionableError";
+import { toActionableError } from "../models/ActionableError";
 import {
   isRecoverableDaemonReleaseReason,
   literalReleaseReasonsStrongerThan,
@@ -190,67 +200,6 @@ function rowRewriteGuard(
 
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
-}
-
-/**
- * An activity write matched no active row (#11129): a peer expired it, or it was released. The
- * write did not persist, so callers must not treat it as stored.
- */
-export class DeviceSessionNotActiveError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(`Device session ${sessionUuid} has no active row to record activity or ownership on.`);
-    this.name = "DeviceSessionNotActiveError";
-  }
-}
-
-/**
- * A recovery's upsert of a claimed recoverable row (#11243) found the row no longer the incarnation
- * it claimed: a terminal release, a peer, or the claim's own hand-back changed it first. Nothing
- * was written.
- */
-export class DeviceSessionRowChangedError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} changed while it was being recovered; the recovery did not ` +
-        "persist it.",
-    );
-    this.name = "DeviceSessionRowChangedError";
-  }
-}
-
-/**
- * An upsert that must not revive an ended UUID ({@link UpsertActiveSessionOptions.unlessTerminal},
- * #11498) found the row released for a terminal reason. Nothing was written: the session the
- * caller holds has been terminally released, whoever wrote the release.
- */
-export class DeviceSessionTerminallyReleasedError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} was terminally released; its row was not made active again.`,
-    );
-    this.name = "DeviceSessionTerminallyReleasedError";
-  }
-}
-
-/** A superseded-release rewrite found another terminal release or a live peer's row (#11557). */
-export class DeviceSessionRowNotRewritableError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} was not rewritten: its row holds another terminal release ` +
-        "or a live peer daemon owns it.",
-    );
-    this.name = "DeviceSessionRowNotRewritableError";
-  }
-}
-
-/** A guarded release matched no writable row; this is a refusal, not a storage failure. */
-export class DeviceSessionRowNotReleasableError extends ActionableError {
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Device session ${sessionUuid} was not released: its row is terminal or owned by a live peer.`,
-    );
-    this.name = "DeviceSessionRowNotReleasableError";
-  }
 }
 
 /** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */

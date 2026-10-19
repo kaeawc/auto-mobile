@@ -10,7 +10,7 @@ import {
   hasPendingTerminalScreenshot,
 } from "../../src/utils/PostActionCaptureContext";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { serverConfig } from "../../src/utils/ServerConfig";

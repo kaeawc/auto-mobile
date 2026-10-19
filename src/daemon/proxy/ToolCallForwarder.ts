@@ -6,7 +6,7 @@ import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
   type DeviceSessionSuspectRefusal,
-} from "../../server/deviceSessionResult";
+} from "../deviceSessionResult";
 import type { DaemonClientLike } from "../client";
 import { isDeviceInventoryTool, type DaemonProxyProgressCallback } from "../daemonMcpProxy";
 import { isReplaySafeToolName } from "../deviceControlTransportFailure";

@@ -15,7 +15,7 @@ import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";
 import {
   LIST_CHANGED_NOTIFICATION_METHODS,
   ListChangedBroadcaster,
-} from "../../src/server/listChangedBroadcast";
+} from "../../src/daemon/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { applyAppearanceToDevice } from "../../src/utils/deviceAppearance";

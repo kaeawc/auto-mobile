@@ -272,8 +272,8 @@ import {
 } from "./daemonStreamRouting";
 import { configureObservationStreamCallbacks } from "./daemonObservationStreamCallbacks";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
+import { BackgroundBindingRegistryUpgrade } from "./sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import {
-  BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
   prepareBindingRegistryForStartup,
 } from "./sessionBroker/registry/legacySlotDeviceRetirement";
@@ -371,7 +371,7 @@ import {
   type ShutdownCleanupStage,
 } from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
-import { type ToolSelectionProfileProvenanceLoader } from "../server/toolSelectionProfileRegistry";
+import { type ToolSelectionProfileProvenanceLoader } from "./toolSelectionProfileRegistry";
 
 import {
   resolveDaemonDependencies,

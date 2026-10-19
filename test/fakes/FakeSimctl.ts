@@ -498,6 +498,15 @@ export class FakeSimctl implements SimCtl {
     return this.malformedListings ? [] : this.runtimes.filter((runtime) => runtime.isAvailable);
   }
 
+  /** Every available configured runtime; the version bounds are not modelled by this fake. */
+  async resolveRuntimeIdentifiersForBounds(
+    minVersion?: string,
+    maxVersion?: string,
+  ): Promise<string[]> {
+    this.recordCall("resolveRuntimeIdentifiersForBounds", { minVersion, maxVersion });
+    return (await this.getRuntimes()).map((runtime) => runtime.identifier);
+  }
+
   async createSimulator(name: string, deviceType: string, runtime: string): Promise<string> {
     this.recordCall("createSimulator", { name, deviceType, runtime });
     return this.createdSimulatorUdid;

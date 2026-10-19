@@ -196,7 +196,6 @@
 6	test/utils/android-cmdline-tools/AndroidEmulatorClient-launchContract.test.ts
 1	test/utils/android-cmdline-tools/AndroidEmulatorClient-launchDiagnostics.test.ts
 2	test/utils/android-cmdline-tools/AndroidEmulatorClient-startEmulator.test.ts
-1	test/utils/android-cmdline-tools/AvdManagerClient.test.ts
 1	test/utils/android-cmdline-tools/EmulatorConsoleClient.test.ts
 1	test/utils/android-cmdline-tools/EmulatorPortReservations.test.ts
 1	test/utils/android-cmdline-tools/SdkManagerClient.test.ts

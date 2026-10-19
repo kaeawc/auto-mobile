@@ -136,7 +136,10 @@ describe("simulator workload profile reconciliation (#6694)", () => {
       deadlineMs: 120_000,
     });
     disableManually(iosDeviceResourceCatalog.tipsServices[0]);
-    const narrower = { ...request, profile: { resources: { wallpaperRendering: "disabled" } } };
+    const narrower = {
+      ...request,
+      profile: { resources: { wallpaperRendering: "disabled" as const } },
+    };
     const report = await reconciler.reconcile({ ...narrower, repair: true });
     expect(report.success).toBe(false);
     expect(report.remainingDrift.map(({ resource, kind }) => [resource, kind])).toEqual([

@@ -123,6 +123,8 @@ import { iosMutationTokens } from "../../storage/IosMutationTokens";
 export type ServiceManagerFactory = (device: BootedDevice) => CtrlProxyIosManager;
 
 /** Default production factory that delegates to the real singleton. */
+type NavGraph = ReturnType<typeof NavigationGraphManager.getInstance>;
+
 const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
   IOSCtrlProxyManager.getInstance(d);
 
@@ -847,7 +849,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly resolvedBuildContexts = new Map<string, NavigationBuildContext>();
   private readonly buildContextInFlight = new Map<string, IosBuildContextAttempt>();
   private readonly buildContextFailures = new Map<string, { attempts: number; retryAt: number }>();
-  private readonly appliedBuildContextManagers = new Map<string, Set<NavigationGraphManager>>();
+  private readonly appliedBuildContextManagers = new Map<string, Set<NavGraph>>();
   private readonly buildContextGeneration = new Map<string, number>();
   private sdkEventPollGeneration = 0;
   private sdkEventPollAbortController: AbortController | null = null;
@@ -1296,7 +1298,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /**
    * Get the NavigationGraphManager for the bound session, or the global singleton.
    */
-  private getNavigationGraphManager(): NavigationGraphManager {
+  private getNavigationGraphManager(): NavGraph {
     return this.boundSessionId
       ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
       : NavigationGraphManager.getInstance();
@@ -1480,8 +1482,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private clearClientBuildContext(appId: string): boolean {
     // Clear earlier session bindings too: close must not leave a released device
     // attributable on a manager to which this client previously applied context.
-    const managers =
-      this.appliedBuildContextManagers.get(appId) ?? new Set<NavigationGraphManager>();
+    const managers = this.appliedBuildContextManagers.get(appId) ?? new Set<NavGraph>();
     for (const manager of managers) {
       manager.clearBuildContext(appId);
     }

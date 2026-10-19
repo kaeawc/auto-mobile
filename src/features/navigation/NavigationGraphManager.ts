@@ -15,18 +15,13 @@ import {
   ExportedGraph,
   HierarchyNavigationEvent,
   IncomingNavigationEvent,
-  NavigationAppListProvider,
   NavigationAppSummary,
   NavigationEdge,
   NavigationEvent,
-  NavigationGraph,
   NavigationGraphHistoryPage,
-  NavigationGraphHistoryProvider,
   NavigationGraphNodeResource,
-  NavigationGraphNodeResourceProvider,
   NavigationGraphStats,
   NavigationGraphSummary,
-  NavigationGraphSummaryProvider,
   NavigationNode,
   NavigationSuggestionInfo,
   NavigationToolCallHandle,
@@ -40,122 +35,20 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { NavigationGraphQueries } from "./NavigationGraphQueries";
 import { recordNodeProvenance, type ResolvedProvenance } from "./navigationGraphWrites";
 
+import type {
+  NavigationBuildContext,
+  NavigationBuildContextChange,
+  NavigationGraphService,
+} from "./NavigationGraphService";
+
 export type { NavigationEvent, IncomingNavigationEvent, NavigationEdge, UIState };
+export type { NavigationBuildContext, NavigationBuildContextChange, NavigationGraphService };
 
 /** Above SQLite's 5s busy timeout and normal loaded writes; callers only log failures, while 15s bounds a wedged tracking queue. */
 const NAVIGATION_WRITE_TIMEOUT_MS = 15_000;
 
 /** Consecutive navigateTo calls whose scroll search missed an edge's target before it is demoted (#10154). */
 const EDGE_TARGET_MISS_DEMOTION_THRESHOLD = 2;
-
-/**
- * Interface for navigation graph management operations.
- * Provides methods for tracking screen visits, recording navigation events,
- * and querying navigation paths.
- */
-export interface NavigationGraphService
-  extends
-    NavigationGraph,
-    NavigationGraphSummaryProvider,
-    NavigationGraphHistoryProvider,
-    NavigationGraphNodeResourceProvider,
-    NavigationAppListProvider {
-  // App management
-  setCurrentApp(appId: string): Promise<void>;
-  getCurrentAppId(): string | null;
-
-  // Build/device provenance (#4984)
-  setBuildContext(context: NavigationBuildContext): void;
-  clearBuildContext(appId: string): void;
-
-  // Screen tracking
-  getCurrentScreen(): string | null;
-  recordBackStack(backStack: BackStackInfo): Promise<void>;
-
-  // Navigation events
-  recordNavigationEvent(event: IncomingNavigationEvent): Promise<void>;
-  recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void>;
-
-  // Tool call correlation
-  recordToolCall(
-    toolName: string,
-    args: Record<string, any>,
-    uiState?: UIState,
-    deviceId?: string,
-  ): NavigationToolCallHandle;
-  updateScrollPosition(scrollPosition: ScrollPosition): void;
-
-  // Pathfinding
-  findPath(targetScreen: string): Promise<PathResult>;
-  recordEdgeReplayOutcome(edge: NavigationEdge, reached: boolean): void;
-  hasEdgeReplayFailure(edge: NavigationEdge): boolean;
-  settleTransientEdgeFailure(edge: NavigationEdge, searched: boolean): void;
-
-  // Graph queries
-  getKnownScreens(): Promise<string[]>;
-  getNode(screenName: string): Promise<NavigationNode | undefined>;
-  getNodeResourceById(nodeId: number, appId?: string): Promise<NavigationGraphNodeResource | null>;
-  getNodeResourceByScreen(screenName: string): Promise<NavigationGraphNodeResource | null>;
-  getEdgesFrom(screenName: string): Promise<NavigationEdge[]>;
-  getEdgesTo(screenName: string): Promise<NavigationEdge[]>;
-  getEdgeTargetsFrom(screenName: string): Promise<NavigationEdgeTarget[]>;
-  getStats(): Promise<NavigationGraphStats>;
-  /** Statistics for a specific app without changing the active graph. */
-  getStatsForApp(appId: string | null): Promise<NavigationGraphStats>;
-
-  // Graph operations
-  clearCurrentGraph(): Promise<void>;
-  clearAllGraphs(): Promise<void>;
-  exportGraph(): Promise<ExportedGraph>;
-  exportGraphForApp(appId: string | null): Promise<ExportedGraph>;
-  exportGraphSummary(): Promise<NavigationGraphSummary>;
-  exportGraphSummaryForApp(appId: string | null): Promise<NavigationGraphSummary>;
-  exportGraphHistory(options?: {
-    cursor?: string;
-    limit?: number;
-  }): Promise<NavigationGraphHistoryPage>;
-
-  // Screenshot management
-  updateNodeScreenshot(
-    appId: string,
-    screenName: string,
-    screenshotPath: string | null,
-  ): Promise<void>;
-
-  // Suggestions
-  getSuggestions(): Promise<NavigationSuggestionInfo[]>;
-  promoteSuggestion(suggestionId: number, screenName: string): Promise<void>;
-
-  // Test coverage
-  startTestSession(sessionUuid: string): Promise<void>;
-  endTestSession(): Promise<void>;
-  getActiveTestSession(): TestCoverageSession | null;
-
-  // Listeners
-  setGraphUpdateListener(listener: (() => void | Promise<void>) | null): void;
-}
-
-/**
- * Build/device provenance context for a graph mutation (#4984). The build key is
- * (packageId=appId, versionCode, contentHash); deviceId names the device the
- * mutation was observed on. appId is carried so a context resolved for one app is
- * never applied to another when a session observes multiple apps on a device —
- * a stale context falls back to the default build key instead of mis-stamping.
- */
-export interface NavigationBuildContext {
-  appId: string;
-  deviceId: string;
-  versionCode: number;
-  /** Non-integer platform version, retained in memory/wire only; DB identity uses 0 + hash. */
-  versionKey?: string;
-  contentHash: string;
-}
-
-export interface NavigationBuildContextChange {
-  appId: string;
-  deviceId: string;
-  buildContext: NavigationBuildContext | null;
-}
 
 /** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
 export const LEGACY_PROVENANCE_SENTINEL = "legacy";
@@ -357,7 +250,7 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Get the singleton instance of NavigationGraphManager.
    * Used for non-daemon single-agent mode.
    */
-  public static getInstance(): NavigationGraphManager {
+  public static getInstance(): NavigationGraphService {
     if (!NavigationGraphManager.instance) {
       NavigationGraphManager.instance = new NavigationGraphManager();
     }
@@ -369,7 +262,7 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Each session gets its own transient state (currentAppId, currentScreen,
    * toolCallHistory, activeTestSession) while sharing the SQLite repositories.
    */
-  public static getInstanceForSession(sessionId: string): NavigationGraphManager {
+  public static getInstanceForSession(sessionId: string): NavigationGraphService {
     let instance = NavigationGraphManager.sessionInstances.get(sessionId);
     if (!instance) {
       // A released session never legitimately returns (UUIDs are unique), so a

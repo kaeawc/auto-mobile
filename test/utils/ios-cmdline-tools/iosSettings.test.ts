@@ -22,7 +22,7 @@ describe("iosSettings", () => {
     simctl.setCommandArgsResult(["ui", UDID, "appearance"], "dark\n");
     simctl.setCommandArgsResult(["ui", UDID, "content_size"], "large\n");
 
-    const snapshot = await captureIosSettings(simctl as any, UDID);
+    const snapshot = await captureIosSettings(simctl, UDID);
 
     expect(snapshot.values).toEqual({ ".GlobalPreferences/AppleLocale": "nl_BE" });
     expect(snapshot.ui).toEqual({ appearance: "dark", contentSize: "large" });
@@ -36,14 +36,14 @@ describe("iosSettings", () => {
     );
     // appearance/content_size return "" by default → ui undefined
 
-    const snapshot = await captureIosSettings(simctl as any, UDID);
+    const snapshot = await captureIosSettings(simctl, UDID);
     expect(snapshot.values).toEqual({});
     expect(snapshot.ui).toBeUndefined();
   });
 
   test("restoreIosSettings replays per-key defaults write + ui commands", async () => {
     const simctl = new FakeSimctl();
-    await restoreIosSettings(simctl as any, UDID, {
+    await restoreIosSettings(simctl, UDID, {
       values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
       ui: { appearance: "dark", contentSize: "large" },
     });
@@ -62,10 +62,10 @@ describe("iosSettings", () => {
       ["spawn", UDID, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
       "en_US",
     );
-    const snapshot = await captureIosSettings(capSim as any, UDID);
+    const snapshot = await captureIosSettings(capSim, UDID);
 
     const restoreSim = new FakeSimctl();
-    await restoreIosSettings(restoreSim as any, UDID, snapshot);
+    await restoreIosSettings(restoreSim, UDID, snapshot);
 
     const argvCommands = restoreSim.getMethodCalls("executeCommandArgs").map((c) => c.args);
     expect(argvCommands).toContainEqual([
@@ -86,7 +86,7 @@ describe("iosSettings", () => {
       new Error("boom"),
     );
 
-    await restoreIosSettings(simctl as any, UDID, {
+    await restoreIosSettings(simctl, UDID, {
       values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
       ui: { appearance: "light" },
     });

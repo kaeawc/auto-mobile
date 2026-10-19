@@ -22,6 +22,7 @@ import {
   DefaultSystemDetection,
   type SystemDetection,
 } from "../../../utils/system/SystemDetection";
+import { ENV } from "../../../config/env";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(
@@ -41,7 +42,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     if (logger.getLogLevel() !== LogLevel.DEBUG) {
       return {};
     }
-    const strategy = this.environment.getEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY");
+    const strategy = this.environment.getEnvVar(ENV.IOS_TAP_STRATEGY.name);
     return strategy === "legacy" ||
       strategy === "appRelative" ||
       strategy === "appRelativeObserved" ||

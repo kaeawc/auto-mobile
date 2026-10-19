@@ -31,6 +31,7 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { stableStringify } from "../../src/utils/stableStringify";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import {
@@ -1426,18 +1427,13 @@ describe("DeviceBootService", () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const timer = new FakeTimer();
-    let killCount = 0;
     let progressStarted = false;
     const outcome: { value: "pending" | "rejected" } = { value: "pending" };
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const childTimer = new FakeTimer();
+    const launched = new FakeChildProcess(childTimer);
+    devices.setMockChildProcess(image.name, launched);
 
     const boot = service(devices, matcher, undefined, timer).boot(
       { platform: "android", timeoutMs: 10_000 },
@@ -1458,23 +1454,19 @@ describe("DeviceBootService", () => {
     expect(progressStarted).toBe(true);
     timer.advanceTime(10_000);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    childTimer.advanceTime(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(outcome.value).toBe("rejected");
-    expect(killCount).toBe(1);
+    expect(launched.killed).toBe(true);
   });
 
   it("opts a fresh-provision Android cold boot into offline recovery and kills the AVD process when readiness fails (#7054)", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
-    let killCount = 0;
     devices.setDeviceImages("android", [image]);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 24,
-    } as any);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
     // Mirror the diagnostic the emulator client raises when a fresh cold boot
     // stays ADB-offline through the bounded recovery.
     devices.setWaitForDeviceReadyError(
@@ -1495,25 +1487,20 @@ describe("DeviceBootService", () => {
     // The fresh-provision flag reaches the Android readiness wait...
     expect(devices.getWaitForDeviceReadyOptions()).toEqual({ freshProvision: true });
     // ...and the owned emulator process is torn down, leaving no dangling boot.
-    expect(killCount).toBe(1);
+    expect(launched.killed).toBe(true);
   });
 
   it("cancels the owned process when a pending progress callback is externally aborted", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
     const controller = new AbortController();
-    let killCount = 0;
     let progressStarted = false;
     const outcome: { value: "pending" | "rejected" } = { value: "pending" };
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const childTimer = new FakeTimer();
+    const launched = new FakeChildProcess(childTimer);
+    devices.setMockChildProcess(image.name, launched);
 
     const boot = service(devices, matcher).boot(
       { platform: "android", signal: controller.signal },
@@ -1534,9 +1521,11 @@ describe("DeviceBootService", () => {
     expect(progressStarted).toBe(true);
     controller.abort(new Error("request cancelled"));
     await new Promise<void>((resolve) => setImmediate(resolve));
+    childTimer.advanceTime(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(outcome.value).toBe("rejected");
-    expect(killCount).toBe(1);
+    expect(launched.killed).toBe(true);
   });
 
   it("preserves an explicit null abort reason instead of substituting an error", async () => {
@@ -1547,10 +1536,8 @@ describe("DeviceBootService", () => {
     let rejection: unknown = "unset";
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => true,
-      pid: 12,
-    } as any);
+    const childTimer = new FakeTimer();
+    devices.setMockChildProcess(image.name, new FakeChildProcess(childTimer));
 
     const boot = service(devices, matcher).boot(
       { platform: "android", signal: controller.signal },
@@ -1571,6 +1558,8 @@ describe("DeviceBootService", () => {
     expect(progressStarted).toBe(true);
     controller.abort(null);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    childTimer.advanceTime(0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(rejection).toBeNull();
   });
@@ -1578,16 +1567,10 @@ describe("DeviceBootService", () => {
   it("cancels the owned process when final progress reporting fails", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
-    let killCount = 0;
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killCount++;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
 
     await expect(
       service(devices, matcher).boot(
@@ -1602,7 +1585,7 @@ describe("DeviceBootService", () => {
       ),
     ).rejects.toThrow("progress failed");
 
-    expect(killCount).toBe(1);
+    expect(launched.killed).toBe(true);
   });
 
   it("preserves successful cold-boot progress reporting", async () => {
@@ -1980,22 +1963,16 @@ describe("DeviceBootService", () => {
   it("cancels a failed cold boot through its launch handle", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();
-    let killed = false;
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.setMockChildProcess(image.name, {
-      kill: () => {
-        killed = true;
-        return true;
-      },
-      pid: 12,
-    } as any);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
     devices.setWaitForDeviceReadyError(new Error("not ready"));
 
     await expect(service(devices, matcher).boot({ platform: "android" })).rejects.toThrow(
       "not ready",
     );
-    expect(killed).toBe(true);
+    expect(launched.killed).toBe(true);
   });
 
   it("applies an injected recovery policy at the cold product boot boundary", async () => {
@@ -3311,7 +3288,7 @@ describe("DeviceBootService", () => {
       const pendingReadiness = new Promise<BootedDevice>(() => {});
       devices.setDeviceImages("android", [image]);
       matcher.setImageResult(image);
-      devices.setMockChildProcess(image.name, { kill: () => true, pid: 12 } as any);
+      devices.setMockChildProcess(image.name, new FakeChildProcess());
       devices.waitForDeviceReady = async () => {
         markReadinessStarted();
         return pendingReadiness;

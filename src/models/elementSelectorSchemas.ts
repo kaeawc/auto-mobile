@@ -1,8 +1,8 @@
-import type { ResolverSelector } from "../models/ResolverSelector";
+import type { ResolverSelector } from "./ResolverSelector";
 import { z } from "zod/v4";
-import { ELEMENT_SELECTION_STRATEGIES } from "../models/ElementSelectionStrategy";
-import type { ElementContainerSelector } from "../models/PinchOnOptions";
-import { HIERARCHY_LAYERS } from "../models/HierarchyLayer";
+import { ELEMENT_SELECTION_STRATEGIES } from "./ElementSelectionStrategy";
+import type { ElementContainerSelector } from "./PinchOnOptions";
+import { HIERARCHY_LAYERS } from "./HierarchyLayer";
 
 type ElementIdTextDescriptions = {
   elementId: string;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { nestedElementContainerSchema } from "../../../../src/server/elementSelectorSchemas";
+import { nestedElementContainerSchema } from "../../../../src/models/elementSelectorSchemas";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";

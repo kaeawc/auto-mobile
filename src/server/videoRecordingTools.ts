@@ -11,7 +11,7 @@ import {
   VideoRecordingMetadata,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 import {
   adoptOrphanCaptureArtifact,
   getVideoRecordingMetadata,

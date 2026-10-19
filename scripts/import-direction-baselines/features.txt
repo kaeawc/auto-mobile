@@ -1,4 +1,3 @@
-src/features/action/swipeon/ScrollUntilVisible.ts -> src/server/elementSelectorSchemas
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/appResources
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/bootedDeviceResources
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/deviceDescription
@@ -10,7 +9,6 @@ src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/inventoryDevic
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/provisionDeviceSpecSchemas
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/resourceRegistry
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/toolRegistry
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/toolSchemaHelpers
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/toolSelectionTools
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/undeliveredAcquisition
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingManager
@@ -22,7 +20,6 @@ src/features/navigation/Explore.ts -> src/server/internalToolCall
 src/features/navigation/Explore.ts -> src/server/toolRegistry
 src/features/navigation/NavigateTo.ts -> src/server/internalToolCall
 src/features/navigation/NavigateTo.ts -> src/server/toolRegistry
-src/features/observe/ConditionPredicates.ts -> src/server/elementSelectorSchemas
 src/features/observe/android/AndroidAppEventRecorder.ts -> src/server/failuresResources
 src/features/observe/android/AndroidCtrlProxyClient.ts -> src/server/NetworkState
 src/features/observe/android/AndroidCtrlProxyClient.ts -> src/server/failuresResources
@@ -35,12 +32,6 @@ src/features/observe/android/networkMockRulesPush.ts -> src/server/networkMockRu
 src/features/observe/ios/CtrlProxyStorage.ts -> src/server/storageSdkErrors
 src/features/observe/ios/IOSCtrlProxyClient.ts -> src/server/NetworkState
 src/features/observe/ios/IOSCtrlProxyClient.ts -> src/server/networkMockRules
-src/features/observe/output/SkeletonProjection.ts -> src/server/elementSelectorSchemas
-src/features/observe/screenshot/observeCrop.ts -> src/server/elementSelectorSchemas
-src/features/observe/wait/WaitElement.ts -> src/server/elementSelectorSchemas
-src/features/observe/wait/WaitEvaluation.ts -> src/server/deviceLossOutcome
-src/features/observe/wait/WaitForSchemas.ts -> src/server/elementSelectorSchemas
-src/features/observe/wait/WaitForSchemas.ts -> src/server/toolSchemaHelpers
 src/features/preferences/AppPreferences.ts -> src/server/storageSdkErrors
 src/features/storage/storageCapabilities.ts -> src/server/appFileService
 src/features/storage/storageCapabilities.ts -> src/server/sharedStorageReadService
@@ -49,5 +40,3 @@ src/features/systemTray/systemTrayHelpers.ts -> src/server/toolRegistry
 src/features/telemetry/TelemetryRecorder.ts -> src/server/NetworkState
 src/features/toolSelection/SessionToolSelectionService.ts -> src/server/toolRegistry
 src/features/toolSelection/toolSelectionContext.ts -> src/server/toolRegistry
-src/features/utility/ElementResolver.ts -> src/server/elementSelectorSchemas
-src/features/utility/ResolverElementSelector.ts -> src/server/elementSelectorSchemas

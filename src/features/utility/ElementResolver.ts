@@ -6,7 +6,7 @@ import {
   isSdkInjectedNode,
 } from "../observe/android/StableNodeIdentity";
 
-import type { ResolverSelector } from "../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";

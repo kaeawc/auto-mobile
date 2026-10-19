@@ -7,7 +7,7 @@ import {
   addDeviceTargetingToSchema,
   withAppIdAliases,
   withPostFlattenJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   clearKeyValueFileResultSchema,

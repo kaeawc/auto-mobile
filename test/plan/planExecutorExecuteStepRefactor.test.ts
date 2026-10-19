@@ -10,7 +10,7 @@ import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withT
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 
 interface CapturedCall {
   params: Record<string, unknown>;

@@ -8,7 +8,7 @@ import {
   addDeviceTargetingToSchema,
   addSessionUuidToSchema,
   responseShapeControlFields,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { biometricAuthResultSchema } from "./biometricToolOutputSchemas";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";

@@ -4,7 +4,7 @@ import {
   DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../utils/deviceTimeouts";
-import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../utils/schemaHelpers";
 import {
   deviceResourceDescriptions,
   type ConfigurableDeviceResource,

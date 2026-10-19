@@ -11,7 +11,7 @@ import {
   matchedSourceNode,
 } from "../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
-import type { ResolverSelector } from "../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../models/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
 
 const waitHierarchyProjection = new SearchableHierarchy();

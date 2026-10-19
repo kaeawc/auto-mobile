@@ -12,7 +12,7 @@ import type {
   ContractResolution,
   ContractResolver,
 } from "./observeContract";
-import type { ResolverSelector } from "../../../src/server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../../src/models/elementSelectorSchemas";
 
 const searchable = new SearchableHierarchy();
 const defaultResolver = new ElementResolver(() => 0.99);

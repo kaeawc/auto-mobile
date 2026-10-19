@@ -6,7 +6,7 @@ import {
   nestedElementContainerSchema,
   resolverSelectorSchema,
   validateElementIdTextSelector,
-} from "../../src/server/elementSelectorSchemas";
+} from "../../src/models/elementSelectorSchemas";
 
 test("recursive container schema accepts indexed scopes and rejects malformed levels", () => {
   const valid = {

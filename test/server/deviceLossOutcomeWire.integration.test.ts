@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
-import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError, rememberDeviceLossAbort } from "../../src/utils/deviceLossOutcome";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";

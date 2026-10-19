@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { withJsonSchemaOverride } from "../utils/schemaHelpers";
 import {
   normalizeSharedStorageNamespace,
   sharedStorageFileSchema,

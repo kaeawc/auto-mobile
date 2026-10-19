@@ -152,7 +152,7 @@ import { getPerformanceMonitor } from "../performance/PerformanceMonitor";
 import {
   platformSchema,
   withCanonicalDiscriminatedUnionJsonSchema,
-} from "../../server/toolSchemaHelpers";
+} from "../../utils/schemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../../utils/deviceMatcher";
 import {
   defaultDisplayInventoryProvider,

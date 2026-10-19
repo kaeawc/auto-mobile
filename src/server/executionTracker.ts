@@ -8,7 +8,7 @@ import {
   deviceLostErrorFromCancellationReason,
   isDeviceLostError,
   rememberDeviceLossAbort,
-} from "./deviceLossOutcome";
+} from "../utils/deviceLossOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 

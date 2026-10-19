@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { addSessionUuidToSchema } from "./toolSchemaHelpers";
+import { addSessionUuidToSchema } from "../utils/schemaHelpers";
 import {
   startToolCallRecording,
   stopToolCallRecording,

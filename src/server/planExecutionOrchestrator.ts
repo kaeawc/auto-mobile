@@ -66,7 +66,7 @@ import { logger } from "../utils/logger";
 import { ProgressCallback } from "./toolRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import type { Plan } from "../models/Plan";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
 import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";

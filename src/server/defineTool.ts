@@ -7,7 +7,7 @@ import {
   type ProgressCallback,
 } from "./toolRegistry";
 import { erased } from "./toolRegistryErasure";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 
 /**
  * Typed tool definitions (#11824). The handler's `args` are inferred from the

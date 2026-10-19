@@ -19,13 +19,13 @@ import type { BootedDevice } from "../models";
 import type { MultiTouchOptions } from "../models/MultiTouchOptions";
 import { multiTouchResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
-import { hierarchyLayerSchema } from "./elementSelectorSchemas";
+import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 
 export type MultiTouchArgs = MultiTouchOptions & {
   platform?: "android" | "ios";

@@ -1,7 +1,7 @@
 import {
   DEVICE_LOSS_REASON_PREFIX,
   isDeviceLossCancellationReason,
-} from "../utils/deviceLossCancellationReason";
+} from "./deviceLossCancellationReason";
 import { isDeviceLostError, deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
 export {
   isDeviceLostError,
@@ -13,7 +13,7 @@ import {
   DEVICE_LOSS_OUTCOME_CODE,
   type EmulatorLossIncident,
   type EmulatorLossSessionState,
-} from "../daemon/emulatorLossIncident";
+} from "./emulatorLossIncident";
 
 export { DeviceLostError, DEVICE_LOSS_OUTCOME_CODE };
 export const DEVICE_LOSS_RESPONSE_HEADROOM_MS = 1_000;

@@ -157,7 +157,7 @@ import {
   withJsonSchemaOverride,
   compactExclusiveSelectorProperties,
   responseShapeControlFields,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { isTruthyFlag } from "../features/utility/elementProperties";
 import {
   createElementIdTextSelectorSchema,
@@ -165,7 +165,7 @@ import {
   tapOnSelectorSchema,
   resolverSelectionStrategySchema,
   nestedElementContainerSchema,
-} from "./elementSelectorSchemas";
+} from "../models/elementSelectorSchemas";
 import {
   keyboardResultSchema,
   pressButtonResultSchema,

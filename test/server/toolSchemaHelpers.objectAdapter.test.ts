@@ -1,9 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod/v4";
-import {
-  addDeviceTargetingToSchema,
-  addSessionUuidToSchema,
-} from "../../src/server/toolSchemaHelpers";
+import { addDeviceTargetingToSchema, addSessionUuidToSchema } from "../../src/utils/schemaHelpers";
 import { schemaProperty } from "../helpers/toolResponse";
 
 test("device targeting preserves base definitions, field order, and passthrough values", () => {

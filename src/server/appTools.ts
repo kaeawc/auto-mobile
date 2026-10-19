@@ -54,7 +54,7 @@ import {
   responseShapeControlFields,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import {
   invalidateInstalledAppsCache,
   notifyInstalledAppResourceUpdated,
@@ -62,7 +62,7 @@ import {
   type AppsQueryResourceContent,
 } from "./appResources";
 import { logger } from "../utils/logger";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import { PrototypeAgentProvider } from "../features/prototype/ios/PrototypeAgentProvider";

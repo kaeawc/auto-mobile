@@ -8,7 +8,7 @@ import {
   platformSchema,
   withFieldAliases,
   withAppIdAliases,
-} from "../../src/server/toolSchemaHelpers";
+} from "../../src/utils/schemaHelpers";
 import { accessibilitySchema } from "../../src/server/accessibilityTools";
 import {
   crashAppSchema,

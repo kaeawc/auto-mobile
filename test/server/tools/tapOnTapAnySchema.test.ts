@@ -10,8 +10,8 @@ import {
 } from "../../../src/server/interactionTools";
 
 import { selectedElementSchema } from "../../../src/server/toolOutputSchemas";
-import { resolverSelectionStrategySchema } from "../../../src/server/elementSelectorSchemas";
-import { applyJsonSchemaOverride } from "../../../src/server/toolSchemaHelpers";
+import { resolverSelectionStrategySchema } from "../../../src/models/elementSelectorSchemas";
+import { applyJsonSchemaOverride } from "../../../src/utils/schemaHelpers";
 
 import type { TapOnElementOptions, TapAnyElementOptions } from "../../../src/models";
 import { toolIsError, toolJson } from "../../helpers/toolResponse";

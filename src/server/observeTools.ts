@@ -30,8 +30,11 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
-import { hierarchyLayerSchema, nestedElementContainerSchema } from "./elementSelectorSchemas";
+} from "../utils/schemaHelpers";
+import {
+  hierarchyLayerSchema,
+  nestedElementContainerSchema,
+} from "../models/elementSelectorSchemas";
 import {
   scopeHierarchyForSelector,
   scopeObserveResultToLayer,

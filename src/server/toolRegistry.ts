@@ -39,7 +39,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
+import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";

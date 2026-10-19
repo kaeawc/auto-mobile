@@ -11,7 +11,7 @@ import { executionTracker } from "../../src/server/executionTracker";
 import {
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,
-} from "../../src/server/deviceLossOutcome";
+} from "../../src/utils/deviceLossOutcome";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";

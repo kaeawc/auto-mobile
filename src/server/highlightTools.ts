@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { highlightResultSchema } from "./highlightToolOutputSchemas";
 import {
@@ -35,7 +35,7 @@ import {
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
   validateElementIdTextSelector,
-} from "./elementSelectorSchemas";
+} from "../models/elementSelectorSchemas";
 import { logger } from "../utils/logger";
 import { boundsEqual } from "../utils/bounds";
 

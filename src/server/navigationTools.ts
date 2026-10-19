@@ -16,7 +16,7 @@ import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/n
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";

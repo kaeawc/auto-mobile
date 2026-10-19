@@ -11,7 +11,7 @@ import {
   SWIPE_DURATION_MIN_MS,
   validateDurationMs,
 } from "../features/action/swipeon/swipeTiming";
-import { hierarchyLayerSchema } from "./elementSelectorSchemas";
+import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { pointerSchema } from "./pointerSchema";
 import {
@@ -19,7 +19,7 @@ import {
   platformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 
 // The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
 // from/to) is narrowed where the options are built.

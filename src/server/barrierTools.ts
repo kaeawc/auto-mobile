@@ -10,7 +10,7 @@ import {
 import { barrierResultSchema } from "./barrierToolOutputSchemas";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { isDeviceLostError } from "../utils/deviceLossOutcome";
 
 // Barrier tool schema. A barrier is a pure synchronization point: every
 // participating device arrives, and once all `deviceCount` devices have

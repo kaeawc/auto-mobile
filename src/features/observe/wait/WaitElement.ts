@@ -16,7 +16,7 @@ import {
 } from "../../utility/ElementGeometry";
 import type { ScreenSize } from "../../../models/ScreenSize";
 import { normalizeQuotes } from "../../utility/TextMatcher";
-import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ConditionResolver } from "../ConditionPredicates";
 import type { ObserveWaitForOptions } from "./WaitForSchemas";
 

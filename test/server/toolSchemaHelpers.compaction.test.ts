@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { compactExclusiveSelectorProperties } from "../../src/server/toolSchemaHelpers";
+import { compactExclusiveSelectorProperties } from "../../src/utils/schemaHelpers";
 
 const textBranch = { type: "object", properties: { text: { type: "string" } }, required: ["text"] };
 const idBranch = {

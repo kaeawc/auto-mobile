@@ -41,7 +41,7 @@ import {
 } from "../../src/server/toolOutputArtifactWriter";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 const writtenObservation = z.looseObject({

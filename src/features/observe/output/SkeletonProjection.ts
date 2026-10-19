@@ -4,7 +4,7 @@ import {
   inheritsOwnerLabel,
 } from "../../utility/SearchableLabels";
 import { ElementResolver } from "../../utility/ElementResolver";
-import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { SearchableEntry } from "../../utility/SearchableNode";
 import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";

@@ -4,7 +4,7 @@ import {
   normalizeAppFileRelativePath,
   type AppFileContainer,
 } from "./appFileContract";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { optionalEnum, optionalInteger, optionalString } from "./queryParamValidation";
 import type { Platform } from "../models";
 import type { LocalFileListEntry } from "./appFileService";

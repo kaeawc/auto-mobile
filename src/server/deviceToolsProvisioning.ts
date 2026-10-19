@@ -1,3 +1,8 @@
+import {
+  provisionedServiceStatus,
+  provisionLifecycleState,
+  provisionReadinessStatus,
+} from "./provisionDeviceResultFacts";
 import { provisionCancellationOutcomes } from "../daemon/provisionCancellationOutcomes";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
@@ -2296,7 +2301,6 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     });
   }
 
-  // oxlint-disable-next-line complexity -- operation fields and canonical device projection share one response boundary.
   function buildProvisionDeviceResult(
     args: ProvisionDeviceArgs,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
@@ -2321,11 +2325,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       pooled,
       discovery: booted?.sourceImage,
       session: booted ? { sessionId: booted.sessionId } : undefined,
-      serviceStatus: booted
-        ? args.readiness === "automation"
-          ? { installed: true, enabled: true, running: true, isCompatible: true }
-          : { installed: true, enabled: true, running: false, isCompatible: true }
-        : undefined,
+      serviceStatus: provisionedServiceStatus(booted !== undefined, args.readiness),
     });
     return {
       ...(booted?.resources ? { resources: booted.resources } : {}),
@@ -2337,14 +2337,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         classifyDisplayCutout(args.device.platform, provisioned.resolvedSpec.deviceType),
       created: createdByRequest,
       adopted: !createdByRequest,
-      lifecycleState: booted ? "ready" : createdByRequest ? "created" : "adopted",
+      lifecycleState: provisionLifecycleState(booted !== undefined, createdByRequest),
       readiness: {
         mode: args.readiness,
-        status: booted
-          ? args.readiness === "automation"
-            ? "automation_ready"
-            : "device_ready"
-          : "not_requested",
+        status: provisionReadinessStatus(booted !== undefined, args.readiness),
       },
       ...(booted ? { sessionId: booted.sessionId } : {}),
       timing: perf.getTimings(),

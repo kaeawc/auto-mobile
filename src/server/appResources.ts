@@ -11,28 +11,25 @@ import {
   Platform,
   SystemInstalledApp,
 } from "../models";
-import { logger } from "../utils/logger";
-import {
-  getInstalledAppsCacheWriteCoordinator,
-  type InstalledAppsCacheWriteCoordinator,
-} from "../db/installedAppsCacheWriteCoordinator";
-import { getDbWriteBarrier, type DbWriteBarrier } from "../db/dbWriteBarrier";
-import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
-import {
-  registerDeviceIncarnationListener,
-  type DeviceIncarnationListener,
-} from "../utils/deviceIncarnation";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { SingleFlight } from "../utils/cache/SingleFlight";
-import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
-import {
-  getIosInstalledAppBundleId,
-  getIosInstalledAppPath,
-} from "../utils/ios-cmdline-tools/iosInstalledApp";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   findBootedDeviceForResource,
   listBootedDevicesForResource,
 } from "./resourceDeviceResolver";
+import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { collectIosInstalledApps } from "./iosInstalledAppFacts";
+import {
+  getInstalledAppsCacheWriteCoordinator,
+  type InstalledAppsCacheWriteCoordinator,
+} from "../db/installedAppsCacheWriteCoordinator";
+import { logger } from "../utils/logger";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
+import { getDbWriteBarrier, type DbWriteBarrier } from "../db/dbWriteBarrier";
+import {
+  registerDeviceIncarnationListener,
+  type DeviceIncarnationListener,
+} from "../utils/deviceIncarnation";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
@@ -46,9 +43,13 @@ export const APPS_RESOURCE_URIS = {
 } as const;
 
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
+
 const APPS_QUERY_TEMPLATE = `${APPS_RESOURCE_URIS.BASE}{?${APPS_QUERY_KEYS.join(",")}}`;
+
 const APPS_QUERY_PARAM_KEYS = new Set<string>(APPS_QUERY_KEYS);
-type InstalledAppType = "user" | "system";
+
+export type InstalledAppType = "user" | "system";
+
 /**
  * `launchable` is a cross-cutting filter, not a fourth classification: an app
  * keeps its "user"/"system" type and is additionally selected by whether it has
@@ -57,6 +58,7 @@ type InstalledAppType = "user" | "system";
  * while still returning providers and RRO overlays under type=all (#6798).
  */
 export type AppsQueryType = InstalledAppType | "all" | "launchable";
+
 /** Single source of truth for the accepted `type` values (tool schema + resource query string). */
 export const APPS_QUERY_TYPES: ReadonlySet<string> = new Set<AppsQueryType>([
   "user",
@@ -204,21 +206,30 @@ interface AppsCacheEntry {
 }
 
 const APPS_CACHE_TTL_MS = 60000;
+
 const APPS_QUERY_URI_TTL_MS = 300000;
+
 const appCacheByDeviceId = new Map<string, AppsCacheEntry>();
+
 const appsCacheEntrySingleFlight = new SingleFlight<string, AppsCacheEntry | null>();
+
 const appsCacheEntryFlightKey = (deviceId: string, generation: number): string =>
   JSON.stringify([deviceId, generation]);
+
 const registeredDeviceResources = new Map<string, string>();
+
 const appsQueryUrisByDeviceId = new Map<string, Map<string, number>>();
+
 // Discovery is best-effort and may overlap a committed boot with a
 // teardown/reboot inventory refresh. Only the newest started discovery may
 // publish its snapshot into the shared resource registry.
 let installedAppResourceRegistryGeneration = 0;
+
 // A refresh can mutate the registry, then yield while clearing cache entries
 // for disappeared devices. Keep that mutation pending until the newest
 // completing refresh hands it to its caller for publication.
 let installedAppResourceRegistryRevision = 0;
+
 let installedAppResourceRegistryHandoffRevision = 0;
 
 function userProfileForUserId(
@@ -295,165 +306,6 @@ function normalizeAndroidApps(installedApps: InstalledAppsByProfile): {
   }
 
   return { userApps, queryApps };
-}
-
-function readIosStringField(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function readIosAppField(app: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = readIosStringField(app[key]);
-    if (value) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-function extractIosDisplayName(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, [
-    "bundleDisplayName",
-    "bundleName",
-    "CFBundleDisplayName",
-    "CFBundleName",
-    "displayName",
-    "name",
-  ]);
-}
-
-function extractIosVersion(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, [
-    "bundleShortVersionString",
-    "bundleVersion",
-    "CFBundleShortVersionString",
-    "CFBundleVersion",
-    "BundleShortVersionString",
-    "BundleVersion",
-    "version",
-  ]);
-}
-
-function extractIosPath(app: Record<string, unknown>): string | undefined {
-  // Shared with the devicectl listing so a physical device's `file://` bundle
-  // URL reaches this resource as a filesystem path, same as a simulator's.
-  return getIosInstalledAppPath(app);
-}
-
-/**
- * Classifies an iOS app as "user" or "system" so `type=user` (the documented
- * default, #6155) actually excludes preinstalled apps on iOS the same way it
- * excludes them on Android.
- *
- * `simctl listapps` reports an explicit `ApplicationType` ("System"/"Hidden"
- * vs "User") — when present it always wins. When it's absent:
- *  - On the simulator, an unexpected/incomplete record still falls back to
- *    Apple's `com.apple.` bundle-id namespace, which only first-party system
- *    apps use there.
- *  - On a PHYSICAL device, `devicectl device info apps --json-output` exposes
- *    no equivalent field at all (only bundleIdentifier/name/version/
- *    bundleVersion/url/appClip, per Apple's devicectl output), so the
- *    `com.apple.` heuristic would misclassify a user's own Apple-published
- *    apps (Pages, Numbers, Keynote, TestFlight, ...) as hidden system apps and
- *    silently drop them from `type=user`. Without a reliable signal there,
- *    default to "user" rather than guessing "system" (#6216 review).
- */
-const IOS_APPLICATION_TYPE_KEYS = ["ApplicationType", "applicationType", "type", "Type"];
-
-function readIosRawApplicationType(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, IOS_APPLICATION_TYPE_KEYS);
-}
-
-function hasIosHiddenSpringBoardTag(app: Record<string, unknown>): boolean {
-  return (
-    Array.isArray(app.SBAppTags) &&
-    app.SBAppTags.some((tag) => typeof tag === "string" && tag.toLowerCase() === "hidden")
-  );
-}
-
-// Exported for tests: pure classification, no device/cache I/O (#6155).
-export function extractIosApplicationType(
-  app: Record<string, unknown>,
-  bundleId: string,
-  isPhysicalDevice: boolean,
-): InstalledAppType {
-  const raw = readIosRawApplicationType(app);
-  if (raw) {
-    const normalized = raw.toLowerCase();
-    if (normalized === "system" || normalized === "hidden") {
-      return "system";
-    }
-    if (normalized === "user") {
-      return "user";
-    }
-  }
-  if (isPhysicalDevice) {
-    return "user";
-  }
-  return bundleId.startsWith("com.apple.") ? "system" : "user";
-}
-
-/**
- * True when `extractIosApplicationType` had no reliable signal and had to
- * default a physical-device app to "user" — i.e. devicectl reported no
- * `ApplicationType`-equivalent field. An explicit `type=system`/`type=user`
- * filter must not be silently applied against such apps: it would report an
- * empty or over-inclusive result that looks like "no system apps exist"
- * rather than "we can't tell" (#6216 review, round 5). Always false on the
- * simulator and for apps that do carry a real classification.
- */
-// Exported for tests: pure check, no device/cache I/O (#6216 review, round 5).
-export function isIosApplicationTypeUnclassified(
-  app: Record<string, unknown>,
-  isPhysicalDevice: boolean,
-): boolean {
-  return isPhysicalDevice && !readIosRawApplicationType(app);
-}
-
-/**
- * iOS launchability from simctl's `ApplicationType` (#6798). "Hidden" is
- * Apple's marker for a bundle with no home-screen entry point (SpringBoard's
- * own internal apps, app extensions); "User" and "System" both launch. A
- * physical device has no equivalent field, so launchability stays undefined
- * there rather than being guessed.
- */
-// Exported for tests: pure classification, no device/cache I/O (#6798).
-export function extractIosLaunchable(app: Record<string, unknown>): boolean | undefined {
-  if (hasIosHiddenSpringBoardTag(app)) {
-    return false;
-  }
-  const raw = readIosRawApplicationType(app)?.toLowerCase();
-  if (raw === "hidden") {
-    return false;
-  }
-  if (raw === "user" || raw === "system") {
-    return true;
-  }
-  return undefined;
-}
-
-// Exported for tests: pure conversion, no device/cache I/O (#6216 review).
-export function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
-  return {
-    packageName: app.bundleId,
-    type: app.type,
-    userId: 0,
-    // iOS has no Android-style multi-user profiles — every app belongs to the
-    // single (profile 0) user. filterAppsByQuery's profile check only reads
-    // `userIds` for non-"user" apps; without this, any profile filter (e.g.
-    // the common profile:0 case) would silently drop every iOS system app
-    // because `userIds` was left undefined (#6216 review).
-    userIds: [0],
-    userProfile: "personal",
-    foreground: false,
-    recent: false,
-    ...(app.displayName ? { displayName: app.displayName, label: app.displayName } : {}),
-    ...(app.launchable === undefined ? {} : { launchable: app.launchable }),
-  };
 }
 
 function recordAppsQueryUri(deviceId: string, uri: string, timer: Timer = defaultTimer): void {
@@ -561,7 +413,6 @@ const defaultListInstalledAppsFactory: NonNullable<
 export type { AppResourceDependencies };
 
 // Dependency injection preserves this existing algorithm and its control flow.
-// oxlint-disable-next-line complexity
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
@@ -602,38 +453,10 @@ async function fetchAppsForDevice(
   }
 
   const result = await listInstalledApps.executeIosDetailedResult();
-  const apps: IosInstalledAppInfo[] = [];
-  const queryApps: AppsQueryAppInfo[] = [];
-  const isPhysicalDevice = isIosPhysicalUdid(device.deviceId);
-  let iosTypeClassificationUnreliable = false;
-
-  for (const app of result.apps) {
-    const bundleId = getIosInstalledAppBundleId(app);
-    if (!bundleId) {
-      continue;
-    }
-    const rawApp = app as Record<string, unknown>;
-    const displayName = extractIosDisplayName(rawApp);
-    const version = extractIosVersion(rawApp);
-    const path = extractIosPath(rawApp);
-    const type = extractIosApplicationType(rawApp, bundleId, isPhysicalDevice);
-    if (isIosApplicationTypeUnclassified(rawApp, isPhysicalDevice)) {
-      iosTypeClassificationUnreliable = true;
-    }
-    const launchable = extractIosLaunchable(rawApp);
-    const info: IosInstalledAppInfo = {
-      bundleId,
-      type,
-      displayName,
-      ...(version ? { version } : {}),
-      ...(path ? { path } : {}),
-      ...(launchable === undefined ? {} : { launchable }),
-    };
-    apps.push(info);
-    queryApps.push({
-      ...toQueryIosApp(info),
-    });
-  }
+  const { apps, queryApps, iosTypeClassificationUnreliable } = collectIosInstalledApps(
+    result.apps,
+    isIosPhysicalUdid(device.deviceId),
+  );
 
   return {
     cacheable: result.successful,
@@ -1239,8 +1062,22 @@ function unregisterDeviceAppResource(deviceId: string): void {
   invalidateMetadataCacheForDevice(deviceId);
 }
 
+async function clearDisappearedDeviceCache(deviceId: string): Promise<void> {
+  try {
+    const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
+    const repo = new InstalledAppsRepository();
+    await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
+      getDbWriteBarrier()
+        .track(() => repo.clearDeviceSession(deviceId))
+        .then(() => undefined),
+    );
+    logger.info(`[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`);
+  } catch (error) {
+    logger.warn(`[AppResources] Failed to clear cache for device ${deviceId}: ${error}`);
+  }
+}
+
 // Dependency injection preserves this existing algorithm and its control flow.
-// oxlint-disable-next-line complexity
 export async function syncInstalledAppResourceRegistry(
   deps: AppResourceDependencies = {},
 ): Promise<boolean> {
@@ -1282,23 +1119,10 @@ export async function syncInstalledAppResourceRegistry(
     installedAppResourceRegistryRevision++;
   }
 
+  // All registry mutation above is synchronous, so a newer refresh cannot
+  // interleave a partial snapshot while this best-effort cleanup yields.
   for (const deviceId of disappearedDeviceIds) {
-    // All registry mutation above is synchronous, so a newer refresh cannot
-    // interleave a partial snapshot while this best-effort cleanup yields.
-    try {
-      const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
-      const repo = new InstalledAppsRepository();
-      await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
-        getDbWriteBarrier()
-          .track(() => repo.clearDeviceSession(deviceId))
-          .then(() => undefined),
-      );
-      logger.info(
-        `[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`,
-      );
-    } catch (error) {
-      logger.warn(`[AppResources] Failed to clear cache for device ${deviceId}: ${error}`);
-    }
+    await clearDisappearedDeviceCache(deviceId);
   }
 
   // A newer refresh may have started while best-effort disappearance cleanup
@@ -1415,6 +1239,7 @@ interface AppMetadataCacheEntry {
 }
 
 const APP_METADATA_CACHE_TTL_MS = 60000;
+
 const appMetadataCacheByKey = new Map<string, AppMetadataCacheEntry>();
 
 function metadataCacheKey(deviceId: string, appId: string): string {

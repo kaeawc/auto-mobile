@@ -1155,8 +1155,7 @@ function buildBootedResponse(
     ...(isDebugPerfEnabled()
       ? {
           // TimingData's runtime shape is serialized as the legacy flat result.
-          // oxlint-disable-next-line auto-mobile/no-unknown-cast
-          timing: (timing ?? {}) as unknown as Record<string, number>,
+          timing: timing ?? {},
         }
       : {}),
   });

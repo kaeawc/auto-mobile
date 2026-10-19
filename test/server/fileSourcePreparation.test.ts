@@ -11,7 +11,10 @@ const FAKE_DIR = "/fake/app-file";
 
 function fakeFileSystem() {
   return {
-    stat: mock(async () => ({ size: 7, isFile: () => true })),
+    stat: mock(async (): Promise<{ size: number; isFile(): boolean }> => ({
+      size: 7,
+      isFile: () => true,
+    })),
     mkdtemp: mock(async () => FAKE_DIR),
     writeFileBuffer: mock(async (_path: string, _buffer: Buffer) => {}),
     rm: mock(async (_path: string) => {}),

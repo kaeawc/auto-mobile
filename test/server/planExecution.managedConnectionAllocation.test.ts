@@ -1,4 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { readToolResponse, toolJson, toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
@@ -68,7 +69,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
         fake.stopVideoRecording,
       ),
       spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
-      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(undefined),
       spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
     ];
     return () => spies.forEach((spy) => spy.mockRestore());
@@ -149,17 +150,19 @@ describe("managed connection executePlan device labels (#11397)", () => {
     planContent: string,
     args: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> => {
-    const response = await ToolRegistry.getTool("executePlan")!.handler({
-      planContent,
-      startStep: 0,
-      platform: "ios",
-      sessionUuid: execA,
-      deviceAllocationTimeoutMs: 1_000,
-      abortStrategy: "immediate",
-      __mcpSessionId: mcpA,
-      ...args,
-    });
-    return response.structuredContent ?? JSON.parse(response.content[0].text);
+    const response = readToolResponse(
+      await ToolRegistry.getTool("executePlan")!.handler({
+        planContent,
+        startStep: 0,
+        platform: "ios",
+        sessionUuid: execA,
+        deviceAllocationTimeoutMs: 1_000,
+        abortStrategy: "immediate",
+        __mcpSessionId: mcpA,
+        ...args,
+      }),
+    );
+    return response.structuredContent === undefined ? toolJson(response) : toolStructured(response);
   };
 
   // The first executePlan call pays the plan pipeline's one-time module and schema cost, which put
@@ -185,11 +188,17 @@ describe("managed connection executePlan device labels (#11397)", () => {
     );
   }
 
-  function arrangedEachRow<T extends readonly [unknown, ...unknown[]]>(table: readonly T[]) {
-    return (name: string, fn: (...row: T) => void | Promise<void>, timeout?: number): void => {
+  type CriterionRow = [criterion: string, line: string];
+
+  function arrangedEachRow(table: CriterionRow[]) {
+    return (
+      name: string,
+      fn: (...row: CriterionRow) => void | Promise<void>,
+      timeout?: number,
+    ): void => {
       test.each(table)(
         name,
-        async (...row: T) => {
+        async (...row: CriterionRow) => {
           await setUp();
           await fn(...row);
         },
@@ -286,13 +295,15 @@ describe("managed connection executePlan device labels (#11397)", () => {
       );
     }
 
-    function arrangedNestedEachRow<T extends readonly [unknown, ...unknown[]]>(
-      table: readonly T[],
-    ) {
-      return (name: string, fn: (...row: T) => void | Promise<void>, timeout?: number): void => {
+    function arrangedNestedEachRow(table: CriterionRow[]) {
+      return (
+        name: string,
+        fn: (...row: CriterionRow) => void | Promise<void>,
+        timeout?: number,
+      ): void => {
         arrangedEachRow(table)(
           name,
-          async (...row: T) => {
+          async (...row: CriterionRow) => {
             await arrangeNested();
             await fn(...row);
           },

@@ -70,3 +70,8 @@ type ObservationFields = Omit<ObserveResult, "display" | "observationId"> &
 export function buildObserveResult(fields: ObservationFields): ObserveResult {
   return { display: DEFAULT_DISPLAY, observationId: "test-observation", ...fields };
 }
+
+/** An otherwise empty hierarchy whose `packageName` tells a test which capture it came from. */
+export function markedHierarchy(marker: string): ViewHierarchyResult {
+  return { hierarchy: {}, packageName: marker };
+}

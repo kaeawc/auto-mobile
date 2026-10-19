@@ -1,4 +1,6 @@
 import { makePool } from "../helpers/makePool";
+import { listDevicesOutputSchema } from "../../src/server/deviceTools";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -75,7 +77,7 @@ describe("a pooled device that discovery no longer lists", () => {
     const toolResponse = await ToolRegistry.getTool("listDevices")!.handler({
       platform: "android",
     });
-    const tool = JSON.parse(toolResponse.content?.[0]?.text ?? "{}");
+    const tool = listDevicesOutputSchema.parse(toolStructured(toolResponse));
     const state: DaemonStateAccess = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager as never,

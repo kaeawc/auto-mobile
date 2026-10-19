@@ -71,6 +71,10 @@ class BuildLensGraphProvider implements GraphProvider {
     return null;
   }
 
+  getCurrentAppId(): string | null {
+    return null;
+  }
+
   async exportGraphHistory(): Promise<never> {
     throw new Error("Unexpected history export");
   }

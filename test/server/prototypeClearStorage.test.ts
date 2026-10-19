@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolStructured } from "../helpers/toolResponse";
 import {
   prototypeOutputSchema,
   prototypeSchema,
@@ -67,7 +68,7 @@ describe("prototype clearStorage and the inspect storage report (#12522)", () =>
 
   async function call(device: BootedDevice, input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   test("clearStorage needs an id and no other mutation fields", () => {

@@ -1,4 +1,6 @@
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { bindDevice } from "../../src/daemon/deviceBinding";
+import { toolJson } from "../helpers/toolResponse";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -462,7 +464,6 @@ describe("already-dead Android shutdown ownership", () => {
     deviceId: "emulator-5554",
     name: "Pixel",
     platform: "android",
-    isEmulator: true,
   };
   let sessions: SessionManager | undefined;
 
@@ -554,7 +555,7 @@ describe("already-dead Android shutdown ownership", () => {
         device,
         sessionUuid: "holder",
       });
-      expect(JSON.parse(response.content[0].text)).toMatchObject({
+      expect(toolJson(response)).toMatchObject({
         success: false,
         error: { code: "device_already_stopped" },
       });
@@ -592,7 +593,7 @@ describe("already-dead Android shutdown ownership", () => {
     let holder = "holder";
     const h = await arrange(() => {
       holder = "new-holder";
-      h.pool.getDevice(device.deviceId)!.sessionId = holder;
+      bindDevice(h.pool.getDevice(device.deviceId)!, holder);
     });
     const ownerSpy = spyOn(sessions!, "getSessionForDevice").mockImplementation(() => holder);
     try {

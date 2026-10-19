@@ -1,4 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { observeToolScreen } from "../helpers/observeToolScreen";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../src/models";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -33,13 +34,7 @@ async function observe(
   try {
     registerObserveTools({
       hidesPrototypeForScreenshot: async () => options.hidesPrototype ?? false,
-      createScreen: () => ({
-        execute: screen.execute.bind(screen),
-        executeDeviceRead: screen.execute.bind(screen),
-        captureScreenshot: screen.captureScreenshot.bind(screen),
-        appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
-        getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
-      }),
+      createScreen: () => observeToolScreen(screen),
     });
     const tool = ToolRegistry.getTool("observe")!;
     return await tool.deviceAwareHandler!(

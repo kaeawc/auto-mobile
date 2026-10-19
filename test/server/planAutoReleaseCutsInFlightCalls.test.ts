@@ -154,6 +154,7 @@ describe("plan auto-release with other calls in flight (#11490)", () => {
           baseSessionUuid: "base",
           sessionUuid: "base",
           device: devices[0],
+          cleanupService: { cleanup: async () => ({ status: "cleaned" }) },
           shouldResolveDevice: true,
         }),
     );

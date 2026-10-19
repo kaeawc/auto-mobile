@@ -11,6 +11,7 @@ import {
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { BootedDevice } from "../../src/models";
+import type { ElementSelectionStrategy } from "../../src/models/ElementSelectionStrategy";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
   PlanExecutionOrchestrator,
@@ -24,6 +25,7 @@ import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { activeVideoRecording } from "../helpers/planVideoFixtures";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const interactionDeps: InteractionToolDependencies = {};
@@ -84,7 +86,7 @@ steps:
         text: Missing
 `;
 
-function selectedElement(text: string, totalMatches: number, strategy: string) {
+function selectedElement(text: string, totalMatches: number, strategy: ElementSelectionStrategy) {
   return {
     text,
     resourceId: "com.example:id/item",
@@ -113,12 +115,12 @@ describe("executePlan toolResults capture (#10090)", () => {
     restoreTools = preserveToolRegistry();
     interactionDeps.tapOnElementFactory = () => ({
       execute: async (params) => {
-        const label = params.selector?.text ?? params.text;
+        const label = params.text ?? "";
         if (label === "Dismiss" || label === "Missing") {
           return {
             success: false,
             action: "tap",
-            element: { text: "" },
+            element: { text: "", bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
             error: "Element not found",
           };
         }
@@ -142,7 +144,7 @@ describe("executePlan toolResults capture (#10090)", () => {
     const start = spyOn(
       AndroidSegmentedPlanVideoSession.prototype,
       "startFirstSegment",
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue(activeVideoRecording("plan-video"));
     const finalize = spyOn(
       AndroidSegmentedPlanVideoSession.prototype,
       "finalize",

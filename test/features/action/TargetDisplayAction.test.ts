@@ -730,12 +730,11 @@ describe("explicit action display", () => {
     const executor = adb();
     const observation = screen("internal");
     const taps: Array<[number, number]> = [];
-    const ctrlProxy = {
-      requestTapCoordinates: async (x: number, y: number) => {
-        taps.push([x, y]);
-        return { success: true };
-      },
-    };
+    const ctrlProxy = new FakeCtrlProxy();
+    spyOn(ctrlProxy, "requestTapCoordinates").mockImplementation(async (x: number, y: number) => {
+      taps.push([x, y]);
+      return { success: true, totalTimeMs: 0 };
+    });
     const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const action = new TapOnElement(android, executor, {
@@ -799,12 +798,11 @@ describe("explicit action display", () => {
     const timer = autoTimer();
     timer.enableAutoAdvance();
     const drags: Array<[number, number, number, number]> = [];
-    const client = {
-      requestDrag: async ({ x1, y1, x2, y2 }: DragRequest) => {
-        drags.push([x1, y1, x2, y2]);
-        return { success: true };
-      },
-    };
+    const client = new FakeCtrlProxy();
+    spyOn(client, "requestDrag").mockImplementation(async ({ x1, y1, x2, y2 }: DragRequest) => {
+      drags.push([x1, y1, x2, y2]);
+      return { success: true, totalTimeMs: 0 };
+    });
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
     } as never);
@@ -832,13 +830,14 @@ describe("explicit action display", () => {
 
   test("pinchOn without display keeps CtrlProxy dispatch and never probes displays", async () => {
     const fakeAdb = new FakeAdbClient();
-    const pinches: number[][] = [];
-    const client = {
-      requestPinch: async (...coordinates: number[]) => {
+    const pinches: Array<Parameters<FakeCtrlProxy["requestPinch"]>> = [];
+    const client = new FakeCtrlProxy();
+    spyOn(client, "requestPinch").mockImplementation(
+      async (...coordinates: Parameters<FakeCtrlProxy["requestPinch"]>) => {
         pinches.push(coordinates);
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
-    };
+    );
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
     } as never);

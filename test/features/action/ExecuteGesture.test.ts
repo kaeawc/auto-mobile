@@ -7,6 +7,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ActionableError, type BootedDevice } from "../../../src/models";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 
 describe("ExecuteGesture", () => {
   const androidDevice: BootedDevice = {
@@ -175,13 +176,12 @@ describe("ExecuteGesture", () => {
   // a11y-mode gesture on a fresh device.
   test("passes the AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance in a11y mode (regression for #2225)", async () => {
     const factory = new FakeAdbClientFactory();
-    const fakeClient = {
-      requestSwipe: async () => ({
-        success: true,
-        totalTimeMs: 1,
-        gestureTimeMs: 1,
-      }),
-    };
+    const fakeClient = new FakeCtrlProxy();
+    spyOn(fakeClient, "requestSwipe").mockImplementation(async () => ({
+      success: true,
+      totalTimeMs: 1,
+      gestureTimeMs: 1,
+    }));
 
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
 
@@ -216,9 +216,12 @@ describe("ExecuteGesture", () => {
   test("reports both a11y and ADB failures when the fallback command fails", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("shell input swipe", new Error("ADB device offline"));
-    const fakeClient = {
-      requestSwipe: async () => ({ success: false, error: "a11y dispatch rejected" }),
-    };
+    const fakeClient = new FakeCtrlProxy();
+    spyOn(fakeClient, "requestSwipe").mockImplementation(async () => ({
+      success: false,
+      totalTimeMs: 0,
+      error: "a11y dispatch rejected",
+    }));
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
     const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100, {
       scrollMode: "a11y",

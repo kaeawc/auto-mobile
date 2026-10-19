@@ -3,6 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { SettingsNamespace } from "../../../src/features/observe/android";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -30,8 +31,9 @@ describe("CaptureSnapshot settings characterization", () => {
         events.push(command);
         return originalExecute(command);
       });
-      const client = {
-        requestSettingsList: async (namespace: SettingsNamespace) => {
+      const client = new FakeCtrlProxy();
+      spyOn(client, "requestSettingsList").mockImplementation(
+        async (namespace: SettingsNamespace) => {
           events.push(`a11y ${namespace}`);
           if (mode === "throw") {
             throw new Error("optional service unavailable");
@@ -44,7 +46,7 @@ describe("CaptureSnapshot settings characterization", () => {
           }
           return { success: mode === "missing" };
         },
-      };
+      );
       const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       restores.push(
         () => execute.mockRestore(),

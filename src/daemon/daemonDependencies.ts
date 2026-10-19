@@ -1,4 +1,4 @@
-import { createServer as createHttpServer, type Server as HttpServer } from "http";
+import { createServer as createHttpServer } from "http";
 import {
   createDefaultBindingExclusion,
   type BindingExclusion,
@@ -10,6 +10,7 @@ import {
   type LiveDaemonSessionIdProvider,
 } from "./daemonFiles";
 import { defaultDaemonStateWrites, type DaemonStateWrites } from "./daemonContext";
+import type { IngressHttpServer } from "./daemonHttpIngress";
 import type { ForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
@@ -47,7 +48,7 @@ export interface DaemonDependencies {
   recoveryPolicyEnvironment?: NodeJS.ProcessEnv;
   managedAdbServerShutdown?: ManagedAdbServerShutdown;
   toolSelectionProfileProvenanceLoader?: ToolSelectionProfileProvenanceLoader;
-  httpServerFactory?: () => HttpServer;
+  httpServerFactory?: () => IngressHttpServer;
   processBirthTime?: DaemonProcessBirthTimeProvider;
   processGenerationToken?: DaemonProcessGenerationTokenProvider;
   liveDaemonSessionIdProvider?: LiveDaemonSessionIdProvider;

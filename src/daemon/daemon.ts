@@ -20,15 +20,11 @@ import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
-import {
-  createServer as createHttpServer,
-  Server as HttpServer,
-  type IncomingMessage,
-} from "node:http";
+import { createServer as createHttpServer } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { DaemonHttpIngress } from "./daemonHttpIngress";
-import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
+import { DaemonHttpIngress, type IngressHttpServer } from "./daemonHttpIngress";
+import type { McpHttpRequestLike, StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
   buildMcpRequestContext,
@@ -563,7 +559,7 @@ export async function findAvailableDaemonPort(
 }
 
 export class Daemon {
-  private readonly httpServerFactory: () => HttpServer;
+  private readonly httpServerFactory: () => IngressHttpServer;
   private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider;
   private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
@@ -1869,7 +1865,7 @@ export class Daemon {
 
   /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
-    req: IncomingMessage,
+    req: McpHttpRequestLike,
     scope: StatelessMcpRequestScope,
   ): ReturnType<typeof createStatelessMcpServer> {
     return createStatelessMcpServer(
@@ -3619,6 +3615,28 @@ export class Daemon {
       ): void => {
         this.attemptRecovery = recover;
       },
+      replaceSessionManager: (manager: SessionManager): void => {
+        this.sessionManager = manager;
+      },
+      replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
+        this.observerSessionRegistry = registry;
+      },
+      resolveStartupCompletion: (): void => this.resolveStartupCompletion(),
+      rejectStartupCompletion: (reason: unknown): void => this.rejectStartupCompletion(reason),
+      startUntilReady: (): Promise<void> => this.startUntilReady(),
+      /** Replaces the startup stages the post-bind failure path runs, keeping the others. */
+      overrideStartupStages: (stages: {
+        startThroughSocketBind?: () => Promise<void>;
+        startAfterSocketBind?: () => Promise<void>;
+        stopAfterFailedStartup?: () => Promise<void>;
+      }): void => {
+        this.startThroughSocketBind = stages.startThroughSocketBind ?? this.startThroughSocketBind;
+        this.startAfterSocketBind = stages.startAfterSocketBind ?? this.startAfterSocketBind;
+        this.stopAfterFailedStartup = stages.stopAfterFailedStartup ?? this.stopAfterFailedStartup;
+      },
+      quiesceProvisioningIngress: (): Promise<void> => this.quiesceProvisioningIngress(),
+      interruptProvisioningForShutdown: (drainTimeoutMs: number): Promise<void> =>
+        this.interruptProvisioningForShutdown(drainTimeoutMs),
       startHealthCheckTimer: (): void => this.startHealthCheckTimer(),
       stopHealthCheckTimer: (): Promise<void> => this.stopHealthCheckTimer(),
     } as const;

@@ -10,8 +10,6 @@
 3	test/daemon/daemonForeignForwardWiring.test.ts
 2	test/daemon/daemonHandshake.test.ts
 1	test/daemon/daemonHangupShutdownWiring.test.ts
-4	test/daemon/daemonHttpRequestAdmission.test.ts
-11	test/daemon/daemonHttpSessionShutdown.test.ts
 2	test/daemon/daemonIdGenerator.test.ts
 1	test/daemon/daemonManagerPeerRejoin.test.ts
 4	test/daemon/daemonManagerReadiness.integration.test.ts

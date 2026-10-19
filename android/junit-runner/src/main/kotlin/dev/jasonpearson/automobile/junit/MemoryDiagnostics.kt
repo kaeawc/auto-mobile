@@ -38,9 +38,9 @@ internal object MemoryDiagnostics {
     )
   }
 
-  @Suppress("ExplicitGarbageCollectionCall")
   fun forceGc() {
-    System.gc()
+    // MemoryMXBean.gc has the same collection-request semantics as System.gc.
+    ManagementFactory.getMemoryMXBean().gc()
   }
 
   fun dumpHeap(label: String, reason: String? = null): File? {

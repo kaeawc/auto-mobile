@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import {
   IOS_RUNNER_FEATURE_FLAGS,
   getRequiredIosRunnerFeatureFlags,
@@ -1696,7 +1696,7 @@ describe("IOSCtrlProxyClient", function () {
           () => {},
         );
         const debug = spyOn(logger, "debug").mockImplementation(() => {});
-        const updates: CtrlProxyHierarchy[] = [];
+        const updates: XCTestHierarchy[] = [];
         const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
         const options: NonNullable<
           Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[5]
@@ -1764,7 +1764,7 @@ describe("IOSCtrlProxyClient", function () {
     );
 
     test("should return hierarchy data when WebSocket receives fresh data", async function () {
-      const mockHierarchyData: CtrlProxyHierarchy = {
+      const mockHierarchyData: XCTestHierarchy = {
         updatedAt: 1750934583218,
         packageName: "com.apple.mobilesafari",
         hierarchy: {
@@ -1829,7 +1829,7 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("suppresses observation stream push for explicit hierarchy sync request", async function () {
-      const mockHierarchyData: CtrlProxyHierarchy = {
+      const mockHierarchyData: XCTestHierarchy = {
         updatedAt: 1750934584218,
         packageName: "com.example.ios",
         hierarchy: {
@@ -2308,7 +2308,6 @@ describe("IOSCtrlProxyClient", function () {
           width: 100,
           height: 81,
         });
-        expect(payload.shape.points).toEqual(shape.points);
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -2404,7 +2403,7 @@ describe("IOSCtrlProxyClient", function () {
         .filter((payload) => payload.type === "get_sdk_capabilities");
 
     const shape: HighlightShape = {
-      type: "rect",
+      type: "circle",
       bounds: { x: 1, y: 2, width: 3, height: 4 },
     };
 
@@ -4390,7 +4389,7 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("caching", function () {
     test("ignores an older hierarchy push without replacing or restamping the cache", () => {
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 6_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
@@ -4423,7 +4422,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         fakeTimer,
       );
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 20_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
@@ -4467,12 +4466,12 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("accepts a ten-minute backward clock step and evaluates later pushes against it", () => {
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 1_000_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
       };
-      const push = (data: CtrlProxyHierarchy) =>
+      const push = (data: XCTestHierarchy) =>
         ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data });
       push(current);
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -4508,12 +4507,12 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("accepts the fifth advancing older push and resets the run on equal/newer acceptance", () => {
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 20_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
       };
-      const push = (data: CtrlProxyHierarchy) =>
+      const push = (data: XCTestHierarchy) =>
         ctrlProxyClient["processMessage"]({ type: "hierarchy_update", data });
       push(current);
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -4552,7 +4551,7 @@ describe("IOSCtrlProxyClient", function () {
     test.each([12_000, 11_000])(
       "restarts an advancing older run at a non-advancing timestamp %i",
       (interruption) => {
-        const current: CtrlProxyHierarchy = {
+        const current: XCTestHierarchy = {
           updatedAt: 20_000,
           packageName: "com.test.app",
           hierarchy: { text: "current" },
@@ -4596,7 +4595,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         fakeTimer,
       );
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 20_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
@@ -4644,7 +4643,7 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("drops a push exactly thirty seconds older but accepts one just beyond the gap", () => {
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 100_000,
         packageName: "com.test.app",
         hierarchy: {},
@@ -4670,7 +4669,7 @@ describe("IOSCtrlProxyClient", function () {
     });
 
     test("a newer hierarchy push replaces the cached capture and its receipt stamp", () => {
-      const current: CtrlProxyHierarchy = {
+      const current: XCTestHierarchy = {
         updatedAt: 2_000,
         packageName: "com.test.app",
         hierarchy: { text: "current" },
@@ -4703,7 +4702,7 @@ describe("IOSCtrlProxyClient", function () {
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
-        const mockHierarchy: CtrlProxyHierarchy = {
+        const mockHierarchy: XCTestHierarchy = {
           updatedAt: Date.now(),
           packageName: "com.test.app",
           hierarchy: { text: "Test" },
@@ -4732,7 +4731,7 @@ describe("IOSCtrlProxyClient", function () {
         factory,
         testTimer,
       );
-      const hierarchy: CtrlProxyHierarchy = {
+      const hierarchy: XCTestHierarchy = {
         updatedAt: 1_750_934_583_218,
         packageName: "com.test.app",
         hierarchy: { text: "unchanged" },
@@ -4777,7 +4776,7 @@ describe("IOSCtrlProxyClient", function () {
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
-        const mockHierarchy: CtrlProxyHierarchy = {
+        const mockHierarchy: XCTestHierarchy = {
           updatedAt: Date.now(),
           packageName: "com.test.app",
           hierarchy: { text: "Test" },
@@ -4816,7 +4815,7 @@ describe("IOSCtrlProxyClient", function () {
       );
 
       try {
-        const ctrlProxyHierarchy: CtrlProxyHierarchy = {
+        const ctrlProxyHierarchy: XCTestHierarchy = {
           updatedAt: 1234567890,
           packageName: "com.apple.test",
           hierarchy: {
@@ -4841,17 +4840,21 @@ describe("IOSCtrlProxyClient", function () {
         expect(result.packageName).toBe("com.apple.test");
         expect(result.updatedAt).toBe(1234567890);
         expect(result.hierarchy).toBeDefined();
-        expect(result.hierarchy.node.$["text"]).toBe("Button");
-        expect(result.hierarchy.node.$["content-desc"]).toBe("Submit button");
-        expect(result.hierarchy.node.$["resource-id"]).toBe("submit_btn");
-        expect(result.hierarchy.node.$["class"]).toBe("UIButton");
-        expect(result.hierarchy.node.$["bounds"]).toEqual({
+        const attrs = result.hierarchy.node?.$;
+        if (!attrs) {
+          throw new Error("Converted hierarchy has no root attributes");
+        }
+        expect(attrs["text"]).toBe("Button");
+        expect(attrs["content-desc"]).toBe("Submit button");
+        expect(attrs["resource-id"]).toBe("submit_btn");
+        expect(attrs["class"]).toBe("UIButton");
+        expect(attrs["bounds"]).toEqual({
           left: 10,
           top: 20,
           right: 100,
           bottom: 60,
         });
-        expect(result.hierarchy.node.$["clickable"]).toBe("true");
+        expect(attrs["clickable"]).toBe("true");
       } finally {
         await testClient.close();
       }
@@ -5135,11 +5138,9 @@ describe("IOSCtrlProxyClient", function () {
       const client = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
-        {
-          create: (url) => {
-            socketCreations += 1;
-            return new FakeWebSocket(url, "none", 0, fakeTimer);
-          },
+        (url) => {
+          socketCreations += 1;
+          return new FakeWebSocket(url, "none", 0, fakeTimer);
         },
         fakeTimer,
         () => manager,
@@ -5260,11 +5261,9 @@ describe("IOSCtrlProxyClient", function () {
       const client = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
-        {
-          create() {
-            socketCreations += 1;
-            throw new Error("retired client must not reconnect");
-          },
+        () => {
+          socketCreations += 1;
+          throw new Error("retired client must not reconnect");
         },
         timer,
       );

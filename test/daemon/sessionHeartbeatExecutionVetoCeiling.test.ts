@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   SessionHeartbeatMonitor,
@@ -55,7 +56,7 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
     );
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION, { livenessOwnerToken: OWNER });
   });
 
   afterEach(async () => {
@@ -107,7 +108,7 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
     await monitor.tick();
 
     // The owner comes back: the session is live again and the veto record is dropped.
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION, { livenessOwnerToken: OWNER });
     await monitor.tick();
     const returnedAt = timer.now();
 

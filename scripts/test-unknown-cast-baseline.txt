@@ -45,7 +45,6 @@
 1	test/daemon/deviceRestartRecoveryReservation.test.ts
 1	test/daemon/emulatorProcessLifecycle.test.ts
 2	test/daemon/explicitReleaseCutCall.test.ts
-3	test/daemon/gatedToolThroughDaemon.test.ts
 3	test/daemon/hierarchyStreamDiff.test.ts
 5	test/daemon/ideMutationReleasedMidCall.test.ts
 5	test/daemon/ideMutationSessionAdmission.test.ts
@@ -119,7 +118,6 @@
 2	test/server/interactionTools.tapOnMessage.test.ts
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
-1	test/server/inventorySurfaceParity.test.ts
 1	test/server/restartReservationOwnerOtherAvdOnReservedSerial.test.ts
 1	test/server/restartReservationStartAdmission.test.ts
 2	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts

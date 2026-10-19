@@ -24,7 +24,11 @@ import { android, createSendKeysHarness, focused, observer } from "./SendKeysTes
 const priorIme = "com.example.keyboard/.Ime";
 const activate = `shell ime set ${AUTO_MOBILE_IME_ID}`;
 const restore = `shell ime set ${priorIme}`;
-const type = (text: string): SendKeysCommand => ({ action: "type", text, mode: "ime" });
+const type = (text: string): Extract<SendKeysCommand, { action: "type" }> => ({
+  action: "type",
+  text,
+  mode: "ime",
+});
 let serial = 0;
 
 function harness(observe: SendKeysObserver = observer, initialIme = priorIme) {
@@ -853,9 +857,9 @@ test("multi-command restore failure reports original-keyboard recovery guidance"
   }
 });
 
-test.each([["a"], ["a", "b"]])(
+test.each([{ texts: ["a"] }, { texts: ["a", "b"] }])(
   "restore failure belongs to the last IME type rather than a trailing enter key (%j)",
-  async (...texts) => {
+  async ({ texts }) => {
     const h = harness();
     h.adb.setCommandError(restore, new Error("restore rejected"));
     try {

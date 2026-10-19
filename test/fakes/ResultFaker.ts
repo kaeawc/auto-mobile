@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { faker } from "@faker-js/faker";
 import {
   ElementBounds,
@@ -189,14 +190,13 @@ export class ResultFaker {
     const elementCount = faker.number.int({ min: 5, max: 20 });
     const elements = Array.from({ length: elementCount }, () => this.element());
 
-    return {
+    return buildObserveResult({
       observationId: overrides.observationId ?? faker.string.uuid(),
       updatedAt,
       screenSize,
       systemInsets,
       viewHierarchy: overrides.viewHierarchy ?? {
-        version: "1.0",
-        nodes: elements.map((e) => ({ ...e, children: [] })),
+        hierarchy: { node: { node: elements.map((e) => ({ $: { ...e } })) } },
       },
       screenshotPath:
         overrides.screenshotPath ??
@@ -206,9 +206,10 @@ export class ResultFaker {
         clickable: elements.filter((e) => e.clickable),
         scrollable: elements.filter((e) => e.scrollable),
         text: elements.filter((e) => e.text),
+        media: [],
       },
       error: overrides.error,
-    };
+    });
   }
 
   /**

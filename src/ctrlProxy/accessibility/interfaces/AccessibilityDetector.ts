@@ -1,5 +1,8 @@
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
+/** The flags the detector reads; a feature flag service satisfies it structurally. */
+export interface FeatureFlagReader {
+  isEnabled(key: "accessibility-auto-detect" | "force-accessibility-mode"): boolean;
+}
 
 /**
  * Type representing the detected accessibility service

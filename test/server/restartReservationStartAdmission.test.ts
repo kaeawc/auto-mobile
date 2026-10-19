@@ -3,7 +3,7 @@ import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { McpSessionRecoveryInProgressError } from "../../src/daemon/deviceAutolockManager";
+import { McpSessionRecoveryInProgressError } from "../../src/daemon/McpSessionRecoveryInProgressError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";

@@ -5,7 +5,7 @@ import { DevicePool } from "../../../src/daemon/devicePool";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../../src/models";
 import { executionTracker } from "../../../src/daemon/executionTracker";
-import { ExecutionTrackerPlanExecutionLock } from "../../../src/server/PlanExecutionLock";
+import { ExecutionTrackerPlanExecutionLock } from "../../../src/server/ExecutionTrackerPlanExecutionLock";
 import { registerPlanTools } from "../../../src/server/planTools";
 import type {
   TaskLeaseHoldRequest,

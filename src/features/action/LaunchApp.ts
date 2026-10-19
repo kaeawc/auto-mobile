@@ -23,6 +23,7 @@ import {
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { rethrowDeviceTransportUnavailable } from "../../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { InstalledAppsRepository } from "../../db/installedAppsRepository";
 import {
   confirmAndroidPackageInstalledLive,
@@ -467,7 +468,8 @@ export class LaunchApp extends BaseVisualChange {
    * error. That is also what a package removed outside the tools looks like, and
    * the remaining fallbacks (about a dozen adb calls) cannot launch it. One live
    * read settles it before they run; the success path never pays for it (#10192).
-   * A failed read is not evidence either way, so the fallbacks still run.
+   * A failed read is not evidence either way. Transport refusals surface for
+   * retry; other read failures leave the launch fallbacks available.
    */
   private async failFastWhenPackageRemoved(
     packageName: string,
@@ -482,6 +484,7 @@ export class LaunchApp extends BaseVisualChange {
       );
     } catch (error) {
       this.assertLaunchNotAborted(signal);
+      rethrowDeviceTransportUnavailable(error);
       logger.warn(
         `[LaunchApp] Could not confirm ${packageName} is still installed after the launcher intent failed: ${errorMessage(error)}`,
         error,

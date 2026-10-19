@@ -1,4 +1,5 @@
 import type { ToolCallRecord, ToolCallRepository } from "../db/toolCallRepository";
+import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../models/describeUnknownError";
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
@@ -10,13 +11,25 @@ type ToolCallOutcome = Pick<ToolCallRecord, "status" | "errorType" | "errorMessa
 
 function thrownToolCallOutcome(error: unknown): ToolCallOutcome {
   const code = isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+  let errorType = "UnknownError";
+  if (code?.trim()) {
+    errorType = code;
+  } else if (error instanceof Error) {
+    errorType = "Error";
+    if (error.name.length > 2 && error.name !== "Error") {
+      errorType = error.name;
+    } else if (error instanceof ActionableError) {
+      // constructor.name is minified in dist (#13655); the class identity is stable.
+      errorType = "ActionableError";
+    } else if (error.name.length > 2) {
+      errorType = error.name;
+    } else if (error.constructor.name.length > 2) {
+      errorType = error.constructor.name;
+    }
+  }
   return {
     status: "failure",
-    errorType: code?.trim()
-      ? code
-      : error instanceof Error
-        ? error.constructor.name || error.name
-        : "UnknownError",
+    errorType,
     errorMessage: errorMessage(error),
   };
 }

@@ -58,10 +58,8 @@ import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import type { LaunchAppCall } from "../../../src/features/action/LaunchApp";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
-import {
-  createHierarchyForTest,
-  createObserveResultForTest,
-} from "../observe/observeScreenTestBuilders";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 
 isolateToolRegistry();
 

@@ -5,7 +5,6 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { InputTextMode } from "../../../src/features/action/InputText";
 import type { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -13,22 +12,6 @@ import {
   AdbCommandTimeoutError,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
-
-interface TestInputText {
-  executeAndroidTextInput: (
-    text: string,
-    imeAction?: undefined,
-    dismissKeyboard?: boolean,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
-  ) => Promise<{
-    success: boolean;
-    error?: string;
-    method?: string;
-    keyboardDismissed?: boolean;
-    warnings?: string[];
-  }>;
-}
 
 type RequestSetText = (
   text: string,
@@ -39,13 +22,6 @@ type RequestSetText = (
     dismissKeyboard?: boolean;
   },
 ) => Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
-
-function testInputText(inputText: InputText): TestInputText {
-  return {
-    executeAndroidTextInput: (text, imeAction, dismissKeyboard, mode, signal) =>
-      inputText.executeAndroidTextInput(text, imeAction, dismissKeyboard, mode, signal),
-  };
-}
 
 function stubAndroidSetText(requestSetText: RequestSetText): void {
   AndroidCtrlProxyClient.getInstance = (() => ({
@@ -125,7 +101,7 @@ describe("InputText", () => {
       };
     }) as typeof AndroidCtrlProxyClient.getInstance;
 
-    await inputText.executeAndroidTextInput("hello");
+    await inputText.testHooks.executeAndroidTextInput("hello");
 
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
@@ -195,7 +171,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "@Jason Pearson",
       undefined,
       false,
@@ -218,7 +194,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc def  ",
       undefined,
       false,
@@ -240,7 +216,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "HellO",
       undefined,
       false,
@@ -264,7 +240,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "HellO",
       undefined,
       false,
@@ -287,7 +263,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "  你好  ",
       undefined,
       false,
@@ -311,7 +287,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "@ab C",
       undefined,
       false,
@@ -354,7 +330,7 @@ describe("InputText", () => {
 
     try {
       await expect(
-        testInputText(inputText).executeAndroidTextInput(
+        inputText.testHooks.executeAndroidTextInput(
           "abc",
           undefined,
           false,
@@ -378,7 +354,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab你好c😊d",
       undefined,
       false,
@@ -422,7 +398,7 @@ describe("InputText", () => {
       };
     });
     try {
-      const result = await testInputText(inputText).executeAndroidTextInput(
+      const result = await inputText.testHooks.executeAndroidTextInput(
         "a你好b",
         undefined,
         true,
@@ -455,7 +431,7 @@ describe("InputText", () => {
       totalTimeMs: 1,
     }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       false,
@@ -479,7 +455,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "a+B",
       undefined,
       false,
@@ -503,7 +479,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "B+",
       undefined,
       false,
@@ -526,7 +502,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "你好😊",
       undefined,
       false,
@@ -561,7 +537,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
@@ -586,11 +562,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
-      "hello",
-      undefined,
-      false,
-    );
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, false);
 
     expect(result.success).toBe(true);
     expect(closeCalls).toEqual([]);
@@ -618,7 +590,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await inputText.executeAndroidTextInput("hello", "done", true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", "done", true);
 
     // The dismissal failure surfaces as a warning on a SUCCESSFUL result (#6868),
     // and the IME action (Enter) already ran — pre-#5887 the dismiss-first
@@ -645,7 +617,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     // #6868: the text landed; only the dismissal epilogue failed.
     expect(result.success).toBe(true);
@@ -667,7 +639,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab",
       undefined,
       true,
@@ -691,7 +663,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       true,
@@ -718,7 +690,7 @@ describe("InputText", () => {
       }),
     }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       true,
@@ -746,7 +718,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab",
       undefined,
       true,
@@ -771,7 +743,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "abc",
       undefined,
       true,
@@ -799,7 +771,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
@@ -826,7 +798,7 @@ describe("InputText", () => {
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
     await expect(
-      testInputText(inputText).executeAndroidTextInput(
+      inputText.testHooks.executeAndroidTextInput(
         "hello",
         undefined,
         true,
@@ -849,7 +821,7 @@ describe("InputText", () => {
       totalTimeMs: 1,
     }));
 
-    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+    const result = await inputText.testHooks.executeAndroidTextInput("hello", undefined, true);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("accessibility service unavailable");
@@ -866,7 +838,7 @@ describe("InputText", () => {
       return { success: false, error: "Set text timed out after 5000ms", totalTimeMs: 5000 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "next",
       undefined,
       false,
@@ -890,7 +862,7 @@ describe("InputText", () => {
       return { success: false, error: "No focused editable node found", totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "next",
       undefined,
       false,
@@ -951,7 +923,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "ab",
       undefined,
       false,
@@ -1003,7 +975,7 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput(
+    const result = await inputText.testHooks.executeAndroidTextInput(
       "😊",
       undefined,
       false,

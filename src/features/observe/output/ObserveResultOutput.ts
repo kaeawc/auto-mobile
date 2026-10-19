@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { parseObserveResultJson, type WireHierarchyNodeSlot } from "./observeResultWire";
 import type { Element } from "../../../models/Element";
 import type { LayoutWarning, LayoutWarningsScope } from "../../../models/ObservationInsets";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
@@ -125,7 +126,7 @@ export type ObserveResultCloner = (obs: ObserveResult) => ObserveResult;
 
 function cloneObserveResult(obs: ObserveResult): ObserveResult {
   // Match the wire's JSON semantics, including omitted undefined/functions.
-  return JSON.parse(JSON.stringify(obs)) as ObserveResult;
+  return parseObserveResultJson(JSON.stringify(obs));
 }
 
 /** Normalize hierarchy optionals and strip internal panel evidence from served captures. */
@@ -427,9 +428,7 @@ function reduceAdvisoryOutput(
  * on child nodes, and real captures put an array in both places — this collapses
  * that runtime shape variance into one traversal path.
  */
-function toNodeArray(
-  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined,
-): ViewHierarchyNode[] {
+function toNodeArray(node: WireHierarchyNodeSlot | undefined): ViewHierarchyNode[] {
   if (!node) {
     return [];
   }

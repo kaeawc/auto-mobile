@@ -59,6 +59,15 @@ is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+  RUN_STATUS=0
+  "$@" || RUN_STATUS=$?
+}
+
 # Run "$@" under a wall-clock timeout, retrying with exponential backoff.
 #
 # Each attempt is bounded by CMD_TIMEOUT_SECONDS so a network stall cannot hang
@@ -105,7 +114,10 @@ try_with_retry() {
 # Like try_with_retry, but a final failure is fatal.
 run_with_retry() {
   local description="$1"
-  try_with_retry "$@" || die "${description} failed after ${MAX_ATTEMPTS} attempts"
+  run_capture_status try_with_retry "$@"
+  if [[ "$RUN_STATUS" -ne 0 ]]; then
+    die "${description} failed after ${MAX_ATTEMPTS} attempts"
+  fi
 }
 
 # Re-run update+install of xmlstarlet against FALLBACK_MIRROR with a throwaway
@@ -131,7 +143,8 @@ install_xmlstarlet_from_fallback_mirror() {
 main() {
   local var
   for var in CMD_TIMEOUT_SECONDS KILL_GRACE_SECONDS MAX_ATTEMPTS RETRY_BASE_DELAY_SECONDS; do
-    if ! is_positive_integer "${!var}"; then
+    run_capture_status is_positive_integer "${!var}"
+    if [[ "$RUN_STATUS" -ne 0 ]]; then
       die "${var} must be a positive integer (got '${!var}')"
     fi
   done
@@ -140,7 +153,8 @@ main() {
     log "xmlstarlet already on PATH; skipping apt-get"
   else
     run_with_retry "apt-get update" sudo apt-get update
-    if ! try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet; then
+    run_capture_status try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet
+    if [[ "$RUN_STATUS" -ne 0 ]]; then
       log "Default mirror failed; falling back to ${FALLBACK_MIRROR}"
       run_with_retry "apt-get install xmlstarlet from fallback mirror" \
         sudo env \

@@ -56,8 +56,23 @@ import * as controlTransport from "../../src/daemon/deviceControlTransportFailur
 import * as toolUnavailable from "../../src/server/toolUnavailableError";
 import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
-import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
+import {
+  bindingsFailure,
+  optionalRecord,
+  readExpectations,
+  readSurfaceExpectations,
+  readSurfaceFixture,
+  readTypedFields,
+  readWirePayload,
+  requireRecord,
+  resultJson,
+  wirePayloadOf,
+  type RefusalFields,
+  type SurfaceFields,
+  type TypedFields,
+  type WirePayload,
+} from "./helpers/refusalWireReaders";
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -74,7 +89,6 @@ import {
   PROVISION_DEVICE_FIXTURE_PREFIX,
   buildRefusalSurfaceFixtures,
   type RefusalSurfaceFixture,
-  type RefusalWireResult,
   expectedWireCodes,
   REFUSAL_FIXTURES_DIR,
   REFUSAL_SURFACES_DIR,
@@ -347,44 +361,6 @@ function missingErrorClasses(
  * same fixtures and classify them per expectations.json. This suite keeps the TypeScript side of
  * that contract honest.
  */
-interface Expectations {
-  codes: Record<
-    string,
-    {
-      expected: RefusalDisposition;
-      knownGaps?: Record<string, RefusalDisposition>;
-      fields: RefusalFields;
-    }
-  >;
-}
-
-interface RefusalFields {
-  code?: string;
-  retryable: boolean;
-  acquireNewSession: boolean;
-  retryAfterMs?: number;
-  recovering?: boolean;
-  externalDevices?: string[];
-}
-
-interface WirePayload {
-  details?: { recovering?: boolean };
-  retryAfterMs?: number;
-  recovering?: boolean;
-  externalDevices?: string[];
-  code?: string;
-  retryable?: boolean;
-  nextAction?: string;
-  error?: {
-    retryAfterMs?: number;
-    recovering?: boolean;
-    code?: string;
-    retryable?: boolean;
-    nextAction?: string;
-    acquisitionFailure?: { code?: string } | null;
-  };
-}
-
 /** The codes a payload names on the wire, outermost first. */
 function wireCodes(payload: WirePayload): string[] {
   const codes = [typeof payload.error === "object" ? payload.error.code : payload.code];
@@ -449,9 +425,9 @@ function dispositionOf(
   return retryable ? "retry" : "fail";
 }
 
-const expectations = JSON.parse(
+const expectations = readExpectations(
   readFileSync(join(REFUSAL_FIXTURES_DIR, "expectations.json"), "utf8"),
-) as Expectations;
+);
 const fixtures = buildRefusalWireFixtures();
 const fixtureCodes = fixtures.map((fixture) => fixture.code);
 
@@ -485,26 +461,6 @@ function exportedCodeConstants(): Map<string, string> {
   return found;
 }
 
-interface SurfaceFields extends Omit<RefusalFields, "retryable"> {
-  retryable?: boolean;
-  /** The evidence the refusal carries beside its typed fields. */
-  details?: Record<string, unknown>;
-  /** A broker provisioning failure's boot-capacity object. */
-  capacity?: Record<string, unknown>;
-  budget?: Record<string, unknown>;
-}
-
-interface SurfaceExpectations {
-  fixtures: Record<string, { expected: RefusalDisposition; fields: SurfaceFields }>;
-}
-
-interface TypedFields {
-  code?: string;
-  retryable?: boolean;
-  retryAfterMs?: number;
-  nextAction?: string;
-}
-
 /** The typed fields a surface fixture's payload carries, and where they sit on that surface. */
 function surfaceTyped(fixture: RefusalSurfaceFixture): {
   typed: TypedFields;
@@ -512,45 +468,48 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   capacity?: Record<string, unknown>;
   budget?: Record<string, unknown>;
 } {
-  const payload = fixture.payload as Record<string, unknown>;
+  const payload = requireRecord(fixture.payload, `${fixture.name} payload`);
   if (
-    ["device-loss-outcome", "device-session-error-fields", "request-failure-fields"].includes(
-      fixture.surface,
-    )
+    [
+      "device-loss-outcome",
+      "device-session-error-fields",
+      "request-failure-fields",
+      "press-button-result",
+    ].includes(fixture.surface)
   ) {
-    return { typed: payload as TypedFields };
+    return { typed: readTypedFields(payload) };
   }
   if (fixture.surface === "recording-start-result") {
-    const result = fixture.payload as RefusalWireResult;
-    return { typed: JSON.parse(result.content[0].text) as TypedFields };
+    return { typed: readTypedFields(resultJson(payload)) };
   }
   if (fixture.surface === "proxy-tool-result") {
-    const result = fixture.payload as RefusalWireResult;
-    const body = JSON.parse(result.content[0].text) as { error: TypedFields };
-    return { typed: body.error };
+    return { typed: readTypedFields(requireRecord(resultJson(payload), "body").error) };
   }
-  if (fixture.surface === "provision-envelope") {
-    return { typed: payload.error as TypedFields };
-  }
-  if (fixture.surface === "liveness-handover") {
-    return { typed: payload.error as TypedFields };
+  if (fixture.surface === "provision-envelope" || fixture.surface === "liveness-handover") {
+    return { typed: readTypedFields(payload.error) };
   }
   if (fixture.surface === "aux-socket-response") {
-    return { typed: payload as TypedFields, details: { deviceId: payload.deviceId } };
+    return { typed: readTypedFields(payload), details: { deviceId: payload.deviceId } };
   }
   if (fixture.surface === "socket-frame") {
-    return { typed: payload as TypedFields, details: payload.details as Record<string, unknown> };
+    return {
+      typed: readTypedFields(payload),
+      details: optionalRecord(payload, "details", "socket frame"),
+    };
   }
   if (fixture.surface === "overload-frame") {
-    const { code, retryable, retryAfterMs, reason, queueWaitMs, remainingTimeoutMs } =
-      payload.overloadFailure as TypedFields & {
-        reason: string;
-        queueWaitMs: number;
-        remainingTimeoutMs: number;
-      };
+    const failure = requireRecord(payload.overloadFailure, "overloadFailure");
     return {
-      typed: { code, retryable, retryAfterMs },
-      details: { queueWaitMs, remainingTimeoutMs, reason },
+      typed: readTypedFields({
+        code: failure.code,
+        retryable: failure.retryable,
+        retryAfterMs: failure.retryAfterMs,
+      }),
+      details: {
+        queueWaitMs: failure.queueWaitMs,
+        remainingTimeoutMs: failure.remainingTimeoutMs,
+        reason: failure.reason,
+      },
     };
   }
   if (fixture.surface === "webrtc-stream-response") {
@@ -558,22 +517,21 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     expect(Object.hasOwn(payload, "retryable"), fixture.name).toBe(false);
     return { typed: { code: String(payload.errorCode) } };
   }
-  if (fixture.surface === "press-button-result") {
-    return { typed: payload as TypedFields };
-  }
   if (fixture.surface === "delete-device") {
-    const text = (payload as unknown as RefusalWireResult).content[0].text;
-    const failure = (JSON.parse(text) as { failure: Record<string, unknown> }).failure;
+    const failure = requireRecord(requireRecord(resultJson(payload), "body").failure, "failure");
     const { code, phase, message, retryable, retryAfterMs, nextAction, ...evidence } = failure;
     expect([phase, typeof message], fixture.name).toEqual(["precondition", "string"]);
     return {
-      typed: { code, retryable, retryAfterMs, nextAction } as TypedFields,
+      typed: readTypedFields({ code, retryable, retryAfterMs, nextAction }),
       details: Object.keys(evidence).length > 0 ? evidence : undefined,
     };
   }
-  const result = payload as unknown as BindingsResult;
-  const failure = result.bindings.find((binding) => binding.failure)?.failure ?? result.failure;
-  return { typed: failure as TypedFields, capacity: failure?.capacity, budget: failure?.budget };
+  const failure = bindingsFailure(payload);
+  return {
+    typed: readTypedFields(failure),
+    capacity: optionalRecord(failure, "capacity", "failure"),
+    budget: optionalRecord(failure, "budget", "failure"),
+  };
 }
 
 function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
@@ -594,11 +552,10 @@ function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
 const surfaceFixtures = buildRefusalSurfaceFixtures();
 const capturedSurfaceFixtures = EXTERNALLY_CAPTURED_SURFACE_FIXTURES.filter(
   (fixture) => fixture.testFile !== "test/daemon/refusalWireContract.test.ts",
-).map(
-  (fixture) =>
-    JSON.parse(
-      readFileSync(join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`), "utf8"),
-    ) as RefusalSurfaceFixture,
+).map((fixture) =>
+  readSurfaceFixture(
+    readFileSync(join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`), "utf8"),
+  ),
 );
 const allSurfaceFixtures = [...surfaceFixtures, ...capturedSurfaceFixtures];
 const coveredWireCodes = new Set([
@@ -607,9 +564,9 @@ const coveredWireCodes = new Set([
   ...EXTERNALLY_CAPTURED_SURFACE_FIXTURES.flatMap((fixture) => expectedWireCodes(fixture.name)),
 ]);
 const drivenErrorClasses = fixtureDrivenErrorClasses();
-const surfaceExpectations = JSON.parse(
+const surfaceExpectations = readSurfaceExpectations(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
-) as SurfaceExpectations;
+);
 
 // Capture private production builders through their registered public handlers, using only fakes.
 const ownedSurfaceFixtures: RefusalSurfaceFixture[] = [];
@@ -736,7 +693,7 @@ describe("refusal wire contract", () => {
       "device_unhealthy.all_candidates",
     ]) {
       const fixture = fixtures.find((fixture) => fixture.code === stem)!;
-      const payload = JSON.parse(fixture.result.content[0].text);
+      const payload = requireRecord(resultJson(fixture.result), "payload");
       expect(payload).toMatchObject({
         success: false,
         error: expect.any(String),
@@ -746,7 +703,10 @@ describe("refusal wire contract", () => {
       });
       expect(Array.isArray(payload.devices)).toBe(true);
       expect(payload).not.toHaveProperty("nextAction");
-      expect(acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES.has(payload.code)).toBe(false);
+      expect(
+        typeof payload.code === "string" &&
+          acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES.has(payload.code),
+      ).toBe(false);
       if (stem.endsWith("all_candidates")) {
         expect(payload).not.toHaveProperty("deviceId");
         expect(payload).not.toHaveProperty("reason");
@@ -785,7 +745,7 @@ describe("refusal wire contract", () => {
     const fixture = fixtures.find((fixture) => fixture.code === "ambiguous_session_selector")!;
     expect(fixture.result.isError).toBe(true);
     expect(fixture.result.content).toHaveLength(1);
-    const payload = JSON.parse(fixture.result.content[0].text);
+    const payload = requireRecord(resultJson(fixture.result), "payload");
     expect(payload.error).toEqual({
       code: "ambiguous_session_selector",
       message: expect.stringContaining("Name one with sessionUuid or deviceId."),
@@ -796,7 +756,7 @@ describe("refusal wire contract", () => {
       ],
       retryable: false,
     });
-    expect(deriveDisposition(payload)).toBe("fail");
+    expect(deriveDisposition(readWirePayload(payload))).toBe("fail");
   });
 
   test("committed fixtures equal what the real TypeScript builders emit", () => {
@@ -815,7 +775,7 @@ describe("refusal wire contract", () => {
 
   test("every fixture carries the code it is named for on the wire", () => {
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       expect(wireCodes(payload), fixture.code).toEqual(expectedWireCodes(fixture.code));
     }
   });
@@ -832,7 +792,7 @@ describe("refusal wire contract", () => {
   test("unhealthy corpus waits exactly while recovering and retryable", () => {
     const outcomes = new Set<string>();
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       const fields = readFields(payload);
       if (fields.code !== "device_unhealthy") {
         continue;
@@ -846,7 +806,7 @@ describe("refusal wire contract", () => {
 
   test("the expectations agree with the disposition the wire fields imply", () => {
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       expect(expectations.codes[fixture.code].expected, fixture.code).toBe(
         deriveDisposition(payload),
       );
@@ -855,7 +815,7 @@ describe("refusal wire contract", () => {
 
   test("the expectations pin the fields each fixture carries on the wire", () => {
     for (const fixture of fixtures) {
-      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const payload = wirePayloadOf(fixture.result);
       expect(expectations.codes[fixture.code].fields, fixture.code).toEqual(readFields(payload));
     }
     const rows = Object.values(expectations.codes).map((row) => row.fields);
@@ -1118,7 +1078,7 @@ describe("refusal wire contract", () => {
 
     test.each(classes)("%s", (_name, build, code, retryable, nextAction) => {
       const error = build();
-      const mcp = readFields(JSON.parse(shapedRefusalResult(error).content[0].text) as WirePayload);
+      const mcp = readFields(wirePayloadOf(shapedRefusalResult(error)));
       const frame = mcpRequestFailureDetails(error, undefined);
       const plan = planRefusalFields(error);
       expect([mcp.code, mcp.retryable]).toEqual([code, retryable]);
@@ -1170,7 +1130,7 @@ describe("refusal wire contract", () => {
         candidates: [{ deviceId: "ios-a", platform: "ios" }],
       };
       expect(error.toPayload()).toEqual(payload);
-      expect(JSON.parse(shapedRefusalResult(error).content[0].text)).toMatchObject(payload);
+      expect(resultJson(shapedRefusalResult(error))).toMatchObject(payload);
       expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
         candidates: payload.candidates,
       });
@@ -1260,7 +1220,7 @@ describe("refusal wire contract", () => {
 
     test("every socket frame carries the code it is named for and its retry intent", () => {
       for (const fixture of surfaceFixtures.filter((f) => f.surface === "socket-frame")) {
-        const frame = fixture.payload as { success: boolean; code?: string; retryable?: boolean };
+        const frame = requireRecord(fixture.payload, fixture.name);
         expect(frame.success, fixture.name).toBe(false);
         expect([frame.code], fixture.name).toEqual(expectedWireCodes(fixture.name));
         expect(typeof frame.retryable, fixture.name).toBe("boolean");

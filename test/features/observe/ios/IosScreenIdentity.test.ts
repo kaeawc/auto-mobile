@@ -238,7 +238,7 @@ describe("deriveIosScreenIdentity", () => {
             clickable: "true",
           },
         ],
-      } as any,
+      },
     });
 
     expect(identity?.components.bundleId).toBe("com.apple.reminders");

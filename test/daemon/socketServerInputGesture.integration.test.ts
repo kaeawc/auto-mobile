@@ -9,6 +9,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -66,14 +67,14 @@ describe("UnixSocketServer input/gesture*", () => {
   });
 
   function mockAndroidGestures() {
-    const requestGestureStart = mock(async () => ({ success: true }));
-    const requestGestureMove = mock(async () => ({ success: true }));
-    const requestGestureEnd = mock(async () => ({ success: true }));
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    const requestGestureStart = mock(async () => ({ success: true, totalTimeMs: 0 }));
+    const requestGestureMove = mock(async () => ({ success: true, totalTimeMs: 0 }));
+    const requestGestureEnd = mock(async () => ({ success: true, totalTimeMs: 0 }));
+    spyOnAndroidClientInstance(androidDevice, {
       requestGestureStart,
       requestGestureMove,
       requestGestureEnd,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     return { requestGestureStart, requestGestureMove, requestGestureEnd };
   }
 
@@ -164,9 +165,7 @@ describe("UnixSocketServer input/gesture*", () => {
     // The client crashes / disconnects before sending its end: the runner has parked a continued
     // stroke with no duration ceiling, so the daemon must lift it with a cancelling end on close.
     conn.close();
-    await waitUntil(
-      () => (requestGestureEnd as unknown as { mock: { calls: unknown[] } }).mock.calls.length > 0,
-    );
+    await waitUntil(() => requestGestureEnd.mock.calls.length > 0);
     expect(requestGestureEnd).toHaveBeenCalledWith("g9", 0, 0, true, 5000);
   });
 
@@ -270,13 +269,13 @@ describe("UnixSocketServer input/gesture*", () => {
         fakeTimer.setTimeout(resolve, 20);
       });
       inFlight -= 1;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     };
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestGestureStart: mock(track),
       requestGestureMove: mock(track),
       requestGestureEnd: mock(track),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);

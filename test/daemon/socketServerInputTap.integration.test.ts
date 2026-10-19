@@ -27,7 +27,7 @@ import {
   createAndroidTestClient,
   spyOnAndroidClientInstance,
 } from "../helpers/androidCtrlProxyClientSpies";
-import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { spyOnIosTestClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -250,7 +250,7 @@ describe("UnixSocketServer input/tap", () => {
       },
     );
     const fetchHierarchy = mock(async () => ({ hierarchy: {} }));
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -316,7 +316,7 @@ describe("UnixSocketServer input/tap", () => {
       },
     );
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -350,7 +350,7 @@ describe("UnixSocketServer input/tap", () => {
       },
     );
     const fetchHierarchy = mock(async () => null); // not connected / timed out -> FAILURE
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -381,7 +381,7 @@ describe("UnixSocketServer input/tap", () => {
     const fetchHierarchy = mock(async () => {
       throw new Error("ws disconnected");
     });
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -417,7 +417,7 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
       return { hierarchy: {} };
     });
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -459,7 +459,7 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3 };
       return { hierarchy: {} };
     });
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -489,7 +489,7 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
     });
@@ -524,7 +524,7 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
       return { hierarchy: {} };
     });
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -563,7 +563,7 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
       return { hierarchy: {} };
     });
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
@@ -601,7 +601,7 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    spyOnIosClientInstance({
+    spyOnIosTestClientInstance(iosDevice, {
       requestTapCoordinates,
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));

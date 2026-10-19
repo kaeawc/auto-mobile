@@ -9,6 +9,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { observeResultFromFixture } from "../../helpers/observeFixture";
 import playgroundCapture from "../../fixtures/android-enabled/playground-disabled-control-api36.json";
 
 const PLAYGROUND = "dev.jasonpearson.automobile.playground";
@@ -16,7 +17,7 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 
 /** The captured Playground design-system screen (MainActivity, no app pane title). */
 function capturedHierarchy(): ViewHierarchyResult {
-  const observation = structuredClone(playgroundCapture) as unknown as ObserveResult;
+  const observation = observeResultFromFixture(structuredClone(playgroundCapture), "playground");
   return { ...observation.viewHierarchy!, packageName: PLAYGROUND };
 }
 

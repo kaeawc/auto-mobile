@@ -2,20 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy$action != IME_ACTION_UNSPECIFIED &amp;&amp; action != IME_ACTION_NONE &amp;&amp; config.imeOptions and IME_FLAG_NO_ENTER_ACTION == 0 &amp;&amp; config.inputType and TYPE_TEXT_FLAG_MULTI_LINE == 0</ID>
-    <ID>ComplexCondition:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy$behavior.recomposeOnCursorMove &amp;&amp; !suppressRecompose &amp;&amp; composingBuffer.isEmpty() &amp;&amp; snapshot.selectionStart == snapshot.selectionEnd</ID>
     <ID>ComplexCondition:CtrlProxy.kt:selector.resourceId != null &amp;&amp; (fields.resourceId == null || (fields.resourceId != selector.resourceId &amp;&amp; !fields.resourceId.endsWith(":id/${selector.resourceId}")))</ID>
-    <ID>ComplexCondition:GestureStreamSession.kt:GestureStreamSession$!segment.isInitial &amp;&amp; segment.willContinue &amp;&amp; action.segment.from != action.segment.to &amp;&amp; segment.from == segment.to</ID>
-    <ID>ComplexCondition:ImeCommitDriver.kt:ImeCommitDriver$!result.success &amp;&amp; committedUnits &gt; 0 &amp;&amp; sink.nowMs() &lt; hardDeadlineMs &amp;&amp; !sink.syncEditorState()</ID>
-    <ID>ComplexCondition:ImeCommitDriver.kt:ImeCommitDriver$event == "decision" &amp;&amp; fields.any { it.first == "kind" &amp;&amp; (it.second == "fail" || it.second == "succeed") }</ID>
-    <ID>ComplexCondition:ImeCommitDriver.kt:ImeCommitDriver.CommitSequence$!reportInsertedText || baseline == null || sink.editorIdentity() != identity || sink.nowMs() &gt;= hardDeadlineMs</ID>
-    <ID>ComplexCondition:ImeCommitDriver.kt:ImeCommitDriver.Companion$baseline != null &amp;&amp; now != null &amp;&amp; now.length &lt; EDITOR_READ_CAP &amp;&amp; now.startsWith(baseline)</ID>
-    <ID>ComplexCondition:ImeGraphemes.kt:ImeGraphemes$end &lt; text.length &amp;&amp; (Character.codePointAt(text, end).isExtend() || Character.codePointBefore(text, end) == ZERO_WIDTH_JOINER || text.hasOddRegionalIndicatorRunBefore(end))</ID>
-    <ID>ComplexCondition:ImeGraphemes.kt:ImeGraphemes$firstCodePoint.isExtend() || previousCodePoint == ZERO_WIDTH_JOINER || (firstCodePoint.isRegionalIndicator() &amp;&amp; text.hasOddRegionalIndicatorRunBefore(start))</ID>
-    <ID>ComplexCondition:ImeTrace.kt:ImeTraceRecorder$value is Byte || value is Short || value is Int || value is Long || value is Float || value is Double</ID>
-    <ID>ComplexCondition:InsertTextPlanner.kt:remembered != null &amp;&amp; remembered.text == text &amp;&amp; remembered.reportedStart == selectionStart &amp;&amp; remembered.reportedEnd == selectionEnd &amp;&amp; remembered.caret in 0..text.length</ID>
-    <ID>ComplexCondition:OverlayDrawer.kt:OverlayDrawer$!radiusX.isFinite() || !radiusY.isFinite() || radiusX &lt;= 0f || radiusY &lt;= 0f</ID>
-    <ID>ComplexCondition:OwnWindowTypeMemo.kt:OwnWindowTypeMemo$(entry.type != null || !retryUnresolvedImmediately) &amp;&amp; now &gt;= entry.atMs &amp;&amp; now - entry.atMs &lt; ttlMs</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.host.isShowing || surface.request.layer != PrototypeWindowLayer.APP || surface.foreground.suspended || surface.host.isHiddenForCapture</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.runtime.persistent &amp;&amp; count == 0 &amp;&amp; (observerSession == null || observerSession == surface.observerSession)</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$count == 0 &amp;&amp; surfaces.isEmpty() &amp;&amp; (observerSession == null || observerSession == lifecycle.observerSession())</ID>
@@ -28,13 +15,7 @@
     <ID>ComplexCondition:PrototypeSpecContent.kt:node.role !in setOf("textField", "searchBar") &amp;&amp; node.role !in SEMANTICS_FREE_CONTAINERS &amp;&amp; !(node.role == "text" &amp;&amp; node.spans != null)</ID>
     <ID>ComplexCondition:PrototypeSpecContent.kt:style.minWidth == null &amp;&amp; style.maxWidth == null &amp;&amp; style.minHeight == null &amp;&amp; style.maxHeight == null</ID>
     <ID>ComplexCondition:PrototypeSwipe.kt:g.fullSwipe &amp;&amp; (distance &gt;= PrototypeSwipeTuning.FULL_FRACTION * g.rowWidth || (distance &gt; width &amp;&amp; opening &gt;= PrototypeSwipeTuning.FULL_VELOCITY_DP * g.density))</ID>
-    <ID>ComplexCondition:RotationProvenanceTracker.kt:DisplayRotationChangeSignal$change == "changed" &amp;&amp; current != null &amp;&amp; previous != null &amp;&amp; current.width == previous.width &amp;&amp; current.height == previous.height &amp;&amp; current.state == previous.state &amp;&amp; current.panelUniqueId == previous.panelUniqueId &amp;&amp; current.panelFingerprint == previous.panelFingerprint &amp;&amp; current.rotation == previous.rotation</ID>
     <ID>ComplexCondition:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$manifest.specFile != "spec.json" || manifest.id.isEmpty() || manifest.id.length &gt; limits.assets.maxIdLength || manifest.label.isEmpty() || manifest.label.length &gt; limits.maxLabelLength</ID>
-    <ID>ComplexCondition:StorageChangeWireEncoder.kt:type == "STRING" || type == "LONG" || (type == "FLOAT" &amp;&amp; value.toDoubleOrNull()?.isFinite() != true)</ID>
-    <ID>ComplexCondition:TextInputController.kt:TextInputController$!targetNode.refresh() || nodeKey() != mutationNodeKey || !targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword</ID>
-    <ID>ComplexCondition:TextInputController.kt:TextInputController$node != null &amp;&amp; node.refresh() &amp;&amp; node.isEditable &amp;&amp; node.isFocused &amp;&amp; !node.isPassword</ID>
-    <ID>ComplexCondition:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$entry.index &gt; i &amp;&amp; bounds.left &lt; node.bounds.right &amp;&amp; bounds.right &gt; node.bounds.left &amp;&amp; bounds.top &lt; node.bounds.bottom &amp;&amp; bounds.bottom &gt; node.bounds.top</ID>
-    <ID>ComplexCondition:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy == null &amp;&amp; activeWindowRoot != null &amp;&amp; (!primaryAppWindowHasNullRoot || activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)</ID>
     <ID>CyclomaticComplexMethod:CaCertificateController.kt:CaCertificateController$suspend fun performRemoveCaCertificate</ID>
     <ID>CyclomaticComplexMethod:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>

@@ -69,12 +69,12 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     val ops = mutableListOf<ImeOp>()
     finishComposingInto(ops)
     val action = config.imeOptions and IME_MASK_ACTION
-    if (
+    val hasEnterAction =
       action != IME_ACTION_UNSPECIFIED &&
         action != IME_ACTION_NONE &&
         config.imeOptions and IME_FLAG_NO_ENTER_ACTION == 0 &&
         config.inputType and TYPE_TEXT_FLAG_MULTI_LINE == 0
-    ) {
+    if (hasEnterAction) {
       ops += ImeOp.PerformEditorAction(action)
     } else {
       ops +=
@@ -106,12 +106,12 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     }
     // Our own composing edits echo back through onUpdateSelection; only re-compose when the
     // cursor lands in committed text, never while a word we are composing is still live.
-    if (
+    val shouldRecomposeAtCursor =
       behavior.recomposeOnCursorMove &&
         !suppressRecompose &&
         composingBuffer.isEmpty() &&
         snapshot.selectionStart == snapshot.selectionEnd
-    ) {
+    if (shouldRecomposeAtCursor) {
       recomposeWordAtCursor(snapshot)?.let { ops += it }
     }
     return batchIfNeeded(ops)

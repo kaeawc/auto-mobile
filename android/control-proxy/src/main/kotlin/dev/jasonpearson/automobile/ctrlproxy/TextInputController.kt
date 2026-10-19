@@ -102,9 +102,9 @@ internal class TextInputController(
       val node = findFocusedEditableNode(host.activeWindowRoot())
       val state =
         try {
-          if (
+          val hasUsableFocusedNode =
             node != null && node.refresh() && node.isEditable && node.isFocused && !node.isPassword
-          ) {
+          if (hasUsableFocusedNode) {
             InsertTextSnapshot(
               node.text?.toString(),
               node.isShowingHintTextCompat(),
@@ -529,14 +529,13 @@ internal class TextInputController(
       val mutationNodeKey = nodeKey()
       fun readMutationSnapshot(): InsertTextSnapshot? {
         // After writing, never re-find and move a caret in a different focused field.
-        if (
+        val hasInvalidMutationTarget =
           !targetNode.refresh() ||
             nodeKey() != mutationNodeKey ||
             !targetNode.isEditable ||
             !targetNode.isFocused ||
             targetNode.isPassword
-        )
-          return null
+        if (hasInvalidMutationTarget) return null
         return InsertTextSnapshot(
           targetNode.text?.toString(),
           targetNode.isShowingHintTextCompat(),

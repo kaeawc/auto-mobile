@@ -547,12 +547,12 @@ internal constructor(
       // Fallback to activeWindowRoot when it can still recover application content. When the
       // selected app has no root, rootInActiveWindow can be the active system status bar, which is
       // not a substitute for application content.
-      if (
+      val canRecoverActiveWindow =
         mainHierarchy == null &&
           activeWindowRoot != null &&
           (!primaryAppWindowHasNullRoot ||
             activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
-      ) {
+      if (canRecoverActiveWindow) {
         val (element, fallbackReasons) =
           budget.inScope(reserved = reserveFallback) { fallbackBudget ->
             val extracted =
@@ -1971,13 +1971,13 @@ internal constructor(
           if (!seen.add(group.bounds)) continue
           val entry = group.firstAfter(i) ?: continue
           val bounds = group.bounds
-          if (
+          val overlapsLaterNode =
             entry.index > i &&
               bounds.left < node.bounds.right &&
               bounds.right > node.bounds.left &&
               bounds.top < node.bounds.bottom &&
               bounds.bottom > node.bounds.top
-          ) {
+          if (overlapsLaterNode) {
             candidates.add(entry to bounds)
           }
         }

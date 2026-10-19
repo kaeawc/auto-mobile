@@ -74,7 +74,7 @@ internal class DisplayRotationChangeSignal(
     val transition =
       current ?: lastDisplays[displayId]?.copy(change = change, panelFingerprint = null)
     val previous = lastDisplays[displayId]
-    if (
+    val isUnchangedDisplay =
       change == "changed" &&
         current != null &&
         previous != null &&
@@ -84,8 +84,7 @@ internal class DisplayRotationChangeSignal(
         current.panelUniqueId == previous.panelUniqueId &&
         current.panelFingerprint == previous.panelFingerprint &&
         current.rotation == previous.rotation
-    )
-      return
+    if (isUnchangedDisplay) return
     if (change == "removed") {
       lastDisplays.remove(displayId)
       synchronized(pendingTransitions) { pendingTransitions.remove(displayId) }

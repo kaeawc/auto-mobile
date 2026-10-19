@@ -147,12 +147,12 @@ internal class GestureStreamSession<S>(
       is GestureStreamAction.Dispatch -> {
         val segment = action.segment.clampedToNonNegative()
         if (!segment.willContinue) lifting = true
-        if (
+        val isClampedContinuation =
           !segment.isInitial &&
             segment.willContinue &&
             action.segment.from != action.segment.to &&
             segment.from == segment.to
-        ) {
+        if (isClampedContinuation) {
           pump()
           return
         }

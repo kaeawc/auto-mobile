@@ -2,14 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:BroadcastGuardAdoptionTest.kt:BroadcastGuardScanner$fun scan: ScanResult</ID>
-    <ID>CyclomaticComplexMethod:CorrelatedErrorDriftGuardTest.kt:CorrelatedErrorDriftScanner$private fun stripComments: String</ID>
-    <ID>CyclomaticComplexMethod:FakeEditor.kt:FakeEditor$fun apply</ID>
-    <ID>CyclomaticComplexMethod:KotlinSourceScan.kt:KotlinSourceScan$fun maskLiteralsAndComments: String</ID>
-    <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun blankNestedGroups: String</ID>
-    <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun swallowingCatchOffsets: List&lt;Int&gt;</ID>
-    <ID>CyclomaticComplexMethod:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `commit text and cancel ime commit frames match the hand-built bytes`</ID>
-    <ID>CyclomaticComplexMethod:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `screenshot error and display transition frames match the hand-built bytes`</ID>
     <ID>InjectDispatcher:PrototypeAnchorWindowTest.kt:PrototypeAnchorWindowTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeDetachedWindowTest.kt:PrototypeDetachedWindowTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeHideForCaptureTest.kt:PrototypeHideForCaptureTest$Unconfined</ID>
@@ -62,14 +54,7 @@
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `observerSessionGeneration is stable within a session and advances after it empties`</ID>
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `raw async response drops later orphaned correlated frames`</ID>
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `typed async response drops later orphaned correlated frames`</ID>
-    <ID>LongParameterList:PackageEventWireTest.kt:PackageEventWireTest$private fun packageEvent: JsonObject</ID>
     <ID>LongParameterList:PrototypeScreenshotComparator.kt:PrototypeScreenshotComparator$fun compare: Result</ID>
-    <ID>LongParameterList:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$private fun legacyGesture</ID>
     <ID>LongParameterList:RetrofitPrototypeHttpClientTest.kt:RetrofitPrototypeHttpClientTest$private fun request</ID>
-    <ID>LongParameterList:TextInputControllerTest.kt:TextInputControllerTest.FakeField</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun ViewHierarchyExtractor.createWindowEntry: Any</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun elementWithBounds: UIElementInfo</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeNode: android.view.accessibility.AccessibilityNodeInfo</ID>
-    <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeWindow: AccessibilityWindowInfo</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -9,9 +9,9 @@ import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { readHostProcessTable } from "../iosSimFleet/FleetHostSource";
+import { readHostProcessTable } from "./readHostProcessTable";
 import { wrapCommandError } from "../../utils/CommandError";
-import { PS_SNAPSHOT_ARGS } from "../iosSimFleet/psSnapshot";
+import { PS_SNAPSHOT_ARGS } from "./psSnapshot";
 import { readProcProcessTable, type AndroidProcessRow, type ProcFs } from "./procProcessTable";
 
 export type ProcessTableFailureReason =

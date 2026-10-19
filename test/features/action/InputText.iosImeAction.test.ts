@@ -87,7 +87,7 @@ describe("InputText iOS IME action", () => {
       return typedObservation(after);
     });
     try {
-      const result = await inputText.executeiOSTextInput("123456");
+      const result = await inputText.testHooks.executeiOSTextInput("123456");
       expect(result.success).toBe(success);
       if (!success) {
         expect(result.error).toContain("nothing was typed");

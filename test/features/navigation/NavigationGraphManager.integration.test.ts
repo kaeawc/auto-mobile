@@ -1928,7 +1928,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 // foreign-bound-connection tests for BOTH methods, not just one.
 describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", () => {
   const managerSource = readFileSync(
-    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphRecorder.ts"),
     "utf8",
   );
 
@@ -1981,7 +1981,7 @@ describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", 
  * opening `{` to its matching `}`. Returning the *spans* (not a whole-file
  * substring match) is what keeps the side-effect guard from false-positiving on
  * the legitimate post-commit side effects that already sit OUTSIDE these
- * callbacks (issue #3129). A naive whole-file scan for `this.notifyGraphUpdated(`
+ * callbacks (issue #3129). A naive whole-file scan for `this.context.notifyGraphUpdated(`
  * would flag the correct code.
  */
 function extractRunBothReposCallbackBodies(source: string): string[] {
@@ -2010,18 +2010,18 @@ function extractRunBothReposCallbackBodies(source: string): string[] {
 
 describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () => {
   const managerSource = readFileSync(
-    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
+    join(import.meta.dir, "../../../src/features/navigation/NavigationGraphRecorder.ts"),
     "utf8",
   );
 
   // Known post-commit side effects that MUST stay OUTSIDE the transaction callback
   // (never on rollback, never holding the exclusive connection across non-DB IO).
-  // See the helper docstring + both call-site comments in NavigationGraphManager.ts.
+  // See the helper docstring + both call-site comments in NavigationGraphRecorder.ts.
   const FORBIDDEN_SIDE_EFFECTS = [
-    "this.notifyGraphUpdated(",
+    "this.context.notifyGraphUpdated(",
     "TelemetryRecorder",
-    "this.activeNavigation =",
-    "this.currentScreen =",
+    "this.state.activeNavigation =",
+    "this.state.currentScreen =",
   ];
 
   test("the source has exactly two helper callbacks to scan", () => {
@@ -2041,23 +2041,23 @@ describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () =>
   });
 
   test("TDD teeth: the guard fires when a side effect is placed inside a callback", () => {
-    // Simulate a future author writing `this.notifyGraphUpdated()` inside a callback body.
+    // Simulate a future author writing `this.context.notifyGraphUpdated()` inside a callback body.
     const bodies = extractRunBothReposCallbackBodies(managerSource);
     expect(bodies.length).toBeGreaterThan(0);
-    const mutated = bodies[0] + "\n        this.notifyGraphUpdated();\n";
+    const mutated = bodies[0] + "\n        this.context.notifyGraphUpdated();\n";
     const tripped = FORBIDDEN_SIDE_EFFECTS.some((s) => mutated.includes(s));
     expect(tripped).toBe(true);
   });
 
   test("the extractor isolates the callback body from surrounding post-commit code", () => {
-    // The real post-commit `this.notifyGraphUpdated()` / `this.currentScreen =` calls sit
+    // The real post-commit `this.context.notifyGraphUpdated()` / `this.state.currentScreen =` calls sit
     // OUTSIDE the callbacks in the file; if the brace-matcher over-ran past the closing `}`
     // it would swallow them and the side-effect test would false-positive. Assert those
     // legitimate calls exist in the file but NOT in any extracted body.
-    expect(managerSource).toContain("this.notifyGraphUpdated();");
+    expect(managerSource).toContain("this.context.notifyGraphUpdated();");
     const bodies = extractRunBothReposCallbackBodies(managerSource);
     for (const body of bodies) {
-      expect(body).not.toContain("this.notifyGraphUpdated();");
+      expect(body).not.toContain("this.context.notifyGraphUpdated();");
     }
   });
 });

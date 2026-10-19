@@ -7,6 +7,7 @@ import { expect, describe, it, beforeAll, beforeEach, spyOn } from "bun:test";
 import { readFileSync } from "fs";
 import { logger } from "../../../src/utils/logger";
 import * as path from "path";
+import { ContrastImageAnalysis } from "../../../src/features/accessibility/ContrastImageAnalysis";
 import { ContrastChecker } from "../../../src/features/accessibility/ContrastChecker";
 import { resolveImageBackend } from "../../../src/utils/image/backend/resolveImageBackend";
 import type { Element } from "../../../src/models/Element";
@@ -518,7 +519,7 @@ describe("ContrastChecker", function () {
 
     it("finds the same opaque pixel as the widening scan, including at edges and beyond 12", function () {
       const random = new SeededRandom(10_220);
-      const search = new ContrastChecker({ compositeOverlays: true });
+      const search = new ContrastImageAnalysis({ compositeOverlays: true }, () => 0);
       const mismatches: string[] = [];
       for (const density of [0, 0.005, 0.03, 0.2]) {
         const image = uniformRaw(31, 27, 0, 0, 0);

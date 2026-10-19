@@ -10,6 +10,7 @@ import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeSocket } from "../../../fakes/FakeNetServer";
 import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
+import { coordinateSpaceFrameSchema } from "../../../helpers/wireMessageSchemas";
 
 describe("IOSCtrlProxyClient observation-stream provenance", () => {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -260,7 +261,7 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       nativeScale: boundPx.nativeScale,
     });
     const pxShot = socket
-      .getWrittenMessages<{ type: string; coordinateSpace?: string; nativeScale?: number }>()
+      .getWrittenMessages(coordinateSpaceFrameSchema)
       .find((message) => message.type === "screenshot_update");
     expect(pxShot?.coordinateSpace).toBe("px");
     expect(pxShot?.nativeScale).toBe(3);
@@ -289,7 +290,7 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       nativeScale: boundLegacy.nativeScale,
     });
     const legacyShot = socket
-      .getWrittenMessages<{ type: string; coordinateSpace?: string; nativeScale?: number }>()
+      .getWrittenMessages(coordinateSpaceFrameSchema)
       .find((message) => message.type === "screenshot_update");
     expect(legacyShot?.coordinateSpace).toBeUndefined();
     expect(legacyShot?.nativeScale).toBeUndefined();

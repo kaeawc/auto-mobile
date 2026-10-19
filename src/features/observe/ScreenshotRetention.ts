@@ -16,6 +16,7 @@ import {
   type ScreenshotCacheFile,
   type ScreenshotPathModule,
 } from "./screenshotCacheEviction";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 export const SCREENSHOT_PATH_MIN_LIFETIME_MS = 10 * 60 * 1000;
 export const MAX_SCREENSHOT_PATH_PROTECTIONS = 4096;
@@ -131,7 +132,7 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
 
   start(directory: string, options: ScreenshotRetentionStart = {}): void {
     const state = this.directory(directory, options.fileSystem);
-    if (state.interval || !(options.scheduled ?? process.env.NODE_ENV !== "test")) {
+    if (state.interval || !(options.scheduled ?? readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test")) {
       return;
     }
     state.interval = this.timer.setInterval(() => {

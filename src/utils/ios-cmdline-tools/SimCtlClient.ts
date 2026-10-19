@@ -68,6 +68,7 @@ import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDispla
 import type { DeviceDisplays } from "../../models/DisplayPanel";
 import { type TransitionalSimulator } from "../../models/TransitionalSimulator";
 import { SimctlUnavailableError } from "./SimctlUnavailableError";
+import { ENV, readEnvRaw } from "../../config/env";
 
 export { SimctlScreenshotError } from "./SimctlScreenshotError";
 export { SimctlUnavailableError } from "./SimctlUnavailableError";
@@ -1021,8 +1022,7 @@ export class SimCtlClient implements SimCtl {
    *     This gate comes BEFORE the env override so `AUTOMOBILE_IOS_HEADLESS=false`
    *     (or `""`) can never make `openSimulatorApp` shell `open -a Simulator` on
    *     Linux/Windows, where that binary does not exist (issue #4177).
-   *  2. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless,
-   *     `false`/`0` => force GUI launch).
+   *  2. `AUTOMOBILE_IOS_HEADLESS` env override (`true`/`1` => headless, else force GUI launch).
    *  3. Auto-detect via `launchctl managername`: an `Aqua` manager means a GUI
    *     login session; anything else (`System`/`Background`) is a daemon/SSH
    *     context with no GUI domain.
@@ -1037,7 +1037,7 @@ export class SimCtlClient implements SimCtl {
       return true;
     }
 
-    const override = process.env.AUTOMOBILE_IOS_HEADLESS;
+    const override = readEnvRaw(ENV.IOS_HEADLESS);
     if (override !== undefined) {
       return override === "true" || override === "1";
     }

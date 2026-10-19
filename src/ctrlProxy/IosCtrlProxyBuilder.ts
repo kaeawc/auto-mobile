@@ -52,6 +52,7 @@ import {
   DefaultCtrlProxyCodesignVerifier,
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import { sortedReaddir, sortedReaddirEntries } from "../utils/io";
+import { ENV, readEnvTrimmed } from "../config/env";
 
 /**
  * When truthy (`1`/`true`), a failed `codesign --verify`, a failed
@@ -1008,8 +1009,7 @@ export class IosCtrlProxyBuilder {
 
   private getBundlePathOverride(): string | null {
     const override =
-      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim() ||
-      process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+      readEnvTrimmed(ENV.CTRL_PROXY_IOS_IPA_PATH) || readEnvTrimmed(ENV.CTRL_PROXY_IOS_BUNDLE_PATH);
     return override && override.length > 0
       ? resolvePathFromDaemonLaunchWorkingDirectory(override)
       : null;
@@ -1248,8 +1248,8 @@ export class IosCtrlProxyBuilder {
     ) {
       return false;
     }
-    const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
-    const bundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+    const ipaPath = readEnvTrimmed(ENV.CTRL_PROXY_IOS_IPA_PATH);
+    const bundlePath = readEnvTrimmed(ENV.CTRL_PROXY_IOS_BUNDLE_PATH);
     if ((ipaPath && ipaPath.length > 0) || (bundlePath && bundlePath.length > 0)) {
       return false;
     }

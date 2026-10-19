@@ -62,9 +62,10 @@ import {
   requestDeclaresTasks,
 } from "./tasks/mcpTasksExtension";
 import { toRelayedProtocolError, isRelayedJsonRpcError } from "./tasks/taskRelay";
+import { ENV } from "../config/env";
 
-const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
-const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
+const LIVE_ACCEPTANCE_ENV = ENV.ACCEPTANCE_LIVE.name;
+const ACCEPTANCE_DISCOVERY_ORDER_ENV = ENV.ACCEPTANCE_DISCOVERY_ORDER.name;
 
 function acceptanceDiscoveryConfiguration():
   | { order: "forward" | "reverse"; capability: string }

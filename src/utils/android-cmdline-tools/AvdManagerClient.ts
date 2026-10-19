@@ -26,6 +26,7 @@ import {
 } from "./detection";
 import type { AvdInfo, CreateAvdParams, DeviceProfile } from "./avdmanager";
 import { AvdCreateInterruptedError } from "./AvdCreateInterruptedError";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 export { AvdCreateInterruptedError } from "./AvdCreateInterruptedError";
 
 export interface AvdManagerExecutionOptions {
@@ -461,7 +462,8 @@ export class AvdManagerClient {
 
     const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return {
-      command: environment?.ComSpec ?? environment?.COMSPEC ?? "cmd.exe",
+      command:
+        (environment ? readEnvRaw(AMBIENT_ENV.COMSPEC, environment) : undefined) ?? "cmd.exe",
       args: ["/d", "/v:off", "/s", "/c", command],
     };
   }

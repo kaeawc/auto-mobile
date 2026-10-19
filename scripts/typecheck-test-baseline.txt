@@ -144,7 +144,6 @@ test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts TS2322 1
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts TS2345 1
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts TS2769 3
 test/daemon/devicePool.observationServiceStart.test.ts TS2540 3
-test/daemon/devicePool.pooledSessionIdentity.test.ts TS2341 6
 test/daemon/devicePool.recoveryForeignOwnership.test.ts TS2551 1
 test/daemon/devicePool.recoveryForeignOwnership.test.ts TS2740 1
 test/daemon/devicePool.recoveryOutsideMutex.test.ts TS2322 3
@@ -346,7 +345,6 @@ test/daemon/socketServerAcquisitionToolSelectionProfile.integration.test.ts TS27
 test/daemon/socketServerBindGuard.integration.test.ts TS2741 1
 test/daemon/socketServerClose.integration.test.ts TS2345 3
 test/daemon/socketServerClose.integration.test.ts TS2454 3
-test/daemon/socketServerDeviceSessionRestore.test.ts TS2345 1
 test/daemon/socketServerFeatureFlags.integration.test.ts TS2741 2
 test/daemon/socketServerIdeForwardRoute.integration.test.ts TS2739 1
 test/daemon/socketServerIdeForwardRoute.integration.test.ts TS2741 7
@@ -391,7 +389,6 @@ test/daemon/sseKeepaliveAndDisconnect.test.ts TS2345 2
 test/daemon/sseKeepaliveAndDisconnect.test.ts TS2769 1
 test/daemon/staticToolDefinitions.test.ts TS2769 1
 test/daemon/telemetryPushSocketServer.integration.test.ts TS2322 1
-test/daemon/telemetryPushSocketServer.integration.test.ts TS2345 3
 test/daemon/telemetryPushSocketServer.integration.test.ts TS2741 24
 test/daemon/telemetryPushSocketServer.test.ts TS2345 4
 test/daemon/telemetryPushSocketServer.test.ts TS2353 2

@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping force_try
-// Force-unwrap/force-try are idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import XCTest
 
@@ -139,7 +136,7 @@ final class EventPersistenceTests: XCTestCase {
 
     // MARK: - FIFO Order
 
-    func testLoadPendingReturnsFIFOOrder() {
+    func testLoadPendingReturnsFIFOOrder() throws {
         // Create files with explicit timestamp prefixes to guarantee ordering
         let encoder = JSONEncoder()
         let event1 = SdkInteractionEvent(interactionType: "first", properties: [:])
@@ -150,11 +147,11 @@ final class EventPersistenceTests: XCTestCase {
 
         // Write files directly with known batch IDs for deterministic ordering
         for (batchId, event) in [(id1, event1), (id2, event2)] {
-            let envelope = try! SdkEventEnvelope(event)
+            let envelope = try SdkEventEnvelope(event)
             let persisted = [PersistedEvent(eventType: envelope.eventType, payload: envelope.payload)]
-            let data = try! encoder.encode(persisted)
+            let data = try encoder.encode(persisted)
             let fileURL = tempDir.appendingPathComponent("events_\(batchId).json")
-            try! data.write(to: fileURL)
+            try data.write(to: fileURL)
         }
 
         let pending = persistence.loadPending()
@@ -171,9 +168,9 @@ final class EventPersistenceTests: XCTestCase {
 
     // MARK: - Remove Batch
 
-    func testRemoveBatchDeletesFile() {
+    func testRemoveBatchDeletesFile() throws {
         let event = SdkInteractionEvent(interactionType: "to_remove", properties: [:])
-        let batchId = persistence.persist([event])!
+        let batchId = try XCTUnwrap(persistence.persist([event]))
 
         XCTAssertEqual(persistence.loadPending().count, 1)
         persistence.removeBatch(batchId)
@@ -187,7 +184,7 @@ final class EventPersistenceTests: XCTestCase {
 
     // MARK: - Cleanup TTL
 
-    func testCleanupRemovesOldBatches() {
+    func testCleanupRemovesOldBatches() throws {
         // Use a fixed time for deterministic testing
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         fakeDateProvider.set(now)
@@ -195,8 +192,8 @@ final class EventPersistenceTests: XCTestCase {
         // Create a file with an old timestamp (8 days ago)
         let oldTs = Int(now.timeIntervalSince1970 * 1000) - (8 * 24 * 60 * 60 * 1000)
         let oldFile = tempDir.appendingPathComponent("events_\(oldTs)_OLD.json")
-        let data = try! JSONSerialization.data(withJSONObject: [["eventType": "interaction"]])
-        try! data.write(to: oldFile)
+        let data = try JSONSerialization.data(withJSONObject: [["eventType": "interaction"]])
+        try data.write(to: oldFile)
 
         // Create a recent file
         let event = SdkInteractionEvent(interactionType: "recent", properties: [:])
@@ -205,35 +202,35 @@ final class EventPersistenceTests: XCTestCase {
         persistence.cleanup(maxAgeDays: 7)
 
         // Old file should be gone, recent should remain
-        let remaining = try! FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+        let remaining = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("events_") }
         XCTAssertEqual(remaining.count, 1)
         XCTAssertFalse(remaining[0].lastPathComponent.contains("OLD"))
     }
 
-    func testCleanupWithNegativeAgeKeepsOldAndFreshBatches() {
+    func testCleanupWithNegativeAgeKeepsOldAndFreshBatches() throws {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let event = SdkInteractionEvent(timestamp: 1000, interactionType: "keep", properties: [:])
         fakeDateProvider.set(now.addingTimeInterval(-8 * 24 * 60 * 60))
-        let oldBatchId = persistence.persist([event])!
+        let oldBatchId = try XCTUnwrap(persistence.persist([event]))
         fakeDateProvider.set(now)
-        let freshBatchId = persistence.persist([event])!
+        let freshBatchId = try XCTUnwrap(persistence.persist([event]))
 
         persistence.cleanup(maxAgeDays: -1)
 
         XCTAssertEqual(persistence.loadPending().map { $0.batchId }, [oldBatchId, freshBatchId])
     }
 
-    func testCleanupWithZeroAgeKeepsBatchExactlyAtNow() {
+    func testCleanupWithZeroAgeKeepsBatchExactlyAtNow() throws {
         fakeDateProvider.set(Date(timeIntervalSince1970: 1_700_000_000))
         let oldFile = tempDir.appendingPathComponent("events_1699999999999_OLD.json")
         let currentFile = tempDir.appendingPathComponent("events_1700000000000_NOW.json")
         let event = SdkInteractionEvent(timestamp: 1000, interactionType: "boundary", properties: [:])
-        let envelope = try! SdkEventEnvelope(event)
+        let envelope = try SdkEventEnvelope(event)
         let persisted = [PersistedEvent(eventType: envelope.eventType, payload: envelope.payload)]
-        let data = try! JSONEncoder().encode(persisted)
-        try! data.write(to: oldFile)
-        try! data.write(to: currentFile)
+        let data = try JSONEncoder().encode(persisted)
+        try data.write(to: oldFile)
+        try data.write(to: currentFile)
 
         persistence.cleanup(maxAgeDays: 0)
 
@@ -242,13 +239,13 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(persistence.loadPending().map { $0.batchId }, ["1700000000000_NOW"])
     }
 
-    func testCleanupWithMaximumAgeKeepsAllBatches() {
+    func testCleanupWithMaximumAgeKeepsAllBatches() throws {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let event = SdkInteractionEvent(timestamp: 1000, interactionType: "keep", properties: [:])
         fakeDateProvider.set(now.addingTimeInterval(-8 * 24 * 60 * 60))
-        let oldBatchId = persistence.persist([event])!
+        let oldBatchId = try XCTUnwrap(persistence.persist([event]))
         fakeDateProvider.set(now)
-        let freshBatchId = persistence.persist([event])!
+        let freshBatchId = try XCTUnwrap(persistence.persist([event]))
 
         persistence.cleanup(maxAgeDays: Int.max)
 
@@ -257,9 +254,9 @@ final class EventPersistenceTests: XCTestCase {
 
     // MARK: - Corrupt File Handling
 
-    func testTransientReadFailureKeepsBatchForRetry() {
+    func testTransientReadFailureKeepsBatchForRetry() throws {
         let event = SdkInteractionEvent(timestamp: 1000, interactionType: "retry", properties: [:])
-        let batchId = persistence.persist([event])!
+        let batchId = try XCTUnwrap(persistence.persist([event]))
         let fileURL = tempDir.appendingPathComponent("events_\(batchId).json")
         let failingPersistence = FileEventPersistence(
             directory: tempDir,
@@ -276,10 +273,10 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual((pending.first?.events.first as? SdkInteractionEvent)?.interactionType, "retry")
     }
 
-    func testVanishedFileIsSkippedWhileOtherBatchLoads() {
+    func testVanishedFileIsSkippedWhileOtherBatchLoads() throws {
         let event = SdkInteractionEvent(timestamp: 1000, interactionType: "available", properties: [:])
-        let missingBatchId = persistence.persist([event])!
-        let availableBatchId = persistence.persist([event])!
+        let missingBatchId = try XCTUnwrap(persistence.persist([event]))
+        let availableBatchId = try XCTUnwrap(persistence.persist([event]))
         let missingFile = tempDir.appendingPathComponent("events_\(missingBatchId).json")
         let readingPersistence = FileEventPersistence(
             directory: tempDir,
@@ -299,12 +296,12 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: missingFile.path))
     }
 
-    func testCorruptFileIsDeletedWhileUnreadableBatchIsKept() {
+    func testCorruptFileIsDeletedWhileUnreadableBatchIsKept() throws {
         let event = SdkInteractionEvent(timestamp: 1000, interactionType: "unreadable", properties: [:])
-        let batchId = persistence.persist([event])!
+        let batchId = try XCTUnwrap(persistence.persist([event]))
         let unreadableFile = tempDir.appendingPathComponent("events_\(batchId).json")
         let corruptFile = tempDir.appendingPathComponent("events_999_CORRUPT.json")
-        try! Data("not valid json".utf8).write(to: corruptFile)
+        try Data("not valid json".utf8).write(to: corruptFile)
         let readingPersistence = FileEventPersistence(
             directory: tempDir,
             dateProvider: fakeDateProvider,
@@ -321,9 +318,9 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: unreadableFile.path))
     }
 
-    func testCorruptFileIsRemovedOnLoad() {
+    func testCorruptFileIsRemovedOnLoad() throws {
         let corruptFile = tempDir.appendingPathComponent("events_999_CORRUPT.json")
-        try! "not valid json".data(using: .utf8)!.write(to: corruptFile)
+        try Data("not valid json".utf8).write(to: corruptFile)
 
         let pending = persistence.loadPending()
         XCTAssertEqual(pending.count, 0)
@@ -347,14 +344,14 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(pending[0].events[1].eventType, .navigation)
     }
 
-    func testPendingCapEvictsOldestAndKeepsNewest() {
+    func testPendingCapEvictsOldestAndKeepsNewest() throws {
         persistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider, maxPendingBatches: 2)
         let event = SdkInteractionEvent(interactionType: "cap")
-        let oldest = persistence.persist([event])!
+        let oldest = try XCTUnwrap(persistence.persist([event]))
         fakeDateProvider.advance(by: 1)
-        let second = persistence.persist([event])!
+        let second = try XCTUnwrap(persistence.persist([event]))
         fakeDateProvider.advance(by: 1)
-        let newest = persistence.persist([event])!
+        let newest = try XCTUnwrap(persistence.persist([event]))
         XCTAssertFalse(
             FileManager.default
                 .fileExists(atPath: tempDir.appendingPathComponent("events_\(oldest).json").path)
@@ -369,7 +366,7 @@ final class EventPersistenceTests: XCTestCase {
         fakeDateProvider.advance(by: 1)
         _ = persistence.persist([event])
         fakeDateProvider.advance(by: -10)
-        let justWritten = persistence.persist([event])!
+        let justWritten = try XCTUnwrap(persistence.persist([event]))
         XCTAssertTrue(
             FileManager.default
                 .fileExists(atPath: tempDir.appendingPathComponent("events_\(justWritten).json").path)
@@ -381,7 +378,7 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(pendingFiles.count, 2)
     }
 
-    func testPendingCapOneAndNonPositiveCapsKeepJustWrittenBatch() {
+    func testPendingCapOneAndNonPositiveCapsKeepJustWrittenBatch() throws {
         for cap in [1, 0, -1] {
             persistence = FileEventPersistence(
                 directory: tempDir,
@@ -391,8 +388,8 @@ final class EventPersistenceTests: XCTestCase {
             let event = SdkInteractionEvent(interactionType: "single")
             _ = persistence.persist([event])
             fakeDateProvider.advance(by: 1)
-            let newest = persistence.persist([event])!
-            let files = try! FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+            let newest = try XCTUnwrap(persistence.persist([event]))
+            let files = try FileManager.default.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
             XCTAssertEqual(files.map { $0.lastPathComponent }, ["events_\(newest).json"])
             XCTAssertEqual(persistence.loadPending().map { $0.batchId }, [newest])
         }
@@ -406,7 +403,7 @@ final class EventPersistenceTests: XCTestCase {
         for id in ["100_A", "100_B"] {
             try data.write(to: tempDir.appendingPathComponent("events_\(id).json"))
         }
-        let justWritten = persistence.persist([event])!
+        let justWritten = try XCTUnwrap(persistence.persist([event]))
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir.appendingPathComponent("events_100_A.json").path))
         XCTAssertEqual(persistence.loadPending().map { $0.batchId }, ["100_B", justWritten])
     }

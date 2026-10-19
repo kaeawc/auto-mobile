@@ -1,3 +1,4 @@
+import * as deviceServiceUtils from "../../../../src/features/observe/DeviceServiceUtils";
 /**
  * Field-name wire-parity backstop for the iOS control-proxy TS client ↔ Swift runner
  * (issue #2954, checklist item 3 of #2857).
@@ -151,8 +152,10 @@ async function withClient(
     },
     h.context.timer,
   );
-  const context = spyOn(client, "createDelegateContext").mockReturnValue(h.context);
-  const gate = spyOn(client, "sdkCapabilityGate").mockResolvedValue(null);
+  const sendCommand = deviceServiceUtils.sendCommand;
+  const command = spyOn(deviceServiceUtils, "sendCommand").mockImplementation((_, options) =>
+    sendCommand(h.context, options),
+  );
   const send = spyOn(client, "sendMessage").mockImplementation((data) => {
     h.sent.push(data);
     return true;
@@ -160,8 +163,7 @@ async function withClient(
   try {
     return await invoke(client);
   } finally {
-    context.mockRestore();
-    gate.mockRestore();
+    command.mockRestore();
     send.mockRestore();
   }
 }
@@ -796,7 +798,7 @@ describe("iOS integer millisecond request boundary", () => {
         invoke: (h) =>
           new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
             "Row",
-            "longPress",
+            "long_press",
             5000,
             undefined,
             { duration: 250.5 },

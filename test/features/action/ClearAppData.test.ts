@@ -66,7 +66,7 @@ describe("ClearAppData", () => {
           "shell pm list packages --user 0",
           createExecResult("package:com.example.app", ""),
         );
-        adb.setCommandResponse("shell pm clear", { stdout, stderr: "" });
+        adb.setCommandResponse("shell pm clear", createExecResult(stdout, ""));
         const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
         await new ClearAppData(device, adbFactoryFor(adb), { cacheInvalidator }).execute(
           "com.example.app",

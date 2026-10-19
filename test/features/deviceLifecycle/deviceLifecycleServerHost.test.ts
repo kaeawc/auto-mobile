@@ -31,7 +31,9 @@ class RecordingHost implements DeviceLifecycleServerHost {
     this.calls.push(`stop:${recordingId}`);
     return undefined;
   }
-  async stopSegmentedVideoRecordingsForDevice(device: { deviceId: string }): Promise<void> {
+  async stopSegmentedVideoRecordingsForDevice(
+    device: Parameters<DeviceLifecycleServerHost["stopSegmentedVideoRecordingsForDevice"]>[0],
+  ): Promise<void> {
     this.calls.push(`segmented:${device.deviceId}`);
   }
 }

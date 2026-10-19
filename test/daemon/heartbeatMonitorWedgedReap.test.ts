@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
@@ -173,7 +174,7 @@ describe("a release that never settles (#10704)", () => {
         timeoutMs: 600_000,
         heartbeatTimeoutMs: LEASE_MS,
       });
-      manager.recordHeartbeat(id);
+      await deliverDaemonHeartbeat(manager, id);
     }
     expect(manager.adoptCliLivenessPolicy("CLI", CLI_IDLE_MS)).toBe(true);
     monitor = new SessionHeartbeatMonitor(
@@ -204,7 +205,7 @@ describe("a release that never settles (#10704)", () => {
     while (timer.now() < until) {
       for (const id of heartbeating) {
         if (manager.getSession(id)) {
-          manager.recordHeartbeat(id);
+          await deliverDaemonHeartbeat(manager, id);
         }
       }
       await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(10));
@@ -269,7 +270,7 @@ describe("monitor reap timestamps", () => {
       timeoutMs: 600_000,
       heartbeatTimeoutMs: LEASE_MS,
     });
-    manager.recordHeartbeat(session.sessionId);
+    await deliverDaemonHeartbeat(manager, session.sessionId);
     timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
     sourceStartedAt = undefined;
     visible = true;

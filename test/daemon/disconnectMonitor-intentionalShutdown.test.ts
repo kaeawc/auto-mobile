@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
@@ -133,7 +134,7 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
   const tick = async () => {
     // The kill's owner remains connected while its device disappears.
     if (sessions.getSession("kill-session")) {
-      sessions.recordHeartbeat("kill-session");
+      await deliverDaemonHeartbeat(sessions, "kill-session");
     }
     timer.advanceTime(5000);
     await daemon.deviceDisconnectMonitor.run();

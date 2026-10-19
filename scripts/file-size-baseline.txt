@@ -45,7 +45,7 @@
 1567	src/features/observe/DeviceServiceClient.ts
 1026	src/features/observe/TakeScreenshot.ts
 1011	src/features/observe/ViewHierarchy.ts
-2908	src/features/observe/android/AndroidCtrlProxyClient.ts
+2594	src/features/observe/android/AndroidCtrlProxyClient.ts
 1840	src/features/observe/android/CtrlProxyHierarchy.ts
 1874	src/features/observe/android/ctrlProxyProtocol.ts
 1121	src/features/observe/android/ctrlProxyWireManifest.ts

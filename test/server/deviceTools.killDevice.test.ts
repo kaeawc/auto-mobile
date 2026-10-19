@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
 import { readFileSync } from "node:fs";
 import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
 import {
@@ -3101,7 +3102,9 @@ describe("killDevice handler", () => {
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
       stopAndroidObservers: async (device) => {
-        retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+        retired = concreteCtrlProxyClient(
+          AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+        );
       },
       timer,
     });
@@ -3509,7 +3512,9 @@ describe("killDevice handler", () => {
     await stopStarted;
     timer.advanceTime(30_000);
     await expect(result).rejects.toThrow("Android observer detach did not complete");
-    const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    const retired = concreteCtrlProxyClient(
+      AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+    );
 
     rejectStop(new Error("observer detach failed"));
     await deferredStop.catch(() => undefined);
@@ -3654,7 +3659,9 @@ describe("killDevice handler", () => {
       // Both platforms use resumeCtrlProxyAfterFailedKill's shared fence.
       expect(resumeSpy).not.toHaveBeenCalled();
       expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-      const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const retired = concreteCtrlProxyClient(
+        AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+      );
       expect(await retired.ensureConnected()).toBe(false);
     } finally {
       resumeSpy.mockRestore();
@@ -3815,7 +3822,9 @@ describe("killDevice handler", () => {
     const retiredDuringKill: boolean[] = [];
     const originalKill = successfulManager.killDevice.bind(successfulManager);
     successfulManager.killDevice = async (target, options) => {
-      const retired = AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory());
+      const retired = concreteCtrlProxyClient(
+        AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory()),
+      );
       retiredDuringKill.push(!(await retired.ensureConnected()));
       await originalKill(target, options);
     };
@@ -3832,7 +3841,9 @@ describe("killDevice handler", () => {
 
     await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).resolves.toBeDefined();
     expect(retiredDuringKill).toEqual([true]);
-    const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    const retired = concreteCtrlProxyClient(
+      AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+    );
     expect(await retired.ensureConnected()).toBe(false);
     expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(retired);
   });
@@ -3848,7 +3859,9 @@ describe("killDevice handler", () => {
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
       stopAndroidObservers: async (target) => {
-        retired = AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory());
+        retired = concreteCtrlProxyClient(
+          AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory()),
+        );
       },
     });
 
@@ -5348,7 +5361,9 @@ describe("killDevice handler", () => {
       if (platform === "android") {
         expect(markedIntentionalShutdown).toBe(1);
         expect(clearedIntentionalShutdown).toBe(0);
-        const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+        const retired = concreteCtrlProxyClient(
+          AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+        );
         expect(await retired.ensureConnected()).toBe(false);
       } else {
         expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
@@ -5603,9 +5618,8 @@ describe("killDevice handler", () => {
         });
         // An active observation-stream subscriber has already caused this singleton
         // to exist. Its cadence callback later resolves only an existing instance.
-        const activeObserver = AndroidCtrlProxyClient.getInstance(
-          { ...device },
-          new FakeAdbClientFactory(),
+        const activeObserver = concreteCtrlProxyClient(
+          AndroidCtrlProxyClient.getInstance({ ...device }, new FakeAdbClientFactory()),
         );
         activeObserver.bindSession("session-5503");
         const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
@@ -5614,7 +5628,9 @@ describe("killDevice handler", () => {
         let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
         const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
           (target) => {
-            restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+            restoredObserver = concreteCtrlProxyClient(
+              originalGetInstance(target, new FakeAdbClientFactory()),
+            );
             ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected")
               .mockResolvedValueOnce(false)
               .mockResolvedValue(true);
@@ -5636,7 +5652,8 @@ describe("killDevice handler", () => {
           expect(getInstanceSpy).toHaveBeenCalledWith(device);
           expect(ensureConnectedSpy).toHaveBeenCalledTimes(2);
           const registeredObserver = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
-          expect(registeredObserver).toBe(restoredObserver);
+          expect(restoredObserver).toBeDefined();
+          expect(registeredObserver).toBe(restoredObserver ?? null);
           expect(registeredObserver).not.toBe(activeObserver);
           expect(registeredObserver?.getBoundSessionId()).toBe("session-5503");
         } finally {
@@ -5673,7 +5690,9 @@ describe("killDevice handler", () => {
       let restoredCloseSpy: ReturnType<typeof spyOn> | undefined;
       const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
         (target) => {
-          const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          const restoredObserver = concreteCtrlProxyClient(
+            originalGetInstance(target, new FakeAdbClientFactory()),
+          );
           ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockImplementation(
             async () => await new Promise<boolean>(() => {}),
           );
@@ -5738,7 +5757,9 @@ describe("killDevice handler", () => {
       let restoredCloseSpy: ReturnType<typeof spyOn> | undefined;
       const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
         (target) => {
-          restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          restoredObserver = concreteCtrlProxyClient(
+            originalGetInstance(target, new FakeAdbClientFactory()),
+          );
           ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
           restoredCloseSpy = spyOn(restoredObserver, "close").mockResolvedValue(undefined);
           return restoredObserver;
@@ -5788,7 +5809,9 @@ describe("killDevice handler", () => {
       let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
       const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
         (target) => {
-          const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          const restoredObserver = concreteCtrlProxyClient(
+            originalGetInstance(target, new FakeAdbClientFactory()),
+          );
           ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
           return restoredObserver;
         },
@@ -5838,7 +5861,9 @@ describe("killDevice handler", () => {
       let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
       const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
         (target) => {
-          restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          restoredObserver = concreteCtrlProxyClient(
+            originalGetInstance(target, new FakeAdbClientFactory()),
+          );
           ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
           return restoredObserver;
         },
@@ -5958,7 +5983,9 @@ describe("killDevice handler", () => {
       let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
       const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
         (target) => {
-          const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          const restoredObserver = concreteCtrlProxyClient(
+            originalGetInstance(target, new FakeAdbClientFactory()),
+          );
           ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
           return restoredObserver;
         },

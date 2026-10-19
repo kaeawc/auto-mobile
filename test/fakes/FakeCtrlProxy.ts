@@ -20,6 +20,7 @@ import {
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
 import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
+import type { PrototypeRequestHost } from "../../src/features/prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
 import type {
@@ -46,6 +47,7 @@ import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 export class FakeCtrlProxy implements AndroidCtrlProxy {
   constructor(private readonly timer: Timer = defaultTimer) {}
 
+  private prototypeRequestHost: PrototypeRequestHost | undefined;
   private nodeActionSelectorsSupported = true;
   private nodeActionHistory: Array<{
     action: string;
@@ -1290,5 +1292,236 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async close(): Promise<void> {
     this.isConnectedState = false;
+  }
+
+  setRecompositionTrackingEnabled(): never {
+    throw new Error("FakeCtrlProxy.setRecompositionTrackingEnabled is not scripted");
+  }
+
+  requestHierarchySyncWithoutObservationStreamPush(): never {
+    throw new Error(
+      "FakeCtrlProxy.requestHierarchySyncWithoutObservationStreamPush is not scripted",
+    );
+  }
+
+  requestInsertTextState(): never {
+    throw new Error("FakeCtrlProxy.requestInsertTextState is not scripted");
+  }
+
+  commitViaIme(): never {
+    throw new Error("FakeCtrlProxy.commitViaIme is not scripted");
+  }
+
+  setKeyboardProfile(): never {
+    throw new Error("FakeCtrlProxy.setKeyboardProfile is not scripted");
+  }
+
+  listKeyboardProfiles(): never {
+    throw new Error("FakeCtrlProxy.listKeyboardProfiles is not scripted");
+  }
+
+  requestClipboard(): never {
+    throw new Error("FakeCtrlProxy.requestClipboard is not scripted");
+  }
+
+  requestSettingsGet(): never {
+    throw new Error("FakeCtrlProxy.requestSettingsGet is not scripted");
+  }
+
+  requestSettingsPut(): never {
+    throw new Error("FakeCtrlProxy.requestSettingsPut is not scripted");
+  }
+
+  requestSettingsList(): never {
+    throw new Error("FakeCtrlProxy.requestSettingsList is not scripted");
+  }
+
+  requestInstallCaCertificate(): never {
+    throw new Error("FakeCtrlProxy.requestInstallCaCertificate is not scripted");
+  }
+
+  requestInstallCaCertificateFromFile(): never {
+    throw new Error("FakeCtrlProxy.requestInstallCaCertificateFromFile is not scripted");
+  }
+
+  requestRemoveCaCertificate(): never {
+    throw new Error("FakeCtrlProxy.requestRemoveCaCertificate is not scripted");
+  }
+
+  requestDeviceOwnerStatus(): never {
+    throw new Error("FakeCtrlProxy.requestDeviceOwnerStatus is not scripted");
+  }
+
+  requestPermission(): never {
+    throw new Error("FakeCtrlProxy.requestPermission is not scripted");
+  }
+
+  requestScreenshotWithoutObservationStreamPush(): never {
+    throw new Error("FakeCtrlProxy.requestScreenshotWithoutObservationStreamPush is not scripted");
+  }
+
+  requestInstalledPackages(): never {
+    throw new Error("FakeCtrlProxy.requestInstalledPackages is not scripted");
+  }
+
+  requestPackageInfo(): never {
+    throw new Error("FakeCtrlProxy.requestPackageInfo is not scripted");
+  }
+
+  requestLaunchIntent(): never {
+    throw new Error("FakeCtrlProxy.requestLaunchIntent is not scripted");
+  }
+
+  sendMessage(): never {
+    throw new Error("FakeCtrlProxy.sendMessage is not scripted");
+  }
+
+  getSupportedCommands(): never {
+    throw new Error("FakeCtrlProxy.getSupportedCommands is not scripted");
+  }
+
+  waitForConnection(): never {
+    throw new Error("FakeCtrlProxy.waitForConnection is not scripted");
+  }
+
+  async verifyServiceReady(): Promise<boolean> {
+    return this.isConnectedState;
+  }
+
+  /** Like a runner without the atomic double-tap command: nothing is sent, callers fall back to two taps. */
+  async requestDoubleTapCoordinates(): Promise<A11yTapCoordinatesResult> {
+    return { success: false, totalTimeMs: 0, error: "double-tap command unsupported by the fake" };
+  }
+
+  requestMultiFingerSwipe(): never {
+    throw new Error("FakeCtrlProxy.requestMultiFingerSwipe is not scripted");
+  }
+
+  requestGestureStart(): never {
+    throw new Error("FakeCtrlProxy.requestGestureStart is not scripted");
+  }
+
+  requestGestureMove(): never {
+    throw new Error("FakeCtrlProxy.requestGestureMove is not scripted");
+  }
+
+  requestGestureEnd(): never {
+    throw new Error("FakeCtrlProxy.requestGestureEnd is not scripted");
+  }
+
+  listPreferenceFiles(): never {
+    throw new Error("FakeCtrlProxy.listPreferenceFiles is not scripted");
+  }
+
+  getPreferenceEntries(): never {
+    throw new Error("FakeCtrlProxy.getPreferenceEntries is not scripted");
+  }
+
+  discoverKeystore(): never {
+    throw new Error("FakeCtrlProxy.discoverKeystore is not scripted");
+  }
+
+  getSdkCapabilities(): never {
+    throw new Error("FakeCtrlProxy.getSdkCapabilities is not scripted");
+  }
+
+  listDataStores(): never {
+    throw new Error("FakeCtrlProxy.listDataStores is not scripted");
+  }
+
+  getDataStore(): never {
+    throw new Error("FakeCtrlProxy.getDataStore is not scripted");
+  }
+
+  setPreference(): never {
+    throw new Error("FakeCtrlProxy.setPreference is not scripted");
+  }
+
+  removePreference(): never {
+    throw new Error("FakeCtrlProxy.removePreference is not scripted");
+  }
+
+  clearPreferenceStore(): never {
+    throw new Error("FakeCtrlProxy.clearPreferenceStore is not scripted");
+  }
+
+  clearAccessibilityFocus(): never {
+    throw new Error("FakeCtrlProxy.clearAccessibilityFocus is not scripted");
+  }
+
+  setAccessibilityFocus(): never {
+    throw new Error("FakeCtrlProxy.setAccessibilityFocus is not scripted");
+  }
+
+  requestCurrentFocus(): never {
+    throw new Error("FakeCtrlProxy.requestCurrentFocus is not scripted");
+  }
+
+  requestTraversalOrder(): never {
+    throw new Error("FakeCtrlProxy.requestTraversalOrder is not scripted");
+  }
+
+  attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.prototypeRequestHost = host;
+  }
+
+  getPrototypeRequestHost(): PrototypeRequestHost | undefined {
+    return this.prototypeRequestHost;
+  }
+
+  invalidateForShutdownRecovery(): never {
+    throw new Error("FakeCtrlProxy.invalidateForShutdownRecovery is not scripted");
+  }
+
+  getSdkScreenIdentity(): never {
+    throw new Error("FakeCtrlProxy.getSdkScreenIdentity is not scripted");
+  }
+
+  getSdkScreenIdentityReceivedAtMs(): never {
+    throw new Error("FakeCtrlProxy.getSdkScreenIdentityReceivedAtMs is not scripted");
+  }
+
+  awaitSdkScreenIdentityAfter(): never {
+    throw new Error("FakeCtrlProxy.awaitSdkScreenIdentityAfter is not scripted");
+  }
+
+  pushNetworkMockRules(): never {
+    throw new Error("FakeCtrlProxy.pushNetworkMockRules is not scripted");
+  }
+
+  requestGlobalAction(): never {
+    throw new Error("FakeCtrlProxy.requestGlobalAction is not scripted");
+  }
+
+  validateFrameContext(): never {
+    throw new Error("FakeCtrlProxy.validateFrameContext is not scripted");
+  }
+
+  requestDeviceInfo(): never {
+    throw new Error("FakeCtrlProxy.requestDeviceInfo is not scripted");
+  }
+
+  onInteraction(): never {
+    throw new Error("FakeCtrlProxy.onInteraction is not scripted");
+  }
+
+  notifyRecordingStarted(): never {
+    throw new Error("FakeCtrlProxy.notifyRecordingStarted is not scripted");
+  }
+
+  notifyRecordingStopped(): never {
+    throw new Error("FakeCtrlProxy.notifyRecordingStopped is not scripted");
+  }
+
+  recordInitialObservationStreamHierarchy(): never {
+    throw new Error("FakeCtrlProxy.recordInitialObservationStreamHierarchy is not scripted");
+  }
+
+  getScreenScaleMetadata(): never {
+    throw new Error("FakeCtrlProxy.getScreenScaleMetadata is not scripted");
+  }
+
+  captureScreenshotForObservationStream(): never {
+    throw new Error("FakeCtrlProxy.captureScreenshotForObservationStream is not scripted");
   }
 }

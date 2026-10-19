@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidDeviceStateSync } from "../../../../src/features/observe/android/AndroidDeviceStateSync";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 
 describe("AndroidDeviceStateSync", () => {
   beforeEach(() => NetworkState.resetInstance());

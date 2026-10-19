@@ -8,14 +8,14 @@ import {
   simulationRemainingMs,
   type SimulatedErrorType,
   type SimulationConfig,
-} from "./NetworkState";
+} from "../utils/NetworkState";
 import {
   buildNetworkMockRules,
   describeInvalidMockPattern,
   type NetworkMockRuleSync,
   type NetworkMockSyncReport,
   type RejectedMockRule,
-} from "./networkMockRules";
+} from "../utils/networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";

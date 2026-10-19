@@ -5,7 +5,7 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
-import { iosSqlErrorMessage } from "./storageSdkErrors";
+import { iosSqlErrorMessage } from "../utils/storageSdkErrors";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";

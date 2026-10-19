@@ -9,7 +9,7 @@
 import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
-import { mapStorageSdkError } from "../../../server/storageSdkErrors";
+import { mapStorageSdkError } from "../../../utils/storageSdkErrors";
 import { ActionableError } from "../../../models/ActionableError";
 import type { DelegateContext } from "./types";
 import { normalizeStorageWriteOptions } from "../../storage/storageTypes";

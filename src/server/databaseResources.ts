@@ -18,7 +18,7 @@ import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { optionalInteger } from "./queryParamValidation";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 import { ActionableError } from "../models/ActionableError";
-import { iosStorageErrorMessage } from "./storageSdkErrors";
+import { iosStorageErrorMessage } from "../utils/storageSdkErrors";
 import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
 import { MALFORMED_URI_SEGMENT_MESSAGE, safeDecodeSegment } from "./resourceUriSegments";
 import { encodeUriSegment } from "../utils/encodeUriSegment";

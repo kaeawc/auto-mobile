@@ -68,13 +68,13 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { serverConfig } from "../../../utils/ServerConfig";
-import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
+import { NetworkState, simulationRemainingMs } from "../../../utils/NetworkState";
 import {
   buildNetworkMockRules,
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   parseMockRuleReport,
   type NetworkMockSyncReport,
-} from "../../../server/networkMockRules";
+} from "../../../utils/networkMockRules";
 import {
   HierarchyNavigationDetector,
   HierarchyNavigationUpdateMetrics,
@@ -96,7 +96,7 @@ import {
 import type { BaseResult, CtrlSocket } from "../shared/types";
 import type { DragRequest, GestureTimingResult, SwipeRequest } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
-import type { SimulatedErrorType } from "../../../server/NetworkState";
+import type { SimulatedErrorType } from "../../../utils/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { TrackedScreenGeometry } from "../TrackedScreenGeometry";
 import {

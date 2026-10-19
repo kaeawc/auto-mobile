@@ -474,6 +474,7 @@ function resolveSocketBindGuard(
  * leaving forwarding dead but the suite green).
  */
 export type { McpClientFactory };
+export type { ListChangedKind };
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -993,6 +994,18 @@ export class UnixSocketServer {
   startDetached(): (socket: Socket) => void {
     this.beginAccepting();
     return this.connectionHandlerWithFanOut();
+  }
+
+  /** Counterpart of {@link startDetached}: refuse requests and drop the list/resource/release fan-out. */
+  stopAcceptingAndFanOut(): void {
+    this.closing = true;
+    this.acceptingRequests = false;
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = null;
+    this.resourceUpdatedUnsubscribe?.();
+    this.resourceUpdatedUnsubscribe = null;
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = null;
   }
 
   private beginAccepting(): void {
@@ -5965,20 +5978,9 @@ export class UnixSocketServer {
    */
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
-    this.closing = true;
-    this.acceptingRequests = false;
+    this.stopAcceptingAndFanOut();
     this.lifecycleGeneration += 1;
     this.restartAdmission.releaseAll();
-
-    // Stop receiving list-changed events (mirrors the subscribe in start()).
-    this.listChangedUnsubscribe?.();
-    this.listChangedUnsubscribe = null;
-    this.resourceUpdatedUnsubscribe?.();
-    this.resourceUpdatedUnsubscribe = null;
-
-    // Stop receiving session-release events (mirrors the subscribe in start()).
-    this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = null;
 
     // Keep sockets and session bookkeeping alive while handlers finish and write.
     // The listener stops new connections now; existing requests get the bounded drain.
@@ -6107,6 +6109,12 @@ export class UnixSocketServer {
       recordBoundMcpClientKey: (...args) => this.recordBoundMcpClientKey(...args),
       boundMcpClientFor: (id) => this.boundMcpClientKeysBySocketSession.get(id),
       requireCurrentFrameContext: (...args) => this.requireCurrentFrameContext(...args),
+      broadcastListChanged: interceptableMethod(
+        () => this.broadcastListChanged.bind(this),
+        (replacement) => {
+          this.broadcastListChanged = replacement;
+        },
+      ),
       waitForStartup: interceptableMethod(
         () => this.waitForStartup.bind(this),
         (replacement) => (this.waitForStartup = replacement),

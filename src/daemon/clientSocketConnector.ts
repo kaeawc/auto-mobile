@@ -100,26 +100,30 @@ export function openDaemonSocket(
       fail(error);
     });
 
-    socket.once("close", () => {
-      // fail() clears the client socket before destroy emits close. Preserve that
-      // notification path; only a different installed socket makes this stale.
-      if (isStaleSocket() || host.hasClosedSocket(socket)) {
-        return;
-      }
-      host.handleSocketClosed(socket);
-      // A daemon restart/crash closes the socket. Over a Unix domain socket
-      // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
-      // event, so any in-flight request would otherwise hang until its request
-      // timeout. Reject pending requests with a recoverable transport error so
-      // the proxy reconnects to the restarted daemon and retries (#2599/#2737).
-      // After fail() the pending map is already cleared, so this is a no-op on
-      // the error path.
-      if (host.hasPendingRequests()) {
-        host.rejectPendingRequests(
-          new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
-          true,
-        );
-      }
-    });
+    socket.once("close", () => onDaemonSocketClosed(host, socket));
   });
+}
+
+/**
+ * The listener on a daemon socket's `close`: fail() clears the client socket before destroy emits
+ * close, so only a different installed socket makes this stale.
+ */
+export function onDaemonSocketClosed(
+  host: DaemonSocketConnectorHost,
+  socket: Socket | Duplex,
+): void {
+  const installed = host.getSocket();
+  if ((installed !== null && installed !== socket) || host.hasClosedSocket(socket)) {
+    return;
+  }
+  host.handleSocketClosed(socket);
+  // A dying daemon over a Unix socket delivers EOF -> "close" with no "error" (no TCP RST), so
+  // in-flight requests would hang to their timeout. Reject them with a recoverable transport
+  // error so the proxy reconnects and retries (#2599/#2737); a no-op after fail() cleared them.
+  if (host.hasPendingRequests()) {
+    host.rejectPendingRequests(
+      new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+      true,
+    );
+  }
 }

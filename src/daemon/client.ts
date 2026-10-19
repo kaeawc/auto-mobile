@@ -52,7 +52,11 @@ import { overflowingResponseId } from "./clientInboundOverflow";
 import { serializeRequestFrame } from "./clientFrameSerialization";
 import { probeDaemonSocket } from "./clientSocketProbe";
 import { annotateStaleSocketHint } from "./clientStaleSocketHint";
-import { openDaemonSocket, type DaemonSocketConnectorHost } from "./clientSocketConnector";
+import {
+  onDaemonSocketClosed,
+  openDaemonSocket,
+  type DaemonSocketConnectorHost,
+} from "./clientSocketConnector";
 import { isDaemonHandshakeFailure } from "./daemonHandshake";
 import { DaemonHandshakeMismatchError } from "./DaemonHandshakeMismatchError";
 import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
@@ -468,6 +472,8 @@ export class DaemonClient {
       /** Checks whether a request remains pending. */
       hasPendingRequest: (requestId: string): boolean => this.pendingRequests.has(requestId),
       connection: () => ({ connected: this.connected, socket: this.socket }),
+      /** Runs the close listener `connect()` installs on its socket. */
+      socketClosed: (socket: Duplex): void => onDaemonSocketClosed(this.connectorHost(), socket),
       declaredIdentity: () => this.clientIdentity,
       socketPathObservable: () => this.socketPathObservable(),
     };

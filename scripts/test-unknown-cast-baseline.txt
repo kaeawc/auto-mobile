@@ -20,8 +20,6 @@
 1	test/features/observe/ios/tapDiagnostics.test.ts
 1	test/fixtures/observe/observeFixture.ts
 4	test/helpers/devicePoolSuite.ts
-7	test/helpers/inMemoryDaemonWire.ts
-1	test/helpers/livenessScenarioHarness.test.ts
 1	test/lint/deviceToolsKillDeviceImportCasing.test.ts
 1	test/lint/expensiveHookWork.ts
 1	test/models/screenScaleMetadata.test.ts

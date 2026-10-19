@@ -2,33 +2,21 @@
 # generated-with: tsgo 7.0.0-dev.20260707.2
 # format: <file> <TScode> <count>
 scripts/benchmark-device-tools-fixture.ts TS2322 2
-scripts/check-daemon-launcher-boundary.ts TS2339 2
-scripts/check-daemon-launcher-boundary.ts TS2345 5
-scripts/check-daemon-launcher-boundary.ts TS2740 5
 scripts/check-mcp-sdk-boundary.ts TS2551 1
 scripts/check-sdkmanager-execution-boundary.ts TS2322 2
 scripts/check-sdkmanager-execution-boundary.ts TS2345 1
 scripts/ci/ciTimeToGreenReport.ts TS2322 1
-scripts/lib/executionBoundaryAst.ts TS2339 2
-scripts/lib/executionBoundaryAst.ts TS2345 5
 scripts/lib/tsImportDeps.ts TS2339 2
-scripts/live-device-acceptance.ts TS18048 1
-scripts/live-device-acceptance.ts TS2322 4
-scripts/live-device-acceptance.ts TS2352 3
 scripts/manual-test/aux-socket.ts TS2322 2
 scripts/manual-test/aux-socket.ts TS2339 2
 scripts/manual-test/brokerDeviceScenarios.ts TS7022 1
 scripts/manual-test/brokerDeviceScenarios.ts TS7024 1
 scripts/manual-test/private-daemon.ts TS2345 1
 scripts/mcp-drive.ts TS2322 1
-scripts/memory/stress-harness.ts TS2322 1
-scripts/memory/stress-harness.ts TS2554 1
-scripts/memory/stress-harness.ts TS2739 5
 test/cli/acquisitionSessionUuid.test.ts TS2322 1
 test/cli/acquisitionSessionUuid.test.ts TS2769 2
 test/cli/usageErrorInstalledSetups.test.ts TS2352 1
 test/contracts/AdbExecutorContract.ts TS2339 2
-test/contracts/ConfigRepositoryContract.ts TS2769 7
 test/contracts/DeviceManagerContract.ts TS18048 2
 test/contracts/HierarchyCaptureContract.ts TS2739 1
 test/contracts/NavigationGraphContract.ts TS2339 4
@@ -36,8 +24,6 @@ test/contracts/NavigationGraphContract.ts TS7006 1
 test/contracts/ObserveCacheStoreContract.ts TS2322 1
 test/contracts/ObserveScreenContract.ts TS2722 1
 test/contracts/ObserveScreenContract.ts TS2739 1
-test/contracts/SimctlContract.ts TS18046 5
-test/contracts/SimctlContract.ts TS2344 1
 test/contracts/androidCtrlProxy.test.ts TS2554 1
 test/contracts/deviceHealthMarkers.test.ts TS2741 1
 test/contracts/deviceWindowCacheInvalidator.test.ts TS2739 1
@@ -80,9 +66,6 @@ test/doctor/automobile.test.ts TS2769 2
 test/doctor/checks/iosSimFleet.test.ts TS2741 1
 test/doctor/checks/workProfileAccessibility.test.ts TS2345 1
 test/doctor/index.test.ts TS2769 1
-test/doctor/ios.test.ts TS2352 4
-test/doctor/ios.test.ts TS2740 1
-test/doctor/ios.test.ts TS2769 1
 test/fakes/FakeAdbClientFactory.test.ts TS2769 2
 test/fakes/FakeAndroidInventoryLoad.ts TS2322 1
 test/fakes/FakeFailureRecorder.test.ts TS2741 1
@@ -171,9 +154,6 @@ test/features/observe/CtrlProxyClient.test.ts TS2339 9
 test/features/observe/CtrlProxyClient.test.ts TS7053 2
 test/features/observe/CtrlProxyResultWrapperGuard.test.ts TS2353 1
 test/features/observe/CtrlProxyResultWrapperGuard.test.ts TS2739 1
-test/features/observe/ObserverHierarchyIsolation.test.ts TS2345 4
-test/features/observe/ObserverHierarchyIsolation.test.ts TS2352 1
-test/features/observe/ObserverHierarchyIsolation.test.ts TS2769 1
 test/features/observe/ViewHierarchy.test.ts TS2769 1
 test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts TS2349 1
 test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts TS2353 1
@@ -218,8 +198,6 @@ test/helpers/daemonHeartbeatHandler.ts TS2322 1
 test/helpers/deviceLikeAndroidHierarchy.ts TS2353 1
 test/helpers/directFrameRig.ts TS2345 1
 test/helpers/fakeServerContext.ts TS2352 1
-test/helpers/livenessScenarioHarness.ts TS2322 1
-test/helpers/livenessScenarioHarness.ts TS2345 5
 test/helpers/planSessionHarness.ts TS2322 1
 test/helpers/planSessionHarness.ts TS2345 1
 test/helpers/prototypeSuspendedCapture.ts TS2352 1
@@ -238,9 +216,6 @@ test/helpers/tapAtCoordinate.ts TS2741 1
 test/helpers/touchNodeCaptures.ts TS2741 1
 test/helpers/warmedTests.ts TS2769 1
 test/integration/foldablePostureRoundTrip.integration.test.ts TS18048 1
-test/integration/mediamtxWebRtcPublisher.integration.test.ts TS2322 1
-test/integration/mediamtxWebRtcPublisher.integration.test.ts TS2345 2
-test/integration/mediamtxWebRtcPublisher.integration.test.ts TS2739 3
 test/integration/sessionBrokerMultiClient.integration.test.ts TS2345 2
 test/integration/sessionBrokerMultiClient.integration.test.ts TS2769 1
 test/integration/webrtcDeviceCapture.integration.test.ts TS18046 1
@@ -249,9 +224,6 @@ test/integration/webrtcDeviceCapture.integration.test.ts TS2339 1
 test/integration/webrtcDeviceCapture.integration.test.ts TS2551 1
 test/lint/ctrlProxyGetInstanceRestore.test.ts TS2339 3
 test/lint/ctrlProxyGetInstanceRestore.test.ts TS2345 1
-test/lint/deviceBindingSingleReader.test.ts TS2339 1
-test/lint/deviceBindingSingleReader.test.ts TS2345 4
-test/lint/deviceBindingSingleReader.test.ts TS2367 1
 test/lint/envRegistry.test.ts TS2322 1
 test/lint/fakeHygiene.test.ts TS2339 2
 test/lint/livenessActivityClockSeparation.test.ts TS2345 1
@@ -284,10 +256,6 @@ test/scripts/benchmarkSettledScreenshotReliability.test.ts TS2769 1
 test/scripts/benchmarkThresholds.test.ts TS2769 2
 test/scripts/dbMigrationsSelfContained.test.ts TS7053 1
 test/scripts/iosIntegrationWorkflowChangeGuard.test.ts TS2339 1
-test/scripts/liveDeviceAcceptance.test.ts TS2339 3
-test/scripts/liveDeviceAcceptance.test.ts TS2345 2
-test/scripts/liveDeviceAcceptance.test.ts TS2739 1
-test/scripts/liveDeviceAcceptance.test.ts TS2769 1
 test/scripts/manualTestAdbHostQuery.test.ts TS2769 3
 test/scripts/manualTestAuxSocket.test.ts TS2769 1
 test/scripts/manualTestBrokerBatch.test.ts TS2769 3
@@ -543,9 +511,6 @@ test/utils/deviceIncarnation.test.ts TS2322 1
 test/utils/deviceProvisioning.test.ts TS2322 1
 test/utils/deviceProvisioning.test.ts TS2554 1
 test/utils/deviceProvisioning.test.ts TS7006 2
-test/utils/deviceSnapshotStore.test.ts TS2322 1
-test/utils/deviceSnapshotStore.test.ts TS2345 3
-test/utils/deviceSnapshotStore.test.ts TS2769 2
 test/utils/deviceSnapshotStoreJournalSweep.test.ts TS2345 1
 test/utils/deviceSnapshotStoreJournalSweep.test.ts TS2769 3
 test/utils/deviceTeardownService.test.ts TS7006 1

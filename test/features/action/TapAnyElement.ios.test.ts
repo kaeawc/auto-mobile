@@ -478,7 +478,11 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   // expire mid-search even though this call would eventually have returned.
   test("search loop constrains each hierarchy refresh to its own remaining budget, not the client default", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
-    fakeIosClient.setHierarchyData({ packageName: "com.test.app", updatedAt: Date.now() });
+    fakeIosClient.setHierarchyData({
+      packageName: "com.test.app",
+      updatedAt: Date.now(),
+      hierarchy: { text: "Ready" },
+    });
     const hierarchyRequests = spyOn(fakeIosClient, "requestHierarchySync");
     // First select call (before the search loop) reports nothing
     // found; the fake element selector's default (call-through) behavior on

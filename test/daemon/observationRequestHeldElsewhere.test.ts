@@ -45,6 +45,7 @@ class ObservationDaemon extends Daemon {
 
 const observation: ObserveResult = {
   observationId: "observed",
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 1, height: 1 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -91,8 +92,6 @@ async function observeAs(options: {
         holder: "session_broker",
         scopeKey: "scope",
         bindingIndex: 0,
-        scopeState: null,
-        execSessionUuid: SLOT_EXEC,
       });
     }
   });

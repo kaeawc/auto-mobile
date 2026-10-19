@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -66,15 +67,14 @@ describe("TapAnyElement", () => {
       { timer, elementSelector: new FakeElementSelector(makeElement()) },
     );
     tapAny.testHooks.setRefreshViewHierarchy(async () => null);
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead(
-          buildObserveResult({
-            viewHierarchy: { hierarchy: { node: {} } },
-            screenSize: { width: 500, height: 500 },
-          }),
-        ),
-      );
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
+          viewHierarchy: { hierarchy: { node: {} } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      ),
+    );
 
     await tapAny.execute({ action: "longPress", duration: LONG_PRESS_HARD_MAX_MS });
     const swipe = adb
@@ -240,12 +240,11 @@ describe("TapAnyElement", () => {
         },
       );
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
-      tapAny.observedInteraction = (action) =>
-        action(
-          recordObservationRead(
-            buildObserveResult({ viewHierarchy, screenSize: { width: 10, height: 10 } }),
-          ),
-        );
+      tapAny.observedInteraction = runBlockWith(() =>
+        recordObservationRead(
+          buildObserveResult({ viewHierarchy, screenSize: { width: 10, height: 10 } }),
+        ),
+      );
       tapAny.testHooks.setRefreshViewHierarchy(async () => null);
 
       const result = await tapAny.execute({ action: "tap" });
@@ -322,13 +321,12 @@ describe("TapAnyElement Android gesture dispatch", () => {
         talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
       },
     );
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead({
-          viewHierarchy: observedHierarchy,
-          screenSize: { width: 500, height: 500 },
-        }),
-      );
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead({
+        viewHierarchy: observedHierarchy,
+        screenSize: { width: 500, height: 500 },
+      }),
+    );
     let refreshCount = 0;
     tapAny.testHooks.setRefreshViewHierarchy(async () => ({
       hierarchy: { node: { marker: `after-${++refreshCount}` } },
@@ -640,7 +638,7 @@ test.each([false, true])(
       screenSize: { width: 100, height: 100 },
       viewHierarchy: { displayId: 0, hierarchy: { node: {} } },
     };
-    tapAny.observedInteraction = (action) => action(cached);
+    tapAny.observedInteraction = runBlockWith(cached);
     // The search capture completes before the gesture; only the post-tap probe changes.
     tapAny.testHooks.setBeforeAndroidTap(() => {
       searchFinished = true;
@@ -684,15 +682,14 @@ describe("TapAnyElement node long press fallbacks", () => {
         accessibilityDetector: new FakeAccessibilityDetector(),
       },
     );
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead(
-          buildObserveResult({
-            viewHierarchy: { hierarchy: { node: {} } },
-            screenSize: { width: 500, height: 500 },
-          }),
-        ),
-      );
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead(
+        buildObserveResult({
+          viewHierarchy: { hierarchy: { node: {} } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      ),
+    );
     tapAny.testHooks.setRefreshViewHierarchy(async () => target?.fresh ?? null);
     return { proxy, adb, tapAny };
   }
@@ -854,13 +851,12 @@ describe("tapAny long press safety", () => {
         lastRenderedObservation: displayLookup,
       },
     );
-    action.observedInteraction = (callback) =>
-      callback(
-        recordObservationRead({
-          viewHierarchy: { hierarchy: { node: element } },
-          screenSize: { width: 500, height: 500 },
-        }),
-      );
+    action.observedInteraction = runBlockWith(() =>
+      recordObservationRead({
+        viewHierarchy: { hierarchy: { node: element } },
+        screenSize: { width: 500, height: 500 },
+      }),
+    );
     action.testHooks.setRefreshViewHierarchy(async () => null);
     return { adb, timer, action, displayLookup };
   }

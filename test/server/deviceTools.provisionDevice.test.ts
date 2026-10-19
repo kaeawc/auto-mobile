@@ -52,6 +52,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -592,11 +593,150 @@ describe("provisionDevice handler", () => {
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
   });
 
+  test("boots a newly created AVD despite an unresolved sibling emulator", async () => {
+    const timer = new FakeTimer();
+    const provisioned = provisionedTestDevice("android", true);
+    exactProvisioner.provision = async () => provisioned;
+    deviceManager.setDeviceImages("android", [provisioned.device]);
+    deviceManager.setBootedDevices("android", [
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({ timer, ensureCtrlProxyReady: async () => {} });
+
+    const payload = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(payload.error).toBeUndefined();
+    expect(payload).toMatchObject({ created: true, lifecycleState: "ready" });
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(true);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("adopts an existing AVD after one bounded wait resolves its sibling identity", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    const target: BootedDevice = {
+      name: "phone-api-36-a",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    deviceManager.setBootedDevices("android", [
+      target,
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    const discover = deviceManager.getBootedDevicesDetailed.bind(deviceManager);
+    deviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      const observation = await discover(platform, options);
+      deviceManager.setBootedDevices("android", [
+        target,
+        { name: "other-avd", platform: "android", deviceId: "emulator-5556" },
+      ]);
+      return observation;
+    };
+    setDeviceToolsDependencies({
+      timer,
+      provisionAndroidIdentityBackoff: fixedBackoff(375),
+      ensureCtrlProxyReady: async () => {},
+    });
+
+    const payload = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(payload.error).toBeUndefined();
+    expect(payload).toMatchObject({ created: false, adopted: true });
+    expect(timer.getSleepHistory()).toEqual([375]);
+    const calls = deviceManager.getBootedDevicesDetailedCalls();
+    expect(calls).toHaveLength(3); // Two identity observations, then the boot service's adoption check.
+    expect(calls.slice(0, 2).every(({ options }) => options.bypassAndroidDeviceListCache)).toBe(
+      true,
+    );
+    expect(calls[1].options.signal).toBe(calls[0].options.signal);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test.each([1_000, 1_001])(
+    "refuses unresolved adoption when the next %sms wait leaves no discovery budget",
+    async (delayMs) => {
+      const timer = new FakeTimer();
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      deviceManager.setBootedDevices("android", [
+        { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+      ]);
+      setDeviceToolsDependencies({ timer, provisionAndroidIdentityBackoff: fixedBackoff(delayMs) });
+
+      const payload = JSON.parse(
+        await provisionResponseText({
+          ...provisionTestArgs("android"),
+          timeoutMs: 1_000,
+        }),
+      );
+
+      expect(payload.error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(payload.error.message).toContain("unresolved: emulator-5556");
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(1);
+      expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+    },
+  );
+
+  test("cancels unresolved identity waiting without another discovery", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    setDeviceToolsDependencies({ timer });
+
+    const pending = ToolRegistry.getTool("provisionDevice")!.handler(
+      provisionTestArgs("android"),
+      undefined,
+      controller.signal,
+    );
+    await flushMicrotasks();
+    expect(timer.getPendingSleeps()).toEqual([250]);
+    controller.abort(new Error("caller disconnected during discovery wait"));
+    const payload = JSON.parse(asToolResponse(await pending).content[0].text);
+    expect(payload.error.code).toBe("request_cancelled");
+    timer.advanceTime(250);
+    await flushMicrotasks();
+    expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(1);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  test("stops identity retries when a repeated Android discovery fails", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+    ]);
+    const discover = deviceManager.getBootedDevicesDetailed.bind(deviceManager);
+    deviceManager.getBootedDevicesDetailed = async (platform, options) => {
+      const observation = await discover(platform, options);
+      deviceManager.failedPlatforms.add("android");
+      return observation;
+    };
+    setDeviceToolsDependencies({ timer });
+
+    const payload = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(payload.error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+    expect(payload.error.message).toContain("booted-device discovery did not complete");
+    expect(timer.getSleepHistory()).toEqual([250]);
+    expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(2);
+    expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   test("rejects adoption when a running emulator identity is unresolved", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
     deviceManager.setBootedDevices("android", [
       { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
       { name: "Unknown (emulator-5556)", platform: "android", deviceId: "emulator-5556" },
+      { name: "emulator-5558", platform: "android", deviceId: "emulator-5558" },
     ]);
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
@@ -607,6 +747,9 @@ describe("provisionDevice handler", () => {
     expect(JSON.stringify(response)).toContain("discovery_incomplete");
     expect(JSON.stringify(response)).toContain('\\"retryable\\":true');
     expect(JSON.stringify(response)).toContain("AVD identity has not resolved yet; retry");
+    expect(JSON.stringify(response)).toContain("unresolved: emulator-5556, emulator-5558");
+    expect(timer.getSleepHistory()).toEqual([250, 250, 250]);
+    expect(deviceManager.getBootedDevicesDetailedCalls()).toHaveLength(4);
     expect(JSON.stringify(response)).not.toContain('"success":true');
     expect(deviceManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
@@ -614,6 +757,8 @@ describe("provisionDevice handler", () => {
 
   test("quarantines a stale pooled identity before rejecting unresolved adoption", async () => {
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    setDeviceToolsDependencies({ timer });
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       isolatedPoolDependencies(sessionManager, "daemon-session", {

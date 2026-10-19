@@ -47,7 +47,10 @@ import {
   type DisplayInventoryProvider,
 } from "./DisplayInventoryProvider";
 import { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
-import { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+import {
+  assertAndroidAvdIdentityResolved,
+  assertExactAndroidImageDiscovery,
+} from "./androidBootIdentity";
 import { enrichBootedDevice, findImageForBootedDevice } from "./bootedDeviceEnrichment";
 import { DeviceBootExecution } from "./DeviceBootExecution";
 import type { BootDeadlineContext } from "./deviceBootContext";
@@ -79,20 +82,6 @@ function hasExplicitSpecConstraints(request: DeviceBootRequest): boolean {
     request.requires !== undefined ||
     request.screenSize !== undefined
   );
-}
-
-function assertAndroidAvdIdentityResolved(devices: readonly BootedDevice[], avdName: string): void {
-  const unresolved = devices
-    .filter(
-      (device) =>
-        device.platform === "android" &&
-        isAndroidEmulatorSerial(device.deviceId) &&
-        device.name === `Unknown (${device.deviceId})`,
-    )
-    .map((device) => device.deviceId);
-  if (unresolved.length > 0) {
-    throw new AndroidAvdIdentityUnresolvedError(avdName, [...new Set(unresolved)].toSorted());
-  }
 }
 
 function assertBootedMatchesImage(device: BootedDevice, image: DeviceInfo): void {
@@ -133,28 +122,6 @@ function assertExactRunningName(request: DeviceBootRequest, device: BootedDevice
     throw new ActionableError(
       `target_identity_mismatch: Requested ${request.platform} device '${request.name}' ` +
         `resolved to '${device.name}' (${device.deviceId}).`,
-    );
-  }
-}
-
-function assertExactAndroidImageDiscovery(
-  image: DeviceInfo,
-  booted: readonly BootedDevice[],
-  exactTarget: boolean,
-): void {
-  if (!exactTarget || image.platform !== "android") {
-    return;
-  }
-  assertAndroidAvdIdentityResolved(booted, image.name);
-  const occupiedSerial =
-    image.deviceId && isAndroidEmulatorSerial(image.deviceId)
-      ? booted.find((device) => device.deviceId === image.deviceId && device.name !== image.name)
-      : undefined;
-  if (occupiedSerial) {
-    throw new ActionableError(
-      `target_identity_mismatch: Configured Android AVD '${image.name}' lists serial ` +
-        `'${image.deviceId}', but that serial is running '${occupiedSerial.name}'. ` +
-        "Refresh device inventory and retry.",
     );
   }
 }
@@ -918,7 +885,12 @@ export class DeviceBootService {
       true,
       presentationOrder,
     );
-    assertExactAndroidImageDiscovery(image, booted, exactTarget === true);
+    assertExactAndroidImageDiscovery(
+      image,
+      booted,
+      exactTarget === true,
+      context.freshProvision === true,
+    );
     // iOS simulators can share a display name, so only their UDID is lifecycle
     // identity. Android `deviceId` may instead name an AVD image, where name
     // fallback is required because the booted device carries an ADB serial.

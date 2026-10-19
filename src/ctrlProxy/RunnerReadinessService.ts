@@ -1,20 +1,18 @@
-import type { TapCoordinatesRequest } from "../utils/interfaces/TapCoordinatesRequest";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { TapCoordinatesRequest } from "../utils/interfaces/TapCoordinatesRequest";
 import type { BootedDevice, DeviceLockState } from "../models";
-import { ActionableError, toActionableError } from "../models";
+import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { AndroidCtrlProxyManager, CtrlProxyInspectionError } from "./CtrlProxyManager";
 import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
-import { redactAndroidCommandOutput } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { compareIosVersions } from "../utils/ios-cmdline-tools/iosVersion";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
@@ -23,23 +21,26 @@ import {
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
 import type { AccessibilityHierarchyRequest } from "../utils/interfaces/DeviceService";
 import type { ProxySetupResult } from "../utils/interfaces/ProxyManager";
-import { runWithAbortSignal } from "../utils/AbortContext";
-import { ambientPerfFor, runWithPerfTracker, trackAmbient } from "../utils/PerfContext";
+import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { logger } from "../utils/logger";
-import {
-  centerOfBounds,
-  findSystemUiAnrDialog,
-  type SystemUiAnrDialog,
-} from "../utils/androidSystemUiAnr";
-import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
+import { RunnerReadinessError } from "./RunnerReadinessError";
+import { SystemUiAnrRecoveryRequiredError } from "./SystemUiAnrRecoveryRequiredError";
+import type {
+  AndroidCompatibilityResult,
+  ReadinessAttemptContext,
+  RunnerReadinessPhase,
+  RunnerReadinessRequest,
+} from "./RunnerReadinessAttemptContext";
+import { READINESS_PROBE_TIMEOUT_MS, ReadinessPhaseRunner } from "./ReadinessPhaseRunner";
+import { SYSTEM_UI_ANR_RECOVERY_POLL_MS, SystemUiAnrRecovery } from "./SystemUiAnrRecovery";
+import { normalizeDiagnostic } from "./runnerReadinessDiagnosticText";
+
+export { RunnerReadinessError, SystemUiAnrRecoveryRequiredError };
+export type { AndroidCompatibilityResult, RunnerReadinessPhase, RunnerReadinessRequest };
 
 const READINESS_RETRY_DELAY_MS = 250;
-const READINESS_PROBE_TIMEOUT_MS = 2_000;
 const CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS = 5_000;
-const MAX_DIAGNOSTIC_LENGTH = 4_000;
-const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
-const SYSTEM_UI_ANR_RECOVERY_POLL_MS = 1_000;
 const CTRL_PROXY_REBIND_RECOVERY_POLL_MS = 1_000;
 /**
  * Minimum time to give a just-rebound accessibility service before escalating
@@ -58,67 +59,11 @@ const CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS = 5_000;
  * trigger a restart on its own.
  */
 const CTRL_PROXY_RESTART_MIN_FAILED_PROBES = 2;
-const SYSTEM_UI_ANR_RECOVERY_HEALTHY_POLLS = 2;
-const SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS = 5_000;
 
 // Keep this aligned with ios/control-proxy/project.yml. The Swift rewrite uses
 // iOS-17-only APIs, so trying to launch it on an older runtime can never make
 // the runner healthy and must fail before setup/restart begins.
 export const IOS_CTRL_PROXY_MINIMUM_IOS_VERSION = "17.0";
-
-type RunnerReadinessPhase =
-  | "package-compatibility"
-  | "runner-setup"
-  | "runner-connect"
-  | "runner-health";
-
-export class RunnerReadinessError extends ActionableError {
-  get code(): "timeout" | undefined {
-    return this.deadlineExhausted ? "timeout" : undefined;
-  }
-
-  get retryable(): true | undefined {
-    return this.deadlineExhausted ? true : undefined;
-  }
-
-  readonly diagnosticCause?: unknown;
-  readonly failureKind?: "ctrlproxy_forward_unavailable";
-
-  constructor(
-    message: string,
-    readonly retryableAndroidFrameworkFailure = false,
-    /**
-     * The phase ran out of budget rather than hitting a platform fault, so the
-     * failure is purely time-based and callers may report it as a timeout and
-     * retry it (`provisionDevice` maps this to error code `"timeout"`).
-     */
-    readonly deadlineExhausted = false,
-    readonly phase?: RunnerReadinessPhase,
-    readonly attempts?: number,
-    ...diagnostic: [diagnosticCause?: unknown, failureKind?: "ctrlproxy_forward_unavailable"]
-  ) {
-    super(message);
-    [this.diagnosticCause, this.failureKind] = diagnostic;
-  }
-}
-
-export class SystemUiAnrRecoveryRequiredError extends RunnerReadinessError {}
-
-export interface AndroidCompatibilityResult {
-  status:
-    | "skipped"
-    | "not_installed"
-    | "compatible"
-    | "upgraded"
-    | "installed"
-    | "reinstalled"
-    | "failed";
-  acceptedPreinstalled?: boolean;
-  error?: string;
-  upgradeError?: string;
-  reinstallError?: string;
-  cause?: unknown;
-}
 
 export interface ReadinessAndroidManager {
   isInstalled(signal?: AbortSignal): Promise<boolean>;
@@ -239,11 +184,6 @@ export interface AndroidFrameworkReadinessResult {
   diagnostic?: string;
 }
 
-interface SystemUiAnrReadinessClient {
-  getAccessibilityHierarchy: NonNullable<ReadinessClient["getAccessibilityHierarchy"]>;
-  requestTapCoordinates: NonNullable<ReadinessClient["requestTapCoordinates"]>;
-}
-
 export interface RunnerReadinessDependencies {
   timer: Timer;
   getAndroidFrameworkReadiness?(
@@ -267,64 +207,14 @@ export interface RunnerReadinessDependencies {
   ): Promise<AndroidRunnerHealthDiagnostic>;
 }
 
-export interface RunnerReadinessRequest {
-  device: BootedDevice;
-  requestedIdentity: string;
-  /** User-visible operation that requires the runner to become responsive. */
-  operationName?: string;
-  /** Absolute deadline shared with device boot. */
-  totalDeadlineMs: number;
-  /** Maximum time allocated to runner readiness within the total deadline. */
-  readinessTimeoutMs: number;
-  skipCtrlProxyDownload?: boolean;
-  perf?: PerformanceTracker;
-  signal?: AbortSignal;
-  onRunnerSetup?: () => void;
-  /** Synchronous admission check under the readiness lock, before any device work. */
-  assertCanSetup?: () => void;
-}
-
-interface ReadinessAttemptContext extends RunnerReadinessRequest {
-  deadlineFailure?: RunnerReadinessError;
-  /**
-   * Absolute deadline for the steady-state connect/health phases, opened when
-   * `waitForResponsiveClient` begins (null until then) so a long cold
-   * provisioning does not consume the short health budget. Setup/provision
-   * phases are bounded by `totalDeadlineMs` directly (#5376).
-   */
-  healthDeadlineMs: number | null;
-  phaseElapsedMs: Partial<Record<RunnerReadinessPhase, number>>;
-  lastCtrlProxyRebindMs: number;
-  ctrlProxyAccessibilityRebindAttempted: boolean;
-  /**
-   * Throttle clock for the connected-but-unresponsive recovery step (#7533),
-   * kept separate from {@link lastCtrlProxyRebindMs} (which gates the
-   * disconnected-branch rebind) so the two recovery paths do not interfere
-   * with each other's cooldowns.
-   */
-  lastConnectedRecoveryMs: number;
-  /**
-   * At most one full CtrlProxy process restart per readiness request (#7533),
-   * mirroring iOS's single `forceRestart` between "connected" and "healthy".
-   */
-  ctrlProxyProcessRestartAttempted: boolean;
-  /**
-   * When the last successful accessibility-service rebind completed, so
-   * escalation to a full process restart can wait out
-   * {@link CTRL_PROXY_POST_REBIND_RESTART_GRACE_MS} for the freshly re-bound
-   * service to start answering before force-stopping it again.
-   */
-  lastSuccessfulRebindMs: number;
-  /**
-   * Consecutive failed health probes since the last actual rebind. The
-   * recovery throttle must not discard failures when each probe itself takes
-   * longer than the throttle window.
-   */
-  failedHealthProbesSinceRecovery: number;
-}
-
 export class RunnerReadinessService {
-  constructor(private readonly dependencies: RunnerReadinessDependencies) {}
+  private readonly phases: ReadinessPhaseRunner;
+  private readonly anrRecovery: SystemUiAnrRecovery;
+
+  constructor(private readonly dependencies: RunnerReadinessDependencies) {
+    this.phases = new ReadinessPhaseRunner(dependencies.timer);
+    this.anrRecovery = new SystemUiAnrRecovery(dependencies.timer, this.phases);
+  }
 
   async ensureReady(request: RunnerReadinessRequest): Promise<void> {
     // Setup/provision phases run against `totalDeadlineMs`; the connect/health
@@ -376,8 +266,8 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     key: string,
   ): Promise<DeviceReadinessLockRelease> {
-    if (this.remainingForPhase(context, "runner-setup") <= 0) {
-      this.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock", {
+    if (this.phases.remainingForPhase(context, "runner-setup") <= 0) {
+      this.phases.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock", {
         deadlineExhausted: true,
       });
     }
@@ -388,32 +278,32 @@ export class RunnerReadinessService {
       return await acquireDeviceReadinessLock(key, {
         timer: this.dependencies.timer,
         signal: context.signal,
-        timeoutMs: this.remainingForPhase(context, "runner-setup"),
+        timeoutMs: this.phases.remainingForPhase(context, "runner-setup"),
         timeoutError: () => new Error("readiness setup lock exceeded this request's deadline"),
       });
     } catch (error) {
       // The queued wait also rejects on caller abort; that cancellation must
       // propagate unchanged rather than be reported as a deadline exhaustion,
       // which provisionDevice maps to a RETRYABLE `timeout`.
-      this.throwIfCallerCancelled(context, error);
+      this.phases.throwIfCallerCancelled(context, error);
       // Otherwise the lock wait is bounded by the remaining setup budget, so
       // the only failure it can report here is that bound being reached.
-      this.fail(context, "runner-setup", 1, normalizeDiagnostic(error), {
+      this.phases.fail(context, "runner-setup", 1, normalizeDiagnostic(error), {
         deadlineExhausted: true,
       });
     }
   }
 
   private async ensureAndroidReady(context: ReadinessAttemptContext): Promise<void> {
-    this.throwIfCallerCancelled(context);
+    this.phases.throwIfCallerCancelled(context);
     const finishInspection = this.inspectAndroidFrameworkBestEffort(context);
     try {
       let lastDiagnostic = "Android framework readiness budget exhausted";
       await new DefaultRetryExecutor(this.dependencies.timer).executeOrThrow(
         async (attempt) => {
-          this.throwIfCallerCancelled(context);
-          if (this.remainingForPhase(context, "runner-setup") <= 0) {
-            this.fail(context, "runner-setup", attempt, lastDiagnostic, {
+          this.phases.throwIfCallerCancelled(context);
+          if (this.phases.remainingForPhase(context, "runner-setup") <= 0) {
+            this.phases.fail(context, "runner-setup", attempt, lastDiagnostic, {
               deadlineExhausted: true,
             });
           }
@@ -421,21 +311,25 @@ export class RunnerReadinessService {
             this.dependencies.getAndroidManager(context.device).resetSetupState();
           }
           await this.ensureAndroidReadyAttempt(context);
-          this.throwIfCallerCancelled(context);
+          this.phases.throwIfCallerCancelled(context);
         },
         {
           maxAttempts:
-            Math.ceil(this.remainingForPhase(context, "runner-setup") / READINESS_RETRY_DELAY_MS) +
-            1,
+            Math.ceil(
+              this.phases.remainingForPhase(context, "runner-setup") / READINESS_RETRY_DELAY_MS,
+            ) + 1,
           signal: context.signal,
           delays: () =>
-            Math.min(READINESS_RETRY_DELAY_MS, this.remainingForPhase(context, "runner-setup")),
+            Math.min(
+              READINESS_RETRY_DELAY_MS,
+              this.phases.remainingForPhase(context, "runner-setup"),
+            ),
           // Retry required setup only when Android explicitly reports a missing
           // boot service. Optional inspection never determines readiness.
           shouldRetry: (error) =>
             error instanceof RunnerReadinessError &&
             error.retryableAndroidFrameworkFailure &&
-            this.remainingForPhase(context, "runner-setup") > 0,
+            this.phases.remainingForPhase(context, "runner-setup") > 0,
           onRetry: (error) => {
             lastDiagnostic = normalizeDiagnostic(error);
             logger.debug(`Retrying Android framework setup: ${lastDiagnostic}`);
@@ -443,11 +337,11 @@ export class RunnerReadinessService {
         },
       );
     } catch (error) {
-      this.throwIfCallerCancelled(context, error);
+      this.phases.throwIfCallerCancelled(context, error);
       throw error;
     } finally {
       await finishInspection?.();
-      this.throwIfCallerCancelled(context);
+      this.phases.throwIfCallerCancelled(context);
     }
   }
 
@@ -458,25 +352,31 @@ export class RunnerReadinessService {
       await this.ensureAndroidReadyWithoutDownloads(context, manager, client);
       return;
     }
-    const compatibility = await this.runPhase(context, "package-compatibility", 1, (signal) =>
-      manager.ensureCompatibleVersion(
-        {
-          allowDownloadWhenInstalled: true,
-          bypassVersionCheckCache: false,
-        },
-        signal,
-      ),
+    const compatibility = await this.phases.runPhase(
+      context,
+      "package-compatibility",
+      1,
+      (signal) =>
+        manager.ensureCompatibleVersion(
+          {
+            allowDownloadWhenInstalled: true,
+            bypassVersionCheckCache: false,
+          },
+          signal,
+        ),
     );
     this.assertAndroidCompatibility(context, compatibility);
 
     // Read sequentially so a transient failure cannot leave a sibling ADB
     // command running when the next setup attempt starts.
-    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, async (signal) => [
-      await manager.isInstalled(signal),
-      await manager.isEnabled(signal),
-    ]);
+    const [installed, enabled] = await this.phases.runPhase(
+      context,
+      "runner-setup",
+      1,
+      async (signal) => [await manager.isInstalled(signal), await manager.isEnabled(signal)],
+    );
     if (await this.isResponsiveFastPath(context, client, installed && enabled)) {
-      await this.recoverSystemUiAnrIfPresent(context, client);
+      await this.anrRecovery.recoverIfPresent(context, client);
       return;
     }
 
@@ -486,7 +386,7 @@ export class RunnerReadinessService {
     manager.resetSetupState();
     await this.setupAndroidRunner(context, manager);
     await this.waitForResponsiveClient(context, client, manager);
-    await this.recoverSystemUiAnrIfPresent(context, client);
+    await this.anrRecovery.recoverIfPresent(context, client);
   }
 
   private inspectAndroidFrameworkBestEffort(
@@ -538,7 +438,7 @@ export class RunnerReadinessService {
       this.dependencies.timer.clearTimeout(timeout);
       // Bound cleanup even for a broken injected probe that ignores abort;
       // production ADB commands observe the signal and settle here.
-      await this.awaitAbortSettlement(inspection);
+      await this.phases.awaitAbortSettlement(inspection);
     };
   }
 
@@ -547,23 +447,25 @@ export class RunnerReadinessService {
     manager: ReadinessAndroidManager,
     client: ReadinessClient,
   ): Promise<void> {
-    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, async (signal) => [
-      await manager.isInstalled(signal),
-      await manager.isEnabled(signal),
-    ]);
+    const [installed, enabled] = await this.phases.runPhase(
+      context,
+      "runner-setup",
+      1,
+      async (signal) => [await manager.isInstalled(signal), await manager.isEnabled(signal)],
+    );
     if (!installed) {
-      this.fail(
+      this.phases.fail(
         context,
         "runner-setup",
         1,
         "CtrlProxy is not installed and runner downloads are disabled",
       );
     }
-    const compatible = await this.runPhase(context, "package-compatibility", 1, () =>
+    const compatible = await this.phases.runPhase(context, "package-compatibility", 1, () =>
       manager.isVersionCompatible(),
     );
     if (!compatible) {
-      this.fail(
+      this.phases.fail(
         context,
         "package-compatibility",
         1,
@@ -571,235 +473,14 @@ export class RunnerReadinessService {
       );
     }
     if (await this.isResponsiveFastPath(context, client, enabled)) {
-      await this.recoverSystemUiAnrIfPresent(context, client);
+      await this.anrRecovery.recoverIfPresent(context, client);
       return;
     }
     if (!enabled) {
-      await this.runPhase(context, "runner-setup", 1, () => manager.enable());
+      await this.phases.runPhase(context, "runner-setup", 1, () => manager.enable());
     }
     await this.waitForResponsiveClient(context, client, manager);
-    await this.recoverSystemUiAnrIfPresent(context, client);
-  }
-
-  private async recoverSystemUiAnrIfPresent(
-    context: ReadinessAttemptContext,
-    client: ReadinessClient,
-  ): Promise<void> {
-    const anrClient = this.systemUiAnrClient(context, client);
-    if (!anrClient) {
-      return;
-    }
-
-    const recoveryDeadlineMs = Math.min(
-      context.healthDeadlineMs ?? context.totalDeadlineMs,
-      this.dependencies.timer.now() + SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS,
-    );
-    const initialHierarchy = await this.readSystemUiAnrHierarchy(
-      context,
-      anrClient,
-      recoveryDeadlineMs,
-    );
-    const dialog = findSystemUiAnrDialog(initialHierarchy ?? { hierarchy: {} });
-    if (!dialog) {
-      return;
-    }
-
-    await this.selectSystemUiAnrWait(context, anrClient, dialog.waitBounds, recoveryDeadlineMs);
-    await this.waitForSystemUiAnrRecovery(
-      context,
-      anrClient,
-      recoveryDeadlineMs,
-      initialHierarchy?.updatedAt,
-    );
-  }
-
-  private systemUiAnrClient(
-    context: ReadinessAttemptContext,
-    client: ReadinessClient,
-  ): SystemUiAnrReadinessClient | undefined {
-    if (
-      context.device.platform !== "android" ||
-      !client.getAccessibilityHierarchy ||
-      !client.requestTapCoordinates
-    ) {
-      return undefined;
-    }
-    return {
-      getAccessibilityHierarchy: (...args) => client.getAccessibilityHierarchy!(...args),
-      requestTapCoordinates: (...args) => client.requestTapCoordinates!(...args),
-    };
-  }
-
-  private async readSystemUiAnrHierarchy(
-    context: ReadinessAttemptContext,
-    client: SystemUiAnrReadinessClient,
-    recoveryDeadlineMs: number,
-    minTimestamp = 0,
-    required = false,
-  ): Promise<ViewHierarchyResult | null> {
-    const timeoutMs = Math.min(
-      this.probeTimeout(context),
-      this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
-    );
-    if (timeoutMs <= 0) {
-      this.throwIfCallerCancelled(context);
-      if (!required) {
-        return null;
-      }
-      throw this.systemUiAnrRecoveryRequired(
-        context,
-        "recovery budget expired before the dialog state could be confirmed",
-      );
-    }
-    try {
-      const hierarchy = await this.runPhase(
-        context,
-        "runner-health",
-        1,
-        async (signal) =>
-          await client.getAccessibilityHierarchy(undefined, {
-            skipWaitForFresh: true,
-            minTimestamp,
-            disableAllFiltering: true,
-            signal,
-            timeoutMs,
-          }),
-      );
-      // The production client can fall back to a cached tree when both its
-      // fresh-data wait and synchronous request fail. A required read must not
-      // treat that stale tree as confirmation that the dialog cleared.
-      const isUnavailable = this.isSystemUiAnrHierarchyUnavailable(hierarchy, minTimestamp);
-      if (isUnavailable && required) {
-        throw this.systemUiAnrRecoveryRequired(
-          context,
-          "could not confirm dialog recovery: hierarchy unavailable",
-        );
-      }
-      return isUnavailable ? null : hierarchy;
-    } catch (error) {
-      if (error instanceof SystemUiAnrRecoveryRequiredError) {
-        throw error;
-      }
-      // Genuine cancellation or device loss aborts the request signal. Treating
-      // that as "no dialog" would let startDevice bind a session after the
-      // caller has already given up, so propagate it on every probe.
-      this.throwIfCallerCancelled(context, error);
-      if (!required) {
-        return null;
-      }
-      throw this.systemUiAnrRecoveryRequired(
-        context,
-        `could not confirm dialog recovery: ${normalizeDiagnostic(error)}`,
-      );
-    }
-  }
-
-  private isSystemUiAnrHierarchyUnavailable(
-    hierarchy: ViewHierarchyResult | null,
-    minTimestamp: number,
-  ): boolean {
-    if (hierarchy === null || hierarchy.fresh === false) {
-      return true;
-    }
-    return hierarchy.updatedAt !== undefined && hierarchy.updatedAt < minTimestamp;
-  }
-
-  private async selectSystemUiAnrWait(
-    context: ReadinessAttemptContext,
-    client: SystemUiAnrReadinessClient,
-    bounds: SystemUiAnrDialog["waitBounds"],
-    recoveryDeadlineMs: number,
-  ): Promise<void> {
-    const { x, y } = centerOfBounds(bounds);
-    try {
-      const tap = await this.runPhase(
-        context,
-        "runner-health",
-        1,
-        async () =>
-          await client.requestTapCoordinates({
-            x,
-            y,
-            duration: 10,
-            timeoutMs: Math.min(
-              this.probeTimeout(context),
-              this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
-            ),
-          }),
-      );
-      if (!tap.success) {
-        throw new Error(tap.error ?? "unknown tap failure");
-      }
-    } catch (error) {
-      this.throwIfCallerCancelled(context, error);
-      throw this.systemUiAnrRecoveryRequired(
-        context,
-        `could not select Wait: ${normalizeDiagnostic(error)}`,
-      );
-    }
-  }
-
-  private async waitForSystemUiAnrRecovery(
-    context: ReadinessAttemptContext,
-    client: SystemUiAnrReadinessClient,
-    recoveryDeadlineMs: number,
-    initialUpdatedAt: number | undefined,
-  ): Promise<void> {
-    let healthyPolls = 0;
-    let freshAfter = (initialUpdatedAt ?? 0) + 1;
-    while (this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs) > 0) {
-      await this.dependencies.timer.sleep(
-        Math.min(
-          SYSTEM_UI_ANR_RECOVERY_POLL_MS,
-          this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
-        ),
-      );
-      const hierarchy = await this.readSystemUiAnrHierarchy(
-        context,
-        client,
-        recoveryDeadlineMs,
-        freshAfter,
-        true,
-      );
-      freshAfter = Math.max(freshAfter, (hierarchy?.updatedAt ?? 0) + 1);
-      if (findSystemUiAnrDialog(hierarchy ?? { hierarchy: {} })) {
-        healthyPolls = 0;
-        continue;
-      }
-      healthyPolls++;
-      if (healthyPolls >= SYSTEM_UI_ANR_RECOVERY_HEALTHY_POLLS) {
-        return;
-      }
-    }
-
-    throw this.systemUiAnrRecoveryRequired(context, "dialog persisted after selecting Wait");
-  }
-
-  private remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs: number): number {
-    return Math.max(0, recoveryDeadlineMs - this.dependencies.timer.now());
-  }
-
-  private throwIfCallerCancelled(context: ReadinessAttemptContext, fallback?: unknown): void {
-    if (context.signal?.aborted) {
-      if (context.deadlineFailure) {
-        throw context.deadlineFailure;
-      }
-      throw context.signal.reason ?? fallback ?? new Error("System UI ANR recovery cancelled");
-    }
-  }
-
-  private systemUiAnrRecoveryRequired(
-    context: ReadinessAttemptContext,
-    detail: string,
-  ): SystemUiAnrRecoveryRequiredError {
-    return new SystemUiAnrRecoveryRequiredError(this.systemUiAnrDiagnostic(context, detail));
-  }
-
-  private systemUiAnrDiagnostic(context: ReadinessAttemptContext, detail: string): string {
-    return (
-      `System UI ANR recovery required: platform=android requested=[${context.requestedIdentity}] ` +
-      `resolved=[${context.device.name} (${context.device.deviceId})]: ${detail}`
-    );
+    await this.anrRecovery.recoverIfPresent(context, client);
   }
 
   private assertAndroidCompatibility(
@@ -822,7 +503,12 @@ export class RunnerReadinessService {
         : undefined,
       compatibility.status === "skipped" ? "package compatibility check was skipped" : undefined,
     ].filter((value): value is string => Boolean(value));
-    this.fail(context, "package-compatibility", 1, compatibility.cause ?? details.join("; "));
+    this.phases.fail(
+      context,
+      "package-compatibility",
+      1,
+      compatibility.cause ?? details.join("; "),
+    );
   }
 
   private async isResponsiveFastPath(
@@ -833,8 +519,8 @@ export class RunnerReadinessService {
     if (!runnerConfigured || !client.isConnected()) {
       return false;
     }
-    return this.runPhase(context, "runner-health", 1, () =>
-      client.verifyServiceReady(1, 0, this.probeTimeout(context)),
+    return this.phases.runPhase(context, "runner-health", 1, () =>
+      client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
     );
   }
 
@@ -842,11 +528,11 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     manager: ReadinessAndroidManager,
   ): Promise<void> {
-    const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
+    const setup = await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
       manager.setup(false, context.perf, signal),
     );
     if (!setup.success) {
-      this.fail(context, "runner-setup", 1, setup.cause ?? setup.error ?? setup.message);
+      this.phases.fail(context, "runner-setup", 1, setup.cause ?? setup.error ?? setup.message);
     }
     const verificationDeadlineMs = Math.min(
       context.totalDeadlineMs,
@@ -857,7 +543,7 @@ export class RunnerReadinessService {
     let enabled = false;
     for (;;) {
       attempts++;
-      [installed, enabled] = await this.runPhase(
+      [installed, enabled] = await this.phases.runPhase(
         context,
         "runner-setup",
         attempts,
@@ -873,18 +559,18 @@ export class RunnerReadinessService {
       if (!installed || this.dependencies.timer.now() >= verificationDeadlineMs) {
         break;
       }
-      this.throwIfCallerCancelled(context);
+      this.phases.throwIfCallerCancelled(context);
       await this.dependencies.timer.sleep(
         Math.min(READINESS_RETRY_DELAY_MS, verificationDeadlineMs - this.dependencies.timer.now()),
       );
-      this.throwIfCallerCancelled(context);
+      this.phases.throwIfCallerCancelled(context);
       if (this.dependencies.timer.now() >= verificationDeadlineMs) {
         break;
       }
       // Android can clear accessibility enablement after a successful setup
       // write. Reconcile the observed disabled state within the same deadline,
       // then require a fresh read before accepting readiness.
-      await this.runPhase(
+      await this.phases.runPhase(
         context,
         "runner-setup",
         attempts,
@@ -893,7 +579,7 @@ export class RunnerReadinessService {
       );
     }
     if (!installed || !enabled) {
-      this.fail(
+      this.phases.fail(
         context,
         "runner-setup",
         attempts,
@@ -904,11 +590,11 @@ export class RunnerReadinessService {
 
   private async ensureIosReady(context: ReadinessAttemptContext): Promise<void> {
     this.assertIosRuntimeCompatible(context);
-    const override = await this.runPhase(context, "runner-setup", 1, () =>
+    const override = await this.phases.runPhase(context, "runner-setup", 1, () =>
       this.dependencies.checkIosOverride(),
     );
     if (override.present && !override.usable) {
-      this.fail(
+      this.phases.fail(
         context,
         "runner-setup",
         1,
@@ -916,15 +602,15 @@ export class RunnerReadinessService {
       );
     }
 
-    await this.runPhase(context, "runner-setup", 1, () =>
+    await this.phases.runPhase(context, "runner-setup", 1, () =>
       this.dependencies.awaitIosStartupMaintenance(),
     );
     const manager = this.dependencies.getIosManager(context.device);
     let client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     if (client.isConnected()) {
-      this.startHealthWindow(context);
-      const ready = await this.runPhase(context, "runner-health", 1, () =>
-        client.verifyServiceReady(1, 0, this.probeTimeout(context)),
+      this.phases.startHealthWindow(context);
+      const ready = await this.phases.runPhase(context, "runner-health", 1, () =>
+        client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
       );
       if (ready) {
         return;
@@ -934,10 +620,10 @@ export class RunnerReadinessService {
       // hierarchy. In that state setup() would short-circuit on port health,
       // leaving the runner wedged indefinitely. Restart the process so the
       // next health probe uses a fresh observation stream (#5532).
-      await this.runPhase(context, "runner-setup", 1, (signal) =>
+      await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
         manager.forceRestart({
           signal,
-          minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-health"),
+          minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-health"),
         }),
       );
       // A cold restart can outlast the original health window. Probe the new
@@ -962,12 +648,17 @@ export class RunnerReadinessService {
     // (:613) — otherwise setup() can report "already running" against a
     // runner that died without a local child-exit event (#6416).
     manager.resetSetupState();
-    const setup = await this.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.setup(false, context.perf, signal, this.remainingForPhase(context, "runner-setup")),
+    const setup = await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
+      manager.setup(
+        false,
+        context.perf,
+        signal,
+        this.phases.remainingForPhase(context, "runner-setup"),
+      ),
     );
     context.onRunnerSetup?.();
     if (!setup.success) {
-      this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
+      this.phases.fail(context, "runner-setup", 1, setup.error ?? setup.message);
     }
     // Setup can reallocate a busy port or adopt the runner's actual listener.
     // Resolve the client after launch, just as the force-restart path does.
@@ -979,7 +670,7 @@ export class RunnerReadinessService {
     const runtime = context.device.iosVersion ?? context.device.osVersion;
     const comparison = compareIosVersions(runtime, IOS_CTRL_PROXY_MINIMUM_IOS_VERSION);
     if (comparison !== null && comparison < 0) {
-      this.fail(
+      this.phases.fail(
         context,
         "runner-setup",
         1,
@@ -992,19 +683,21 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     manager: ReadinessIosManager,
   ): Promise<void> {
-    const installed = await this.runPhase(context, "runner-setup", 1, () => manager.isInstalled());
+    const installed = await this.phases.runPhase(context, "runner-setup", 1, () =>
+      manager.isInstalled(),
+    );
     if (!installed) {
-      this.fail(
+      this.phases.fail(
         context,
         "runner-setup",
         1,
         "CtrlProxy iOS runner is not installed and runner downloads are disabled",
       );
     }
-    await this.runPhase(context, "runner-setup", 1, (signal) =>
+    await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
       manager.start({
         signal,
-        minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-setup"),
+        minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-setup"),
       }),
     );
     const client = this.dependencies.getIosClient(context.device, manager.getServicePort());
@@ -1020,16 +713,16 @@ export class RunnerReadinessService {
     // that is alive but whose CtrlProxy endpoint never came up. Give that
     // process one real WebSocket + hierarchy readiness attempt, then restart it
     // instead of spending the entire health window polling a dead listener.
-    this.startHealthWindow(context);
+    this.phases.startHealthWindow(context);
     if (await this.isResponsiveClientOnce(context, initialClient)) {
       return;
     }
 
     manager.resetSetupState();
-    await this.runPhase(context, "runner-health", 1, (signal) =>
+    await this.phases.runPhase(context, "runner-health", 1, (signal) =>
       manager.forceRestart({
         signal,
-        minimumHealthPollDurationMs: this.remainingForPhase(context, "runner-health"),
+        minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-health"),
       }),
     );
     const restartedClient = this.dependencies.getIosClient(
@@ -1045,14 +738,14 @@ export class RunnerReadinessService {
   ): Promise<boolean> {
     const connected =
       client.isConnected() ||
-      (await this.runPhase(context, "runner-connect", 1, (signal) =>
+      (await this.phases.runPhase(context, "runner-connect", 1, (signal) =>
         client.connectWithoutSetup(signal),
       ));
     if (!connected) {
       return false;
     }
-    return await this.runPhase(context, "runner-health", 1, () =>
-      client.verifyServiceReady(1, 0, this.probeTimeout(context)),
+    return await this.phases.runPhase(context, "runner-health", 1, () =>
+      client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
     );
   }
 
@@ -1079,13 +772,13 @@ export class RunnerReadinessService {
   ): Promise<void> {
     // Provisioning is done; open the steady-state health window now so a long
     // cold launch above did not consume it (#5376).
-    this.startHealthWindow(context);
+    this.phases.startHealthWindow(context);
     let attempts = 0;
     let connected = client.isConnected();
     let phase: RunnerReadinessPhase = connected ? "runner-health" : "runner-connect";
     let lastSystemUiProbeMs = Number.NEGATIVE_INFINITY;
-    while (this.remainingForPhase(context, "runner-health") > 0) {
-      this.throwIfCallerCancelled(context);
+    while (this.phases.remainingForPhase(context, "runner-health") > 0) {
+      this.phases.throwIfCallerCancelled(context);
       if (context.device.platform === "android") {
         client = await this.replaceClosedAndroidClient(context, client, hold, attempts);
       }
@@ -1099,7 +792,7 @@ export class RunnerReadinessService {
           attempts,
           client,
         );
-        connected = await this.runPhase(context, phase, attempts, () =>
+        connected = await this.phases.runPhase(context, phase, attempts, () =>
           client.waitForConnection(1, 0),
         );
         if (!connected && isTerminalLeaseConflict(client)) {
@@ -1108,8 +801,8 @@ export class RunnerReadinessService {
       }
       if (connected) {
         phase = "runner-health";
-        const ready = await this.runPhase(context, phase, attempts, () =>
-          client.verifyServiceReady(1, 0, this.probeTimeout(context)),
+        const ready = await this.phases.runPhase(context, phase, attempts, () =>
+          client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
         );
         if (ready) {
           return;
@@ -1126,10 +819,10 @@ export class RunnerReadinessService {
         this.dependencies.timer.now() - lastSystemUiProbeMs >= SYSTEM_UI_ANR_RECOVERY_POLL_MS
       ) {
         lastSystemUiProbeMs = this.dependencies.timer.now();
-        await this.recoverSystemUiAnrIfPresent(context, client);
+        await this.anrRecovery.recoverIfPresent(context, client);
       }
 
-      const remaining = this.remainingForPhase(context, "runner-health");
+      const remaining = this.phases.remainingForPhase(context, "runner-health");
       if (remaining > 0) {
         await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
       }
@@ -1178,18 +871,23 @@ export class RunnerReadinessService {
     ) {
       return;
     }
-    const rebindAttempted = await this.runPhase(context, "runner-connect", attempts, async () => {
-      try {
-        return await manager.rebindIfUnhealthy!();
-      } catch (error) {
-        if (!(error instanceof CtrlProxyInspectionError)) {
-          throw error;
+    const rebindAttempted = await this.phases.runPhase(
+      context,
+      "runner-connect",
+      attempts,
+      async () => {
+        try {
+          return await manager.rebindIfUnhealthy!();
+        } catch (error) {
+          if (!(error instanceof CtrlProxyInspectionError)) {
+            throw error;
+          }
+          // Inspection did not mutate settings, so a normal connection attempt remains safe.
+          logger.warn(`[CTRL_PROXY] Accessibility rebind inspection unavailable: ${error}`, error);
+          return false;
         }
-        // Inspection did not mutate settings, so a normal connection attempt remains safe.
-        logger.warn(`[CTRL_PROXY] Accessibility rebind inspection unavailable: ${error}`, error);
-        return false;
-      }
-    });
+      },
+    );
     context.lastCtrlProxyRebindMs = this.dependencies.timer.now();
     context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
     if (rebindAttempted) {
@@ -1244,7 +942,7 @@ export class RunnerReadinessService {
     context.lastConnectedRecoveryMs = this.dependencies.timer.now();
 
     if (manager.rebindIfUnhealthy && !context.ctrlProxyAccessibilityRebindAttempted) {
-      const rebindAttempted = await this.runPhase(context, "runner-health", attempts, () =>
+      const rebindAttempted = await this.phases.runPhase(context, "runner-health", attempts, () =>
         manager.rebindIfUnhealthy!(),
       );
       context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
@@ -1263,7 +961,7 @@ export class RunnerReadinessService {
       return;
     }
     context.ctrlProxyProcessRestartAttempted = true;
-    const restarted = await this.runPhase(context, "runner-health", attempts, () =>
+    const restarted = await this.phases.runPhase(context, "runner-health", attempts, () =>
       manager.forceRestartProcess!(),
     );
     if (restarted) {
@@ -1321,7 +1019,7 @@ export class RunnerReadinessService {
     if (isForwardingLeaseConflict) {
       const lastConnectionFailure = client.getLastConnectionFailureMessage?.();
       if (lastConnectionFailure) {
-        this.fail(context, phase, attempts, lastConnectionFailure);
+        this.phases.fail(context, phase, attempts, lastConnectionFailure);
       }
     }
     if (phase === "runner-connect") {
@@ -1331,7 +1029,7 @@ export class RunnerReadinessService {
       phase === "runner-connect"
         ? await this.runnerConnectFailureDiagnostic(context)
         : await this.runnerHealthFailureDiagnostic(context, phase);
-    this.fail(
+    this.phases.fail(
       context,
       phase,
       attempts,
@@ -1352,7 +1050,7 @@ export class RunnerReadinessService {
         ? `CtrlProxy client for ${context.device.deviceId} is closed; adb forward unavailable`
         : undefined);
     if (cause) {
-      this.fail(context, "runner-connect", attempts, cause, {
+      this.phases.fail(context, "runner-connect", attempts, cause, {
         deadlineExhausted,
         failureKind: "ctrlproxy_forward_unavailable",
       });
@@ -1468,227 +1166,6 @@ export class RunnerReadinessService {
       return undefined;
     }
   }
-
-  private async runPhase<T>(
-    context: ReadinessAttemptContext,
-    phase: RunnerReadinessPhase,
-    attempts: number,
-    operation: (signal: AbortSignal) => Promise<T>,
-    operationDeadlineMs?: number,
-  ): Promise<T> {
-    const remainingMs = Math.min(
-      this.remainingForPhase(context, phase),
-      operationDeadlineMs === undefined
-        ? Number.POSITIVE_INFINITY
-        : Math.max(0, operationDeadlineMs - this.dependencies.timer.now()),
-    );
-    if (remainingMs <= 0) {
-      this.fail(context, phase, attempts, "readiness budget exhausted before phase started", {
-        deadlineExhausted: true,
-      });
-    }
-    let phaseTimedOut = false;
-    let operationFailure: unknown;
-    let callerTimedOut = false;
-    const recordCallerAbort = () => {
-      callerTimedOut = this.dependencies.timer.now() >= context.totalDeadlineMs;
-    };
-    context.signal?.addEventListener("abort", recordCallerAbort, { once: true });
-    if (context.signal?.aborted) {
-      recordCallerAbort();
-    }
-    const deadlineError = () => {
-      const stage =
-        phase === "runner-connect"
-          ? "CtrlProxy WebSocket connect"
-          : phase === "runner-health"
-            ? "CtrlProxy readiness wait"
-            : context.device.platform === "ios"
-              ? "iOS CtrlProxy setup"
-              : "CtrlProxy package/setup";
-      return new ActionableError(
-        `${stage} timed out: readiness phase exceeded the remaining deadline. Retry device acquisition.`,
-      );
-    };
-    const callerAbortError = (reason: unknown) =>
-      callerTimedOut
-        ? operationFailure === undefined
-          ? deadlineError()
-          : toActionableError(operationFailure, `Runner readiness ${phase} failed`)
-        : reason;
-    const phaseStartedMs = this.dependencies.timer.now();
-    let elapsedRecorded = false;
-    const recordElapsed = (): void => {
-      if (elapsedRecorded) {
-        return;
-      }
-      elapsedRecorded = true;
-      const elapsedMs = Math.max(0, this.dependencies.timer.now() - phaseStartedMs);
-      context.phaseElapsedMs[phase] = (context.phaseElapsedMs[phase] ?? 0) + elapsedMs;
-    };
-    // Record one `readiness:<phase>` span. The ambient tracker is already
-    // established for the whole attempt in `ensureReadyUncoordinated`, so the
-    // runner install/start/health commands (adb, simctl, xcodebuild) beneath
-    // this phase attribute their time here (see PerfContext); `trackAmbient` is
-    // a no-op when no ambient tracker is in scope.
-    try {
-      return await runPhaseWithSettlement(
-        {
-          timer: this.dependencies.timer,
-          timeoutMs: remainingMs,
-          signal: context.signal,
-          graceMs: ABORT_SETTLEMENT_GRACE_MS,
-          label: `Runner readiness ${phase}`,
-          preferOperationFailureOnTimeout: true,
-          explicitAbortError: callerAbortError,
-          defaultAbortError: () => callerAbortError(context.signal?.reason),
-          timeoutError: () => {
-            phaseTimedOut = true;
-            return deadlineError();
-          },
-          onRaceSettled: recordElapsed,
-        },
-        async (signal) => {
-          try {
-            return await trackAmbient(`readiness:${phase}`, () =>
-              runWithAbortSignal(signal, () => operation(signal)),
-            );
-          } catch (error) {
-            operationFailure = error;
-            throw error;
-          }
-        },
-      );
-    } catch (error) {
-      // Capture the phase duration at the deadline, excluding any grace period
-      // spent waiting for an aborted platform command to settle.
-      recordElapsed();
-      if (!callerTimedOut) {
-        this.throwIfCallerCancelled(context, error);
-      }
-      // An operation fault remains a fault; only the owned deadline or a
-      // request abort captured at that deadline is a timeout.
-      return this.fail(context, phase, attempts, error, {
-        deadlineExhausted: phaseTimedOut || callerTimedOut,
-      });
-    } finally {
-      context.signal?.removeEventListener("abort", recordCallerAbort);
-      recordElapsed();
-    }
-  }
-
-  private async awaitAbortSettlement(operation: Promise<unknown>): Promise<void> {
-    const timedOut = new Error("Abort settlement grace expired");
-    try {
-      await raceWithDeadline(
-        operation.then(
-          () => undefined,
-          () => undefined,
-        ),
-        {
-          timer: this.dependencies.timer,
-          timeoutMs: ABORT_SETTLEMENT_GRACE_MS,
-          label: "Abort settlement grace",
-          timeoutError: () => timedOut,
-        },
-      );
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-    }
-  }
-
-  private probeTimeout(context: ReadinessAttemptContext): number {
-    return Math.max(
-      1,
-      Math.min(READINESS_PROBE_TIMEOUT_MS, this.remainingForPhase(context, "runner-health")),
-    );
-  }
-
-  /**
-   * Setup/provision phases (a cold CtrlProxy download + `xcodebuild`/install
-   * launch) are the ones that legitimately take boot-class time, so they run
-   * against `totalDeadlineMs`. Connect/health probes are steady-state and stay
-   * fast-fail against the health window (#5376).
-   */
-  private static isSetupPhase(phase: RunnerReadinessPhase): boolean {
-    return phase === "runner-setup" || phase === "package-compatibility";
-  }
-
-  private phaseDeadlineMs(context: ReadinessAttemptContext, phase: RunnerReadinessPhase): number {
-    if (RunnerReadinessService.isSetupPhase(phase)) {
-      return context.totalDeadlineMs;
-    }
-    // Before the health window opens (fast-path probes run before setup), fall
-    // back to the total deadline; those probes self-bound via `probeTimeout`.
-    return context.healthDeadlineMs ?? context.totalDeadlineMs;
-  }
-
-  private remainingForPhase(context: ReadinessAttemptContext, phase: RunnerReadinessPhase): number {
-    return Math.max(0, this.phaseDeadlineMs(context, phase) - this.dependencies.timer.now());
-  }
-
-  /**
-   * Open the steady-state connect/health window once provisioning is done, so a
-   * long cold launch does not eat the health budget. Still bounded by the
-   * caller's total deadline (#5376).
-   */
-  private startHealthWindow(context: ReadinessAttemptContext): void {
-    if (context.healthDeadlineMs !== null) {
-      return;
-    }
-    context.healthDeadlineMs = Math.min(
-      context.totalDeadlineMs,
-      this.dependencies.timer.now() + context.readinessTimeoutMs,
-    );
-  }
-
-  /**
-   * Report a readiness failure. `deadlineExhausted` says the phase ran out of
-   * BUDGET, so callers may treat it as a retryable timeout -- it must be stated
-   * by the caller, never inferred from the remaining budget at throw time: a
-   * terminal platform fault (runner not installed, version mismatch, a setup
-   * error, an orphaned forwarding lease) that happens to land as the phase
-   * deadline passes would otherwise be mapped to a retryable `timeout` and
-   * retried forever.
-   */
-  private fail(
-    context: ReadinessAttemptContext,
-    phase: RunnerReadinessPhase,
-    attempts: number,
-    detail: unknown,
-    options?: { deadlineExhausted?: boolean; failureKind?: "ctrlproxy_forward_unavailable" },
-  ): never {
-    const { device } = context;
-    const mapping =
-      `platform=${device.platform} requested=[${context.requestedIdentity}] ` +
-      `resolved=[${device.name} (${device.deviceId})]`;
-    const remainingBudgetMs = this.remainingForPhase(context, phase);
-    const phaseElapsed = Object.entries(context.phaseElapsedMs)
-      .map(([trackedPhase, elapsedMs]) => `${phaseElapsedLabel(trackedPhase)}=${elapsedMs}`)
-      .join(" ");
-    const readinessContext =
-      `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
-      `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}${phaseElapsed ? ` ${phaseElapsed}` : ""}`;
-    const failure = new RunnerReadinessError(
-      options?.failureKind
-        ? `${normalizeDiagnostic(detail)}; ${readinessContext}`
-        : `${readinessContext}: ${normalizeDiagnostic(detail)}`,
-      device.platform === "android" &&
-        RunnerReadinessService.isSetupPhase(phase) &&
-        isAndroidFrameworkUnavailable(detail),
-      options?.deadlineExhausted ?? false,
-      phase,
-      attempts,
-      detail,
-      options?.failureKind,
-    );
-    if (options?.deadlineExhausted) {
-      context.deadlineFailure = failure;
-    }
-    throw failure;
-  }
 }
 
 /**
@@ -1702,31 +1179,6 @@ function isTerminalLeaseConflict(client: ReadinessClient): boolean {
     (client.isLastConnectionFailureForwardingLeaseConflict?.() ?? false) &&
     !(client.isLastConnectionFailureTransientLeaseConflict?.() ?? false)
   );
-}
-
-function phaseElapsedLabel(phase: string): string {
-  switch (phase) {
-    case "package-compatibility":
-      return "packageCompatibilityElapsedMs";
-    case "runner-setup":
-      return "runnerSetupElapsedMs";
-    case "runner-connect":
-      return "connectElapsedMs";
-    case "runner-health":
-      return "healthElapsedMs";
-    default:
-      return `${phase}ElapsedMs`;
-  }
-}
-
-function normalizeDiagnostic(error: unknown): string {
-  const raw = errorMessage(error);
-  const redacted = redactAndroidCommandOutput(raw);
-  if (redacted.length <= MAX_DIAGNOSTIC_LENGTH) {
-    return redacted;
-  }
-  const half = Math.floor((MAX_DIAGNOSTIC_LENGTH - 32) / 2);
-  return `${redacted.slice(0, half)}\n...[diagnostic truncated]...\n${redacted.slice(-half)}`;
 }
 
 async function getDefaultAndroidFrameworkReadiness(

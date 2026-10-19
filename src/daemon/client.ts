@@ -20,20 +20,17 @@ import {
   daemonNotificationSchema,
   daemonResponseSchema,
   PROGRESS_NOTIFICATION_METHOD,
-  boundSessionLossMessage,
   sanitizeBoundSessionLoss,
   sanitizeDaemonRequestFailureCause,
   daemonInstanceFromError,
   releasedSessionNotFoundFields,
 } from "./types";
-import type { BoundSessionLoss } from "./types";
 import {
   SOCKET_PATH,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
-  DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
 import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import { type BuildIdentity, getCurrentBuildIdentity } from "./buildIdentity";
@@ -60,7 +57,11 @@ import {
   openDaemonSocket,
   type DaemonSocketConnectorHost,
 } from "./clientSocketConnector";
-import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
+import { isDaemonHandshakeFailure } from "./daemonHandshake";
+import { DaemonHandshakeMismatchError } from "./DaemonHandshakeMismatchError";
+import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
+import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
 import type { DaemonOptions, DaemonStatus } from "./types";
 import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
@@ -159,46 +160,6 @@ const socketOptionsStatusSchema = z.object({
   options: daemonOptionsSchema.optional(),
   effectiveDebug: z.boolean().optional(),
 });
-
-/** The server rejected this request before dispatch; retry cannot duplicate work. */
-export class DaemonHandshakeMismatchError extends ActionableError {
-  constructor(
-    readonly failure: DaemonHandshakeFailure,
-    message: string,
-  ) {
-    super(`Daemon preflight failed; no device operation started. ${message}`);
-    this.name = "DaemonHandshakeMismatchError";
-  }
-}
-
-/**
- * The request frame was never written to the daemon socket: connecting failed,
- * or no socket existed at send time. Replaying cannot duplicate a device action,
- * unlike a plain `DaemonUnavailableError` raised after the frame was written
- * (issue #6382).
- */
-export class DaemonRequestNotDeliveredError extends DaemonUnavailableError {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "DaemonRequestNotDeliveredError";
-  }
-}
-
-/** Shutdown response; only unadmitted requests are safe to replay unconditionally. */
-export class DaemonShuttingDownError extends DaemonUnavailableError {
-  constructor(readonly requestMayHaveDispatched = false) {
-    super(DAEMON_SHUTTING_DOWN_ERROR_MESSAGE);
-    this.name = "DaemonShuttingDownError";
-  }
-}
-
-/** A terminal loss of a session explicitly bound to the forwarded request. */
-export class DaemonBoundSessionLostError extends ActionableError {
-  constructor(readonly failure: BoundSessionLoss) {
-    super(boundSessionLossMessage(failure));
-    this.name = "DaemonBoundSessionLostError";
-  }
-}
 
 function daemonLifecycleResponseError(response: DaemonResponse): Error | undefined {
   if (isDaemonHandshakeFailure(response.handshakeFailure)) {

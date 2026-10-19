@@ -78,6 +78,14 @@ class SignalAwareDevice {
       return { status: "restored" };
     };
   }
+
+  /** The same restore for a restorer whose contract returns no outcome. */
+  voidRestorer(kind: RestoreKind): () => Promise<void> {
+    const restore = this.restorer(kind);
+    return async () => {
+      await restore();
+    };
+  }
 }
 
 async function harness() {
@@ -88,8 +96,8 @@ async function harness() {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
     barrier: () => new FakeDbWriteBarrier(),
     keepScreenAwakeRestorer: () => ({ restore: fake.restorer("keep-awake") }),
-    biometricEnrollmentRestorer: () => ({ restore: fake.restorer("biometric") }),
-    restorers: { networkCondition: () => ({ restore: fake.restorer("network") }) },
+    biometricEnrollmentRestorer: () => ({ restore: fake.voidRestorer("biometric") }),
+    restorers: { networkCondition: () => ({ restore: fake.voidRestorer("network") }) },
   });
   managers.push(manager);
   const utils = new FakeDeviceUtils();

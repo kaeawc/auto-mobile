@@ -19,7 +19,18 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 
-const rigs: ReturnType<typeof setup>[] = [];
+interface Rig {
+  proxy: DaemonMcpProxy;
+  client: FakeDaemonClient;
+  sessions: SessionManager;
+  timer: FakeTimer;
+  wire: Array<{ method: string; params?: Record<string, unknown> }>;
+  releasedDevices: string[];
+  state: DaemonStateAccess;
+  wedge: () => void;
+}
+
+const rigs: Rig[] = [];
 afterEach(async () => {
   for (const rig of rigs.splice(0)) {
     await rig.proxy.close();
@@ -27,7 +38,7 @@ afterEach(async () => {
   }
 });
 
-function setup(config: Partial<DaemonMcpProxyConfig> = {}) {
+function setup(config: Partial<DaemonMcpProxyConfig> = {}): Rig {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const wire: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -127,7 +138,7 @@ beforeAll(async () => {
   }
 });
 
-const releases = (rig: ReturnType<typeof setup>) =>
+const releases = (rig: Rig) =>
   rig.wire.filter(({ method }) => method === DAEMON_RELEASE_SESSION_METHOD);
 
 for (const count of [1, 2]) {

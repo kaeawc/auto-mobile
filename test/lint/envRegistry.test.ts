@@ -28,6 +28,20 @@ const PRODUCT_NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 const REGISTRY_IDENTIFIER = "ENV";
 const ENV_OBJECT = /(?:^|[a-z])(?:env|environment)$/i;
 
+/**
+ * `AUTOMOBILE_*`-shaped string literals that are not environment variables. They match the
+ * product-name scan but are never read from an environment object; renaming them would change
+ * on-device shell output or user-facing error codes.
+ */
+const NON_ENV_LITERALS: Readonly<Record<string, string>> = {
+  AUTOMOBILE_INCOMPLETE_EXTRACTION:
+    "Error code for an incomplete package extraction, not a variable.",
+  AUTOMOBILE_APP_FILE_BACKUP: "Marker echoed by the on-device app-file backup shell script.",
+  AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY:
+    "Marker echoed by the on-device app-file save shell script.",
+  AUTOMOBILE_SHARED_STORAGE_BACKUP: "Marker echoed by the on-device shared-storage backup script.",
+};
+
 function staticName(node: Expression): string | undefined {
   if (node.type === "Literal" && typeof node.value === "string") {
     return node.value;
@@ -177,7 +191,7 @@ function unregisteredReads(files: Map<string, string>): string[] {
     .filter(([relative]) => relative !== REGISTRY_FILE)
     .flatMap(([relative, source]) =>
       [...findEnvNames(relative, source)]
-        .filter((name) => !registered.has(name))
+        .filter((name) => !registered.has(name) && !Object.hasOwn(NON_ENV_LITERALS, name))
         .map((name) => `${relative}\t${name}`),
     )
     .sort();
@@ -186,11 +200,13 @@ function unregisteredReads(files: Map<string, string>): string[] {
 describe("environment variable registry", () => {
   let found: string[];
   let rawReads: string[];
+  let allFiles: Map<string, string>;
   // The AST scan of src/ runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
     const files = new Map(
       typeScriptFiles(SRC).map((file) => [relativePosix(ROOT, file), readFileSync(file, "utf8")]),
     );
+    allFiles = files;
     found = unregisteredReads(files);
     const registered = registeredNames();
     rawReads = [...files]
@@ -247,6 +263,18 @@ describe("environment variable registry", () => {
         registered,
       ),
     ).toEqual(["x.ts\tHOME", "x.ts\tPATH"]);
+  });
+
+  test("allowlisted non-env literals are never read from process.env or registered", () => {
+    const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
+    expect(registeredNames().intersection(allowlisted).size).toBe(0);
+    const reads = [...allFiles]
+      .filter(([relative]) => relative !== REGISTRY_FILE)
+      .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, allowlisted));
+    expect(reads).toEqual([]);
+    for (const reason of Object.values(NON_ENV_LITERALS)) {
+      expect(reason.length).toBeGreaterThan(0);
+    }
   });
 
   test("baseline is sorted and has no duplicates", () => {

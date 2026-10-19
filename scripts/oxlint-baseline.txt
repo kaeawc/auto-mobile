@@ -29,7 +29,6 @@
 1	src/daemon/socketServer.ts	eslint(max-lines-per-function)
 1	src/daemon/socketServer.ts	eslint(max-params)
 1	src/daemon/streamSocketAuth.ts	eslint(max-classes-per-file)
-1	src/daemon/videoStreamSocketServer.ts	auto-mobile(max-class-lines)
 1	src/db/bunSqliteDialect.ts	eslint(max-classes-per-file)
 1	src/db/bunSqliteDialect.ts	oxlint-disable(require-yield)
 1	src/db/bunSqliteDialect.ts	oxlint-disable-no-reason(require-yield)

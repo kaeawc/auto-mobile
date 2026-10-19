@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
@@ -84,11 +85,11 @@ async function stuckRelease(
     released.push(`${sessionId}:${reason}`);
   });
   await manager.createSession("s", DEVICE, "android", { timeoutMs: idleWindowMs });
-  manager.recordHeartbeat("s");
+  await deliverDaemonHeartbeatIfKnown(manager, "s");
 
   // The owner stays alive but makes no tool call, then dies.
   timer.advanceTime(idleBeforeOwnerLossMs);
-  manager.recordHeartbeat("s");
+  await deliverDaemonHeartbeatIfKnown(manager, "s");
 
   // A rebind whose write does not return: the release that follows waits on it ("awaiting-rebind").
   const parked = Promise.withResolvers<void>();
@@ -110,7 +111,7 @@ async function stuckRelease(
       while (timer.now() < until) {
         if (options.ownerKeepsHeartbeating) {
           // A no-op once the session is releasing, exactly as the daemon's heartbeat handler is.
-          manager.recordHeartbeat("s");
+          await deliverDaemonHeartbeatIfKnown(manager, "s");
         }
         await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
         result.idleReleaseStartedAt ??= manager.getIdleReleasesInProgress()[0]?.startedAtMs;
@@ -268,7 +269,7 @@ describe("a stuck idle release is held to the same deadline", () => {
       cleanups.push(() => void monitor.stop());
       const until = DEFAULT_SESSION_IDLE_TIMEOUT_MS + 2 * STUCK_REAP_WARN_MS;
       while (timer.now() < until) {
-        manager.recordHeartbeat("s");
+        await deliverDaemonHeartbeatIfKnown(manager, "s");
         await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
       }
       expect(manager.getSessionForDevice(DEVICE)).toBeNull();

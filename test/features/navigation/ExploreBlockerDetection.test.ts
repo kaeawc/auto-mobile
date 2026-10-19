@@ -16,10 +16,8 @@ import type { BlockerHandlerDeps } from "../../../src/features/navigation/Explor
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
-import {
-  createHierarchyForTest,
-  createObserveResultForTest,
-} from "../observe/observeScreenTestBuilders";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 
 function parserFlatteningTo(elements: Element[]): FakeElementParser {
   const parser = new FakeElementParser();

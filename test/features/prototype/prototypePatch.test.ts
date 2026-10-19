@@ -26,7 +26,7 @@ const fixtures: Fixture[] = readdirSync(directory)
   .map((name) => ({ ...JSON.parse(readFileSync(join(directory, name), "utf8")), name }));
 const base = {
   id: "patch",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root: { type: "column", id: "root", children: [{ type: "text", id: "label", text: "hello" }] },
   data: {},
 };
@@ -44,7 +44,7 @@ describe("shared prototype patch fixtures", () => {
     });
     const expectedError = { path: fixture.expectedPath, message: fixture.expectedMessage };
     if (fixture.stage === "apply") {
-      expect(result).toEqual({ success: false, error: expectedError });
+      expect<unknown>(result).toEqual({ success: false, error: expectedError });
     } else {
       expect(result.success).toBe(true);
       if (!result.success) {
@@ -56,10 +56,10 @@ describe("shared prototype patch fixtures", () => {
         if (validated.success) {
           throw new Error(`Unexpected validation success in ${fixture.name}`);
         }
-        expect(validated.error).toEqual(expectedError);
+        expect<unknown>(validated.error).toEqual(expectedError);
       } else {
         expect(validatePrototypeSpec(fixture.expected).success).toBe(true);
-        expect(result.spec).toEqual(fixture.expected);
+        expect<unknown>(result.spec).toEqual(fixture.expected);
       }
     }
     expect(fixture.spec).toEqual(pristineSpec);

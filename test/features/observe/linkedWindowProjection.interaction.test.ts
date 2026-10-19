@@ -1,15 +1,13 @@
+import {
+  createAndroidHierarchyConverter,
+  wireHierarchyFrom,
+} from "../../helpers/androidHierarchyConverter";
 import { describe, expect, test } from "bun:test";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
 import { textEquals } from "../../../src/features/observe/ConditionPredicates";
 import { previewHierarchyHitTest } from "../../../src/features/observe/HierarchyHitTest";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import type { ObserveResult } from "../../../src/models";
-import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
@@ -20,10 +18,8 @@ import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
  * once under its owning window. They must agree on what such a node shows.
  */
 describe("linked-window projection shared by waitFor textEquals and hitTest (#10095 + #10097)", () => {
-  const hierarchy = new CtrlProxyHierarchy({
-    timer: new FakeTimer(),
-  } as HierarchyDelegateContext).convertToViewHierarchyResult(
-    structuredClone(capturedIme) as AccessibilityHierarchy,
+  const hierarchy = createAndroidHierarchyConverter().convertToViewHierarchyResult(
+    wireHierarchyFrom(structuredClone(capturedIme)),
   );
   const observation: ObserveResult = {
     ...loadAndroidHomeObserve().observe,

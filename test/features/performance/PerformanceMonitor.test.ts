@@ -1,3 +1,4 @@
+import { FakeSimctl as FakeSimCtl } from "../../fakes/FakeSimctl";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   PerformanceMonitor,
@@ -1202,91 +1203,6 @@ describe("PerformanceMonitor", () => {
 /**
  * Fake SimCtl implementation for testing iOS monitoring.
  */
-class FakeSimCtl implements SimCtl {
-  private commandResults = new Map<string, ExecResult>();
-  private commandErrors = new Map<string, Error>();
-
-  setCommandResult(command: string, stdout: string, stderr = ""): void {
-    this.commandResults.set(command, { stdout, stderr });
-  }
-
-  setCommandError(command: string, error: Error): void {
-    this.commandErrors.set(command, error);
-  }
-
-  async executeCommand(command: string): Promise<ExecResult> {
-    if (this.commandErrors.has(command)) {
-      throw this.commandErrors.get(command);
-    }
-    const result = this.commandResults.get(command);
-    if (result) {
-      return result;
-    }
-    // Return empty result by default
-    return { stdout: "", stderr: "" };
-  }
-
-  async executeCommandArgs(args: string[]): Promise<ExecResult> {
-    return this.executeCommand(args.join(" "));
-  }
-
-  // Implement other SimCtl methods as no-ops for testing
-  setDevice(): void {}
-  async isAvailable(): Promise<boolean> {
-    return true;
-  }
-  async isSimulatorRunning(): Promise<boolean> {
-    return false;
-  }
-  async startSimulator(): Promise<any> {
-    return {};
-  }
-  async killSimulator(): Promise<void> {}
-  async waitForSimulatorReady(): Promise<any> {
-    return {};
-  }
-  async listSimulatorImages(): Promise<any[]> {
-    return [];
-  }
-  async getBootedSimulators(): Promise<any[]> {
-    return [];
-  }
-  async getDeviceInfo(): Promise<any> {
-    return null;
-  }
-  async bootSimulator(): Promise<any> {
-    return {};
-  }
-  async getDeviceTypes(): Promise<any[]> {
-    return [];
-  }
-  async getRuntimes(): Promise<any[]> {
-    return [];
-  }
-  async createSimulator(): Promise<string> {
-    return "";
-  }
-  async deleteSimulator(): Promise<void> {}
-  async listApps(): Promise<any[]> {
-    return [];
-  }
-  async launchApp(): Promise<any> {
-    return { success: true };
-  }
-  async terminateApp(): Promise<void> {}
-  async installApp(): Promise<void> {}
-  async uninstallApp(): Promise<void> {}
-  async getScreenSize(): Promise<any> {
-    return { width: 390, height: 844 };
-  }
-  async setAppearance(): Promise<void> {}
-  async openSimulatorApp(): Promise<boolean> {
-    return true;
-  }
-  async pushNotification(): Promise<{ success: boolean; error?: string }> {
-    return { success: true };
-  }
-}
 
 /**
  * Fake SimCtlClientFactory for testing.

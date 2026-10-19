@@ -1,3 +1,4 @@
+import { wireCapture } from "../../../helpers/wireCapture";
 import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
@@ -211,8 +212,8 @@ describe("diffObserveResult — a parked iOS keyboard is not collapsed (#10027)"
 });
 
 describe("diffObserveResult — Android keyboard collapse is unchanged (#9980)", () => {
-  const before = observation(androidPreTap.viewHierarchy, "android");
-  const after = observation(androidPostTap.viewHierarchy, "android");
+  const before = observation(wireCapture(androidPreTap.viewHierarchy), "android");
+  const after = observation(wireCapture(androidPostTap.viewHierarchy), "android");
 
   test("the captured Android keyboard-appearing pair still yields no keyboard rows", () => {
     const diff = diffObserveResult(before, after, COLLAPSE);

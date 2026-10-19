@@ -181,7 +181,7 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
   describe("show reset", () => {
     const spec = {
       id: "panel",
-      window: { placement: { type: "fullscreen" as const } },
+      window: { placement: { type: "fullscreen" as const }, opacity: 1 },
       root: { type: "text" as const, text: "hi" },
     };
     function recording(capabilities: string[]) {
@@ -227,7 +227,9 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
         return request(type, body);
       };
       const transport = new IosPrototypeTransport(agent);
-      expect((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(reported);
+      expect<unknown>((await transport.show(spec, { appearance: "dark" })).appearance).toEqual(
+        reported,
+      );
       // A reply that is not {mode, source, deviceDark} is dropped, not passed on.
       expect(await transport.show(spec)).not.toHaveProperty("appearance");
       expect(bodies).toEqual([{ spec, appearance: "dark" }, { spec }]);
@@ -251,7 +253,11 @@ describe("iOS status suspension deadline", () => {
     const transport = new IosPrototypeTransport(agent);
     await transport.status();
     expect(requestCalls[0]).toEqual(["get_prototype_status", undefined, { timeoutMs: 3000 }]);
-    await transport.show({ id: "test", root: { type: "text", text: "Hello" } });
+    await transport.show({
+      id: "test",
+      window: { placement: { type: "fullscreen" }, opacity: 1 },
+      root: { type: "text", text: "Hello" },
+    });
     await transport.dismiss({ all: true });
     expect(requestCalls[1]).toHaveLength(2);
     expect(requestCalls[2]).toHaveLength(2);
@@ -269,7 +275,7 @@ describe("iOS status suspension deadline", () => {
       message:
         "Prototype agent did not answer get_prototype_status within 3000 ms. iOS suspends an app that is not in the foreground, and the prototype agent injected into it, so the prototype's app is most likely in the background. Bring that app back to the foreground with launchApp (the prototype returns with its state), then retry.",
     });
-    expect(toActionableError(error, "Prototype inspect failed")).toBe(error);
+    expect<unknown>(toActionableError(error, "Prototype inspect failed")).toBe(error);
   });
   test("connection errors propagate unchanged", async () => {
     const error = new ActionableError("connection closed");

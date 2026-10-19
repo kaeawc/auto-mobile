@@ -143,7 +143,13 @@ describe("nested sessionless calls keep the outer control execution's session ke
     restoreEndSpy = () => endSpy.mockRestore();
     const pool = daemon.getDevicePool();
     await pool.initializeWithDevices([HELD, WATCHED]);
-    session = seeded ? await pool.autolockDevice(HELD.deviceId, "android", OWNER) : SESSION;
+    const autolocked = seeded
+      ? await pool.autolockDevice(HELD.deviceId, "android", OWNER)
+      : SESSION;
+    if (!autolocked) {
+      throw new Error("autolockDevice did not return a session");
+    }
+    session = autolocked;
     if (!seeded) {
       await pool.bindOrReuseDeviceSession({
         sessionId: session,

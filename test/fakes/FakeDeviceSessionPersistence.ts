@@ -156,7 +156,8 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       pre_cli_heartbeat_timeout_source: record.preCliHeartbeatTimeoutSource ?? null,
       pre_cli_session_timeout_ms: record.preCliSessionTimeoutMs ?? null,
       liveness_owner_token: existing?.liveness_owner_token ?? null,
-      liveness_contract_generation: existing?.liveness_contract_generation ?? 0,
+      // Like the repository's conflict update: every upsert marks a current liveness write.
+      liveness_contract_generation: existing ? (existing.liveness_contract_generation ?? 0) + 1 : 0,
       created_at: existing?.created_at ?? new Date(record.createdAtMs).toISOString(),
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });
@@ -220,7 +221,11 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       throw new DeviceSessionNotActiveError(sessionUuid);
     }
     const seq = update.activitySeq ?? update.lastUsedAtMs;
+    // Like the repository: every accepted write advances the liveness contract generation, even
+    // when a newer activity_seq keeps the stored deadlines.
+    row.liveness_contract_generation = (row.liveness_contract_generation ?? 0) + 1;
     if ((row.activity_seq ?? 0) > seq) {
+      this.faultPlan?.finish(fault);
       return;
     }
     Object.assign(row, {

@@ -1,10 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import fc from "fast-check";
-import {
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DaemonMcpProxy,
@@ -2277,7 +2274,7 @@ describe("not-found peer and retained handoff regressions", () => {
       results.set(name, world.violations);
     }
   });
-  test.each(cases)("%s", (name) => {
+  test.each([...cases])("%s", (name) => {
     expect(results.get(name)).toEqual([]);
   });
 });

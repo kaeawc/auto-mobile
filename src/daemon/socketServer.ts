@@ -45,7 +45,7 @@ import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecovery
 import { readToolEnvelopePayload } from "../utils/toolEnvelopePayload";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { unlink } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
@@ -191,6 +191,12 @@ import {
 export { DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS, DAEMON_MAINTENANCE_ADMISSION_TTL_MS };
 import { recordedProcessGenerationToken } from "./processGenerationFields";
 import { mcpRequestFailureDetails, requestFailureCause } from "./socketServer/errorFrames";
+import { interceptableMethod } from "./interceptableMethod";
+import {
+  isOwnedSocketFile,
+  readSocketFileIdentity,
+  type SocketFileIdentity,
+} from "./socketFileIdentity";
 import type { UnixSocketServerTestHooks } from "./socketServer/unixSocketServerTestHooks";
 import { isTaskRelayMethod, parseTaskRelayFrame } from "./tasks/taskRelay";
 import {
@@ -461,11 +467,6 @@ function resolveSocketBindGuard(
  * run concurrently. Each forward runs in process (#11820): its own MCP client and stateless
  * server, named by the socket session id as its MCP session key.
  */
-interface SocketFileIdentity {
-  dev: number;
-  ino: number;
-}
-
 /**
  * Creates the MCP HTTP client the daemon forwards `tools/call` requests through.
  * Injected so tests can substitute a fake without monkeypatching a private method
@@ -963,7 +964,7 @@ export class UnixSocketServer {
 
       await new Promise<void>((resolve, reject) => {
         this.server!.listen(this.socketPath, () => {
-          this.socketFileIdentity = this.readSocketFileIdentity();
+          this.socketFileIdentity = readSocketFileIdentity(this.socketPath);
           logger.info(`Unix socket server listening on ${this.socketPath}`);
           // Restrict the bound socket to the owner (0o600) before start() resolves,
           // so no client can connect while it is still world-accessible. listen()
@@ -5921,7 +5922,7 @@ export class UnixSocketServer {
     // subscribers alive long enough to receive session-release frames. Any
     // connection that has not opted in cannot receive the shutdown reason, so
     // close it now and let its proxy reconnect to the successor daemon.
-    void this.closeListeningServer(this.isOwnedSocketFile());
+    void this.closeListeningServer(isOwnedSocketFile(this.socketFileIdentity, this.socketPath));
     for (const [sessionId, socket] of this.clientSockets) {
       if (!this.notificationSubscribers.has(sessionId) && !socket.destroyed) {
         socket.end();
@@ -5982,7 +5983,7 @@ export class UnixSocketServer {
     // Keep sockets and session bookkeeping alive while handlers finish and write.
     // The listener stops new connections now; existing requests get the bounded drain.
     const clientSockets = Array.from(this.clientSockets.values());
-    const ownsSocketPath = this.isOwnedSocketFile();
+    const ownsSocketPath = isOwnedSocketFile(this.socketFileIdentity, this.socketPath);
     const serverClosed = this.closeListeningServer(ownsSocketPath);
 
     // Queued requests have not started device work and must not begin during shutdown.
@@ -6097,18 +6098,6 @@ export class UnixSocketServer {
     }
   }
 
-  private readSocketFileIdentity(): SocketFileIdentity | null {
-    try {
-      const stats = statSync(this.socketPath);
-      return { dev: stats.dev, ino: stats.ino };
-    } catch (error) {
-      // statSync fails if the socket file was removed/replaced concurrently; callers
-      // treat a null identity as "can't confirm ownership" rather than a hard error.
-      logger.debug(`src/daemon/socketServer.ts fallback failed: ${error}`, error);
-      return null;
-    }
-  }
-
   /** Typed access to the MCP forward-routing internals for daemon integration tests. */
   get testHooks(): UnixSocketServerTestHooks {
     return {
@@ -6118,17 +6107,10 @@ export class UnixSocketServer {
       recordBoundMcpClientKey: (...args) => this.recordBoundMcpClientKey(...args),
       boundMcpClientFor: (id) => this.boundMcpClientKeysBySocketSession.get(id),
       requireCurrentFrameContext: (...args) => this.requireCurrentFrameContext(...args),
+      waitForStartup: interceptableMethod(
+        () => this.waitForStartup.bind(this),
+        (replacement) => (this.waitForStartup = replacement),
+      ),
     };
-  }
-
-  private isOwnedSocketFile(): boolean {
-    if (!this.socketFileIdentity || !existsSync(this.socketPath)) {
-      return false;
-    }
-    const currentIdentity = this.readSocketFileIdentity();
-    return (
-      currentIdentity?.dev === this.socketFileIdentity.dev &&
-      currentIdentity.ino === this.socketFileIdentity.ino
-    );
   }
 }

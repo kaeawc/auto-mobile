@@ -54,7 +54,7 @@ import { deviceLossCancellationReason } from "../../daemon/emulatorLossIncident"
 import { createStructuredToolResponse } from "../../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutError";
-import { fixedBackoff } from "../../utils/Backoff";
+import { fixedBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import type { DaemonStateLike } from "../../daemon/daemonState";
 import {
   daemonStateLikeFrom,
@@ -1149,6 +1149,8 @@ export interface DeviceToolsDependencies {
    * defaults to the process-wide admission gates.
    */
   checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
+  /** Delay between bounded discovery retries when an existing AVD might already be running. */
+  provisionAndroidIdentityBackoff?: BackoffPolicy;
   /**
    * Per-platform boot capacity reporters the `listDevices` `capacity` field samples; defaults to
    * the process-wide admission gates, which probe adb/simctl/ps. Injected by the benchmark so the

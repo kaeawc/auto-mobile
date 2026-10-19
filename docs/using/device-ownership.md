@@ -368,9 +368,12 @@ acquisitions as anonymous (#11096):
   `src/models/deviceSessionRecovery.ts`, #11098), with `idle: true` beside the
   release reason after an idle release. Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
-- Booted-device discovery that did not complete (adb or simctl failed, or a
-  running emulator's AVD identity has not resolved) is refused with the retryable
-  code `discovery_incomplete` instead of booting or adopting a device blind. Retry
+- Booted-device discovery that did not complete (adb or simctl failed, or an
+  unresolved running emulator could be the requested AVD) is refused with the
+  retryable code `discovery_incomplete` instead of booting or adopting a device
+  blind. `provisionDevice` skips the unresolved-sibling guard for an AVD it just
+  created; otherwise it retries identity discovery within the caller's deadline
+  before refusing with the unresolved serials. Retry
   the acquisition. `setActiveDevice` answers it for a device it cannot find only
   when the discovery that could have listed that device failed, and names that
   platform: an iOS UDID while simctl failed is iOS discovery, and an id whose

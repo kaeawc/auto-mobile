@@ -12,6 +12,8 @@ import { isUnresolvedAndroidEmulatorName } from "../../devices/deviceIdentityEvi
 import type { DeviceReadinessReservation } from "../../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../../devices/deviceBootService";
 import { type Timer } from "../../utils/SystemTimer";
+import { fixedBackoff } from "../../utils/Backoff";
+import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { combineAbortSignals } from "../../utils/AbortContext";
 import {
   deviceReadinessLockKey,
@@ -152,14 +154,52 @@ function assertProvisionAndroidIdentities(
   args: ProvisionDeviceArgs,
   devices: BootedDevice[],
 ): void {
-  if (
-    devices.filter((device) => device.platform === "android").some(isUnresolvedAndroidEmulatorName)
-  ) {
+  const unresolved = devices
+    .filter(isUnresolvedAndroidEmulatorName)
+    .map((device) => device.deviceId);
+  if (unresolved.length > 0) {
     throw new ProvisionDeviceError(
       "discovery_incomplete",
-      `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry.`,
+      `Cannot provision Android device '${args.device.name}' because a running emulator's AVD identity has not resolved yet; retry (unresolved: ${unresolved.join(", ")}).`,
       true,
     );
+  }
+}
+
+const PROVISION_ANDROID_IDENTITY_BACKOFF = fixedBackoff(250);
+const MAX_PROVISION_ANDROID_IDENTITY_REDISCOVERIES = 3;
+
+async function discoverProvisionAndroidIdentities(
+  args: ProvisionDeviceArgs,
+  deps: DeviceToolsDependencies,
+  deviceManager: PlatformDeviceManager,
+  totalDeadlineMs: number,
+  signal: AbortSignal,
+  created: boolean,
+): Promise<BootedDevice[]> {
+  const backoff = deps.provisionAndroidIdentityBackoff ?? PROVISION_ANDROID_IDENTITY_BACKOFF;
+  for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted();
+    const discovery = await deviceManager.getBootedDevicesDetailed("android", {
+      bypassAndroidDeviceListCache: true,
+      signal,
+    });
+    assertProvisionAndroidDiscovery(args, discovery.succeededPlatforms);
+    // FUNNEL 1: fold EVERY observation into the pool BEFORE checking identity,
+    // so placeholders quarantine stale pooled labels even when we refuse (#7177).
+    await reconcileDiscoveryObservation(discovery.devices, "provisionDevice-exact");
+    // A never-launched AVD created by this request cannot be running on a sibling.
+    if (created || !discovery.devices.some(isUnresolvedAndroidEmulatorName)) {
+      return discovery.devices;
+    }
+    const delayMs = backoff.delayForAttempt(attempt + 1);
+    if (
+      attempt >= MAX_PROVISION_ANDROID_IDENTITY_REDISCOVERIES ||
+      totalDeadlineMs - deps.timer.now() <= delayMs
+    ) {
+      assertProvisionAndroidIdentities(args, discovery.devices);
+    }
+    await awaitWhileRequestIsLive(deps.timer.sleep(delayMs), signal);
   }
 }
 
@@ -195,6 +235,7 @@ async function discoverAlreadyBootedDevices(
   deviceManager: PlatformDeviceManager,
   totalDeadlineMs: number,
   operationSignal: AbortSignal,
+  created: boolean,
 ): Promise<BootedDevice[]> {
   return await runProvisionDeviceWithinDeadline(
     deps.timer,
@@ -203,19 +244,14 @@ async function discoverAlreadyBootedDevices(
     "discovering an already-running exact device",
     async (deadlineSignal) => {
       if (args.device.platform === "android") {
-        const discovery = await deviceManager.getBootedDevicesDetailed("android", {
-          bypassAndroidDeviceListCache: true,
-          signal: deadlineSignal,
-        });
-        assertProvisionAndroidDiscovery(args, discovery.succeededPlatforms);
-        // FUNNEL 1: fold the fresh observation into the pool BEFORE deciding
-        // whether it resolves the requested identity, so a discovered
-        // placeholder quarantines any stale pooled label under this serial
-        // even when the request itself is about to fail closed (#7177
-        // review).
-        await reconcileDiscoveryObservation(discovery.devices, "provisionDevice-exact");
-        assertProvisionAndroidIdentities(args, discovery.devices);
-        return discovery.devices;
+        return await discoverProvisionAndroidIdentities(
+          args,
+          deps,
+          deviceManager,
+          totalDeadlineMs,
+          deadlineSignal,
+          created,
+        );
       }
       const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
       // FUNNEL 1: acquisition matches this observation against the pooled
@@ -264,6 +300,7 @@ export async function bootExactProvisionedDevice(
       deviceManager,
       totalDeadlineMs,
       operationSignal,
+      provisioned.created === true,
     );
     const exactBootedDevice = findExactProvisionedBootedDevice(
       args.device.platform,

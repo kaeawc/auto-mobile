@@ -26,10 +26,6 @@ import { executionTracker } from "../../src/daemon/executionTracker";
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
 
-interface DaemonSessionReleaseInternals {
-  cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
-}
-
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
  * devices. A pooled Android entry is re-proved present against discovery before
@@ -131,7 +127,6 @@ describe("Daemon session-release signal wiring", () => {
     const daemon = new Daemon({}, { deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
-    const internals = daemon as unknown as DaemonSessionReleaseInternals;
     const sessionId = "terminal-persistence-failure";
     const deviceId = "physical-device";
     const emitted: string[] = [];
@@ -149,7 +144,7 @@ describe("Daemon session-release signal wiring", () => {
       await devicePool.assignDeviceToSession(sessionId, "android");
 
       await expect(
-        internals.cancelAndReleaseSession(
+        daemon.cancelAndReleaseSession(
           sessionId,
           deviceLossCancellationReason(deviceId, "incident-1"),
         ),
@@ -168,7 +163,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([]);
 
       markReleasedSpy.mockResolvedValue(undefined);
-      await internals.cancelAndReleaseSession(
+      await daemon.cancelAndReleaseSession(
         sessionId,
         deviceLossCancellationReason(deviceId, "incident-1"),
       );

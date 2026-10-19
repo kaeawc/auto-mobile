@@ -67,7 +67,9 @@ final class SdkDatabaseClientTests: XCTestCase {
         let stub = StubHTTPTransport([.respond(status: 400, body: Data(#"{"error":"no such table: ghost"}"#.utf8))])
         await assertThrows(
             { _ = try await self.makeClient(stub).executeSQL(databasePath: "/db", query: "x", sessionId: nil) },
-            { if case let .unavailable(m) = $0 { return m.contains("no such table: ghost") } else { return false } },
+            {
+                if case let .unavailable(message) = $0 { return message.contains("no such table: ghost") }
+                else { return false } },
             "non-2xx with payload must carry the SDK error message"
         )
     }
@@ -76,7 +78,7 @@ final class SdkDatabaseClientTests: XCTestCase {
         let stub = StubHTTPTransport([.respond(status: 503, body: Data("{}".utf8))])
         await assertThrows(
             { _ = try await self.makeClient(stub).executeSQL(databasePath: "/db", query: "x", sessionId: nil) },
-            { if case let .unavailable(m) = $0 { return m.contains("HTTP 503") } else { return false } },
+            { if case let .unavailable(message) = $0 { return message.contains("HTTP 503") } else { return false } },
             "non-2xx without payload must fall back to HTTP <code>"
         )
     }
@@ -104,8 +106,9 @@ final class SdkDatabaseClientTests: XCTestCase {
         await assertThrows(
             { _ = try await self.makeClient(stub).getTableData(databasePath: "/db", table: "t", limit: 1, offset: 0) },
             {
-                if case let .unavailable(m) = $0 { return m.hasSuffix(": unknown_table") && m.contains("embed") }
-                else { return false } },
+                if case let .unavailable(message) = $0 {
+                    return message.hasSuffix(": unknown_table") && message.contains("embed")
+                } else { return false } },
             "codes other than busy_lock keep the existing wrapper text the host parses"
         )
     }
@@ -136,7 +139,7 @@ final class SdkDatabaseClientTests: XCTestCase {
         await assertThrows(
             { _ = try await self.makeClient(stub).listTables(databasePath: "/db") },
             {
-                if case let .unavailable(m) = $0 { return m.hasPrefix("database inspection unavailable") }
+                if case let .unavailable(message) = $0 { return message.hasPrefix("database inspection unavailable") }
                 else { return false } },
             "idempotent reads keep the existing unavailable mapping"
         )

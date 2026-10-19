@@ -97,7 +97,7 @@ final class PerfProviderTests: XCTestCase {
         let data = try encoder.encode(timing)
 
         XCTAssertEqual(
-            String(decoding: data, as: UTF8.self),
+            String(data: data, encoding: .utf8) ?? "",
             #"{"children":[{"durationMs":3,"name":"child"}],"durationMs":8,"name":"root"}"#
         )
     }
@@ -288,15 +288,31 @@ final class FakeGestureLogSink: GestureLogSink, Sendable {
 }
 
 extension PerfProviderTests {
+    private struct SwipeAnnotationCase {
+        let dispatch: SwipeDispatchMode
+        let trackedApp: String?
+        let phase: String
+        let entered: Bool
+    }
+
     func testSwipeAnnotationsRenderAtBoundAndFinishFromCurrentAndCompletedPhases() {
-        let cases: [(SwipeDispatchMode, String?, String, Bool)] = [
-            (.xcuitest, "com.test.playground", "xcuitestGesture", true),
-            (.xcuitest, nil, "coordinateResolution", false),
-            (.synthesizedLockScreen, nil, "synthesizedGesture", false),
+        let cases: [SwipeAnnotationCase] = [
+            .init(dispatch: .xcuitest, trackedApp: "com.test.playground", phase: "xcuitestGesture", entered: true),
+            .init(dispatch: .xcuitest, trackedApp: nil, phase: "coordinateResolution", entered: false),
+            .init(dispatch: .synthesizedLockScreen, trackedApp: nil, phase: "synthesizedGesture", entered: false),
             // Missing synthesis symbols can reach the ordinary XCUITest call.
-            (.synthesizedLockScreen, "com.test.playground", "xcuitestGesture", true),
+            .init(
+                dispatch: .synthesizedLockScreen,
+                trackedApp: "com.test.playground",
+                phase: "xcuitestGesture",
+                entered: true
+            ),
         ]
-        for (dispatch, trackedApp, phase, entered) in cases {
+        for testCase in cases {
+            let dispatch = testCase.dispatch
+            let trackedApp = testCase.trackedApp
+            let phase = testCase.phase
+            let entered = testCase.entered
             let clock = FakeMonotonicClock()
             let sink = FakeGestureLogSink()
             let diagnostics = GesturePhaseDiagnostics(

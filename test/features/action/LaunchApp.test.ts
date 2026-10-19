@@ -42,6 +42,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { createExecResult } from "../../../src/utils/execResult";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/utils/deviceLossOutcome";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PortManager } from "../../../src/utils/PortManager";
 import { logger } from "../../../src/utils/logger";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
@@ -3077,6 +3078,23 @@ describe("LaunchApp", () => {
     ).rejects.toThrow(
       "Could not determine whether com.example.app is installed: adb package listing failed",
     );
+    expect(hasStartedAppLaunch()).toBe(false);
+  });
+
+  test("preserves the transport code from a failed installed-app listing", async () => {
+    fakeTimer.enableAutoAdvance();
+    const error = new AdbDeviceTransportUnavailableError(device.deviceId, new Error("offline"));
+    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
+      installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
+        successful: false,
+        error,
+      }),
+    });
+
+    await expect(
+      action.execute(packageName, { clearAppData: false, coldBoot: false }),
+    ).rejects.toMatchObject({ code: "device_transport_unavailable" });
     expect(hasStartedAppLaunch()).toBe(false);
   });
 

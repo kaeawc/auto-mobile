@@ -1,3 +1,4 @@
+import { toolJson } from "../helpers/toolResponse";
 import { afterEach, describe, expect, test } from "bun:test";
 import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import type { HighlightShape, ViewHierarchyResult } from "../../src/models";
@@ -32,7 +33,7 @@ async function highlight(hierarchy: ViewHierarchyResult, args: Record<string, un
     { deviceId: "captured-device", name: "Captured Android", platform: "android" },
     args,
   );
-  return { response: JSON.parse(result.content[0].text), shapes };
+  return { response: toolJson(result), shapes };
 }
 
 function prototypeTop(hierarchy: ViewHierarchyResult): number {

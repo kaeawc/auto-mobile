@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { PROTOTYPE_SPEC_CAPABILITY_GATES } from "../../src/features/prototype/prototypeCapabilityGates";
@@ -181,9 +182,9 @@ function setup() {
     adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
   });
 }
-async function call(device: BootedDevice, input: unknown) {
+async function call(device: BootedDevice, input: Record<string, unknown>) {
   const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-  return prototypeOutputSchema.parse(result.structuredContent);
+  return prototypeOutputSchema.parse(readToolResponse(result).structuredContent);
 }
 const show = (device: BootedDevice, spec: unknown) => call(device, { action: "show", spec });
 const patch = (device: BootedDevice, ops: unknown, extra = {}) =>

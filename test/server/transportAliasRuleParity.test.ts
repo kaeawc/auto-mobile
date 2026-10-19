@@ -161,7 +161,13 @@ async function runScenario(scenario: Scenario, cleanups: Array<() => void>) {
     sessionUuid: scenario.requester,
   };
   const frame = await client.request("input/tap", { ...args, x: 1, y: 2 });
-  const frameVerdict = verdict(frame.success ? "ran" : (frame.code ?? frame.error));
+  const frameVerdict = verdict(
+    frame.success
+      ? "ran"
+      : typeof frame.code === "number"
+        ? String(frame.code)
+        : (frame.code ?? frame.error),
+  );
   const toolVerdict = verdict(await h.outcome("controlProbe", args));
   return { frame: frameVerdict, tool: toolVerdict };
 }

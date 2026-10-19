@@ -7,7 +7,7 @@ set -euo pipefail
 
 adb_bin="${ADB_BIN:-adb}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/lib/session-release.sh disable=SC1091
+# shellcheck source=scripts/lib/session-release.sh
 source "${script_dir}/../lib/session-release.sh"
 repo_root="${GITHUB_WORKSPACE:-$(cd -- "${script_dir}/../.." && pwd)}"
 dist_entry="${repo_root}/dist/src/index.js"

@@ -41,6 +41,8 @@ export class TouchFrameReconstructor {
   private releasedSlots = new Set<number>();
   /** Slots reported as in contact in the previous frame. */
   private touchingSlots = new Set<number>();
+  /** Position of each touching slot as last emitted, to spot a move inside its release packet. */
+  private readonly lastEmitted = new Map<number, { x: number; y: number }>();
   /** Pen tool in range (BTN_TOOL_PEN / BTN_TOOL_RUBBER); node-wide, applied to active slots. */
   private nodeTool: PointerToolType | undefined;
   private readonly heldButtons = new Set<StylusButton>();
@@ -146,6 +148,7 @@ export class TouchFrameReconstructor {
     }
     this.releasedSlots.delete(replaced.slotId);
     this.touchingSlots.delete(replaced.slotId);
+    this.lastEmitted.delete(replaced.slotId);
     return { arrivedAt, activeSlots, releasedSlots: [replaced.slotId] };
   }
 
@@ -269,18 +272,21 @@ export class TouchFrameReconstructor {
 
     const activeSlots: TouchSlot[] = [];
     const releasedSlots: number[] = [];
+    const releasedFinalSamples: TouchSlot[] = [];
 
     const touching = new Set<number>();
     for (const [, slot] of this.slots) {
       if (slot.trackingId >= 0 && !this.isMtPenHovering(slot)) {
         touching.add(slot.slotId);
         activeSlots.push(this.withPenState({ ...slot }));
+        this.lastEmitted.set(slot.slotId, { x: slot.x, y: slot.y });
       } else if (
         this.releasedSlots.has(slot.slotId) ||
         (slot.trackingId >= 0 && this.touchingSlots.has(slot.slotId))
       ) {
         // A tracked MT pen that lifts into hover ends its contact just like a release.
         releasedSlots.push(slot.slotId);
+        releasedFinalSamples.push(...this.takeFinalMove(slot));
       }
     }
 
@@ -290,7 +296,20 @@ export class TouchFrameReconstructor {
     // Protocol B retains each slot's axes and pressure after contact release.
     // Release notifications are per-frame; inactive slots stay out of activeSlots.
 
-    return { arrivedAt, activeSlots, releasedSlots };
+    return releasedFinalSamples.length > 0
+      ? { arrivedAt, activeSlots, releasedSlots, releasedFinalSamples }
+      : { arrivedAt, activeSlots, releasedSlots };
+  }
+
+  /**
+   * A pen driver may send its last ABS_X/Y in the same packet as BTN_TOUCH UP, and an MT pen may
+   * move while lifting into hover. Returns that final sample when the released slot moved since it
+   * was last emitted, so the stroke keeps its real end point.
+   */
+  private takeFinalMove(slot: TouchSlot): TouchSlot[] {
+    const last = this.lastEmitted.get(slot.slotId);
+    this.lastEmitted.delete(slot.slotId);
+    return last && (last.x !== slot.x || last.y !== slot.y) ? [this.withPenState({ ...slot })] : [];
   }
 
   /**

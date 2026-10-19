@@ -29,7 +29,10 @@ import { createInstalledAppsDeviceIncarnationListener } from "../../src/server/a
 import { PerDeviceInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { RestoreSnapshot } from "../../src/features/action/RestoreSnapshot";
+import {
+  RestoreSnapshot,
+  type RestoreSnapshotArgs,
+} from "../../src/features/action/RestoreSnapshot";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -47,7 +50,7 @@ describe("deviceSnapshotManager", () => {
   let configRepository: FakeDeviceSnapshotConfigRepository;
   let store: FakeDeviceSnapshotStore;
   let captureCalls: Array<Record<string, unknown>>;
-  let restoreCalls: Array<Record<string, unknown>>;
+  let restoreCalls: Array<RestoreSnapshotArgs>;
 
   beforeEach(async () => {
     fakeTimer = new FakeTimer();
@@ -493,7 +496,7 @@ describe("deviceSnapshotManager", () => {
     const survivors = (await repository.listSnapshots()).map((record) => record.snapshotName);
     const survivorNames = new Set(survivors);
     const totalSize = (await repository.listSnapshots()).reduce(
-      (sum, record) => sum + record.sizeBytes,
+      (sum, record) => sum + (record.sizeBytes ?? 0),
       0,
     );
     const allInitial = ["s1", "s2", "s3", "cap-a", "cap-b"];

@@ -53,6 +53,11 @@ export interface RawTouchFrame {
   activeSlots: ReadonlyArray<TouchSlot>;
   /** slotIds whose trackingId became -1 in this frame */
   releasedSlots: ReadonlyArray<number>;
+  /**
+   * Final sample of a released slot whose position changed in its release packet. Present only
+   * when non-empty, so ordinary frames keep their shape.
+   */
+  releasedFinalSamples?: ReadonlyArray<TouchSlot>;
 }
 
 // ---------------------------------------------------------------------------

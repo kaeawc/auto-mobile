@@ -13,7 +13,7 @@
 #
 # Sourcing convention mirrors scripts/local-dev/lib/common.sh and
 # scripts/lib/tool-install.sh (issue #2822):
-#   # shellcheck source=scripts/lib/file-selection.sh disable=SC1091
+#   # shellcheck source=scripts/lib/file-selection.sh
 #   source "$(dirname "${BASH_SOURCE[0]}")/../lib/file-selection.sh"
 #
 # Exports:

@@ -4442,7 +4442,7 @@ export class UnixSocketServer {
    * proves nothing, so refuse with the retryable discovery error instead (#11122,
    * cf. #11103, #11535).
    */
-  private async listBootedDevicesForIdeAction(
+  protected async listBootedDevicesForIdeAction(
     platform: "android" | "ios",
     serial: string,
     signal?: AbortSignal,

@@ -12,7 +12,7 @@ import {
   clearSessionAppearanceConfig,
   getAppearanceConfig,
   updateAppearanceConfig,
-} from "../../src/server/appearanceManager";
+} from "../../src/daemon/appearanceManager";
 import {
   getDeviceSnapshotConfig,
   resetDeviceSnapshotManagerDependencies,

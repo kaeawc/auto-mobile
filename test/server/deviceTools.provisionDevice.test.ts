@@ -75,7 +75,7 @@ import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";

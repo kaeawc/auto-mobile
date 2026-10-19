@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import type { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
 

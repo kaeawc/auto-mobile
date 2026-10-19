@@ -1,11 +1,6 @@
-src/daemon/AppearanceSyncScheduler.ts -> src/server/appearanceManager
 src/daemon/announceSessionRelease.ts -> src/server/sessionReleaseBroadcast
-src/daemon/appearanceConfigStartupSweep.ts -> src/server/appearanceManager
-src/daemon/appearanceSocketServer.ts -> src/server/appearanceManager
 src/daemon/childProcessCleanup.ts -> src/server/videoRecordingManager
 src/daemon/client.ts -> src/server/tasks/taskRelay
-src/daemon/daemon.ts -> src/server/appearanceManager
-src/daemon/daemon.ts -> src/server/appearanceSessionKey
 src/daemon/daemon.ts -> src/server/bootedDeviceResources
 src/daemon/daemon.ts -> src/server/deviceStateChangeNotifier
 src/daemon/daemon.ts -> src/server/networkStateSessionCleanup
@@ -26,8 +21,6 @@ src/daemon/daemonMcpProxy.ts -> src/server/sessionReleaseBroadcast
 src/daemon/daemonMcpProxy.ts -> src/server/tasks/mcpTasksExtension
 src/daemon/daemonMcpProxy.ts -> src/server/tasks/taskRelay
 src/daemon/daemonMcpProxy.ts -> src/server/toolEnvelopePayload
-src/daemon/daemonSessionLifecycleWiring.ts -> src/server/appearanceManager
-src/daemon/daemonSessionLifecycleWiring.ts -> src/server/appearanceSessionKey
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/networkStateSessionCleanup
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/performanceMonitorSessionCleanup
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/recordingSessionCleanup

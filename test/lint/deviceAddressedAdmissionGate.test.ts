@@ -216,7 +216,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     for (const file of SCANNED) {
       namedFunctions(file);
     }
-    namedFunctions("src/devices/DeviceReadiness.ts");
+    namedFunctions("src/daemon/readiness/DeviceReadiness.ts");
     poolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
     resolverSource = blankComments(
       readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
@@ -306,7 +306,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   });
 
   test("Android readiness gates before discovery and cached Window use", () => {
-    const target = namedFunctions("src/devices/DeviceReadiness.ts").find(
+    const target = namedFunctions("src/daemon/readiness/DeviceReadiness.ts").find(
       (fn) => fn.name === "verifyAndroidDevice",
     )!;
     const gate = target.body.indexOf(`this.admissionGate.${GATE}(deviceId`);

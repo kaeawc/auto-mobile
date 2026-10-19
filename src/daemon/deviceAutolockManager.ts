@@ -11,7 +11,7 @@ import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
-import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import type { DeviceReadinessLevel } from "./readiness/DeviceReadiness";
 import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import { freshStartAlreadyBoundError } from "../models/deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";

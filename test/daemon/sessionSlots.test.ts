@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   LEGAL_SLOT_TRANSITIONS,
   SLOT_TAGS,
-  SlotTransitionError,
   assertSlotTransition,
   checkSlotTransition,
   deriveAllSlots,
@@ -19,6 +18,7 @@ import {
   type SlotPhase,
   type SlotPosition,
 } from "../../src/daemon/sessionSlots";
+import { SlotTransitionError } from "../../src/daemon/SlotTransitionError";
 import { FakeLegacyLifecycleView, deadIdentity } from "../fakes/FakeLegacyLifecycleView";
 
 // Independent oracle from design sections 3.1 and 4, including every absent edge.

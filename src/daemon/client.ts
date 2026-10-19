@@ -57,11 +57,8 @@ import {
 import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonOptions, DaemonStatus } from "./types";
-import {
-  DAEMON_CLIENT_MAX_FRAME_BYTES,
-  DaemonFrameTooLargeError,
-  LineFramer,
-} from "./socketServer/LineFramer";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
 
 export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),

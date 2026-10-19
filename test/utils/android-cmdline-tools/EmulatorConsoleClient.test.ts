@@ -235,7 +235,6 @@ describe("parseConsoleAcknowledgement", () => {
   });
 });
 
-import type * as net from "node:net";
 import { NetEmulatorConsoleTransport } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -248,7 +247,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("NetEmulatorConsoleTransport wire protocol", () => {
   function makeTransport(socket: FakeSocket, timer: FakeTimer): NetEmulatorConsoleTransport {
-    return new NetEmulatorConsoleTransport(() => socket as unknown as net.Socket, 5000, timer);
+    return new NetEmulatorConsoleTransport(() => socket, 5000, timer);
   }
 
   test("abort closes an in-flight socket and clears its deadline", async () => {

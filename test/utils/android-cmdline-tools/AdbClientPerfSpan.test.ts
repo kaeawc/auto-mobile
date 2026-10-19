@@ -28,8 +28,7 @@ function buildClient(): AdbClient {
     timer: new FakeTimer(),
   });
   // Skip real adb path resolution so the test never shells out.
-  (client as unknown as { getBaseCommandParts: () => Promise<unknown> }).getBaseCommandParts =
-    async () => ({ adbPath: "adb", baseArgs: [] });
+  client.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
   return client;
 }
 

@@ -250,9 +250,9 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionForIngress.ts#sessionForIngress": 1,
   "socketServer.ts#getAssignedDeviceForSession": 1,
   "socketServer.ts#getSessionIncarnation": 1,
-  "socketServer.ts#grantedDeviceOf": 1,
+  "socketServer/inputDeviceGating.ts#grantedDeviceOf": 1,
   "socketServer.ts#hasActiveDaemonSession": 1,
-  "socketServer.ts#selectInputTargetDevice": 1,
+  "socketServer/inputDeviceGating.ts#selectInputTargetDevice": 1,
 };
 
 // src/features: the one remaining reader consumes the session object and, when it is expired,

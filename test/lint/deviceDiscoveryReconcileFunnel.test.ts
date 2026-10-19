@@ -147,7 +147,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Disconnect monitor joins the observation to getAllDevices() by serial; reconciles first.",
     },
-    "src/daemon/socketServer.ts": {
+    "src/daemon/socketServer/inputDeviceGating.ts": {
       calls: 1,
       reason: "Input-target discovery reconciles first.",
     },
@@ -333,6 +333,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/daemon/deviceLossDiscovery.ts",
       "src/daemon/socketServer.ts",
       "src/daemon/socketServer/ideDeviceRoutes.ts",
+      "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",
       "src/features/deviceLifecycle/deviceLifecycleCore.ts",
       "src/server/deviceToolsStartupLease.ts",

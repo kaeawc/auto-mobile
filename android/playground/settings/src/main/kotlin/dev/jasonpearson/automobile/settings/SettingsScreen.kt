@@ -46,6 +46,7 @@ import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.settings.ui.EmailEditBottomSheet
 import dev.jasonpearson.automobile.settings.ui.ExperimentsSection
 import dev.jasonpearson.automobile.settings.ui.ProfileTopAppBar
+import dev.jasonpearson.automobile.storage.UserStats
 import kotlin.math.min
 
 @Composable
@@ -67,11 +68,6 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
   TrackRecomposition(id = "screen.settings", composableName = "SettingsScreen") {
     val context = LocalContext.current
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(context))
-    val experiments by viewModel.experiments.collectAsStateWithLifecycle()
-    val userStats by viewModel.userStats.collectAsStateWithLifecycle()
-    val trackingEnabled by viewModel.trackingEnabled.collectAsStateWithLifecycle()
-    val email by viewModel.email.collectAsStateWithLifecycle()
-    val name by viewModel.name.collectAsStateWithLifecycle()
     val shouldNavigateToLogin by viewModel.shouldNavigateToLogin.collectAsStateWithLifecycle()
     var isEditingEmail by remember { mutableStateOf(false) }
     var tempEmail by remember { mutableStateOf("") }
@@ -84,148 +80,9 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
       }
     }
 
-    // Scroll state for dynamic behavior
-    val scrollState = rememberScrollState()
-    val scrollProgress by remember {
-      derivedStateOf {
-        min(1f, scrollState.value / 300f) // Transition over first 300px of scroll
-      }
-    }
-
-    Scaffold(
-      topBar = {
-        ProfileTopAppBar(
-          name = name,
-          email = email,
-          scrollProgress = scrollProgress,
-          onEmailClick = {
-            tempEmail = email
-            isEditingEmail = true
-          },
-        )
-      },
-    ) { paddingValues ->
-      Column(
-        modifier =
-          Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-      ) {
-        HorizontalDivider()
-
-        // Experiments Section
-        ExperimentsSection(
-          experiments = experiments,
-          onExperimentsUpdated = { updatedExperiments ->
-            updatedExperiments.forEach { updatedExp ->
-              val originalExp = experiments.find { it.name == updatedExp.name }
-              if (
-                originalExp != null && originalExp.currentTreatment != updatedExp.currentTreatment
-              ) {
-                viewModel.updateExperimentTreatment(updatedExp, updatedExp.currentTreatment)
-              }
-            }
-          },
-        )
-
-        HorizontalDivider()
-
-        // Statistics Section
-        AutoMobileContentCard(
-          modifier = Modifier.fillMaxWidth(),
-          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-          shape = RoundedCornerShape(12.dp),
-        ) {
-          Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Icon(
-                imageVector = Icons.Filled.Analytics,
-                contentDescription = "Analytics",
-                modifier = Modifier.padding(end = 8.dp),
-                tint = MaterialTheme.colorScheme.primary,
-              )
-              Text(
-                text = "Statistics",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-              )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-              StatisticItem("Taps", userStats.taps.toString())
-              StatisticItem("Swipes", userStats.swipes.toString())
-              StatisticItem("Screens", userStats.screensNavigated.toString())
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically,
-            ) {
-              Text(text = "Enable Tracking", modifier = Modifier.weight(1f))
-              Switch(
-                checked = trackingEnabled,
-                onCheckedChange = { viewModel.updateTrackingEnabled(it) },
-              )
-            }
-
-            Text(
-              text = "For demo purposes only. No data is transmitted anywhere.",
-              fontSize = 12.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.padding(top = 4.dp),
-            )
-          }
-        }
-
-        // Logout Section
-        AutoMobileContentCard(
-          modifier = Modifier.fillMaxWidth(),
-          elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-          shape = RoundedCornerShape(12.dp),
-          colors =
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        ) {
-          Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-          ) {
-            Text(
-              text = "Account Actions",
-              fontSize = 18.sp,
-              fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onErrorContainer,
-              modifier = Modifier.padding(bottom = 12.dp),
-            )
-
-            AutoMobileContentButton(
-              onClick = onLogout,
-              modifier = Modifier.fillMaxWidth(),
-              colors =
-                ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-            ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                contentDescription = "Logout",
-                modifier = Modifier.padding(end = 8.dp),
-              )
-              Text("Logout")
-            }
-          }
-        }
-      }
+    SettingsContent(viewModel, onLogout) { email ->
+      tempEmail = email
+      isEditingEmail = true
     }
 
     // Email editing bottom sheet
@@ -239,6 +96,176 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
           isEditingEmail = false
         },
       )
+    }
+  }
+}
+
+@Composable
+private fun SettingsContent(
+  viewModel: SettingsViewModel,
+  onLogout: () -> Unit,
+  onEmailClick: (String) -> Unit,
+) {
+  val experiments by viewModel.experiments.collectAsStateWithLifecycle()
+  val userStats by viewModel.userStats.collectAsStateWithLifecycle()
+  val trackingEnabled by viewModel.trackingEnabled.collectAsStateWithLifecycle()
+  val email by viewModel.email.collectAsStateWithLifecycle()
+  val name by viewModel.name.collectAsStateWithLifecycle()
+  // Scroll state for dynamic behavior
+  val scrollState = rememberScrollState()
+  val scrollProgress by remember {
+    derivedStateOf {
+      min(1f, scrollState.value / 300f) // Transition over first 300px of scroll
+    }
+  }
+
+  Scaffold(
+    topBar = {
+      ProfileTopAppBar(
+        name = name,
+        email = email,
+        scrollProgress = scrollProgress,
+        onEmailClick = { onEmailClick(email) },
+      )
+    },
+  ) { paddingValues ->
+    Column(
+      modifier =
+        Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).verticalScroll(scrollState),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      HorizontalDivider()
+
+      // Experiments Section
+      ExperimentsSection(
+        experiments = experiments,
+        onExperimentsUpdated = { updatedExperiments ->
+          updatedExperiments.forEach { updatedExp ->
+            val originalExp = experiments.find { it.name == updatedExp.name }
+            if (
+              originalExp != null && originalExp.currentTreatment != updatedExp.currentTreatment
+            ) {
+              viewModel.updateExperimentTreatment(updatedExp, updatedExp.currentTreatment)
+            }
+          }
+        },
+      )
+
+      HorizontalDivider()
+
+      SettingsStatistics(userStats, trackingEnabled, viewModel::updateTrackingEnabled)
+
+      SettingsAccountActions(onLogout)
+    }
+  }
+}
+
+@Composable
+private fun SettingsStatistics(
+  userStats: UserStats,
+  trackingEnabled: Boolean,
+  onTrackingEnabledChange: (Boolean) -> Unit,
+) {
+  // Statistics Section
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth(),
+    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+    shape = RoundedCornerShape(12.dp),
+  ) {
+    Column(
+      modifier = Modifier.padding(20.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      StatisticsHeader()
+
+      HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+      ) {
+        StatisticItem("Taps", userStats.taps.toString())
+        StatisticItem("Swipes", userStats.swipes.toString())
+        StatisticItem("Screens", userStats.screensNavigated.toString())
+      }
+
+      HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(text = "Enable Tracking", modifier = Modifier.weight(1f))
+        Switch(
+          checked = trackingEnabled,
+          onCheckedChange = onTrackingEnabledChange,
+        )
+      }
+
+      Text(
+        text = "For demo purposes only. No data is transmitted anywhere.",
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp),
+      )
+    }
+  }
+}
+
+@Composable
+private fun StatisticsHeader() {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(
+      imageVector = Icons.Filled.Analytics,
+      contentDescription = "Analytics",
+      modifier = Modifier.padding(end = 8.dp),
+      tint = MaterialTheme.colorScheme.primary,
+    )
+    Text(
+      text = "Statistics",
+      fontSize = 18.sp,
+      fontWeight = FontWeight.Bold,
+      color = MaterialTheme.colorScheme.onSurface,
+    )
+  }
+}
+
+@Composable
+private fun SettingsAccountActions(onLogout: () -> Unit) {
+  // Logout Section
+  AutoMobileContentCard(
+    modifier = Modifier.fillMaxWidth(),
+    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+    shape = RoundedCornerShape(12.dp),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+  ) {
+    Column(
+      modifier = Modifier.padding(20.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      Text(
+        text = "Account Actions",
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = Modifier.padding(bottom = 12.dp),
+      )
+
+      AutoMobileContentButton(
+        onClick = onLogout,
+        modifier = Modifier.fillMaxWidth(),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+      ) {
+        Icon(
+          imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+          contentDescription = "Logout",
+          modifier = Modifier.padding(end = 8.dp),
+        )
+        Text("Logout")
+      }
     }
   }
 }

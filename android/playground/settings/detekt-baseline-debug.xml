@@ -2,8 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongMethod:SettingsScreen.kt:@OptIn(ExperimentalMaterial3Api::class) @Composable fun SettingsScreen</ID>
-    <ID>TooManyFunctions:SettingsViewModel.kt:SettingsViewModel : ViewModel</ID>
-    <ID>UnsafeCallOnNullableType:Experiments.kt:selectedExperiment!!</ID>
   </CurrentIssues>
 </SmellBaseline>

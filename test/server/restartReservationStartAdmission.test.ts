@@ -7,7 +7,6 @@ import { McpSessionRecoveryInProgressError } from "../../src/daemon/McpSessionRe
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -41,17 +40,6 @@ isolateEmptyToolRegistry();
 
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";
-interface Internals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    id: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<string, { restartHandoff?: boolean; scheduledDeadlineMs?: number }>;
-  intentionalShutdowns: Map<string, number>;
-  restartReadiness: ReadonlySet<unknown>;
-}
-
 class RestartDeviceManager extends FakeDeviceUtils {
   beforeReady?: () => Promise<void>;
   override async waitForDeviceReady(...args: Parameters<FakeDeviceUtils["waitForDeviceReady"]>) {
@@ -207,7 +195,7 @@ describe("start admission and owner resume for restart reservations", () => {
         await sessions.claimLivenessOwnership(options.label ? HOLDER : holder, options.ownerToken),
       ).toBe("claimed");
     }
-    const internals = pool as unknown as Internals;
+    const internals = pool.testHooks;
     if (options.serialReuse) {
       const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
       manager.setBootedDevices(platform, [replacement]);

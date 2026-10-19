@@ -49,6 +49,7 @@ import {
   spyOnIosExistingFactory,
   spyOnIosExistingInstance,
 } from "../helpers/iosCtrlProxyClientSpies";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
@@ -517,7 +518,7 @@ describe("Daemon stream wiring", () => {
           expect(fresh?.replay).toBe(false);
           expect(fresh?.frame.deviceSessionUuid).toBe(stream.getDeviceSessionUuid("emulator-5554"));
           const frameCount = pane
-            .getWrittenMessages<{ type: string }>()
+            .getWrittenMessages(typedFrameSchema)
             .filter((m) => m.type === "hierarchy_update").length;
           observation.resolve([
             {
@@ -534,7 +535,7 @@ describe("Daemon stream wiring", () => {
           if (event.generationOnly) {
             expect(
               pane
-                .getWrittenMessages<{ type: string }>()
+                .getWrittenMessages(typedFrameSchema)
                 .filter((m) => m.type === "hierarchy_update"),
             ).toHaveLength(frameCount + 1);
             expect(
@@ -552,7 +553,7 @@ describe("Daemon stream wiring", () => {
           } else {
             expect(
               pane
-                .getWrittenMessages<{ type: string }>()
+                .getWrittenMessages(typedFrameSchema)
                 .filter((m) => m.type === "hierarchy_update"),
             ).toHaveLength(frameCount);
             expect(stream.getCurrentFrameContext("emulator-5554")).toBeUndefined();

@@ -28,6 +28,7 @@ import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
 import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import { appearanceSocketResponseSchema } from "./wireMessageSchemas";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
@@ -1228,7 +1229,7 @@ export class LivenessScenario {
       }),
     );
     await internals.pendingBySocket.get(socket);
-    const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0]!;
+    const response = socket.getWrittenMessages(appearanceSocketResponseSchema)[0]!;
     return { response, applied };
   }
 

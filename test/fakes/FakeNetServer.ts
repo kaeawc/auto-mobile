@@ -1,4 +1,5 @@
 import { Socket, type SocketConnectOpts } from "node:net";
+import type { z } from "zod/v4";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
@@ -44,12 +45,20 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   }
 
   /**
-   * Parse all written JSON messages (newline-delimited)
+   * Parse all written JSON messages (newline-delimited). With a `schema`, every frame is
+   * validated against it and returned with the schema's output type; without one the frames are
+   * `unknown`.
    */
-  getWrittenMessages<T = unknown>(): T[] {
-    const allData = this.getWrittenDataString();
-    const lines = allData.split("\n").filter((line) => line.trim());
-    return lines.map((line) => JSON.parse(line) as T);
+  getWrittenMessages(): unknown[];
+  getWrittenMessages<S extends z.ZodType>(schema: S): z.output<S>[];
+  /** @deprecated Asserts a frame type without checking it; pass a schema instead. */
+  getWrittenMessages<T>(): T[];
+  getWrittenMessages(schema?: z.ZodType): unknown[] {
+    const lines = this.getWrittenDataString()
+      .split("\n")
+      .filter((line) => line.trim());
+    const frames: unknown[] = lines.map((line) => JSON.parse(line));
+    return schema === undefined ? frames : frames.map((frame) => schema.parse(frame));
   }
 
   /**

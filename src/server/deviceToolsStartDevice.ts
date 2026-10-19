@@ -39,7 +39,7 @@ import {
 import { createDefaultRunnerReadinessService } from "../daemon/defaultRunnerReadinessService";
 import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -1032,10 +1032,7 @@ async function resumePreparedDeviceSession(
       resumeSessionId,
       {
         assignDeviceToSession: async (_id, _platform, target) => {
-          if (
-            !target ||
-            !daemonState.getDevicePool().matchesRestartRecoveryTarget(device, target)
-          ) {
+          if (!target || !pool.matchesRestartRecoveryTarget(device, target)) {
             throw new ActionableError(
               `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
             );
@@ -1049,6 +1046,7 @@ async function resumePreparedDeviceSession(
       device.platform,
       undefined,
       true,
+      { signal: getAbortSignal() },
     );
     if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
       throw new ActionableError(

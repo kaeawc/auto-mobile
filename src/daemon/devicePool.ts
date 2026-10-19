@@ -6736,7 +6736,11 @@ export class DevicePool {
    * session so repeated startDevice calls stay idempotent.
    */
   bindOrReuseDeviceSession(request: BindDeviceRequest): Promise<string> {
-    return this.explicitDeviceBind.bindOrReuseDeviceSession(request);
+    // The ambient signal is read once here, at the pool entry point; the bind takes it explicitly.
+    return this.explicitDeviceBind.bindOrReuseDeviceSession({
+      ...request,
+      signal: request.signal ?? getAbortSignal(),
+    });
   }
 
   /**
@@ -7371,8 +7375,16 @@ export class DevicePool {
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
     const { settleMembership, ...identityOptions } = options;
-    await this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, identityOptions);
-    if (settleMembership === true && !options.signal?.aborted) {
+    // The one ambient read for this entry point (#11817): the identity tracker takes the signal explicitly.
+    const signals = [options.signal, getAbortSignal()].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
+    const signal = signals.length > 0 ? AbortSignal.any(signals) : undefined;
+    await this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, {
+      ...identityOptions,
+      signal,
+    });
+    if (settleMembership === true && !signal?.aborted) {
       await this.settleObservedRuntimeIdentities(devices);
     }
   }
@@ -7517,7 +7529,11 @@ export class DevicePool {
   ): Promise<string | undefined> {
     // Tracked like an explicit bind: a connection closing mid-acquire must not stay an owner (#11166).
     const endBind = this.beginMcpBind(args[2]);
-    return this.autolockManager.autolockDevice(...args).finally(endBind);
+    // The one ambient read for this entry point (#11817): the manager takes the signal explicitly.
+    const policy = args[10] ?? {};
+    const forwarded = [...args] as typeof args;
+    forwarded[10] = { ...policy, signal: policy.signal ?? getAbortSignal() };
+    return this.autolockManager.autolockDevice(...forwarded).finally(endBind);
   }
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {

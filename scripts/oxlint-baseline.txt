@@ -17,7 +17,6 @@
 1	src/daemon/DaemonStartupFailureTracker.ts	eslint(max-classes-per-file)
 1	src/daemon/McpTimeoutError.ts	eslint(max-classes-per-file)
 1	src/daemon/androidRebootCoordinator.ts	eslint(max-classes-per-file)
-1	src/daemon/client.ts	auto-mobile(max-class-lines)
 1	src/daemon/client.ts	eslint(max-classes-per-file)
 1	src/daemon/client.ts	eslint(max-params)
 1	src/daemon/daemon.ts	auto-mobile(max-class-lines)

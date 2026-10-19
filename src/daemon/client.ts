@@ -1,11 +1,10 @@
-import { createConnection, Socket } from "node:net";
+import type { Socket } from "node:net";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { Duplex } from "node:stream";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { platform } from "node:os";
 import { z } from "zod";
 import { logger } from "../utils/logger";
-import { encodeNonFinite } from "../utils/nonFiniteJson";
 import { ActionableError } from "../models";
 import {
   isRelayedJsonRpcError,
@@ -30,12 +29,10 @@ import {
 import type { BoundSessionLoss } from "./types";
 import {
   SOCKET_PATH,
-  PID_FILE_PATH,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
-  DAEMON_NON_FINITE_ENCODED_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
 import { isDaemonShuttingDownFailure } from "./daemonShutdownOutcome";
@@ -54,7 +51,11 @@ import {
   DeviceControlTransportError,
   sanitizeDeviceControlTransportFailure,
 } from "./deviceControlTransportFailure";
-import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
+import { overflowingResponseId } from "./clientInboundOverflow";
+import { serializeRequestFrame } from "./clientFrameSerialization";
+import { probeDaemonSocket } from "./clientSocketProbe";
+import { annotateStaleSocketHint } from "./clientStaleSocketHint";
+import { openDaemonSocket, type DaemonSocketConnectorHost } from "./clientSocketConnector";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonOptions, DaemonStatus } from "./types";
 import {
@@ -62,6 +63,10 @@ import {
   DaemonFrameTooLargeError,
   LineFramer,
 } from "./socketServer/LineFramer";
+
+import { DaemonUnavailableError, toDaemonTransportError } from "./DaemonUnavailableError";
+
+export { DaemonUnavailableError, toDaemonTransportError };
 
 export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),
@@ -166,16 +171,6 @@ export class DaemonHandshakeMismatchError extends ActionableError {
 }
 
 /**
- * Custom error thrown when daemon is unavailable
- */
-export class DaemonUnavailableError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "DaemonUnavailableError";
-  }
-}
-
-/**
  * The request frame was never written to the daemon socket: connecting failed,
  * or no socket existed at send time. Replaying cannot duplicate a device action,
  * unlike a plain `DaemonUnavailableError` raised after the frame was written
@@ -202,30 +197,6 @@ export class DaemonBoundSessionLostError extends ActionableError {
     super(boundSessionLossMessage(failure));
     this.name = "DaemonBoundSessionLostError";
   }
-}
-
-/**
- * Normalize a socket-level transport failure into a `DaemonUnavailableError`.
- *
- * When a daemon restart/crash tears down the connection, an in-flight request's
- * socket emits a raw transport error (`ECONNRESET` / `EPIPE` / "socket hang up")
- * with no daemon-level meaning. Surfacing that raw error verbatim wedges every
- * other connected session (#2599): the proxy only treats `DaemonUnavailableError`
- * and the daemon's own `Session not found` as recoverable, so a raw `ECONNRESET`
- * is not retried (#2737). Typing it here — at the layer that knows it is a socket
- * failure — keeps the recoverability signal in one place: the proxy reconnects via
- * its existing `instanceof DaemonUnavailableError` branch, and a *daemon-returned*
- * application error that merely mentions a transport code (e.g. a tool reporting a
- * downstream `connect ECONNREFUSED`) stays an `ActionableError` and is correctly
- * not retried. Already-typed `DaemonUnavailableError`s pass through unchanged.
- */
-export function toDaemonTransportError(error: Error): DaemonUnavailableError {
-  if (error instanceof DaemonUnavailableError) {
-    return error;
-  }
-  return new DaemonUnavailableError(`Daemon socket connection lost: ${error.message}`, {
-    cause: error,
-  });
 }
 
 function daemonLifecycleResponseError(response: DaemonResponse): Error | undefined {
@@ -360,6 +331,32 @@ export function daemonResponseError(response: DaemonResponse): Error {
     ...(livenessOwnerHold ? { livenessOwnerHold } : {}),
     ...releaseReasonField(response),
   });
+}
+
+function toDaemonStatus(rawStatus: unknown, socketPath: string): DaemonStatus {
+  const identityStatus = socketIdentityStatusSchema.safeParse(rawStatus);
+  if (!identityStatus.success) {
+    throw new ActionableError(
+      "Daemon preflight failed: the socket owner returned no version identity; no device operation started. Restart the daemon from this client installation.",
+    );
+  }
+  const optionsStatus = socketOptionsStatusSchema.safeParse(rawStatus);
+  if (!optionsStatus.success) {
+    throw new ActionableError(
+      "Daemon preflight failed: the socket owner returned a valid identity but malformed startup options; no device operation started. Restart the daemon from this client installation.",
+    );
+  }
+  const { releaseVersion, ...identity } = identityStatus.data;
+  return {
+    running: true,
+    ...identity,
+    socketPath,
+    ...(optionsStatus.data.options ? { options: optionsStatus.data.options } : {}),
+    ...(optionsStatus.data.effectiveDebug !== undefined
+      ? { effectiveDebug: optionsStatus.data.effectiveDebug }
+      : {}),
+    ...(releaseVersion ? { assetVersion: releaseVersion } : {}),
+  };
 }
 
 /**
@@ -538,31 +535,6 @@ export class DaemonClient {
   }
 
   /**
-   * Serialize an outbound request as a newline-delimited frame, encoding any
-   * non-finite argument as a JSON-safe sentinel (#5854 §2). When — and only when —
-   * a tool call actually encoded a non-finite value, we stamp a transport-provenance
-   * flag inside `arguments` so the MCP handler knows this request is sentinel-encoded
-   * and must be revived (#5863); requests with no non-finite values carry no flag and
-   * the handler leaves them untouched.
-   */
-  private serializeRequestFrame(request: DaemonRequest): string {
-    const { value, encoded } = encodeNonFinite(request);
-    if (encoded && request.type === "mcp_request" && request.method === "tools/call") {
-      const params = (value as { params?: Record<string, unknown> }).params;
-      if (params && typeof params === "object") {
-        const existingArgs =
-          params.arguments &&
-          typeof params.arguments === "object" &&
-          !Array.isArray(params.arguments)
-            ? (params.arguments as Record<string, unknown>)
-            : {};
-        params.arguments = { ...existingArgs, [DAEMON_NON_FINITE_ENCODED_PARAM]: true };
-      }
-    }
-    return JSON.stringify(value) + "\n";
-  }
-
-  /**
    * Check if daemon is available (socket file exists and is connectable).
    * Uses a lightweight raw socket probe — no logging, no DaemonClient overhead.
    *
@@ -577,59 +549,7 @@ export class DaemonClient {
     socketPath: string = SOCKET_PATH,
     options: { signal?: AbortSignal; timeoutMs?: number; timer?: Timer } = {},
   ): Promise<boolean> {
-    const timer = options.timer ?? defaultTimer;
-    // On Unix, verify the path exists and is a socket (not a stale regular file).
-    // On Windows, named pipes don't have filesystem entries — skip the stat check
-    // and let createConnection determine reachability.
-    if (platform() !== "win32") {
-      try {
-        const stats = statSync(socketPath);
-        if (!stats.isSocket()) {
-          return false;
-        }
-      } catch (error) {
-        // statSync throws when the path doesn't exist (or is unreadable); either way
-        // there's no live daemon socket to connect to, so report unavailable.
-        logger.debug(`src/daemon/client.ts fallback failed: ${error}`, error);
-        return false;
-      }
-    }
-
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      const settle = (value: boolean) => {
-        if (!settled) {
-          settled = true;
-          options.signal?.removeEventListener("abort", onAbort);
-          resolve(value);
-        }
-      };
-      const onAbort = () => {
-        timer.clearTimeout(timeout);
-        socket.destroy();
-        settle(false);
-      };
-
-      const socket = createConnection(socketPath, () => {
-        timer.clearTimeout(timeout);
-        socket.destroy();
-        settle(true);
-      });
-      socket.on("error", () => {
-        timer.clearTimeout(timeout);
-        socket.destroy();
-        settle(false);
-      });
-      const timeout = timer.setTimeout(() => {
-        socket.destroy();
-        settle(false);
-      }, options.timeoutMs ?? 1000);
-      if (options.signal?.aborted) {
-        onAbort();
-      } else {
-        options.signal?.addEventListener("abort", onAbort, { once: true });
-      }
-    });
+    return probeDaemonSocket(socketPath, options);
   }
 
   /**
@@ -692,31 +612,8 @@ export class DaemonClient {
     }
   }
 
-  /**
-   * Adds a diagnostic hint to a failed connect's error when the PID file names a
-   * PID that is confirmed dead — otherwise returns the error unchanged. NEVER
-   * touches the filesystem (issue #6140): this only reads the PID file to decide
-   * whether the hint applies.
-   */
   private annotateStaleSocketHint(error: unknown): Error {
-    const originalError =
-      error instanceof Error ? error : new DaemonUnavailableError(String(error));
-    const pidFilePath = this.recoveryOptions.pidFilePath ?? PID_FILE_PATH;
-    const pidData = readPidFileDataSync(pidFilePath);
-    if (!pidData || typeof pidData.pid !== "number") {
-      return originalError;
-    }
-    const processRunning =
-      this.recoveryOptions.isProcessRunning ??
-      ((pid: number) => isProcessRunning(pid, { debugLog: logger.debug }));
-    if (processRunning(pidData.pid)) {
-      return originalError;
-    }
-    return new DaemonUnavailableError(
-      `${originalError.message} — the recorded daemon PID ${pidData.pid} is not running; ` +
-        "the socket may be stale and will be reclaimed automatically the next time the daemon " +
-        "starts (run `--daemon restart` if this persists)",
-    );
+    return annotateStaleSocketHint(error, this.recoveryOptions);
   }
 
   private remainingConnectTimeout(deadline: number, timeoutMs: number): number {
@@ -754,116 +651,44 @@ export class DaemonClient {
       throw new DaemonUnavailableError(`Daemon socket not found: ${this.socketPath}`);
     }
 
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let removeAbortListener = () => {};
+    return openDaemonSocket(this.connectorHost(), connectionTimeout, signal);
+  }
 
-      const rejectPendingRequests = (error: Error, preserveRequestCause: boolean = false) => {
-        for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
-          .pendingRequests) {
-          this.timer.clearTimeout(timeout);
-          removeAbortListener?.();
-          reject(
-            preserveRequestCause
-              ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
-              : error,
-          );
-        }
-        this.pendingRequests.clear();
-      };
-
-      const fail = (error: Error) => {
-        if (isStaleSocket()) {
-          return;
-        }
-        this.timer.clearTimeout(timeout);
-        removeAbortListener();
-        this.connected = false;
-        this.socket = null;
-        socket.destroy();
-        // Type the transport failure so the proxy can recover sibling sessions
-        // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
-        // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
-        const failure = toDaemonTransportError(error);
-        rejectPendingRequests(failure, true);
-        if (!settled) {
-          settled = true;
-          reject(failure);
-        }
-      };
-
-      const timeout = this.timer.setTimeout(() => {
-        fail(
-          new DaemonUnavailableError(`Failed to connect to daemon within ${connectionTimeout}ms`),
-        );
-      }, connectionTimeout);
-
-      if (signal) {
-        const onAbort = () =>
-          fail(
-            new DaemonUnavailableError("Daemon connection attempt aborted", {
-              cause: signal.reason,
-            }),
-          );
-        signal.addEventListener("abort", onAbort, { once: true });
-        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
-      }
-
-      const isStaleSocket = () => this.socket !== null && this.socket !== socket;
-      const socket = createConnection(this.socketPath, () => {
-        if (settled || socket.destroyed || isStaleSocket()) {
-          return;
-        }
-        this.timer.clearTimeout(timeout);
-        removeAbortListener();
+  private connectorHost(): DaemonSocketConnectorHost {
+    return {
+      timer: this.timer,
+      socketPath: this.socketPath,
+      getSocket: () => this.socket,
+      setSocket: (socket) => {
+        this.socket = socket;
+      },
+      setConnected: (connected) => {
+        this.connected = connected;
+      },
+      resetInbound: () => {
         this.framer = this.createInboundFramer();
         this.inboundClosed = false;
-        this.connected = true;
-        logger.info(`Connected to daemon at ${this.socketPath}`);
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
-      });
-      this.socket = socket;
+      },
+      handleData: (data) => this.handleData(data),
+      handleSocketClosed: (socket) => this.handleSocketClosed(socket),
+      hasClosedSocket: (socket) => this.closedSockets.has(socket),
+      hasPendingRequests: () => this.pendingRequests.size > 0,
+      rejectPendingRequests: (error, preserve) => this.rejectPendingRequests(error, preserve),
+    };
+  }
 
-      socket.on("data", (data) => {
-        if (isStaleSocket()) {
-          return;
-        }
-        this.handleData(typeof data === "string" ? Buffer.from(data) : data);
-      });
-
-      socket.on("error", (error) => {
-        if (isStaleSocket()) {
-          return;
-        }
-        logger.error(`Daemon socket error: ${error.message}`);
-        fail(error);
-      });
-
-      socket.once("close", () => {
-        // fail() clears this.socket before destroy emits close. Preserve that
-        // notification path; only a different installed socket makes this stale.
-        if (isStaleSocket() || this.closedSockets.has(socket)) {
-          return;
-        }
-        this.handleSocketClosed(socket);
-        // A daemon restart/crash closes the socket. Over a Unix domain socket
-        // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
-        // event, so any in-flight request would otherwise hang until its request
-        // timeout. Reject pending requests with a recoverable transport error so
-        // the proxy reconnects to the restarted daemon and retries (#2599/#2737).
-        // After fail() the pending map is already cleared, so this is a no-op on
-        // the error path.
-        if (this.pendingRequests.size > 0) {
-          rejectPendingRequests(
-            new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
-            true,
-          );
-        }
-      });
-    });
+  private rejectPendingRequests(error: Error, preserveRequestCause: boolean): void {
+    for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
+      .pendingRequests) {
+      this.timer.clearTimeout(timeout);
+      removeAbortListener?.();
+      reject(
+        preserveRequestCause
+          ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
+          : error,
+      );
+    }
+    this.pendingRequests.clear();
   }
 
   /** Handle incoming data from daemon */
@@ -904,48 +729,10 @@ export class DaemonClient {
     logger.warn("Dropped daemon frame: invalid response or notification envelope");
   }
 
-  /** Owner request id, null for a positively unrelated frame, undefined for an unreadable head. */
-  private overflowingResponseId(head?: Buffer): string | null | undefined {
-    const prefix = head?.toString("utf8");
-    if (!prefix?.startsWith('{"')) {
-      return undefined;
-    }
-    try {
-      const keyEnd = this.overflowStringEnd(prefix, 1);
-      const key: unknown = JSON.parse(prefix.slice(1, keyEnd + 1));
-      if (key !== "id") {
-        return null;
-      }
-      if (!prefix.slice(keyEnd + 1).startsWith(':"')) {
-        return undefined;
-      }
-      const idStart = keyEnd + 2;
-      const idEnd = this.overflowStringEnd(prefix, idStart);
-      const id: string = JSON.parse(prefix.slice(idStart, idEnd + 1));
-      return this.pendingRequests.has(id) ? id : null;
-    } catch {
-      // An incomplete or invalid id is expected in a bounded head; attribute nothing.
-      logger.debug("Oversized daemon frame head contained no complete response id");
-      return undefined;
-    }
-  }
-
-  /** Locate a quoted key/id's end; JSON.parse validates its escapes and contents. */
-  private overflowStringEnd(prefix: string, start: number): number {
-    for (let index = start + 1; index < prefix.length; index++) {
-      if (prefix[index] === "\\") {
-        index++;
-      } else if (prefix[index] === '"') {
-        return index;
-      }
-    }
-    return -1;
-  }
-
   private handleInboundOverflow(head?: Buffer): void {
     const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
     logger.warn(error.message);
-    const attribution = this.overflowingResponseId(head);
+    const attribution = overflowingResponseId(head, (id) => this.pendingRequests.has(id));
     const owner =
       attribution === undefined && this.pendingRequests.size === 1
         ? this.pendingRequests.keys().next().value
@@ -1125,7 +912,7 @@ export class DaemonClient {
       ...this.handshakeFields(),
     };
     try {
-      socket.write(this.serializeRequestFrame(frame));
+      socket.write(serializeRequestFrame(frame));
     } catch (error) {
       // The caller is already being rejected; a failed write means the socket is
       // going away, and the daemon aborts a closed socket's requests itself.
@@ -1240,29 +1027,7 @@ export class DaemonClient {
     );
     try {
       const rawStatus = await diagnostic.callDaemonMethod("ide/status", {}, { timeoutMs });
-      const identityStatus = socketIdentityStatusSchema.safeParse(rawStatus);
-      if (!identityStatus.success) {
-        throw new ActionableError(
-          "Daemon preflight failed: the socket owner returned no version identity; no device operation started. Restart the daemon from this client installation.",
-        );
-      }
-      const optionsStatus = socketOptionsStatusSchema.safeParse(rawStatus);
-      if (!optionsStatus.success) {
-        throw new ActionableError(
-          "Daemon preflight failed: the socket owner returned a valid identity but malformed startup options; no device operation started. Restart the daemon from this client installation.",
-        );
-      }
-      const { releaseVersion, ...identity } = identityStatus.data;
-      return {
-        running: true,
-        ...identity,
-        socketPath: this.socketPath,
-        ...(optionsStatus.data.options ? { options: optionsStatus.data.options } : {}),
-        ...(optionsStatus.data.effectiveDebug !== undefined
-          ? { effectiveDebug: optionsStatus.data.effectiveDebug }
-          : {}),
-        ...(releaseVersion ? { assetVersion: releaseVersion } : {}),
-      };
+      return toDaemonStatus(rawStatus, this.socketPath);
     } finally {
       await diagnostic.close();
     }
@@ -1372,7 +1137,7 @@ export class DaemonClient {
     // Serialize before registering the request: an unserializable argument
     // rejects here with nothing scheduled, instead of throwing inside the
     // Promise executor after the timeout and pending entry already exist.
-    const frame = this.serializeRequestFrame(request);
+    const frame = serializeRequestFrame(request);
     const toolName = method === "tools/call" ? (params?.name ?? method) : method;
     const disconnectCause = new DaemonDisconnectError({
       toolName,
@@ -1569,7 +1334,7 @@ export class DaemonClient {
       }
 
       try {
-        this.socket.write(this.serializeRequestFrame(request));
+        this.socket.write(serializeRequestFrame(request));
       } catch (error) {
         this.timer.clearTimeout(timeout);
         removeAbortListener();

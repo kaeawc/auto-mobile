@@ -507,7 +507,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     await client.ensureConnected();
 
     // The re-entrant call should have returned false immediately
-    expect(reentrantCallResult).toBe(false);
+    expect<unknown>(reentrantCallResult).toBe(false);
 
     await client.close();
   });

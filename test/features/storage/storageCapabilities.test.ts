@@ -384,7 +384,7 @@ describe("Android app-owned Keystore capability", () => {
       ctx({ keystore: { ...keystore, scopes: [...keystore.scopes] } }),
     );
     const secure = report.domains.find((d) => d.domain === "secure_state")!;
-    expect(secure.capabilities).toEqual([keystore]);
+    expect<unknown>(secure.capabilities).toEqual([keystore]);
     expect(findOperationCapability(report, "secure_state", "read")?.state).toBe("unavailable");
     expect(findOperationCapability(report, "secure_state", "write")?.state).toBe("unsupported");
     expect(findOperationCapability(report, "secure_state", "namespace_reset")?.state).toBe(

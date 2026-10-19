@@ -1,3 +1,4 @@
+import { viewHierarchyFromFixture } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import {
   hierarchyUpdatedAtToMillis,
@@ -33,9 +34,13 @@ test("unparseable strings including nonfinite numeric strings fall back to zero"
 test("hierarchy accepts only finite device-authored numbers", () => {
   expect(hierarchyUpdatedAtToMillis(undefined)).toBeUndefined();
   for (const updatedAt of [undefined, NaN, Infinity, -Infinity, "1700000000000"]) {
-    expect(hierarchyUpdatedAtToMillis({ updatedAt })).toBeUndefined();
+    expect(
+      hierarchyUpdatedAtToMillis(viewHierarchyFromFixture({ hierarchy: {}, updatedAt })),
+    ).toBeUndefined();
   }
   for (const updatedAt of [0, -5, 1.25, 1700000000000]) {
-    expect(hierarchyUpdatedAtToMillis({ updatedAt })).toBe(updatedAt);
+    expect(hierarchyUpdatedAtToMillis(viewHierarchyFromFixture({ hierarchy: {}, updatedAt }))).toBe(
+      updatedAt,
+    );
   }
 });

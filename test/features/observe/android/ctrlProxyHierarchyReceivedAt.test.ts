@@ -306,7 +306,7 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
 
   test("fresh is true only after a device hierarchy request", async () => {
     h = createHarness();
-    const cachedTree: AccessibilityHierarchy = { updatedAt: 100, packageName: "" };
+    const cachedTree: AccessibilityHierarchy = { updatedAt: 100, packageName: "", hierarchy: {} };
     h.setCached({ hierarchy: cachedTree, receivedAt: 100, fresh: true });
 
     let deviceRequests = 0;
@@ -327,7 +327,7 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(timestampCacheHit.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
-    const freshTree: AccessibilityHierarchy = { updatedAt: 200, packageName: "" };
+    const freshTree: AccessibilityHierarchy = { updatedAt: 200, packageName: "", hierarchy: {} };
     h.setCached(null);
     Reflect.set(h.hierarchy, "requestHierarchySync", async () => {
       deviceRequests += 1;
@@ -404,7 +404,7 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     releaseProbe();
 
     const result = await latestPromise;
-    expect(freshWaitTimeout).toBe(100);
+    expect<unknown>(freshWaitTimeout).toBe(100);
     expect(result.fresh).toBe(false);
   });
 

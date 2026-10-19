@@ -1,7 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -27,6 +26,8 @@ import {
 import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { createExecResult } from "../../src/utils/execResult";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -38,6 +39,19 @@ import {
   registerLiveDeadline,
   unregisterLiveDeadline,
 } from "../../src/daemon/liveDeadlineRegistry";
+
+/** A replacement emulator process that reports itself killed without ever emitting exit. */
+class SilentChildProcess extends FakeChildProcess {
+  constructor() {
+    super();
+    this.pid = 4242;
+  }
+
+  override kill(): boolean {
+    this.killed = true;
+    return true;
+  }
+}
 
 isolateToolRegistry();
 
@@ -115,6 +129,7 @@ describe("device acquisition wait deadlines", () => {
       notifyDeviceInventoryResourcesChanged: async () => {},
       syncInstalledAppResourceRegistry: async () => false,
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async (identity) => ({
           identity,
           signal: new AbortController().signal,
@@ -308,19 +323,22 @@ describe("device acquisition wait deadlines", () => {
       const adb = new FakeAdbExecutor();
       const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, timer);
       const listing = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
-      adb.setCommandResponse(listing, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
-        stderr: "",
-      });
-      adb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/ctrlproxy/base.apk",
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        listing,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
+      );
+      adb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/ctrlproxy/base.apk", ""),
+      );
       // A known mismatched SHA selects upgrade; an unknown SHA selects reinstall.
-      adb.setCommandResponse("shell sha256sum", {
-        stdout: stage === "upgrade" ? "different-sha /data/app/ctrlproxy/base.apk" : "",
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          stage === "upgrade" ? "different-sha /data/app/ctrlproxy/base.apk" : "",
+          "",
+        ),
+      );
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       manager.downloadApk = async () => "fake.apk";
       manager.cleanupApk = async () => {};
@@ -332,7 +350,7 @@ describe("device acquisition wait deadlines", () => {
         if (command.startsWith(stage === "upgrade" ? "install -r" : "shell pm uninstall")) {
           dispatched = true;
           // Model a package mutation completed on-device before cancellation arrived.
-          adb.setCommandResponse(listing, { stdout: "", stderr: "" });
+          adb.setCommandResponse(listing, createExecResult("", ""));
           caller.abort(new Error("caller cancelled"));
         }
         return await execute(command, ...args);
@@ -385,18 +403,18 @@ describe("device acquisition wait deadlines", () => {
           };
         };
         AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
-        adb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
-          stderr: "",
-        });
-        adb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-          stdout: "package:/data/app/ctrlproxy/base.apk",
-          stderr: "",
-        });
-        adb.setCommandResponse("shell sha256sum", {
-          stdout: "different-sha /data/app/ctrlproxy/base.apk",
-          stderr: "",
-        });
+        adb.setCommandResponse(
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}`, ""),
+        );
+        adb.setCommandResponse(
+          `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult("package:/data/app/ctrlproxy/base.apk", ""),
+        );
+        adb.setCommandResponse(
+          "shell sha256sum",
+          createExecResult("different-sha /data/app/ctrlproxy/base.apk", ""),
+        );
         manager.downloadApk = async () => "fake.apk";
         manager.cleanupApk = async () => {};
         let connectionReady = stage !== "CtrlProxy WebSocket connect" && platform === "android";
@@ -742,6 +760,7 @@ describe("device acquisition wait deadlines", () => {
       const failure = new ActionableError("lifecycle deadline exhausted");
       setDeviceToolsDependencies({
         lifecycleCoordinator: {
+          isReserved: () => false,
           reserve: async () => {
             unlock = await mutex.acquire();
             timer.advanceTime(2_000);
@@ -1058,7 +1077,7 @@ describe("device acquisition wait deadlines", () => {
         deviceId: "emulator-5556",
         isRunning: false,
       };
-      const replacementProcess = new FakeChildProcess();
+      const replacementProcess = new SilentChildProcess();
       deviceUtils.setBootedDevices("android", [android]);
       await pool.initializeWithDevices([android]);
       await pool.bindOrReuseDeviceSession({

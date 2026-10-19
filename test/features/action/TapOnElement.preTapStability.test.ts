@@ -53,6 +53,7 @@ function makeSelection(
 
 function makeFocusObservation(viewHierarchy: ViewHierarchyResult): ObserveResult {
   return {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "focus-test",
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
@@ -266,8 +267,8 @@ async function executeFocusWithDuplicateEmail(
     effect: undefined,
     observation,
   });
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tap.execute({ text: "Email", action: "focus", index: 0, [flag]: true });
@@ -377,7 +378,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       "tap",
       false,
     );
-    expect(checked).toBe(label);
+    expect<unknown>(checked).toBe(label);
     expect(failedRefind(result).error).toContain("matched label changed");
   });
 

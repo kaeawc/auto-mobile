@@ -55,8 +55,10 @@ import { prepareFileSource } from "./fileSourcePreparation";
 
 export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 
-export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
+export type PutAppFileRequest = Omit<PutAppFileArgs, "device" | "target"> & {
   device: BootedDevice;
+  /** Callers may omit `indexMedia`; the service defaults it to false. */
+  target: PutAppFileTarget;
   signal?: AbortSignal;
 };
 

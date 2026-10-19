@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   InternalToolPayloads,
@@ -80,7 +81,7 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
   });
 
   function registerSwipeOn(found: boolean): void {
-    ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+    ToolRegistry.register("swipeOn", "swipeOn", z.object({}), async () =>
       createStructuredToolResponse<SwipeOnToolPayload>({
         success: true,
         found,
@@ -102,7 +103,7 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
 
   test("delegates through callInternal so the args are marked internal (#3108)", async () => {
     let seenArgs: Record<string, unknown> | undefined;
-    ToolRegistry.register("swipeOn", "swipeOn", {}, async (args: any) => {
+    ToolRegistry.register("swipeOn", "swipeOn", z.object({}), async (args: any) => {
       seenArgs = args;
       return createStructuredToolResponse<SwipeOnToolPayload>({
         success: true,
@@ -121,7 +122,7 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
   });
 
   test("narrows a non-envelope handler response to undefined", async () => {
-    ToolRegistry.register("swipeOn", "swipeOn", {}, async () => 42 as unknown);
+    ToolRegistry.register("swipeOn", "swipeOn", z.object({}), async () => 42 as unknown);
     const result = await ToolRegistry.callInternalTyped("swipeOn", { direction: "up" });
     expect(result).toBeUndefined();
     expect(getStructuredField(result, "found")).toBeUndefined();

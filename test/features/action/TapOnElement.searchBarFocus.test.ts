@@ -105,8 +105,12 @@ describe("iOS search bar focus fixture", () => {
   test("keeps a duplicated field's indexed identity when focus is on its parent", () => {
     const hierarchy = fixture(3);
     for (const bar of hierarchy.hierarchy.node!.node!.slice(0, 3)) {
-      bar.node![0].$["view-id"] = "search-field";
-      bar.node![0].$.role = "textfield";
+      const field = bar.node?.[0];
+      if (!bar.$ || !field?.$) {
+        throw new Error("Expected search bar attributes");
+      }
+      field.$["view-id"] = "search-field";
+      field.$.role = "textfield";
     }
     const inner = new SearchableHierarchy()
       .project(hierarchy)
@@ -121,9 +125,16 @@ describe("iOS search bar focus fixture", () => {
     const hierarchy = fixture(3);
     const bars = hierarchy.hierarchy.node!.node!.slice(0, 3);
     for (const [index, bar] of bars.entries()) {
+      if (!bar.$) {
+        throw new Error("Expected search bar attributes");
+      }
       bar.$.focused = index === 1;
-      bar.node![0].$["view-id"] = "search-field";
-      bar.node![0].$.role = "textfield";
+      const field = bar.node?.[0];
+      if (!bar.$ || !field?.$) {
+        throw new Error("Expected search bar attributes");
+      }
+      field.$["view-id"] = "search-field";
+      field.$.role = "textfield";
     }
     const inner = new SearchableHierarchy()
       .project(hierarchy)
@@ -155,9 +166,13 @@ describe("iOS search bar focus fixture", () => {
     }).element!;
     const root = hierarchy.hierarchy.node!;
     const bar = root.node![0];
+    const field = bar.node?.[0];
+    if (!bar.$ || !field?.$) {
+      throw new Error("Expected search bar attributes");
+    }
     bar.$.focused = false;
-    bar.node![0].$.focused = true;
-    bar.node![0].$.role = "textfield";
+    field.$.focused = true;
+    field.$.role = "textfield";
     expect(
       verifySelectedField(hierarchy, { ...parent, class: "UISearchBar", role: "textfield" }),
     ).toBe(true);

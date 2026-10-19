@@ -626,7 +626,7 @@ export interface PrototypeResult {
   saved?: SavedPrototypeInfo;
   pin?: SavedPrototypePinInfo;
   savedPrototypes?: SavedPrototypeEntry[];
-  errorCode?: SavedPrototypeErrorCode;
+  errorCode?: SavedPrototypeErrorCode | (string & {});
   hiddenReason?: PrototypeHiddenReason;
   /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
   revision?: number;

@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
@@ -43,7 +44,7 @@ function capture(overrides: Partial<ViewHierarchyResult> = {}): ViewHierarchyRes
     screenHeight: 2400,
     systemInsets: { top: 136, bottom: 63, left: 0, right: 0 },
     insets: typedInsets({ top: 136, bottom: 63 }),
-    hierarchy: { node: { bounds: fullScreen } },
+    hierarchy: { node: createFlatNodeForTest({ bounds: fullScreen }) },
     ...overrides,
   } as ViewHierarchyResult;
 }
@@ -227,7 +228,7 @@ describe("isOwnPrototypeNode (#10086)", () => {
       type,
       packageName,
       bounds: fullScreen,
-      hierarchy: { node: { bounds: fullScreen, node: [prototypeControl] } },
+      hierarchy: createFlatNodeForTest({ bounds: fullScreen, node: [prototypeControl] }),
     },
   ];
 

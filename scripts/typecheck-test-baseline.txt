@@ -437,7 +437,6 @@ test/server/inventorySurfaceParity.test.ts TS2339 1
 test/server/inventorySurfaceParity.test.ts TS2571 1
 test/server/inventorySurfaceParity.test.ts TS7006 1
 test/server/iosUserFilesProvider.test.ts TS18048 2
-test/server/iosUserFilesProvider.test.ts TS2769 3
 test/server/navigationTools.test.ts TS18046 13
 test/server/navigationTools.test.ts TS2322 1
 test/server/navigationTools.test.ts TS2339 3
@@ -636,7 +635,6 @@ test/utils/android-cmdline-tools/EmulatorProcessStop.group.test.ts TS2769 2
 test/utils/android-cmdline-tools/EmulatorReadinessPoller.test.ts TS2339 1
 test/utils/android-cmdline-tools/EmulatorReadinessPoller.test.ts TS2352 1
 test/utils/android-cmdline-tools/runAndroidCommand.test.ts TS2339 1
-test/utils/contentHashProvider.test.ts TS2554 4
 test/utils/coreSimulatorDeviceSetEnvConstant.test.ts TS2339 1
 test/utils/coreSimulatorDeviceSetEnvConstant.test.ts TS2345 3
 test/utils/ctrlProxyDownloadControl.property.test.ts TS2367 1
@@ -691,6 +689,4 @@ test/utils/structuralUtils.characterization.test.ts TS2345 2
 test/utils/structuralUtils.characterization.test.ts TS2769 1
 test/utils/structuralUtils.characterization.test.ts TS7006 1
 test/utils/toolFailureSignal.test.ts TS2769 3
-test/utils/toolUtils.property.test.ts TS2345 1
-test/utils/toolUtilsStructuredField.test.ts TS2769 1
 test/vision/ClaudeVisionClient.test.ts TS2769 1

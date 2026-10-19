@@ -43,6 +43,17 @@ export class DefaultFileDownloader implements FileDownloader {
     private readonly fileSystem: DownloadFileSystem = fs,
   ) {}
 
+  /** @internal Typed access to deterministic stream regression seams. */
+  get testHooks() {
+    return {
+      pipeResponseToFile: (response: Readable, destination: string) =>
+        this.pipeResponseToFile(response, destination),
+      onFirstResponseByte: (observer: () => void): void => {
+        this.onFirstResponseByte = observer;
+      },
+    };
+  }
+
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
     signal ??= getAbortSignal();
     if (signal?.aborted) {

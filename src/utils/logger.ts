@@ -15,6 +15,8 @@ import {
   resolveAutomobileLogFormat,
   resolveAutomobileLogSink,
   writeEmergencyLog,
+  logStreamFactory,
+  type LogStream,
 } from "./loggingConfig";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { toActionableError } from "../models/ActionableError";
@@ -199,7 +201,7 @@ const logFilePath = logsDir ? path.join(logsDir, `${ownLogPrefix}.log`) : undefi
 // preceding 'error' is rare enough (and self-healing via the next write's
 // lazy retry once a subsequent write actually fails) that it doesn't need a
 // handler here.
-const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): void => {
+const attachStreamFailureHandlers = (stream: LogStream, target: string): void => {
   stream.on("error", (error) => {
     try {
       writeEmergencyLog(`Log stream error on ${target}`, error);
@@ -224,7 +226,7 @@ const attachStreamFailureHandlers = (stream: fs.WriteStream, target: string): vo
 // Every old descriptor whose close was not confirmed keeps this path unavailable.
 // These are old-stream release barriers, never references to the current sink.
 const unconfirmedCloses = new Map<
-  fs.WriteStream,
+  LogStream,
   {
     timer: Pick<Timer, "setTimeout" | "clearTimeout">;
     timeoutHandle: NodeJS.Timeout;
@@ -232,7 +234,7 @@ const unconfirmedCloses = new Map<
   }
 >();
 const deferReopenUntilClose = (
-  stream: fs.WriteStream,
+  stream: LogStream,
   timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
 ): void => {
   if (stream.closed) {
@@ -267,7 +269,7 @@ const deferReopenUntilClose = (
 // importing process ("Unhandled error between tests" in the host-integration
 // lane). File logging is best-effort, so swallow the construction failure and
 // fall back to console-only logging rather than taking the process down.
-const openLogStream = (target: string): fs.WriteStream | undefined => {
+const openLogStream = (target: string): LogStream | undefined => {
   for (const [stream, entry] of unconfirmedCloses) {
     if (stream.closed) {
       entry.onClose();
@@ -277,7 +279,7 @@ const openLogStream = (target: string): fs.WriteStream | undefined => {
     return undefined;
   }
   try {
-    const stream = fs.createWriteStream(target, { flags: "a" });
+    const stream = logStreamFactory.create(target, { flags: "a" });
     attachStreamFailureHandlers(stream, target);
     return stream;
   } catch (error) {
@@ -299,19 +301,7 @@ function fileLogPaths(): { dir: string; path: string } | undefined {
   return { dir: logsDir, path: logFilePath };
 }
 
-interface EndableLogStream {
-  end(callback?: () => void): void;
-  once(event: "error" | "close", listener: (...args: any[]) => void): void;
-  off(event: "error" | "close", listener: (...args: any[]) => void): void;
-  // Node/Bun WriteStreams expose this once the fd has actually been released.
-  // Optional so plain EventEmitter fakes that never set it still type-check.
-  readonly closed?: boolean;
-  // Node/Bun WriteStreams (via Writable) expose this. Called only on the
-  // error-without-close path below, to nudge a stalled fd toward release
-  // rather than passively waiting on a `close` that may never come. Optional
-  // so plain EventEmitter fakes that never implement it still type-check.
-  destroy?(error?: Error): void;
-}
+type EndableLogStream = Pick<LogStream, "end" | "once" | "off" | "closed" | "destroy">;
 
 // Bounds how long closeLogStream() waits for the confirming `close`, including
 // a stream that silently never closes. A stuck fd must not hold the next test
@@ -336,7 +326,7 @@ const productionStallTimer = {
   now: () => runtimeNow(),
 };
 let logSinkStallTimer: LogSinkTimer = productionStallTimer;
-const streamStallGuards = new WeakMap<fs.WriteStream, LogSinkStallGuard>();
+const streamStallGuards = new WeakMap<LogStream, LogSinkStallGuard>();
 let intentionalDrainCount = 0;
 let rotationWait:
   | {
@@ -641,7 +631,7 @@ let startupLogSweep = logsDir ? createStartupLogSweep(defaultTimer, pruneOldLogF
 // can throw `EEXIST: file already exists, epoll_ctl` on the new stream's own
 // construction (issue #6149). A failed close defers rotation until the
 // descriptor confirms release; writes degrade to stderr in the meantime.
-const closeStreamBeforeRotation = async (stream: fs.WriteStream): Promise<boolean> => {
+const closeStreamBeforeRotation = async (stream: LogStream): Promise<boolean> => {
   streamStallGuards.get(stream)?.suspend();
   try {
     await closeLogStream(stream);
@@ -972,7 +962,7 @@ const writeResumedRecord = (elapsedMs: number, diverted: number): void => {
 };
 
 const abandonStalledStream = (
-  stream: fs.WriteStream,
+  stream: LogStream,
   timer: LogSinkTimer,
   elapsed: number,
   dropped: number,
@@ -994,7 +984,7 @@ const abandonStalledStream = (
   }
 };
 
-const stallGuardForStream = (stream: fs.WriteStream): LogSinkStallGuard => {
+const stallGuardForStream = (stream: LogStream): LogSinkStallGuard => {
   let guard = streamStallGuards.get(stream);
   if (!guard) {
     const timer = logSinkStallTimer;

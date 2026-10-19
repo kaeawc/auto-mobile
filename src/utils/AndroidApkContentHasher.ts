@@ -73,7 +73,7 @@ export function parsePmPathOutput(stdout: string): string[] {
  */
 export class AndroidApkContentHasher implements AppContentHasher {
   constructor(
-    private readonly adb: AdbExecutor,
+    private readonly adb: Pick<AdbExecutor, "executeCommand">,
     private readonly checksum: ChecksumCalculator = new DefaultChecksumCalculator(),
   ) {}
 

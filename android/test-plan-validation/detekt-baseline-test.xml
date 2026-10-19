@@ -2,8 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:ToolResultParserTest.kt:SchemaSampleGenerator$private fun generate: JsonElement</ID>
-    <ID>LargeClass:TestPlanValidatorTest.kt:TestPlanValidatorTest</ID>
-    <ID>LongMethod:TestPlanValidatorTest.kt:TestPlanValidatorTest$@Test fun `accepts valid tool names`</ID>
   </CurrentIssues>
 </SmellBaseline>

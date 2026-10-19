@@ -268,7 +268,6 @@ describe("IOSCtrlProxyClient restart threshold", () => {
 
   test("briefly opened sockets never rearm the restart budget", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     const manager = createFakeManager(timer);
     client = IOSCtrlProxyClient.createForTesting(
       testDevice,
@@ -289,7 +288,9 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       } else {
         await client.awaitRecovery(20_000);
       }
-      await timer.advanceTimeAsync(2000);
+      // Recovery has settled; explicitly cross the stability window without
+      // an auto-advancing clock racing the fake socket's close handshake.
+      timer.advanceTime(2000);
     }
     expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
       state: "exhausted",
@@ -487,7 +488,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
           }),
       },
     );
-    const internals = client as any;
+    const internals = client.testHooks;
     client.ensureRecoveryStarted();
     const first = internals.recoveryPromise;
     expect(releases).toHaveLength(1);

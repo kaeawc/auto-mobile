@@ -4,7 +4,6 @@ import {
   type KeepScreenAwakeSettingsClient,
   type KeepScreenAwakeState,
 } from "../../src/utils/KeepScreenAwakeManager";
-import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
@@ -35,7 +34,7 @@ interface FakeAdbOptions {
   rejectAt?: Array<{ match: string; occurrence: number }>;
 }
 
-class FakeAdb implements Partial<AdbExecutor> {
+class FakeAdb implements Pick<AdbExecutor, "executeCommand"> {
   calls: string[] = [];
   constructor(private readonly opts: FakeAdbOptions = {}) {}
 
@@ -63,8 +62,8 @@ class FakeAdb implements Partial<AdbExecutor> {
   }
 }
 
-const makeFactory = (adb: FakeAdb): AdbClientFactory => ({
-  create: () => adb as unknown as AdbExecutor,
+const makeFactory = (adb: FakeAdb) => ({
+  create: () => adb,
 });
 
 const physicalDevice: BootedDevice = {

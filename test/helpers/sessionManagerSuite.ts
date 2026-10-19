@@ -315,6 +315,17 @@ export function recordingBiometricRestorer(
   });
 }
 
+/** A manager with the timer and persistence it was built over, for tests that drive all three. */
+export function makeSessionManagerHarness(): {
+  timer: FakeTimer;
+  persistence: FakeDeviceSessionPersistence;
+  manager: SessionManager;
+} {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  return { timer, persistence, manager: makeSessionManager({ timer, persistence }) };
+}
+
 /**
  * Registers the shared per-test fixture of the `SessionManager` suites: a fresh manager over a
  * `FakeTimer` and in-memory persistence, with the heartbeat env cleared around each test and the

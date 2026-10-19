@@ -13,7 +13,7 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { executionTracker } from "../../src/daemon/executionTracker";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";

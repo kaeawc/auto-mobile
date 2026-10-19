@@ -75,6 +75,8 @@ export {
   IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS,
   IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   resolveIosEncoderScale,
+  validateIosSourceFrameSize,
+  type EncoderSize,
 } from "./IosFramePipeline";
 export { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
 

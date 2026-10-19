@@ -24,8 +24,10 @@ export {
   NAL_TYPE_AUD,
   NAL_TYPE_SPS,
   NAL_TYPE_PPS,
+  NAL_TYPE_SEI,
   nalUnitType,
   isVclNal,
+  isFirstSliceOfPicture,
 } from "./H264AccessUnitAssembler";
 
 /** NAL unit type for a coded slice of an IDR (key frame) picture. */

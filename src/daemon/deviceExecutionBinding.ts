@@ -5,4 +5,7 @@ export const ambientExecutionIdReader: AmbientExecutionIdReader = {
   getExecutionId: () => getToolSelectionContext()?.execution?.executionId,
 };
 
-export { ambientDeviceExecutionBinding } from "../utils/deviceExecutionBinding";
+export {
+  type DeviceExecutionBinding,
+  ambientDeviceExecutionBinding,
+} from "../utils/deviceExecutionBinding";

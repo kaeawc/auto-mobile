@@ -12,7 +12,10 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultDeviceSetRoot } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { ExpiringControllerVersionMemory } from "./ExpiringControllerVersionMemory";
-export { ExpiringControllerVersionMemory } from "./ExpiringControllerVersionMemory";
+export {
+  ExpiringControllerVersionMemory,
+  NETWORK_FILTER_LEGACY_MEMORY_TTL_MS,
+} from "./ExpiringControllerVersionMemory";
 
 /**
  * Host bridge to the macOS Network Extension controller (#10590, plan #6298).

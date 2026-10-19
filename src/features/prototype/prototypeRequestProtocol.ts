@@ -63,6 +63,7 @@ export const prototypeRequestMessageSchema = z.object({
   /** Clamped to the maximum timeout; absent means the default. */
   timeoutMs: z.number().int().positive().optional(),
 });
+export type PrototypeRequestMessage = z.infer<typeof prototypeRequestMessageSchema>;
 
 export const prototypeRequestCancelMessageSchema = z.object({
   type: z.literal(PROTOTYPE_REQUEST_CANCEL_MESSAGE_TYPE),

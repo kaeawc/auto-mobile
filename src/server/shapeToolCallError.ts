@@ -26,7 +26,7 @@ import {
   recoveryIdentityLoss,
   recoveryIdentityLossPayload,
   sessionReleasedDuringCallPayload,
-} from "./deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import {
   DaemonRestartDeferredError,
   daemonRestartDeferredPayload,
@@ -38,7 +38,7 @@ import {
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "./deviceOutsideBoundSessionRefusal";
+} from "../daemon/deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { SdkTooOldError } from "../models/SdkTooOldError";

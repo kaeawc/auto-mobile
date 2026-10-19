@@ -75,7 +75,7 @@ export function assertAndroidImageRunningStateKnown(image: DeviceInfo): void {
   }
 }
 
-export type { DeviceDiscoveryError };
+export type { DeviceDiscoveryError, DeviceDiscoveryErrorCode };
 
 /**
  * Result of a discovery sweep that distinguishes per-platform success.

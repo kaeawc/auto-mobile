@@ -1,5 +1,5 @@
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
-import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {

@@ -17,6 +17,8 @@ import type {
   RotationSettingCleanup,
 } from "./RotationSupport";
 
+export type AutoRotateState = "locked" | "enabled" | "unknown";
+
 export type AutoRotatePlan = {
   preserveLock: boolean;
   restoreAutomaticRotation: boolean;

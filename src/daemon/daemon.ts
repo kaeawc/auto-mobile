@@ -374,7 +374,7 @@ import {
   type ShutdownCleanupStage,
 } from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
-import { type ToolSelectionProfileProvenanceLoader } from "../server/toolSelectionProfileRegistry";
+import { type ToolSelectionProfileProvenanceLoader } from "./toolSelectionProfileRegistry";
 
 import {
   resolveDaemonDependencies,

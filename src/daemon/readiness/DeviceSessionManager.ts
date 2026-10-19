@@ -4,3 +4,4 @@
  */
 export * from "./DeviceReadiness";
 export { DeviceReadiness as DeviceSessionManager } from "./DeviceReadiness";
+export type { DeviceReadinessOptions as DeviceSessionManagerOptions } from "./DeviceReadiness";

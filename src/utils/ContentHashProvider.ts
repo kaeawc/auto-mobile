@@ -8,6 +8,7 @@ import { IosBundleContentHasher } from "./IosBundleContentHasher";
 import { AndroidApkContentHasher } from "./AndroidApkContentHasher";
 export {
   AndroidApkContentHasher,
+  extractApkDigests,
   combineApkDigests,
   parsePmPathOutput,
 } from "./AndroidApkContentHasher";

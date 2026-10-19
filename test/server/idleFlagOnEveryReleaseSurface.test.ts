@@ -9,7 +9,7 @@ import {
   recoveryIdentityLossDetails,
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -90,7 +90,7 @@ interface Surface {
 const surfaces: Surface[] = [
   {
     name: "default proxy tool result",
-    builders: ["src/server/proxyServer.ts#noActiveDeviceSessionPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload"],
     reasonKey: "reason",
     holder: (reason) => {
       const content = noActiveDeviceSessionResult(new DaemonConnectionSessionReleasedError(reason))
@@ -127,7 +127,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "ownership lost",
-    builders: ["src/server/deviceSessionResult.ts#sessionOwnershipLostPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload"],
     reasonKey: "reason",
     holder: (reason) =>
       sessionOwnershipLostPayload({ message: "Released", sessionUuid: SESSION, reason }).error,
@@ -135,7 +135,7 @@ const surfaces: Surface[] = [
   {
     name: "released during call MCP",
     builders: [
-      "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
+      "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
       "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
     ],
     reasonKey: "reason",
@@ -224,7 +224,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "recovery identity loss details",
-    builders: ["src/server/deviceSessionResult.ts#recoveryIdentityLossDetails"],
+    builders: ["src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails"],
     reasonKey: "reason",
     holder: (reason) =>
       recoveryIdentityLossDetails({

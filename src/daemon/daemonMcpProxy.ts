@@ -99,7 +99,7 @@ export {
   mergeDaemonOptions,
 } from "./proxy/startupOptions";
 import { anyDeviceReadOnlyArgShapeMatches } from "./deviceReadOnlyArgShapes";
-import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
 import { getRemovedToolHint } from "../utils/removedTools";
@@ -156,7 +156,7 @@ import {
   listChangedKindForMethod,
   RESOURCE_UPDATED_NOTIFICATION_METHOD,
   type ListChangedKind,
-} from "../server/listChangedBroadcast";
+} from "./listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "./sessionReleaseBroadcast";
 import { SESSION_OWNERSHIP_LOST_CODE } from "./sessionReleasedDuringCall";
 import {
@@ -168,7 +168,7 @@ import {
   isDeviceBindingTool,
   readDeviceCleanupInProgressRefusal,
   readTerminalSessionRefusal,
-} from "../server/deviceSessionResult";
+} from "./deviceSessionResult";
 import { routedSessionUuidFromResult } from "./routedSessionMeta";
 import {
   toolSelectionProfileUuidFromResponse,

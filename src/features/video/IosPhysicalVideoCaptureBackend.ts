@@ -35,7 +35,7 @@ import {
   type VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { HelperCaptureDeviceLister } from "./HelperCaptureDeviceLister";
-export { parseCaptureDeviceList } from "./HelperCaptureDeviceLister";
+export { HelperCaptureDeviceLister, parseCaptureDeviceList } from "./HelperCaptureDeviceLister";
 
 /** Hardware H.264 encoder used whenever the host ffmpeg exposes it. */
 export const VIDEOTOOLBOX_H264_ENCODER = "h264_videotoolbox";

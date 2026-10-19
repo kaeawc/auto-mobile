@@ -12,6 +12,7 @@ export {
   emulatorProcessArguments,
   emulatorProcessEscapeHint,
 } from "./EmulatorStillRunningError";
+export { EmulatorStopDispatchedError } from "./EmulatorStopDispatchedError";
 
 /** Structurally the same as boot admission's AndroidProcessRow. */
 export interface EmulatorHostProcessRow {

@@ -13,7 +13,7 @@ import { DEVICES_ENV } from "./envDevices";
 import { MEDIA_ENV } from "./envMedia";
 import type { EnvVarSpec } from "./envSpec";
 
-export type { EnvVarSpec } from "./envSpec";
+export type { EnvVarKind, EnvVarSpec } from "./envSpec";
 
 /** Every AutoMobile-owned variable; the entries live in the domain modules next to this file. */
 export const ENV = {

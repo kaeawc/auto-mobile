@@ -85,7 +85,7 @@ import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "./toolSelectionProfileRegistry";
+} from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
   iosDependencies?: IosDoctorDependencies;

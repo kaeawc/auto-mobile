@@ -1,6 +1,6 @@
 import { serverConfig } from "../../../utils/ServerConfig";
 import { logger } from "../../../utils/logger";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 
 export function resolveToolResultsNoStructuredContent(
   registry: ToolSelectionProfileRegistry,

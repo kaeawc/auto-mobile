@@ -34,6 +34,8 @@ export {
   resolveIosLenientTerminateBackend,
 } from "./SimulatorIosClearDataBackend";
 export { PhysicalIosDeviceBackend } from "./PhysicalIosDeviceBackend";
+export { SimulatorIosLaunchBackend } from "./SimulatorIosLaunchBackend";
+export { PhysicalIosLaunchBackend } from "./PhysicalIosLaunchBackend";
 export { SimulatorIosTerminateBackend } from "./SimulatorIosTerminateBackend";
 export { PhysicalIosTerminateBackend } from "./PhysicalIosTerminateBackend";
 export { SimulatorIosAppListBackend } from "./SimulatorIosAppListBackend";

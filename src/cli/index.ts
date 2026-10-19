@@ -24,7 +24,7 @@ import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
-} from "../server/deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import { AUTOMATIC_TOOL_OUTPUT_RETENTION } from "../server/toolRegistry";
 import { JsonToolOutputArtifactWriter } from "../server/toolOutputArtifactWriter";
 import type { ObservationArtifactWriter } from "../server/finalizeToolResponse";

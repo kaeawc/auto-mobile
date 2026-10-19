@@ -284,7 +284,6 @@ import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { PlatformLegacySlotDeviceStopper } from "./sessionBroker/registry/platformLegacySlotDeviceStopper";
 import { sessionDisposition } from "./sessionBroker/sessionDisposition";
-import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import {
   createDaemonTerminalReleaseJournal,
   type DaemonTerminalReleaseJournalOptions,
@@ -379,6 +378,7 @@ import { type ToolSelectionProfileProvenanceLoader } from "../server/toolSelecti
 import {
   resolveDaemonDependencies,
   type DaemonDependencies,
+  type DaemonDeviceSessionStore,
   type DatabaseHealthFailureRecovery,
   type ManagedAdbServerShutdown,
   type DaemonProcessBirthTimeProvider,
@@ -651,7 +651,7 @@ export class Daemon {
   private deviceSessionRegistry: DeviceSessionRegistry;
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
-  private deviceSessionRepository: DeviceSessionRepository;
+  private deviceSessionRepository: DaemonDeviceSessionStore;
   private timer: Timer;
   private brokerExecutionRelease: BrokerExecutionRelease | undefined;
   private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;

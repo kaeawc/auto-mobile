@@ -3,7 +3,8 @@ import { z } from "zod/v4";
 import type { FailureObservationSummary } from "../../src/models/FailureObservation";
 import type { AbortStrategy, Plan, PlanExecutionResult } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor, selectParallelFailure } from "../../src/utils/plan/PlanExecutor";
+import { selectParallelFailure } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { PlanPartitioner } from "../../src/utils/plan/PlanPartitioner";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { withTemporaryTool } from "../helpers/withTemporaryTool";
@@ -51,7 +52,7 @@ async function runInOrder(
 ): Promise<PlanExecutionResult> {
   const releases = new Map(order.map((device) => [device, Promise.withResolvers<void>()]));
   const started = new Map(order.map((device) => [device, Promise.withResolvers<void>()]));
-  const executor = new DefaultPlanExecutor(new FakeTimer());
+  const executor = createDefaultPlanExecutor(new FakeTimer());
   const observationRelease = Promise.withResolvers<void>();
   let observationCalls = 0;
   if (failureObservation) {

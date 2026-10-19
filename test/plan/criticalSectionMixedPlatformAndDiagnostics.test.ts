@@ -6,7 +6,7 @@ import { registerCriticalSectionTools } from "../../src/server/criticalSectionTo
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry, preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -94,7 +94,7 @@ describe("criticalSection sub-steps in a mixed-platform plan", () => {
   });
 
   test("an inputText sub-step on each label migrates with that label's platform, not the request's", async () => {
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
       mixedPlan([
         sectionStep("A", { tool: "inputText", params: { text: "hello" } }),
         sectionStep("B", { tool: "inputText", params: { text: "hello" } }),
@@ -115,7 +115,7 @@ describe("criticalSection sub-steps in a mixed-platform plan", () => {
   });
 
   test("an android-label plan run under an ios request still migrates the android label as android", async () => {
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
       mixedPlan([
         sectionStep("A", { tool: "inputText", params: { text: "x" } }),
         sectionStep("B", { tool: "inputText", params: { text: "x" } }),
@@ -155,7 +155,7 @@ describe("criticalSection sub-steps in a mixed-platform plan", () => {
         warnings: ["keyboard dismissal failed"],
       }));
 
-      const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
         singlePlan({ tool: "answeredFailure" }),
         0,
         "android",
@@ -184,7 +184,7 @@ describe("criticalSection sub-steps in a mixed-platform plan", () => {
         }),
       );
 
-      const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
         singlePlan({ tool: "timesOut" }),
         0,
         "android",

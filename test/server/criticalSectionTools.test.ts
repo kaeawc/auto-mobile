@@ -1,6 +1,6 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry, preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
@@ -404,7 +404,7 @@ describe("criticalSection tool", () => {
         { tool: "envelopeVerdictProbe", params: { device: "A" } },
         { tool: "envelopeNextProbe", params: { device: "A" } },
       ];
-      const plan = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      const plan = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
         { name: "envelope verdict", steps },
         0,
       );

@@ -1,6 +1,6 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test, beforeEach, afterEach, afterAll, mock, spyOn } from "bun:test";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";

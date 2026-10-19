@@ -14,6 +14,16 @@ const UPDATE_COMMAND =
 
 type Counts = Record<string, number>;
 
+/**
+ * Files allowed to call DaemonState.getInstance() because they ARE the process-wide
+ * composition seam: every other src file receives its daemon state as a dependency.
+ * Exempt files are not counted against the baseline, which therefore stays empty.
+ */
+const EXEMPT_FILES: Readonly<Record<string, string>> = {
+  "src/daemon/daemonContext.ts":
+    "Daemon composition root: the single place that resolves the process-wide DaemonState singleton and hands it to collaborators.",
+};
+
 function readBaseline(): Counts {
   const counts: Counts = {};
   for (const line of readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean)) {
@@ -74,6 +84,7 @@ describe("countDaemonStateGetInstanceCalls", () => {
 
 describe("DaemonState.getInstance() call sites in src/ never grow (#11806)", () => {
   const found: Counts = {};
+  const exemptFound: Counts = {};
   let baseline: Counts = {};
 
   beforeAll(() => {
@@ -83,8 +94,9 @@ describe("DaemonState.getInstance() call sites in src/ never grow (#11806)", () 
         continue;
       }
       const count = countDaemonStateGetInstanceCalls(file, source);
+      const relative = relativePosix(REPO_ROOT, file);
       if (count > 0) {
-        found[relativePosix(REPO_ROOT, file)] = count;
+        (relative in EXEMPT_FILES ? exemptFound : found)[relative] = count;
       }
     }
     const update = process.env.UPDATE_DAEMON_STATE_BASELINE;
@@ -119,5 +131,21 @@ describe("DaemonState.getInstance() call sites in src/ never grow (#11806)", () 
   test("the baseline file is sorted by path", () => {
     const files = Object.keys(baseline);
     expect(files).toEqual([...files].sort());
+  });
+
+  test("every exemption is still needed and says why", () => {
+    const unused = Object.keys(EXEMPT_FILES).filter((file) => !(file in exemptFound));
+    expect(
+      unused,
+      "Remove exemptions whose file no longer calls DaemonState.getInstance().",
+    ).toEqual([]);
+    const unexplained = Object.entries(EXEMPT_FILES)
+      .filter(([, reason]) => reason.trim().length === 0)
+      .map(([file]) => file);
+    expect(unexplained).toEqual([]);
+  });
+
+  test("the baseline is empty: exemptions are the only allowed call sites", () => {
+    expect(baseline).toEqual({});
   });
 });

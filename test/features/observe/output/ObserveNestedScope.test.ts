@@ -236,11 +236,7 @@ describe("nested observe subtree scope", () => {
         timeoutMs: 300,
         settled: { quietPeriodMs: 500 },
       },
-      undefined,
-      true,
-      timer,
-      "android",
-      "none",
+      { skipBackStack: true, timer, platform: "android", screenshot: "none" },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.containerFailure).toMatchObject({
@@ -258,11 +254,7 @@ describe("nested observe subtree scope", () => {
     const outcome = await waitForObservation(
       screen,
       { elementId: focus.elementId, container: { elementId: "missing" }, timeoutMs: 0 },
-      undefined,
-      true,
-      timer,
-      "android",
-      "none",
+      { skipBackStack: true, timer, platform: "android", screenshot: "none" },
     );
     expect(outcome.containerFailure).toMatchObject({ level: 1, reason: "not-found" });
   });
@@ -282,11 +274,7 @@ describe("nested observe subtree scope", () => {
           selectionStrategy: "unique",
           timeoutMs: 0,
         },
-        undefined,
-        true,
-        timer,
-        "android",
-        "none",
+        { skipBackStack: true, timer, platform: "android", screenshot: "none" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(JSON.parse(JSON.stringify(outcome.containerFailure))).toEqual({

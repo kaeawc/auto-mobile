@@ -77,18 +77,14 @@ class HoldingAdb extends FakeAdbExecutor {
 
 function screenshot(adb: FakeAdbExecutor, timer: FakeTimer, ids: CountingIdGenerator) {
   const writer = new FakeScreenshotFileWriter();
-  const capture = new TakeScreenshot(
-    device,
-    new FakeAdbClientFactory(adb),
+  const capture = new TakeScreenshot(device, {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    ids,
-    writer,
-    undefined,
-    undefined,
-    undefined,
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-  );
+    idGenerator: ids,
+    fileWriter: writer,
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
   return { capture, writer };
 }
 

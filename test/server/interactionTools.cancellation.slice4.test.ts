@@ -227,12 +227,11 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
     );
     restores.push(() => delegate.mockRestore());
     interactionDeps.keyboardFactory = () =>
-      new Keyboard(
-        ios,
-        { create: () => new FakeAdbExecutor() },
-        new FakeKeyboardHierarchyProvider(),
-        h.timer,
-      );
+      new Keyboard(ios, {
+        adbFactory: { create: () => new FakeAdbExecutor() },
+        hierarchyProvider: new FakeKeyboardHierarchyProvider(),
+        timer: h.timer,
+      });
     const controller = new AbortController();
     const pending = handler("keyboard")(
       ios,

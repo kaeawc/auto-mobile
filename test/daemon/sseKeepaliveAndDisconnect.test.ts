@@ -941,13 +941,11 @@ describe("disconnect monitor miss counting", () => {
         };
       });
       try {
-        const outcome = await waitForObservation(
-          screen,
-          waitFor,
-          tracked.abortController.signal,
-          false,
+        const outcome = await waitForObservation(screen, waitFor, {
+          signal: tracked.abortController.signal,
+          skipBackStack: false,
           timer,
-        );
+        });
         expect(outcome.matched).toBe(true);
         expect(outcome.timedOut).toBe(false);
         expect(screen.getExecuteCallCount()).toBe(3);

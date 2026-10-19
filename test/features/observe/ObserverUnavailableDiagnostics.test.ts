@@ -142,17 +142,13 @@ test.each([
     const close = spyOn(client, "close");
     const transient = spyOn(IOSCtrlProxyClient, "createForObservationRead").mockReturnValue(client);
     const writer = new FakeScreenshotFileWriter();
-    const screenshot = new TakeScreenshot(
-      device,
-      factory,
+    const screenshot = new TakeScreenshot(device, {
+      adbFactory: factory,
       timer,
-      new CountingIdGenerator("observer"),
-      writer,
-      undefined,
-      undefined,
-      undefined,
-      false,
-    );
+      idGenerator: new CountingIdGenerator("observer"),
+      fileWriter: writer,
+      cleanupOnCreate: false,
+    });
     const state = new FakeScreenshotStateStore(timer);
     if (cached) {
       state.update(device.deviceId, "/fake/cached.png");

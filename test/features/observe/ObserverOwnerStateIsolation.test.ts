@@ -192,18 +192,16 @@ test.each(["active", "all"])(
     timer.advanceTime(6000); // An observer must not refresh even expired owner display/posture entries.
     const factory = new FakeAdbClientFactory(adb);
     const writer = new FakeScreenshotFileWriter();
-    const shot = new TakeScreenshot(
-      device,
-      factory,
+    const shot = new TakeScreenshot(device, {
+      adbFactory: factory,
       timer,
-      new CountingIdGenerator("shot"),
-      writer,
-      new FakeFileSystem(),
-      () => "/fake",
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      idGenerator: new CountingIdGenerator("shot"),
+      fileWriter: writer,
+      fileSystem: new FakeFileSystem(),
+      cacheDirResolver: () => "/fake",
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     directory = mkdtempSync(join(tmpdir(), "observer-owner-state-"));
     const store = new FileSystemObserveCacheStore(
       timer,
@@ -498,18 +496,19 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
   const adb = new FakeAdbExecutor();
   adb.setCommandError("screencap", new Error("maxBuffer exceeded"));
   const writer = new FakeScreenshotFileWriter();
-  const screenshot = new TakeScreenshot(
-    device,
-    new FakeAdbClientFactory(adb),
+  const screenshot = new TakeScreenshot(device, {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    new CountingIdGenerator("buffer"),
-    writer,
-    new FakeFileSystem(),
-    () => "/fake",
-    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-  );
+    idGenerator: new CountingIdGenerator("buffer"),
+    fileWriter: writer,
+    fileSystem: new FakeFileSystem(),
+    cacheDirResolver: () => "/fake",
+    physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+      new Map([[0, "4619827259835644672"]]),
+    ),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
   expect(await screenshot.executeObservationRead({ format: "png", displayId: 0 })).toEqual({
     success: false,
     error: "maxBuffer exceeded",

@@ -113,7 +113,7 @@ export function resolveObserveDataSources(
       readOnlyOr(
         readOnly,
         () => TakeScreenshot.forObservationRead(device),
-        () => new TakeScreenshot(device, adbFactory),
+        () => new TakeScreenshot(device, { adbFactory }),
       ),
     ),
     window: orDefault(deps?.window, () => new Window(device, adbFactory)),

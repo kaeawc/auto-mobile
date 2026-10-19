@@ -88,9 +88,7 @@ describe("observe waitFor with layer (#9305)", () => {
     return waitForObservation(
       screen,
       { text: "YouTube", timeout: 300, layer } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
   };
 
@@ -121,9 +119,7 @@ describe("observe waitFor with layer (#9305)", () => {
     const outcome = await waitForObservation(
       screen,
       { for: "appear", text: "YouTube", timeout: 300, layer } satisfies WaitForWithSettled,
-      undefined,
-      false,
-      timer,
+      { skipBackStack: false, timer },
     );
     expect(outcome.matched).toBe(matched);
   });

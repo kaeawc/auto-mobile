@@ -79,19 +79,16 @@ export class DefaultAndroidObservationCollector implements AndroidObservationCol
       readOptions,
     } = context;
     perf.serial("phase1_hierarchy");
-    await this.deps
-      .hierarchyCollector()
-      .collect(
-        result,
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-        readOnly,
-        capturedHierarchy,
-        readOptions,
-      );
+    await this.deps.hierarchyCollector().collect(result, {
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    });
     perf.end();
 
     // Prefer accessibility-service-supplied metadata for screen/insets/rotation/wakefulness/foreground.

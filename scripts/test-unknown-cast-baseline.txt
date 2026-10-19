@@ -78,7 +78,6 @@
 2	test/server/interactionTools.tapOnMessage.test.ts
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
-1	test/server/inventorySurfaceParity.test.ts
 1	test/server/restartReservationOwnerOtherAvdOnReservedSerial.test.ts
 1	test/server/restartReservationStartAdmission.test.ts
 2	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts

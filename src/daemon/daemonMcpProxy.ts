@@ -56,6 +56,7 @@ import {
 } from "./proxy/HeldSessionLosses";
 import { LatestBindingKeeper, type LatestBindingKeeperPort } from "./proxy/LatestBindingKeeper";
 import { ReleaseEpochLedger } from "./proxy/ReleaseEpochLedger";
+import type { DaemonMcpProxyTestInternals } from "./proxy/DaemonMcpProxyTestInternals";
 import { StallProbe, type StallProbePort } from "./proxy/StallProbe";
 import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
 import {
@@ -873,15 +874,6 @@ export class DaemonMcpProxy {
   // UNRELATED session mid-call no longer blocks remembering the session THIS call
   // actually forwarded, while a release of the forwarded UUID still preserves.
   private readonly releaseLedger = new ReleaseEpochLedger();
-  private get releasedSessionEpochs(): Map<string, number> {
-    return this.releaseLedger.releasedSessionEpochs;
-  }
-  private get releasedSessionReasons(): Map<string, string> {
-    return this.releaseLedger.releasedSessionReasons;
-  }
-  private get activeReleaseEpochReferences(): Map<string, number> {
-    return this.releaseLedger.activeReleaseEpochReferences;
-  }
   // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
   // or the session binding mid-flight (list_changed nulls a cache; a bound-session
   // release changes the session scope). A `tools/list` / `resources/list` captures
@@ -1098,6 +1090,15 @@ export class DaemonMcpProxy {
   /** Test-only seam for checking active progress listener cleanup. */
   getProgressListenerCountForTesting(): number {
     return this.progressListeners.size;
+  }
+
+  /** Test-only typed view of the proxy internals suites need to drive or assert on. */
+  getInternalsForTesting(): DaemonMcpProxyTestInternals {
+    return {
+      resetConnection: () => this.resetConnection(),
+      resourceSubscriptions: this.resourceSubscriptions,
+      releaseLedger: this.releaseLedger,
+    };
   }
 
   /** Test-only seam for building a tool-unavailable error. */
@@ -1410,7 +1411,7 @@ export class DaemonMcpProxy {
         (sessionId) =>
           sessionId !== this.config.initialSessionUuid?.trim() &&
           !this.sessionBrokerSessions.has(sessionId) &&
-          !this.releasedSessionReasons.has(sessionId),
+          !this.releaseLedger.releasedSessionReasons.has(sessionId),
       );
     await Promise.all(
       sessions.map(async (sessionId) => {
@@ -4664,7 +4665,7 @@ export class DaemonMcpProxy {
       if (!this.stallHandovers.has(terminal.sessionUuid)) {
         return new DaemonBoundSessionExpiredError(
           namedSessionUuid,
-          this.releasedSessionReasons.get(namedSessionUuid) ?? terminal.reason,
+          this.releaseLedger.releasedSessionReasons.get(namedSessionUuid) ?? terminal.reason,
         );
       }
     }

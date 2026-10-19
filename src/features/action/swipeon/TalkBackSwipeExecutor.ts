@@ -385,16 +385,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     throwIfAborted(signal);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     gestureOptions?.displayFence?.assertCurrent();
-    const a11yResult = await this.accessibilityService.requestTwoFingerSwipe(
+    const a11yResult = await this.accessibilityService.requestTwoFingerSwipe({
       x1,
       y1,
       x2,
       y2,
       duration,
       offset,
-      5000,
-      perf || new NoOpPerformanceTracker(),
-    );
+      timeoutMs: 5000,
+      perf: perf || new NoOpPerformanceTracker(),
+    });
     throwIfAborted(signal);
 
     if (a11yResult.success) {

@@ -1,3 +1,5 @@
+import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { TwoFingerSwipeRequest } from "../../src/features/observe/android/types";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type { AndroidActivateAccessibilityLinkRequest } from "../../src/features/observe/android/AndroidActionDispatcher";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
@@ -949,19 +951,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
+  async requestPinch(request: PinchRequest): Promise<A11yPinchResult> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
+
     await this.applyDelay("pinch");
     beforeSend?.();
     this.checkFailure("pinch");
@@ -1208,18 +1211,19 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      displayId,
+      beforeSend,
+    } = request;
+
     await this.applyDelay("requestTwoFingerSwipe");
     beforeSend?.();
     this.checkFailure("requestTwoFingerSwipe");

@@ -81,7 +81,15 @@ describe("gesture request sequences", () => {
           error: "refused",
         };
       };
-      proxy.requestTwoFingerSwipe = async (x1, y1, x2, y2, duration, offset, timeout) => {
+      proxy.requestTwoFingerSwipe = async ({
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        offset,
+        timeoutMs: timeout,
+      }) => {
         calls.push(`two:${x1}:${y1}:${x2}:${y2}:${duration}:${offset}:${timeout}`);
         return { success: true, totalTimeMs: 1 };
       };

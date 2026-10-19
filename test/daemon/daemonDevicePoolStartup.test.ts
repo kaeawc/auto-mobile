@@ -77,7 +77,7 @@ describe("Daemon startup device discovery", () => {
     const daemon = buildDaemon(new FakeTimer());
     const internals = daemon;
     const manager = new FakeDeviceManager();
-    Object.assign(internals.getDevicePoolForTesting(), { deviceManager: manager });
+    Object.assign(internals.testHooks.devicePool, { deviceManager: manager });
     const discovery = spyOn(manager, "getBootedDevicesDetailed").mockRejectedValue(
       new Error("startup discovery failed"),
     );
@@ -112,7 +112,7 @@ describe("Daemon startup device discovery", () => {
       manager.bootedDevices = populated
         ? [{ deviceId: "startup-device", name: "Physical Android", platform: "android" }]
         : [];
-      Object.assign(internals.getDevicePoolForTesting(), { deviceManager: manager });
+      Object.assign(internals.testHooks.devicePool, { deviceManager: manager });
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
@@ -123,7 +123,7 @@ describe("Daemon startup device discovery", () => {
             "Device pool initialized with 1 devices: startup-device",
           );
           expect(info).toHaveBeenCalledWith("Device pool ready with 1 device(s)");
-          expect(internals.getDevicePoolForTesting().getDevice("startup-device")).toMatchObject({
+          expect(internals.testHooks.devicePool.getDevice("startup-device")).toMatchObject({
             sessionId: null,
             status: "idle",
           });
@@ -157,7 +157,7 @@ describe("Daemon startup device discovery", () => {
           process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = secret;
         }
         const daemon = buildDaemon(new FakeTimer());
-        const pool = daemon.getDevicePoolForTesting();
+        const pool = daemon.testHooks.devicePool;
         try {
           await pool.initializeWithDevices([
             { deviceId: "android-a", name: "Pixel A", platform: "android" },
@@ -201,7 +201,7 @@ describe("Daemon startup device discovery", () => {
         undefined,
       );
       const daemon = buildDaemon(new FakeTimer());
-      const pool = daemon.getDevicePoolForTesting();
+      const pool = daemon.testHooks.devicePool;
       try {
         await pool.initializeWithDevices([
           { deviceId: "android-a", name: "Pixel A", platform: "android" },
@@ -223,7 +223,7 @@ describe("Daemon startup device discovery", () => {
   test("iOS pool removal suspends and stops its manager; reappearance rearms lazily", async () => {
     const timer = new FakeTimer();
     const daemon = buildDaemon(timer);
-    const pool = daemon.getDevicePoolForTesting();
+    const pool = daemon.testHooks.devicePool;
     const manager = new FakeIOSCtrlProxyManager(timer);
     const managerLookup = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(
       manager as unknown as IOSCtrlProxyManager,
@@ -268,7 +268,7 @@ describe("Daemon startup device discovery", () => {
     };
     manager.bootedDevices = [device, lateDevice];
     (
-      internals.getDevicePoolForTesting() as unknown as {
+      internals.testHooks.devicePool as unknown as {
         deviceManager: DeferredDiscoveryDeviceManager;
       }
     ).deviceManager = manager;
@@ -287,14 +287,12 @@ describe("Daemon startup device discovery", () => {
     timer.advanceTime(5_000);
     await startup;
 
-    await internals.getDevicePoolForTesting().initializeWithDevices([device]);
-    const assignedBeforeLateDiscovery = internals
-      .getDevicePoolForTesting()
-      .getDevice(device.deviceId);
+    await internals.testHooks.devicePool.initializeWithDevices([device]);
+    const assignedBeforeLateDiscovery = internals.testHooks.devicePool.getDevice(device.deviceId);
     if (!assignedBeforeLateDiscovery) {
       throw new Error("expected startup device in pool");
     }
-    await internals.getDevicePoolForTesting().assignDeviceToSession("live-session", "android");
+    await internals.testHooks.devicePool.assignDeviceToSession("live-session", "android");
     expect(assignedBeforeLateDiscovery).toMatchObject({
       sessionId: "live-session",
       status: "busy",
@@ -304,12 +302,12 @@ describe("Daemon startup device discovery", () => {
     manager.releaseDiscovery();
     await refreshCompleted.promise;
 
-    expect(internals.getDevicePoolForTesting().getDevice(device.deviceId)).toMatchObject({
+    expect(internals.testHooks.devicePool.getDevice(device.deviceId)).toMatchObject({
       sessionId: "live-session",
       status: "busy",
       incarnation,
     });
-    expect(internals.getDevicePoolForTesting().getDevice(lateDevice.deviceId)).toMatchObject({
+    expect(internals.testHooks.devicePool.getDevice(lateDevice.deviceId)).toMatchObject({
       sessionId: null,
       status: "idle",
     });
@@ -323,7 +321,7 @@ describe("Daemon startup device discovery", () => {
         process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = secret;
         const daemon = buildDaemon(new FakeTimer());
         const internals = daemon;
-        await internals.getDevicePoolForTesting().initializeWithDevices([
+        await internals.testHooks.devicePool.initializeWithDevices([
           {
             deviceId: "unrelated-simulator",
             name: "Unrelated iPhone",
@@ -359,7 +357,7 @@ describe("Daemon startup device discovery", () => {
         process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = allowlist;
         const daemon = buildDaemon(new FakeTimer());
         const internals = daemon;
-        await internals.getDevicePoolForTesting().initializeWithDevices([
+        await internals.testHooks.devicePool.initializeWithDevices([
           { deviceId: "sim-a", name: "First iPhone", platform: "ios" },
           { deviceId: "sim-b", name: "Second iPhone", platform: "ios" },
           { deviceId: "android-a", name: "Pixel", platform: "android" },
@@ -398,7 +396,7 @@ describe("Daemon startup device discovery", () => {
     try {
       const daemon = buildDaemon(new FakeTimer());
       const internals = daemon;
-      await internals.getDevicePoolForTesting().initializeWithDevices([
+      await internals.testHooks.devicePool.initializeWithDevices([
         {
           deviceId: "ordinary-simulator",
           name: "Ordinary iPhone",
@@ -469,7 +467,7 @@ describe("Daemon startup device discovery", () => {
       { deviceId: "foreign-simulator", name: "Foreign iPhone", platform: "ios" },
     ];
     try {
-      await internals.getDevicePoolForTesting().initializeWithDevices(bootedDevices);
+      await internals.testHooks.devicePool.initializeWithDevices(bootedDevices);
       await internals.initializeIosServices();
       expect(verifiedDeviceIds).toEqual([]);
 
@@ -516,14 +514,14 @@ describe("Daemon startup device discovery", () => {
     const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
       verifyIosDevice: async (deviceId: string) => {
         verifiedDeviceIds.push(deviceId);
-        daemon.markShutdownInProgressForTesting();
+        daemon.testHooks.markShutdownInProgress();
       },
     } as unknown as DeviceSessionManager);
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     try {
       daemon = buildDaemon(new FakeTimer());
       const internals = daemon;
-      await internals.getDevicePoolForTesting().initializeWithDevices([
+      await internals.testHooks.devicePool.initializeWithDevices([
         { deviceId: "first-simulator", name: "First iPhone", platform: "ios" },
         { deviceId: "second-simulator", name: "Second iPhone", platform: "ios" },
       ]);

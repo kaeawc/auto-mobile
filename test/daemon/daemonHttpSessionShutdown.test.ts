@@ -166,7 +166,7 @@ describe("Daemon HTTP session shutdown", () => {
       () => {},
     );
     await transport.started;
-    daemon.markShutdownInProgressForTesting();
+    daemon.testHooks.markShutdownInProgress();
 
     const inFlight = internals.httpIngress.mcpHttpEndpoint.inFlightRequests();
     expect(inFlight).toHaveLength(1);

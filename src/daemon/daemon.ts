@@ -62,7 +62,6 @@ import {
   sessionExecutionProbe,
   subscribeToolCallEndActivity,
 } from "./toolCallActivity";
-import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { createDaemonHealthCheck, type HealthFailureKind } from "./daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
@@ -240,12 +239,7 @@ import {
   stopDeviceDataStreamSocketServer,
   getDeviceDataStreamServer,
 } from "./deviceDataStreamSocketServer";
-import {
-  OBSERVATION_BATCH_HEADROOM_MS,
-  PER_DEVICE_OBSERVATION_TIMEOUT_MS,
-  createPooledObservationExecutor,
-  runObservationRequestBatch,
-} from "./observationRequestBatch";
+import {} from "./observationRequestBatch";
 import {
   startFailuresStreamSocketServer,
   stopFailuresStreamSocketServer,
@@ -272,18 +266,13 @@ import {
 import { getDaemonSocketPathsByName } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { pushInitialObservationFramesForSubscriber } from "./observationInitialFrame";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
   NavigationGraphStreamBridge,
   type StorageSubscriptionRequest,
   applyStorageSubscriptionRequest,
-  createObservationStreamIosClient,
-  isHeldByAnotherOwner,
-  logSkippedObservationStreamDevice,
 } from "./daemonStreamRouting";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { configureObservationStreamCallbacks } from "./daemonObservationStreamCallbacks";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
 import {
   BackgroundBindingRegistryUpgrade,
@@ -305,7 +294,6 @@ import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentReposi
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
-import { selectObservationStreamDevices } from "./observationInitialFrame";
 import {
   startAppearanceSyncScheduler,
   stopAppearanceSyncScheduler,
@@ -362,7 +350,7 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "../processLifecycle";
-import type { BootedDevice, Platform } from "../models";
+import type { Platform } from "../models";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -440,50 +428,6 @@ type DeviceSessionRoutingTargets = {
   failuresPush: ReturnType<typeof getFailuresPushServer>;
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
-
-function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
-  return {
-    deviceId: pooledDevice.id,
-    name: pooledDevice.name,
-    platform: pooledDevice.platform,
-    iosVersion: pooledDevice.iosVersion,
-  };
-}
-
-/**
- * Per-device step of the pooled observation batch. An Android floor is read from the device's
- * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
- * floor (issue #9895).
- */
-function createDaemonObservationExecutor(
-  requestStart: number,
-  isViewerRead: (pooledDevice: PooledDevice) => boolean | Promise<boolean>,
-) {
-  return createPooledObservationExecutor({
-    hostRequestStartMs: requestStart,
-    readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
-      (
-        await defaultAdbClientFactory
-          .create(toBootedDevice(pooledDevice))
-          .getDeviceTimestampMsWithSource(undefined, signal)
-      ).timestampMs,
-    observe: (pooledDevice: PooledDevice, { minTimestamp, signal }) =>
-      new RealObserveScreen(toBootedDevice(pooledDevice)).execute({
-        skipWaitForFresh: false,
-        minTimestamp,
-        signal,
-      }),
-    // A watcher of a held device gets the `observe` tool's deviceId read (#10967): connect-only,
-    // never the session pipeline's service rebind or CtrlProxy setup on the holder's device.
-    viewerRead: {
-      applies: isViewerRead,
-      observe: (pooledDevice: PooledDevice, signal: AbortSignal) =>
-        new RealObserveScreen(toBootedDevice(pooledDevice), undefined, {
-          deviceReadOnly: true,
-        }).executeDeviceRead(signal, "none"),
-    },
-  });
-}
 
 export function getProcessWideAdbServerResetCohort(
   bootedDeviceIds: ReadonlySet<string>,
@@ -2172,160 +2116,13 @@ export class Daemon {
       return;
     }
 
-    const coordinator = this.getInitialFrameCoordinator(server);
-    server.setOnSubscriberConnected((deviceId: string | null, subscriber) => {
-      logger.info(
-        `[Daemon] IDE plugin subscribed to observation stream (device: ${deviceId ?? "all"}), ensuring WebSocket connections...`,
-      );
-
-      // A stream subscription does not acquire devices. Initial frames can
-      // connect a CtrlProxy client, so both platforms need passive-work scope.
-      const pooledDevices = this.devicePool.getAllDevices();
-      const allDevices = selectObservationStreamDevices(
-        pooledDevices,
-        this.passiveWorkPolicy,
-        (device) => logSkippedObservationStreamDevice(device.platform, device.id, "connect"),
-      );
-
-      pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
-        streamServer: server,
-        coordinator,
-        subscriber,
-        isDeviceAllowed: (id) => {
-          const device = this.devicePool.getAllDevices().find((candidate) => candidate.id === id);
-          return (
-            !!device && this.passiveWorkPolicy.allows(device.platform, "observation-stream", id)
-          );
-        },
-        androidClientFactory: (device) =>
-          AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
-        iosClientFactory: (device) =>
-          createObservationStreamIosClient(device, getDeviceDataStreamServer),
-      }).catch((error) => {
-        logger.warn(`[Daemon] Error pushing initial observation frame: ${error}`);
-      });
-
-      if (pooledDevices.length === 0) {
-        logger.info("[Daemon] No devices in pool to connect");
-      }
+    configureObservationStreamCallbacks(server, this.getInitialFrameCoordinator(server), {
+      devicePool: () => this.devicePool,
+      passiveWorkPolicy: () => this.passiveWorkPolicy,
+      timer: () => this.timer,
+      sessionManager: () => this.sessionManager,
+      applyStorageSubscriptionRequest: (request) => this.applyStorageSubscriptionRequest(request),
     });
-
-    server.setOnScreenshotCadenceChanged((deviceId: string | null) => {
-      const devices = this.devicePool
-        .getAllDevices()
-        .filter((device) => deviceId === null || device.id === deviceId);
-
-      for (const device of devices) {
-        if (device.platform === "android") {
-          if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
-            logSkippedObservationStreamDevice("android", device.id, "screenshot cadence");
-            continue;
-          }
-          AndroidCtrlProxyClient.getExistingInstance(
-            device.id,
-          )?.refreshObservationStreamScreenshotCadence();
-        } else if (device.platform === "ios") {
-          if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
-            logSkippedObservationStreamDevice("ios", device.id, "screenshot cadence");
-            continue;
-          }
-          IOSCtrlProxyClient.getExistingInstance(
-            device.id,
-          )?.refreshObservationStreamScreenshotCadence();
-        }
-      }
-    });
-
-    server.setOnHierarchyCadenceChanged((deviceId: string | null) => {
-      const devices = this.devicePool
-        .getAllDevices()
-        .filter((device) => deviceId === null || device.id === deviceId);
-
-      for (const device of devices) {
-        if (device.platform === "android") {
-          if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
-            logSkippedObservationStreamDevice("android", device.id, "hierarchy cadence");
-            continue;
-          }
-          AndroidCtrlProxyClient.getExistingInstance(
-            device.id,
-          )?.refreshObservationStreamHierarchyCadence();
-        } else if (device.platform === "ios") {
-          if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
-            logSkippedObservationStreamDevice("ios", device.id, "hierarchy cadence");
-            continue;
-          }
-          const client = IOSCtrlProxyClient.getExistingInstance(device.id);
-          if (!client) {
-            continue;
-          }
-
-          const intervalMs = server.getHierarchyIntervalMsForDevice(device.id);
-          void client
-            .ensureConnected()
-            .then((connected) => {
-              if (connected) {
-                client.refreshObservationStreamHierarchyCadence(intervalMs);
-              }
-            })
-            .catch((error) => {
-              logger.warn(
-                `[Daemon] Failed to refresh iOS hierarchy cadence for ${device.id}: ${error}`,
-              );
-            });
-        }
-      }
-    });
-
-    // Register/release a device-side content observer for one key/value store so external writes
-    // emit storage_update frames to the pane (issue #4709). Only Android exposes storage content
-    // observers today; a storage pane is always device-scoped, so target the resolved device and
-    // skip when no live CtrlProxy client exists. The device-side subscriptionId is deterministic
-    // ("packageName:fileName"), so unsubscribe reconstructs it without daemon-side bookkeeping.
-    server.setOnStorageSubscriptionRequested((request) =>
-      this.applyStorageSubscriptionRequest(request),
-    );
-
-    server.setOnObservationRequested(async ({ deviceId, sessionUuid, signal }) => {
-      const authenticator = createDefaultStreamSocketAuthenticator("observationStream", {
-        allowObserverSessions: true,
-      });
-      const pooledDevices = deviceId
-        ? [this.devicePool.getDevice(deviceId)].filter((device) => device !== null)
-        : this.devicePool.getAllDevices();
-
-      if (pooledDevices.length === 0) {
-        throw new Error(
-          deviceId ? `Device ${deviceId} is not available` : "No devices are available",
-        );
-      }
-
-      if (signal.aborted) {
-        throw new Error("Observation request was aborted");
-      }
-
-      const requestStart = this.timer.now();
-      return runObservationRequestBatch(
-        pooledDevices,
-        createDaemonObservationExecutor(requestStart, (pooledDevice) =>
-          isHeldByAnotherOwner(
-            { sessionManager: this.sessionManager, devicePool: this.devicePool },
-            pooledDevice,
-            sessionUuid,
-          ),
-        ),
-        {
-          timer: this.timer,
-          signal,
-          assertDeviceActionable: (pooledDevice) => {
-            this.devicePool.assertDeviceActionable(pooledDevice.id, "to observe");
-            // Watching: a held device admits any live identity read-only (#10830).
-            authenticator.authorize({ sessionUuid, deviceId: pooledDevice.id, admitViewer: true });
-          },
-        },
-      );
-    }, PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS);
-
     logger.info("[Daemon] Observation stream callback configured");
 
     // Wire up navigation graph updates to stream to IDE plugins
@@ -3772,27 +3569,59 @@ export class Daemon {
     setFatalProcessHandler(createDaemonFatalProcessHandler(logger));
   }
 
-  /** Test seam: the daemon-owned device pool, so tests can seed and inspect it without private-field casts. */
-  getDevicePoolForTesting(): DevicePool {
-    return this.devicePool;
-  }
-
-  /** Test seam: install (or clear) a socket server double whose members the shutdown path calls. */
-  setSocketServerForTesting(server: Partial<UnixSocketServer> | null): void {
-    this.socketServer = server as UnixSocketServer | null;
-  }
-
-  /** Test seam: register an in-flight HTTP request double that shutdown must close. */
-  registerTransportForTesting(
-    requestScopeId: string,
-    transport: Pick<StreamableHTTPServerTransport, "close">,
-  ): void {
-    this.httpIngress.trackTransportForTesting(requestScopeId, () => transport.close());
-  }
-
-  /** Test seam: behave as if shutdown had already started, without running it. */
-  markShutdownInProgressForTesting(): void {
-    this.shutdownInProgress = true;
+  /** @internal Typed view of private state for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      sessionManager: this.sessionManager,
+      devicePool: this.devicePool,
+      deviceSessionRegistry: this.deviceSessionRegistry,
+      navigationGraphBridge: this.navigationGraphBridge,
+      deviceDataStreamServer: (): typeof this.deviceDataStreamServer => this.deviceDataStreamServer,
+      httpIngress: this.httpIngress.testHooks,
+      observationStreamHealth: (): ObservationStreamHealth => this.observationStreamHealth,
+      setObservationStreamHealth: (health: ObservationStreamHealth): void => {
+        this.observationStreamHealth = health;
+      },
+      healthCheck: (): SingleFlightInterval | null => this.healthCheck,
+      lastDatabaseHealthFailure: (): string | undefined => this.lastDatabaseHealthFailure,
+      /** Installs (or clears) a socket server double whose members the shutdown path calls. */
+      setSocketServer: (server: Partial<UnixSocketServer> | null): void => {
+        this.socketServer = server as UnixSocketServer | null;
+      },
+      /** Registers an in-flight HTTP request double that shutdown must close. */
+      registerTransport: (
+        requestScopeId: string,
+        transport: Pick<StreamableHTTPServerTransport, "close">,
+      ): void => this.httpIngress.trackTransportForTesting(requestScopeId, () => transport.close()),
+      /** Behaves as if shutdown had already started, without running it. */
+      markShutdownInProgress: (): void => {
+        this.shutdownInProgress = true;
+      },
+      overrideRoutingTargets: (targets: () => DeviceSessionRoutingTargets): void => {
+        this.getDeviceSessionRoutingTargets = targets;
+      },
+      setupDeviceSessionRouting: (): void => this.setupDeviceSessionRouting(),
+      setupDeviceDataStreamCallback: (): void => this.setupDeviceDataStreamCallback(),
+      setupNavigationGraphStreamListener: (
+        server: ReturnType<typeof getDeviceDataStreamServer>,
+      ): void => this.setupNavigationGraphStreamListener(server),
+      overrideNavigationGraphListener: (
+        listen: (server: ReturnType<typeof getDeviceDataStreamServer>) => void,
+      ): void => {
+        this.setupNavigationGraphStreamListener = listen;
+      },
+      applyStorageSubscriptionRequest: (request: StorageSubscriptionRequest): Promise<void> =>
+        this.applyStorageSubscriptionRequest(request),
+      attemptRecovery: (failureKind?: HealthFailureKind): Promise<void> =>
+        this.attemptRecovery(failureKind),
+      overrideAttemptRecovery: (
+        recover: (failureKind?: HealthFailureKind) => Promise<void>,
+      ): void => {
+        this.attemptRecovery = recover;
+      },
+      startHealthCheckTimer: (): void => this.startHealthCheckTimer(),
+      stopHealthCheckTimer: (): Promise<void> => this.stopHealthCheckTimer(),
+    } as const;
   }
 
   /**

@@ -167,7 +167,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     restores.push(unsubscribe);
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -319,7 +319,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     restores.push(unsubscribe);
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       // The control socket waits up to 1 s for in-flight request handlers; this one needs it all.
       quiesce: async () => {
@@ -350,7 +350,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     );
     const events: string[] = [];
     // A stage that outlives its deadline by seconds, the way a recording finalizer can.
-    daemon.registerTransportForTesting("slow-http", {
+    daemon.testHooks.registerTransport("slow-http", {
       close: async () => {
         await timer.sleep(6_000);
         events.push("straggler:done");
@@ -382,7 +382,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
         deviceSessionRepository: new FakeDeviceSessionRepository(),
       },
     );
-    daemon.registerTransportForTesting("wedged-http", {
+    daemon.testHooks.registerTransport("wedged-http", {
       close: () => new Promise<void>(() => {}),
     });
 

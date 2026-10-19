@@ -878,7 +878,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         events.push("socket:quiesce");
@@ -944,7 +944,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         continueAcquisition.resolve();
@@ -1000,7 +1000,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -1109,7 +1109,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -1191,7 +1191,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     let ordinaryRelease: Promise<string | null> | undefined;
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         ordinaryRelease = sessionManager.releaseSession("upgraded-release", "explicit-release");

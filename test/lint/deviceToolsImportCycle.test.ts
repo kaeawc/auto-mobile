@@ -24,6 +24,9 @@ const EXTRA_NODES = [
   "src/server/deviceResourceTools.ts",
   "src/server/registerAllTools.ts",
   "src/daemon/socketServer.ts",
+  "src/daemon/socketServer/inputDeviceGating.ts",
+  "src/daemon/socketServer/inputStrokes.ts",
+  "src/daemon/socketServer/inputTypeTextAppendError.ts",
 ];
 
 function nodeFiles(): string[] {

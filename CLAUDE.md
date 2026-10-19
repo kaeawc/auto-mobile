@@ -255,13 +255,23 @@ Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
 exists; it does not outlaw iteration.
 
-## DaemonState.getInstance() ratchet
+## Zero baselines are deleted, not kept
 
-`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and compares per-file
-`DaemonState.getInstance(` call counts to `test/lint/daemon-state-get-instance-baseline.txt`
-(#11806). A file may never exceed its baseline count; after removing calls, run
-`UPDATE_DAEMON_STATE_BASELINE=1 bun test test/lint/daemonStateGetInstanceRatchet.test.ts`
-and commit the smaller baseline (it refuses to grow without `=grow`).
+When a ratchet baseline reaches zero, delete its baseline file, its regeneration
+path (`UPDATE_*` env var, `--update`) and any allow-list plumbing, and make the guard
+assert "no violations" outright (a warn-level oxlint rule becomes `error` and leaves
+the ratchet's rule list in `scripts/oxlint-baseline.sh`). Named `EXEMPT_*` lists that
+encode deliberate, reasoned exceptions are not baselines and stay. Import-direction
+tiers follow the same rule: only tiers marked `baselined: true` in
+`scripts/check-tier-import-direction.ts` keep a file under
+`scripts/import-direction-baselines/`; `scripts/check-utils-import-direction.ts` has
+no baseline at all.
+
+## DaemonState.getInstance() guard
+
+`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and fails on any
+`DaemonState.getInstance(` call outside its named `EXEMPT_FILES` (#11806). The
+baseline reached zero and was deleted; pass the daemon state in as a dependency.
 
 ## File-backed DB lifecycle tests
 

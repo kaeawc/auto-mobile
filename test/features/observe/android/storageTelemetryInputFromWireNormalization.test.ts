@@ -1,7 +1,18 @@
+function storageTelemetryInputFromWire(raw: unknown, timestamp: number) {
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    !("type" in raw) ||
+    raw.type !== "storage_changed"
+  ) {
+    throw new Error("Expected raw storage_changed message");
+  }
+  return mapStorageWire({ ...raw, type: raw.type }, timestamp);
+}
 import { describe, expect, test } from "bun:test";
 import {
   normalizeStorageWireValue,
-  storageTelemetryInputFromWire,
+  storageTelemetryInputFromWire as mapStorageWire,
 } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 
 describe("storageTelemetryInputFromWire normalization", () => {

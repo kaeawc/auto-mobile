@@ -46,7 +46,7 @@ function harness(featureFlags = flags) {
       calls.push(`invalidate:${session}:${reason}`),
   };
   const setOutput = (stdout: string) =>
-    adb.setCommandResponse("enabled_accessibility_services", { stdout, stderr: "" });
+    adb.setCommandResponse("enabled_accessibility_services", createExecResult(stdout, ""));
   const observe = async () => {
     const result = {} as ObserveResult;
     await audit.run(result, new NoOpPerformanceTracker());

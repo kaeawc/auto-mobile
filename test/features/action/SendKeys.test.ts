@@ -1,3 +1,4 @@
+import { runBlockWithEnvelope } from "../../helpers/observedInteractionStub";
 import { createExecResult } from "../../../src/utils/execResult";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
@@ -4399,8 +4400,7 @@ describe("SendKeys IME focus regression", () => {
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
     };
-    tap.observedInteraction = async (action) => ({
-      ...(await action(recordObservationRead(observation))),
+    tap.observedInteraction = runBlockWithEnvelope(() => recordObservationRead(observation), {
       observation,
     });
     const error =

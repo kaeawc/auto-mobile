@@ -40,14 +40,28 @@ describe("NavigationGraphManager navigation write ordering", () => {
       new FakeTimer(),
     );
     await manager.setCurrentApp(appId);
-    await manager.recordNavigationEvent({ destination: "Home", timestamp: 1000 });
+    await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "Home",
+      timestamp: 1000,
+    });
     await manager.recordHierarchyNavigation({
       packageName: appId,
       fromFingerprint: null,
       toFingerprint: "fp_home",
       timestamp: 1200,
     });
-    await manager.recordNavigationEvent({ destination: "Other", timestamp: 3000 });
+    await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "Other",
+      timestamp: 3000,
+    });
   });
 
   afterAll(async () => {
@@ -57,6 +71,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
   test("does not correlate another app inside the SDK window or on a later revisit", async () => {
     const otherApp = `${appId}.other`;
     await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
       applicationId: appId,
       destination: "Checkout",
       timestamp: 1000,
@@ -78,6 +96,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
     }
     // The other app still records and correlates its own SDK navigation normally.
     await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
       applicationId: otherApp,
       destination: "Browser",
       timestamp: 10000,
@@ -159,6 +181,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const coldApp = `${appId}.cold`;
     expect(manager.getBuildContexts()).toEqual([]);
     await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
       applicationId: coldApp,
       destination: "Welcome",
       timestamp: 4000,
@@ -188,7 +214,14 @@ describe("NavigationGraphManager navigation write ordering", () => {
       versionCode: 42,
       contentHash: "resolved-bundle-hash",
     });
-    await manager.recordNavigationEvent({ destination: "Checkout", timestamp: 4000 });
+    await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "Checkout",
+      timestamp: 4000,
+    });
     const node = await repository.getNode(appId, "Checkout");
     expect(node).toBeDefined();
     manager.clearBuildContext(appId);
@@ -206,7 +239,14 @@ describe("NavigationGraphManager navigation write ordering", () => {
   test("same app and build still correlate at the inclusive one-second boundary", async () => {
     const context = { appId, versionCode: 3, contentHash: "build", deviceId: "device-one" };
     manager.setBuildContext(context);
-    await manager.recordNavigationEvent({ destination: "Checkout", timestamp: 4000 });
+    await manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "Checkout",
+      timestamp: 4000,
+    });
     // Device identity is provenance, not part of the graph's app/build key.
     manager.setBuildContext({ ...context, deviceId: "device-two" });
     await manager.recordHierarchyNavigation({
@@ -477,7 +517,14 @@ describe("NavigationGraphManager navigation write ordering", () => {
         return originalLookup(appId, hash);
       });
 
-      const eventWrite = manager.recordNavigationEvent({ destination: "New", timestamp: 4000 });
+      const eventWrite = manager.recordNavigationEvent({
+        source: "",
+        arguments: {},
+        metadata: {},
+        sequenceNumber: 0,
+        destination: "New",
+        timestamp: 4000,
+      });
       await eventStarted.promise;
       const hierarchyWrite = manager.recordHierarchyNavigation({
         packageName: appId,
@@ -515,8 +562,22 @@ describe("NavigationGraphManager navigation write ordering", () => {
       return originalTransaction(fn);
     });
 
-    const failed = manager.recordNavigationEvent({ destination: "Failed", timestamp: 4000 });
-    const next = manager.recordNavigationEvent({ destination: "Recovered", timestamp: 5000 });
+    const failed = manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "Failed",
+      timestamp: 4000,
+    });
+    const next = manager.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "Recovered",
+      timestamp: 5000,
+    });
     await expect(failed).rejects.toThrow("injected transaction failure");
     await next;
     expect(manager.getCurrentScreen()).toBe("Recovered");
@@ -551,10 +612,24 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
 
     try {
-      const stuck = bounded.recordNavigationEvent({ destination: "Stuck", timestamp: 4000 });
+      const stuck = bounded.recordNavigationEvent({
+        source: "",
+        arguments: {},
+        metadata: {},
+        sequenceNumber: 0,
+        destination: "Stuck",
+        timestamp: 4000,
+      });
       void stuck.catch(() => undefined);
       await started.promise;
-      const next = bounded.recordNavigationEvent({ destination: "Recovered", timestamp: 5000 });
+      const next = bounded.recordNavigationEvent({
+        source: "",
+        arguments: {},
+        metadata: {},
+        sequenceNumber: 0,
+        destination: "Recovered",
+        timestamp: 5000,
+      });
       timer.advanceTime(50);
       await expect(stuck).rejects.toBeInstanceOf(ActionableError);
       await expect(stuck).rejects.toThrow("Navigation write recordNavigationEvent timed out");
@@ -596,12 +671,26 @@ describe("NavigationGraphManager navigation write ordering", () => {
       }
       return result;
     });
-    const stale = bounded.recordNavigationEvent({ destination: "A", timestamp: 4000 });
+    const stale = bounded.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "A",
+      timestamp: 4000,
+    });
     void stale.catch(() => undefined);
     await started.promise;
     timer.advanceTime(50);
     await expect(stale).rejects.toThrow("timed out");
-    await bounded.recordNavigationEvent({ destination: "B", timestamp: 5000 });
+    await bounded.recordNavigationEvent({
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 0,
+      destination: "B",
+      timestamp: 5000,
+    });
     gate.resolve();
     await completed.promise;
     await Promise.resolve();

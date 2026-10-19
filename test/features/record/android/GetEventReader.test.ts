@@ -44,6 +44,7 @@ function setup() {
     touchNode: {
       path: "/dev/input/event2",
       name: "touch",
+      kind: "touch",
       axisXMin: 0,
       axisXMax: 1079,
       axisYMin: 0,

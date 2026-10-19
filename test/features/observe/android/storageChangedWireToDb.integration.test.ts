@@ -61,6 +61,9 @@ describe("Android storage_changed wire → ingest → DB (#3000)", () => {
       message,
       message.eventTimestamp ?? message.timestamp,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     // The ingest sets device context on the recorder; here we record directly with a deviceId.
     await recordStorageEvent({ deviceId: "d1", sessionId: null, ...input }, db);
 
@@ -92,6 +95,9 @@ describe("Android storage_changed wire → ingest → DB (#3000)", () => {
       message,
       message.eventTimestamp ?? message.timestamp,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     await recordStorageEvent({ deviceId: "d1", sessionId: null, ...input }, db);
 
     const events = await getStorageEvents({ deviceId: "d1", limit: 10 }, db);
@@ -132,6 +138,9 @@ describe("Android storage_changed wire → ingest → DB (#3000)", () => {
       message,
       message.eventTimestamp ?? message.timestamp,
     );
+    if (!input) {
+      throw new Error("Expected accepted storage telemetry");
+    }
     // Field must be absent so the repository performs the auto-lookup.
     expect("previousValue" in input).toBe(false);
     await recordStorageEvent({ deviceId: "d1", sessionId: null, ...input }, db);

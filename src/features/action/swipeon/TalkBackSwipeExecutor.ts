@@ -24,7 +24,7 @@ import type { AccessibilityNodeSelector } from "../../observe/android/types";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   type AccessibilityDetector,
-} from "../../accessibility/interfaces/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import {

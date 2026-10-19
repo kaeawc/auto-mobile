@@ -63,7 +63,7 @@
 1518	src/features/webrtc/IosH264Source.ts
 1316	src/features/webrtc/PersistentEncoderH264Source.ts
 1431	src/server/appResources.ts
-1508	src/server/appTools.ts
+1476	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2526	src/server/deviceToolsProvisioning.ts
@@ -75,7 +75,6 @@
 2849	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 1140	src/server/toolRegistry.ts
-1027	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1427	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts

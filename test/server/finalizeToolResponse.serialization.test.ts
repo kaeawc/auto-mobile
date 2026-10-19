@@ -124,6 +124,7 @@ describe("finalizeToolResponse serialization bytes", () => {
     const writer = new FakeArtifactWriter();
     const finalized = finalizeToolResponse(response, {
       name: "tapOn",
+      defaultsToSkeletonObservation: true,
       args: { project: "full" },
       artifactWriter: writer,
       artifactMode: "oversized",
@@ -157,6 +158,7 @@ describe("finalizeToolResponse serialization bytes", () => {
       createStructuredToolResponse({ success: true, observation: observation("Done") }),
       {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         args: { project },
         sessionUuid: "fixture",
         baselineStore,

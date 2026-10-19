@@ -127,6 +127,7 @@ describe("finalizeToolResponse serialized shape compatibility", () => {
           createStructuredToolResponse({ success: true, observation: observation(true) }),
           {
             name: "tapOn",
+            defaultsToSkeletonObservation: true,
             args: { raw: true },
             sessionUuid: "fixture",
             baselineStore: store,
@@ -161,6 +162,7 @@ describe("finalizeToolResponse serialized shape compatibility", () => {
       }),
       {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         args: { project: "full" },
         artifactWriter: writer,
         artifactMode: "oversized",
@@ -240,6 +242,7 @@ describe("finalizeToolResponse observation clone boundary", () => {
         }),
         {
           name: "tapOn",
+          defaultsToSkeletonObservation: true,
           args,
           sessionUuid: "fixture",
           baselineStore: store,

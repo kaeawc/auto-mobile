@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SetUIState, type LiveDeadlineSubscriber } from "../features/action/SetUIState";
@@ -202,6 +203,7 @@ export function registerFormTools(deps: FormToolDependencies = {}): void {
     addDeviceTargetingToSchema(setUIStateSchema),
     createSetUIStateHandler(deps),
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: true,
       supportsProgress: true,
       debugOnly: true,

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { toolIsError, toolStructured, toolText } from "../helpers/toolResponse";
+import { appLifecycleResultSchema } from "../../src/server/appToolOutputSchemas";
 import {
   appLifecycleSchema,
-  appLifecycleResultSchema,
   registerAppTools,
   resetInstalledAppResourceRefresh,
   setInstalledAppResourceRefresh,

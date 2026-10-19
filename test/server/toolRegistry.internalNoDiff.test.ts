@@ -10,7 +10,8 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { toolPayload } from "../helpers/toolResponse";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -30,7 +31,7 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
  *
  * These exercise the real wrapped-handler → finalize path end-to-end.
  */
-const payloadOf = (result: Parameters<typeof getStructuredPayload>[0]) =>
+const payloadOf = (result: unknown) =>
   z
     .looseObject({
       observation: z
@@ -48,7 +49,7 @@ const payloadOf = (result: Parameters<typeof getStructuredPayload>[0]) =>
         .optional(),
       observationDiff: z.looseObject({ mode: z.string(), reason: z.string() }).optional(),
     })
-    .parse(getStructuredPayload(result));
+    .parse(toolPayload(result));
 
 describe("ToolRegistry internal no-diff guard (#3053)", () => {
   const androidA: BootedDevice = {
@@ -81,6 +82,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   /** Same-screen observation so `isSameObservationScreen` holds between calls. */
   function sameScreenObserve(): ObserveResult {
     return {
+      observationId: "same-screen",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       updatedAt: 1,
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -232,12 +235,12 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     const handler = ToolRegistry.getTool("tapOn")!.handler;
     const args = { platform: "android", __mcpSessionId: "mcp-session-1" };
     const output = z.object({ observation: z.record(z.string(), z.unknown()) });
-    const first = output.parse(getStructuredPayload(await handler(args))).observation;
+    const first = output.parse(toolPayload(await handler(args))).observation;
     expect(first).toHaveProperty("systemInsets");
     expect(daemonSessionManager?.getLastActionMetadata(uuid, androidA.deviceId)).toHaveProperty(
       "systemInsets",
     );
-    const second = output.parse(getStructuredPayload(await handler(args))).observation;
+    const second = output.parse(toolPayload(await handler(args))).observation;
     expect(second).not.toHaveProperty("systemInsets");
   });
 

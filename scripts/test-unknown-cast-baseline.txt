@@ -41,10 +41,6 @@
 1	test/lint/expensiveHookWork.ts
 1	test/models/screenScaleMetadata.test.ts
 1	test/scripts/optimizeSourcemap.test.ts
-1	test/server/DeviceSessionManager.appearanceSync.test.ts
-1	test/server/DeviceSessionManager.foreignForward.test.ts
-1	test/server/androidStartLifecycleDiscoveryTyped.test.ts
-2	test/server/bootedDeviceResourcesCharacterization.test.ts
 2	test/server/derivedLabelSessionRestoreOwnership.test.ts
 1	test/server/deviceDescription.test.ts
 1	test/server/deviceTools.acquisitionWaitDeadlines.test.ts

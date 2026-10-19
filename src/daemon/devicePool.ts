@@ -6655,7 +6655,7 @@ export class DevicePool {
     return this.deviceReservations.scheduleDeviceRestartReservationExpiry(sessionId, deadline);
   }
 
-  private releaseDeviceRestartReservation(sessionId: string): void {
+  releaseDeviceRestartReservation(sessionId: string): void {
     return this.deviceReservations.releaseDeviceRestartReservation(sessionId);
   }
 

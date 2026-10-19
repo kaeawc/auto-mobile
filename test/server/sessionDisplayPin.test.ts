@@ -29,7 +29,17 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
 import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
-import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import {
+  readToolResponse,
+  toolIsError,
+  toolPayload,
+  toolStructured,
+  toolText,
+} from "../helpers/toolResponse";
+import { buildElement } from "../helpers/elementBuilder";
+import type { DisplayInventoryProvider } from "../../src/devices/DisplayInventoryProvider";
+import { sessionDisplayPinnedHandler } from "../../src/server/pipeline/deviceCallDispatch";
 import {
   resolveTargetDisplay,
   DisplaySelectionError,
@@ -103,24 +113,30 @@ function arranged(name: string, fn: () => void | Promise<void>, timeout?: number
   );
 }
 
-function arrangedEach<T>(table: readonly T[]) {
-  return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+function arrangedEachDeviceId(table: string[]) {
+  return (name: string, fn: (deviceId: string) => void | Promise<void>, timeout?: number): void => {
     test.each(table)(
       name,
-      async (row: T) => {
+      async (deviceId: string) => {
         await arrangeHarness();
-        await fn(row);
+        await fn(deviceId);
       },
       timeout,
     );
   };
 }
 
-function arrangedEachRow<T extends readonly [unknown, ...unknown[]]>(table: readonly T[]) {
-  return (name: string, fn: (...row: T) => void | Promise<void>, timeout?: number): void => {
+type PrototypeActionRow = [action: string, expectedDisplay: string | undefined];
+
+function arrangedEachPrototypeAction(table: PrototypeActionRow[]) {
+  return (
+    name: string,
+    fn: (...row: PrototypeActionRow) => void | Promise<void>,
+    timeout?: number,
+  ): void => {
     test.each(table)(
       name,
-      async (...row: T) => {
+      async (...row: PrototypeActionRow) => {
         await arrangeHarness();
         await fn(...row);
       },
@@ -146,7 +162,7 @@ async function select(display?: unknown) {
   });
 }
 
-arrangedEach(["missing-device", device.deviceId])(
+arrangedEachDeviceId(["missing-device", device.deviceId])(
   "setActiveDevice rechecks %s after a failed refresh partially updates the pool",
   async (deviceId) => {
     const utils = new FakeDeviceUtils();
@@ -174,7 +190,7 @@ arrangedEach(["missing-device", device.deviceId])(
       },
     });
     if (deviceId === device.deviceId) {
-      expect(getStructuredPayload(await handler({ deviceId, sessionUuid: "one" }))).toMatchObject({
+      expect(toolPayload(await handler({ deviceId, sessionUuid: "one" }))).toMatchObject({
         deviceId,
         sessionUuid: "one",
       });
@@ -286,7 +302,7 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
           resumeCtrlProxy: async () => {},
         });
         expect(
-          getStructuredPayload(
+          toolPayload(
             await handler({ deviceId: device.deviceId, sessionUuid: "one", display: selector }),
           ),
         ).toMatchObject({ displayPin: "0" });
@@ -305,8 +321,8 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
               name === "observe" ? { display } : { success: true, observation: { display } },
             );
           };
-          const pinned = getStructuredPayload(
-            (await runSessionDisplayPin({
+          const pinned = toolPayload(
+            await runSessionDisplayPin({
               name,
               acceptsDisplay: true,
               device: target,
@@ -314,7 +330,7 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
               sessionUuid: "one",
               store: sessions,
               invoke,
-            })) as Parameters<typeof getStructuredPayload>[0],
+            }),
           )!;
           const output = name === "observe" ? pinned : (pinned.observation as { display: unknown });
           expect(output.display).toMatchObject({ key: "0", pinned: true, generation: 0 });
@@ -416,7 +432,7 @@ arranged(
         sessionUuid: "one",
       },
     );
-    expect(getStructuredPayload(response)?.success).toBe(true);
+    expect(toolPayload(response)?.success).toBe(true);
   },
 );
 
@@ -461,7 +477,7 @@ arranged(
         },
       }),
     });
-    expect(getStructuredPayload(response)?.observation).toMatchObject({
+    expect(toolPayload(response)?.observation).toMatchObject({
       settled: true,
       display: { key: "inside", pinned: true, generation: 0 },
     });
@@ -489,11 +505,11 @@ arranged("strict display schema adds nullable string without weakening other fie
 
 arranged("set, replace, omit, and clear report the current session pin", async () => {
   const selected = await select("inner");
-  expect(getStructuredPayload(selected)).toMatchObject({ displayPin: "inner" });
-  expect(getStructuredPayload(selected)).toMatchObject({ displayPin: "inner" });
-  expect(getStructuredPayload(await select("outside"))).toMatchObject({ displayPin: "outside" });
-  expect(getStructuredPayload(await select())).toMatchObject({ displayPin: "outside" });
-  expect(getStructuredPayload(await select(null))).toMatchObject({ displayPin: null });
+  expect(toolPayload(selected)).toMatchObject({ displayPin: "inner" });
+  expect(toolPayload(selected)).toMatchObject({ displayPin: "inner" });
+  expect(toolPayload(await select("outside"))).toMatchObject({ displayPin: "outside" });
+  expect(toolPayload(await select())).toMatchObject({ displayPin: "outside" });
+  expect(toolPayload(await select(null))).toMatchObject({ displayPin: null });
   expect(sessions.getDisplayPin("one")).toBeUndefined();
 });
 
@@ -626,30 +642,50 @@ for (const acceptsDisplay of [true, false]) {
   );
 }
 
+for (const [label, schema] of [
+  ["empty loose object", z.looseObject({})],
+  ["object without display", z.object({ other: z.string().optional() })],
+] as const) {
+  arranged(`${label} schema registers and dispatches without display injection`, async () => {
+    sessions.setDisplayPin("one", "unplugged");
+    const tools = registry();
+    const response = createStructuredToolResponse({ success: true });
+    const handler = async (_target: BootedDevice, args: Record<string, unknown>) => {
+      expect(args).not.toHaveProperty("display");
+      return response;
+    };
+    tools.registerDeviceAware("plain", "plain schema probe", schema, handler);
+    expect(tools.getTool("plain")!.deviceAwareHandler).toBe(handler);
+    expect(await tools.getTool("plain")!.handler({})).toBe(response);
+    expect(
+      await tools.callInternal("plain", {}, undefined, undefined, {
+        targetDevice: device,
+        sessionUuid: "one",
+      }),
+    ).toBe(response);
+  });
+}
+
+// The registry's contract is a Zod schema; the display-acceptance probe itself must still be
+// total over any value a tool author could pass, so it is exercised through the pinned handler,
+// which takes the schema as `unknown`.
 for (const schema of [
   {},
   { properties: { display: { type: "string" } } },
   { parse: (value: unknown) => value },
 ]) {
   arranged(
-    `non-zod schema ${JSON.stringify(schema)} registers and dispatches without display injection`,
+    `non-zod schema ${JSON.stringify(schema)} dispatches without display injection`,
     async () => {
       sessions.setDisplayPin("one", "unplugged");
-      const tools = registry();
       const response = createStructuredToolResponse({ success: true });
       const handler = async (_target: BootedDevice, args: Record<string, unknown>) => {
         expect(args).not.toHaveProperty("display");
         return response;
       };
-      tools.registerDeviceAware("plain", "plain schema probe", schema, handler);
-      expect(tools.getTool("plain")!.deviceAwareHandler).toBe(handler);
-      expect(await tools.getTool("plain")!.handler({})).toBe(response);
-      expect(
-        await tools.callInternal("plain", {}, undefined, undefined, {
-          targetDevice: device,
-          sessionUuid: "one",
-        }),
-      ).toBe(response);
+      const pinned = sessionDisplayPinnedHandler({ name: "plain", schema, handler });
+      expect(await pinned(device, {})).toBe(response);
+      expect(await pinned(device, { sessionUuid: "one" })).toBe(response);
     },
   );
 }
@@ -666,7 +702,7 @@ for (const targetDevice of [undefined, device]) {
         z.object({ display: z.string().optional() }),
         async (_target, args) => {
           expect(args.display).toBe("inside");
-          expect(args.sessionUuid).toBe("one");
+          expect(args).toMatchObject({ sessionUuid: "one" });
           expect(getToolSelectionContext()?.routingSessionUuid).toBe("one");
           return createStructuredToolResponse({
             display: { key: args.display, role: "inner", posture: "opened", generation: 0 },
@@ -676,9 +712,7 @@ for (const targetDevice of [undefined, device]) {
       tools.registerDeviceAware("outer", "nested caller", z.object({}), async () =>
         tools.callInternal("inner", {}, undefined, undefined, { targetDevice }),
       );
-      expect(
-        getStructuredPayload(await tools.getTool("outer")!.handler({}))?.display,
-      ).toMatchObject({
+      expect(toolPayload(await tools.getTool("outer")!.handler({}))?.display).toMatchObject({
         key: "inside",
         pinned: true,
       });
@@ -726,13 +760,11 @@ for (const name of [
           );
         },
       );
-      const first = getStructuredPayload(await tools.getTool(name)!.handler({}));
+      const first = toolPayload(await tools.getTool(name)!.handler({}));
       const stamp =
         name === "observe" ? first?.display : (first?.observation as { display: unknown }).display;
       expect(stamp).toMatchObject({ key: "inside", pinned: true });
-      const explicit = getStructuredPayload(
-        await tools.getTool(name)!.handler({ display: "active" }),
-      );
+      const explicit = toolPayload(await tools.getTool(name)!.handler({ display: "active" }));
       const explicitStamp =
         name === "observe"
           ? explicit?.display
@@ -765,8 +797,7 @@ for (const name of [
     } catch (error) {
       failure = error;
     }
-    const details =
-      failure ?? getStructuredPayload(response as Parameters<typeof getStructuredPayload>[0]);
+    const details = failure ?? toolPayload(response);
     expect(details).toMatchObject(
       name === "observe" || name === "captureScreenshot"
         ? { name: "PinnedDisplayUnavailableError", details: { pin: "unplugged" } }
@@ -838,14 +869,14 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"] as const) {
         execute: async (options) => {
           const observation = capture(options.display);
           await executor.executeCommand(`tap panel ${observation.display.key}`);
-          return { success: true, action: "tap", element: {}, observation };
+          return { success: true, action: "tap", element: buildElement(), observation };
         },
       });
       interactionDeps.tapAnyElementFactory = () => ({
         execute: async (options) => {
           const observation = capture(options.display);
           await executor.executeCommand(`tap panel ${observation.display.key}`);
-          return { success: true, action: "tap", element: {}, observation };
+          return { success: true, action: "tap", element: buildElement(), observation };
         },
       });
       interactionDeps.swipeOnFactory = () => ({
@@ -887,7 +918,7 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"] as const) {
             undefined,
             { targetDevice: device, sessionUuid: "one" },
           );
-          const payload = getStructuredPayload(response)!;
+          const payload = toolPayload(response)!;
           const output =
             name === "observe" ? payload : (payload.observation as { display: unknown });
           expect(output.display).toMatchObject({ key });
@@ -929,7 +960,7 @@ for (const name of ["tapOn", "swipeOn", "sendKeys"]) {
         },
       );
       const response = await tools.getTool(name)!.handler({});
-      expect(getStructuredPayload(response)).toMatchObject({
+      expect(toolPayload(response)).toMatchObject({
         success: false,
         pinnedDisplay: {
           pin: "inner",
@@ -939,8 +970,8 @@ for (const name of ["tapOn", "swipeOn", "sendKeys"]) {
           ],
         },
       });
-      expect(getStructuredPayload(response)?.error).toContain("setActiveDevice {display: null}");
-      expect(response.isError).toBe(true);
+      expect(toolPayload(response)?.error).toContain("setActiveDevice {display: null}");
+      expect(toolIsError(response)).toBe(true);
     },
   );
 }
@@ -962,11 +993,11 @@ arranged(
       z.object({ display: z.string().optional() }),
       async () => createStructuredToolResponse({ display: stamp }),
     );
-    const pinned = getStructuredPayload(await tools.getTool("observe")!.handler({}))!;
+    const pinned = toolPayload(await tools.getTool("observe")!.handler({}))!;
     expect(pinned.display).toMatchObject({ pinned: true });
     expect(stamp).not.toHaveProperty("pinned");
     sessions.setDisplayPin("one", null);
-    const unpinned = getStructuredPayload(await tools.getTool("observe")!.handler({}))!;
+    const unpinned = toolPayload(await tools.getTool("observe")!.handler({}))!;
     expect(unpinned.display).toBe(stamp);
     expect(unpinned.display).not.toHaveProperty("pinned");
     const observation = structuredClone(loadAndroidHomeObserve().observe);
@@ -998,9 +1029,9 @@ arranged(
           return createStructuredToolResponse({ success: true });
         },
       );
-      expect(
-        getStructuredPayload(await tools.getTool(name)!.handler({ action: "stop" }))?.success,
-      ).toBe(true);
+      expect(toolPayload(await tools.getTool(name)!.handler({ action: "stop" }))?.success).toBe(
+        true,
+      );
     }
     expect(calls).toBe(2);
   },
@@ -1020,7 +1051,7 @@ arranged("another session's pin cannot select this device", async () => {
     },
   );
   expect(
-    getStructuredPayload(
+    toolPayload(
       await tools.callInternal("observe", {}, undefined, undefined, {
         targetDevice: device,
         sessionUuid: "two",
@@ -1043,9 +1074,9 @@ arranged(
   "null clears an unavailable pin without needing inventory; omitted does not read it",
   async () => {
     sessions.updateSessionCache("one", { ...{ displayPin: "unplugged" } });
-    expect(getStructuredPayload(await select())).toMatchObject({ displayPin: "unplugged" });
+    expect(toolPayload(await select())).toMatchObject({ displayPin: "unplugged" });
     expect(provider.calls).toBe(0);
-    expect(getStructuredPayload(await select(null))).toMatchObject({ displayPin: null });
+    expect(toolPayload(await select(null))).toMatchObject({ displayPin: null });
     expect(provider.calls).toBe(0);
   },
 );
@@ -1061,7 +1092,7 @@ arranged("a successful device rebind with display omitted clears the old pin", a
     sessionUuid: "one",
   });
   expect(sessions.getDeviceForSession("one")).toBe("other");
-  expect(getStructuredPayload(response)).toMatchObject({ displayPin: null });
+  expect(toolPayload(response)).toMatchObject({ displayPin: null });
 });
 
 arranged(
@@ -1183,8 +1214,8 @@ arranged(
     });
     const response = await select();
     expect(response).toEqual(expected);
-    expect(response.content[0].text).toBe(expected.content[0].text);
-    expect(response.content[0].text).toBe(
+    expect(toolText(response)).toBe(toolText(expected));
+    expect(toolText(response)).toBe(
       JSON.stringify({
         message: "Active device set to 'pin-device'",
         deviceId: device.deviceId,
@@ -1211,8 +1242,8 @@ arranged(
         deviceId: device.deviceId,
       });
       // The wire text is byte-identical to the pre-structured response (#11830).
-      expect(response.content).toEqual(expected.content);
-      expect(response.structuredContent).toEqual({
+      expect(readToolResponse(response).content).toEqual(expected.content);
+      expect(toolStructured(response)).toEqual({
         message: "Active device set to 'pin-device'",
         deviceId: device.deviceId,
       });
@@ -1280,7 +1311,7 @@ arranged(
     });
     try {
       const handler = createSetActiveDeviceHandler({
-        get displayInventory() {
+        get displayInventory(): DisplayInventoryProvider {
           throw new Error("Omitted display must not access inventory");
         },
         resumeCtrlProxy: async (id, platform) => {
@@ -1411,9 +1442,7 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
           });
         } else {
           const response = await result;
-          expect(
-            getStructuredPayload(response as Parameters<typeof getStructuredPayload>[0]),
-          ).toMatchObject({
+          expect(toolPayload(response)).toMatchObject({
             success: false,
             error: expect.stringContaining("retry"),
             displayInventory: { pin: "inner", retryable: true },
@@ -1510,7 +1539,7 @@ arranged("registered tapAny missing pin reports typed details without dispatch",
   interactionDeps.tapAnyElementFactory = () => ({
     execute: async () => {
       dispatches++;
-      return { success: true, element: {} };
+      return { success: true, action: "tap", element: buildElement() };
     },
   });
   registerInteractionTools(interactionDeps);
@@ -1518,15 +1547,15 @@ arranged("registered tapAny missing pin reports typed details without dispatch",
     targetDevice: device,
     sessionUuid: "one",
   });
-  expect(response.isError).toBe(true);
-  expect(getStructuredPayload(response)).toMatchObject({
+  expect(toolIsError(response)).toBe(true);
+  expect(toolPayload(response)).toMatchObject({
     success: false,
     pinnedDisplay: { pin: "unplugged" },
   });
   expect(dispatches).toBe(0);
 });
 
-arrangedEachRow([
+arrangedEachPrototypeAction([
   ["show", "inside"],
   ["dismiss", undefined],
   ["awaitEvent", undefined],

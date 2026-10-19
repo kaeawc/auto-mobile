@@ -6,6 +6,7 @@ import {
   ToolRegistryClass,
 } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
+import { buildToolOutputResourceUri } from "../../src/server/toolOutputResources";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { DefaultAppCleanupService } from "../../src/server/AppCleanupService";
@@ -573,6 +574,14 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 });
 
+type AfterToolCallInput = Parameters<DefaultAfterToolCallHandler["handle"]>[0];
+
+/** An after-tool-call input where a call without an output schema or session says so explicitly. */
+const afterCall = (
+  input: Omit<AfterToolCallInput, "outputSchema" | "sessionUuid"> &
+    Partial<Pick<AfterToolCallInput, "outputSchema" | "sessionUuid">>,
+): AfterToolCallInput => ({ outputSchema: undefined, sessionUuid: undefined, ...input });
+
 describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   class FakeObservationArtifactWriter implements ObservationArtifactWriter {
     writes: Array<{ tool: string; payload: string; data: unknown }> = [];
@@ -590,6 +599,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           payload: input.payload,
           bytes: 123,
           tool: input.tool,
+          resourceUri: buildToolOutputResourceUri(`${input.tool}-1.json`),
         },
       };
     }
@@ -618,17 +628,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const initialized = spyOn(daemon, "isInitialized").mockReturnValue(true);
     const handler = new DefaultAfterToolCallHandler(() => new FakeObservationArtifactWriter());
     try {
-      await handler.handle({
-        name: "observe",
-        args: { display: "all" },
-        device: undefined,
-        internalCall: false,
-        response: createStructuredToolResponse(makeObservePayload()),
-        sessionUuid: "owner",
-        shouldResolveDevice: true,
-        timer: new FakeTimer(),
-        toolStartMs: 0,
-      });
+      await handler.handle(
+        afterCall({
+          name: "observe",
+          args: { display: "all" },
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse(makeObservePayload()),
+          sessionUuid: "owner",
+          shouldResolveDevice: true,
+          timer: new FakeTimer(),
+          toolStartMs: 0,
+        }),
+      );
       expect(writes).toEqual([]);
     } finally {
       initialized.mockRestore();
@@ -679,16 +691,18 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const timer = new FakeTimer();
     startToolCallRecording({ connectionId: "A", timer });
     const handler = new DefaultAfterToolCallHandler();
-    await handler.handle({
-      name: "tapOn",
-      args: { text: "Only B", __mcpSessionId: "B" },
-      device: undefined,
-      internalCall: false,
-      response: createStructuredToolResponse({ success: true }),
-      shouldResolveDevice: false,
-      timer,
-      toolStartMs: 0,
-    });
+    await handler.handle(
+      afterCall({
+        name: "tapOn",
+        args: { text: "Only B", __mcpSessionId: "B" },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse({ success: true }),
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 0,
+      }),
+    );
     expect(getToolCallRecordingStatus({ connectionId: "A", timer })?.stepCount).toBe(0);
   });
 
@@ -698,16 +712,18 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     startToolCallRecording({ connectionId: "B", timer });
     const handler = new DefaultAfterToolCallHandler();
     for (const connectionId of ["A", "B", "A", "B"]) {
-      await handler.handle({
-        name: "tapOn",
-        args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
-        device: undefined,
-        internalCall: false,
-        response: createStructuredToolResponse({ success: true }),
-        shouldResolveDevice: false,
-        timer,
-        toolStartMs: 0,
-      });
+      await handler.handle(
+        afterCall({
+          name: "tapOn",
+          args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse({ success: true }),
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 0,
+        }),
+      );
     }
     const a = stopToolCallRecording({ connectionId: "A", timer });
     expect(a.stepCount).toBe(2);
@@ -740,17 +756,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     // Skeleton is the default observe projection now; this test inspects the
     // written full view hierarchy, so request the full projection per-call.
-    const result = await handler.handle({
-      name: "observe",
-      args: { project: "full" },
-      device: undefined,
-      internalCall: false,
-      response: createStructuredToolResponse(makeObservePayload()),
-      sessionUuid: "session-1",
-      shouldResolveDevice: false,
-      timer,
-      toolStartMs: 20,
-    });
+    const result = await handler.handle(
+      afterCall({
+        name: "observe",
+        args: { project: "full" },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 20,
+      }),
+    );
 
     expect(result.durationMs).toBe(5);
     expect(requestedDirectories).toEqual(["/tmp/artifacts"]);
@@ -772,6 +790,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         payload: "ObserveResult",
         bytes: 123,
         tool: "observe",
+        resourceUri: buildToolOutputResourceUri("observe-1.json"),
       },
     });
     expect(result.finalizedResponse.content[0].text).toBe(
@@ -797,19 +816,21 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
 
     try {
-      const result = await handler.handle({
-        name: "observe",
-        // Skeleton is the default projection; this test inspects the written full
-        // view hierarchy, so request the full projection per-call.
-        args: { project: "full" },
-        device: undefined,
-        internalCall: false,
-        response: createStructuredToolResponse(makeLargeOcclusionHeavyObservePayload()),
-        sessionUuid: "session-1",
-        shouldResolveDevice: false,
-        timer,
-        toolStartMs: 20,
-      });
+      const result = await handler.handle(
+        afterCall({
+          name: "observe",
+          // Skeleton is the default projection; this test inspects the written full
+          // view hierarchy, so request the full projection per-call.
+          args: { project: "full" },
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse(makeLargeOcclusionHeavyObservePayload()),
+          sessionUuid: "session-1",
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 20,
+        }),
+      );
       const wireResult = stripToolResultStructuredContent(
         result.finalizedResponse,
         structuredContentOmissionReason(true),
@@ -838,6 +859,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           payload: "ObserveResult",
           bytes: 123,
           tool: "observe",
+          resourceUri: buildToolOutputResourceUri("observe-1.json"),
         },
       });
       expect(wireResult.content[0].text).not.toContain("\n");
@@ -851,19 +873,21 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const handler = new DefaultAfterToolCallHandler(() => writer);
     serverConfig.setToolOutputsDir(undefined);
 
-    const result = await handler.handle({
-      name: "observe",
-      // Skeleton is the default projection; this test asserts the served full
-      // view hierarchy stays inline, so request the full projection per-call.
-      args: { project: "full" },
-      device: undefined,
-      internalCall: false,
-      response: createStructuredToolResponse(makeObservePayload()),
-      sessionUuid: "session-1",
-      shouldResolveDevice: false,
-      timer: new FakeTimer(),
-      toolStartMs: 0,
-    });
+    const result = await handler.handle(
+      afterCall({
+        name: "observe",
+        // Skeleton is the default projection; this test asserts the served full
+        // view hierarchy stays inline, so request the full projection per-call.
+        args: { project: "full" },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer: new FakeTimer(),
+        toolStartMs: 0,
+      }),
+    );
 
     expect(writer.writes).toHaveLength(0);
     expect(
@@ -886,19 +910,21 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     });
     serverConfig.setToolOutputsDir("/tmp/artifacts");
 
-    const result = await handler.handle({
-      name: "observe",
-      // Skeleton is the default projection; this test asserts the full view
-      // hierarchy is preserved for internal callers, so request it per-call.
-      args: { project: "full" },
-      device: undefined,
-      internalCall: true,
-      response: createStructuredToolResponse(makeObservePayload()),
-      sessionUuid: "session-1",
-      shouldResolveDevice: false,
-      timer: new FakeTimer(),
-      toolStartMs: 0,
-    });
+    const result = await handler.handle(
+      afterCall({
+        name: "observe",
+        // Skeleton is the default projection; this test asserts the full view
+        // hierarchy is preserved for internal callers, so request it per-call.
+        args: { project: "full" },
+        device: undefined,
+        internalCall: true,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer: new FakeTimer(),
+        toolStartMs: 0,
+      }),
+    );
 
     expect(requestedDirectories).toEqual([]);
     expect(writer.writes).toHaveLength(0);
@@ -911,17 +937,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   // instance state, so the handler must reuse one writer across tool calls.
   describe("artifact writer reuse across tool calls (#10079)", () => {
     const handleObserve = (handler: DefaultAfterToolCallHandler, timer: FakeTimer) =>
-      handler.handle({
-        name: "observe",
-        args: { project: "full" },
-        device: undefined,
-        internalCall: false,
-        response: createStructuredToolResponse(makeObservePayload()),
-        sessionUuid: "session-1",
-        shouldResolveDevice: false,
-        timer,
-        toolStartMs: 0,
-      });
+      handler.handle(
+        afterCall({
+          name: "observe",
+          args: { project: "full" },
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse(makeObservePayload()),
+          sessionUuid: "session-1",
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 0,
+        }),
+      );
 
     test("builds one writer per configured directory and reuses it", async () => {
       let created = 0;
@@ -949,17 +977,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       });
       serverConfig.setToolOutputsDir("/tmp/artifacts");
 
-      await handler.handle({
-        name: "observe",
-        args: { project: "full" },
-        device: undefined,
-        internalCall: true,
-        response: createStructuredToolResponse(makeObservePayload()),
-        sessionUuid: "session-1",
-        shouldResolveDevice: false,
-        timer: new FakeTimer(),
-        toolStartMs: 0,
-      });
+      await handler.handle(
+        afterCall({
+          name: "observe",
+          args: { project: "full" },
+          device: undefined,
+          internalCall: true,
+          response: createStructuredToolResponse(makeObservePayload()),
+          sessionUuid: "session-1",
+          shouldResolveDevice: false,
+          timer: new FakeTimer(),
+          toolStartMs: 0,
+        }),
+      );
 
       expect(created).toBe(0);
     });
@@ -1022,17 +1052,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       const handler = new DefaultAfterToolCallHandler(() => writer);
 
       await expect(
-        handler.handle({
-          name: "observe",
-          args: {},
-          device: undefined,
-          internalCall: false,
-          response: createStructuredToolResponse(makeObservePayload()),
-          sessionUuid: "session-1",
-          shouldResolveDevice: false,
-          timer,
-          toolStartMs: 20,
-        }),
+        handler.handle(
+          afterCall({
+            name: "observe",
+            args: {},
+            device: undefined,
+            internalCall: false,
+            response: createStructuredToolResponse(makeObservePayload()),
+            sessionUuid: "session-1",
+            shouldResolveDevice: false,
+            timer,
+            toolStartMs: 20,
+          }),
+        ),
       ).rejects.toThrow("artifact disk is full");
 
       expect(telemetryEvents).toHaveLength(0);
@@ -1043,7 +1075,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
   });
 
   test("records a structured tool error as its code:message, not [object Object]", async () => {
-    const telemetryEvents: Array<{ success: boolean; error: unknown }> = [];
+    const telemetryEvents: Array<{ success: boolean; error?: unknown }> = [];
     const recordToolCallEvent = spyOn(
       TelemetryRecorder.getInstance(),
       "recordToolCallEvent",
@@ -1074,17 +1106,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         ],
       };
 
-      await handler.handle({
-        name: "killDevice",
-        args: {},
-        device: undefined,
-        internalCall: false,
-        response,
-        sessionUuid: "session-1",
-        shouldResolveDevice: false,
-        timer,
-        toolStartMs: 20,
-      });
+      await handler.handle(
+        afterCall({
+          name: "killDevice",
+          args: {},
+          device: undefined,
+          internalCall: false,
+          response,
+          sessionUuid: "session-1",
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 20,
+        }),
+      );
 
       expect(telemetryEvents).toHaveLength(1);
       expect(telemetryEvents[0].success).toBe(false);

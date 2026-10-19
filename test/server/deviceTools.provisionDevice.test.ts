@@ -1,5 +1,8 @@
 import * as buildIdentity from "../../src/daemon/buildIdentity";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
+import type { DeviceResourceStatus } from "../../src/models/DeviceResource";
+import { VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION } from "../../src/models/virtualDeviceCapabilities";
+import { toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -208,7 +211,9 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
         runtimeId: request.spec.runtime,
         runtime: request.spec.runtime,
         deviceType: request.spec.deviceType,
-        ...(request.platform === "android" && request.spec.configuration
+        ...(request.platform === "android" &&
+        "configuration" in request.spec &&
+        request.spec.configuration
           ? {
               screenWidth: request.spec.configuration.screenWidth,
               screenHeight: request.spec.configuration.screenHeight,
@@ -216,8 +221,8 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
             }
           : {}),
         capabilityInventory: {
-          schemaVersion: 2,
-          capabilities: [{ id: "test.fake.capability", state: "available" }],
+          schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+          capabilities: [{ id: "test.fake.capability", state: "available", source: "platform" }],
         },
       },
       resolvedSpec: {
@@ -835,8 +840,8 @@ describe("provisionDevice handler", () => {
       ...provisionTestArgs("android"),
       resources: { wallpaperRendering: "disabled" },
     });
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text)).toMatchObject({
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response)).toMatchObject({
       success: false,
       created: true,
       resources: {
@@ -873,10 +878,10 @@ describe("provisionDevice handler", () => {
       undefined,
       abort.signal,
     );
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(readinessCalls).toBe(0);
     expect(resourceObserver.requests).toHaveLength(1);
-    expect(JSON.parse(response.content[0].text).sessionId).toBeUndefined();
+    expect(toolJson(response).sessionId).toBeUndefined();
   });
   test("resource timeout leaves readiness time and returns the retained device and session", async () => {
     const timer = new FakeTimer();
@@ -1037,8 +1042,8 @@ describe("provisionDevice handler", () => {
       resources: { wallpaperRendering: "disabled", widgets: "disabled" },
     });
 
-    expect(response.isError).toBe(true);
-    const payload = JSON.parse(response.content[0].text);
+    expect(toolIsError(response)).toBe(true);
+    const payload = toolJson(response);
     expect(payload.sessionId).toBeUndefined();
     expect(payload.error).toMatchObject({
       code: "resource_profile_unproven",
@@ -1052,8 +1057,12 @@ describe("provisionDevice handler", () => {
         },
       ],
     });
-    expect(payload.error.message).toContain("widgets (missingRequested");
-    expect(payload.error.message).not.toContain("wallpaperRendering (");
+    expect(payload.error).toMatchObject({
+      message: expect.stringContaining("widgets (missingRequested"),
+    });
+    expect(payload.error).not.toMatchObject({
+      message: expect.stringContaining("wallpaperRendering ("),
+    });
     expect(harness.readinessCalls()).toBe(0);
     // Partial transition: the override that did land stays (no compensating write)
     // and remains recorded as AutoMobile-owned, so a retry or reconcile sees it.
@@ -1097,16 +1106,17 @@ describe("provisionDevice handler", () => {
       resources: { wallpaperRendering: "disabled" },
     });
 
-    expect(response.isError).toBe(true);
-    const payload = JSON.parse(response.content[0].text);
+    expect(toolIsError(response)).toBe(true);
+    const payload = toolJson(response);
     expect(payload.sessionId).toBeUndefined();
-    expect(payload.error.code).toBe("resource_profile_unproven");
-    expect(payload.error.resourceDrift).toMatchObject([
-      { resource: "wallpaperRendering", kind: "unsupported" },
-    ]);
+    expect(payload.error).toMatchObject({
+      code: "resource_profile_unproven",
+      resourceDrift: [{ resource: "wallpaperRendering", kind: "unsupported" }],
+    });
     expect(payload.cleanup).toMatchObject({ status: "succeeded", state: "destroyed" });
     // A clean rollback is not a cleanup failure.
-    expect(payload.recovery.boundary).not.toBe("cleanup_failure");
+    expect(payload.recovery).toBeDefined();
+    expect(payload.recovery).not.toMatchObject({ boundary: "cleanup_failure" });
     expect(readinessCalls).toBe(0);
     expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
   });
@@ -1126,19 +1136,19 @@ describe("provisionDevice handler", () => {
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
 
-    const payload = JSON.parse(response.content[0].text);
-    expect(payload.error.retryable).toBe(true);
-    expect(payload.error.resourceDrift).toMatchObject([
-      { resource: "wallpaperRendering", kind: "commandFailure" },
-    ]);
+    const payload = toolJson(response);
+    expect(payload.error).toMatchObject({
+      retryable: true,
+      resourceDrift: [{ resource: "wallpaperRendering", kind: "commandFailure" }],
+    });
     expect(payload.sessionId).toBeUndefined();
     await expectDeviceFree(harness.coordinator);
   });
 
-  test.each([
+  test.each<readonly [string, DeviceResourceStatus]>([
     ["unknown", { state: "unknown", reason: "launchctl timed out" }],
     ["unsupported", { state: "unsupported" }],
-  ] as const)(
+  ])(
     "iOS simulator profile (#11028): an observed %s never overrides a state the controller proved",
     async (_name, observed) => {
       const resources = new FakeDeviceResourceController();
@@ -1150,8 +1160,8 @@ describe("provisionDevice handler", () => {
         resources: { wallpaperRendering: "disabled" },
       });
 
-      expect(response.isError).not.toBe(true);
-      expect(JSON.parse(response.content[0].text).sessionId).toEqual(expect.any(String));
+      expect(toolIsError(response)).not.toBe(true);
+      expect(toolJson(response).sessionId).toEqual(expect.any(String));
       expect(harness.readinessCalls()).toBe(1);
     },
   );
@@ -1166,10 +1176,10 @@ describe("provisionDevice handler", () => {
       resources: { wallpaperRendering: "disabled" },
     });
 
-    expect(response.isError).not.toBe(true);
-    const payload = JSON.parse(response.content[0].text);
+    expect(toolIsError(response)).not.toBe(true);
+    const payload = toolJson(response);
     expect(payload.sessionId).toEqual(expect.any(String));
-    expect(payload.resources.success).toBe(true);
+    expect(payload.resources).toMatchObject({ success: true });
     expect(harness.readinessCalls()).toBe(1);
   });
 
@@ -1261,7 +1271,7 @@ describe("provisionDevice handler", () => {
     ).toThrow(/at least 2048/);
   });
 
-  test.each([
+  test.each<readonly [string, Record<string, unknown>]>([
     [
       "Play Store RAM below the product floor",
       {
@@ -1303,7 +1313,7 @@ describe("provisionDevice handler", () => {
         },
       },
     ],
-  ] as const)(
+  ])(
     "rejects %s through the provisionDevice product handler before provisioning",
     async (_description, input) => {
       const response = await ToolRegistry.getTool("provisionDevice")!.handler(input);
@@ -1313,24 +1323,23 @@ describe("provisionDevice handler", () => {
     },
   );
 
-  test.each([
+  test.each<readonly [string, number]>([
     ["system-images;android-36;google_apis_playstore;x86_64", 2048],
     ["system-images;android-36.1;google_apis_playstore;x86_64", 2048],
     ["system-images;android-36.1;google_apis;x86_64", 1024],
-  ] as const)("accepts supported memory for Android image %s", (runtime, memoryMb) => {
-    expect(
-      provisionDeviceSchema.parse({
-        device: {
-          platform: "android",
-          name: "phone-api-36",
-          spec: {
-            runtime,
-            deviceType: "pixel_9",
-            configuration: { memoryMb },
-          },
+  ])("accepts supported memory for Android image %s", (runtime, memoryMb) => {
+    const { spec } = provisionDeviceSchema.parse({
+      device: {
+        platform: "android",
+        name: "phone-api-36",
+        spec: {
+          runtime,
+          deviceType: "pixel_9",
+          configuration: { memoryMb },
         },
-      }).device.spec.configuration?.memoryMb,
-    ).toBe(memoryMb);
+      },
+    }).device;
+    expect("configuration" in spec ? spec.configuration?.memoryMb : undefined).toBe(memoryMb);
   });
 
   // #11065: a repeated call is a fresh provision, never a stored-result replay.
@@ -1419,8 +1428,10 @@ describe("provisionDevice handler", () => {
       screenHeight: 2400,
       screenDensity: 420,
       capabilityInventory: {
-        schemaVersion: 2,
-        capabilities: [{ id: "test.fake.capability", state: "available" as const }],
+        schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+        capabilities: [
+          { id: "test.fake.capability", state: "available" as const, source: "platform" as const },
+        ],
       },
     };
     deviceManager.setDeviceImages("android", [image]);
@@ -2020,7 +2031,7 @@ describe("provisionDevice handler", () => {
                 return { success: true, message: "created", avdName: name };
               },
             },
-            androidConfigReader: { readConfig: async () => undefined },
+            androidConfigReader: { readConfig: async () => null },
             androidConfigWriter: { setMemoryMb: async () => {} },
             iosSimulator: {
               createSimulator: async () => {
@@ -2076,7 +2087,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: {
             setMemoryMb: async () => {
@@ -2132,7 +2143,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: {
             setMemoryMb: async () => {
@@ -2197,7 +2208,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: configWriter,
           iosSimulator: {
@@ -2286,7 +2297,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: configWriter,
           iosSimulator: {
@@ -2892,7 +2903,7 @@ describe("provisionDevice handler", () => {
             },
           },
           androidConfigReader: {
-            readConfig: async () => undefined,
+            readConfig: async () => null,
           },
           androidConfigWriter: configWriter,
           iosSimulator: {
@@ -3180,6 +3191,10 @@ describe("provisionDevice handler", () => {
           resolvedSpec: {
             runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
             deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            displayCutout: classifyDisplayCutout(
+              "ios",
+              "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+            ),
           },
         };
       },
@@ -3511,9 +3526,9 @@ describe("provisionDevice handler", () => {
       );
       // Teardown preempts the in-flight provision, whose rollback removes the
       // simulator it created; the racing teardown then finds it already gone.
-      expect(provisionResult.isError).toBe(true);
+      expect(toolIsError(provisionResult)).toBe(true);
       expect(deviceManager.getExecutedOperations()).toContain("destroyDevice:ios:created-udid");
-      expect(teardownResult.structuredContent).toMatchObject({ state: "already_absent" });
+      expect(toolStructured(teardownResult)).toMatchObject({ state: "already_absent" });
     } finally {
       iosCtrlProxyManager.mockRestore();
     }
@@ -3886,6 +3901,7 @@ describe("provisionDevice handler", () => {
     const reserved: string[] = [];
     const released: string[] = [];
     const lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: (identity) => inner.isReserved(identity),
       reserve: async (identity, options) => {
         const lease = await inner.reserve(identity, options);
         const key = JSON.stringify(lease.identity);
@@ -4246,7 +4262,7 @@ describe("provisionDevice handler", () => {
     expect(provisionCalls).toBe(1);
   });
 
-  test.each([
+  test.each<readonly [string, string | number]>([
     ["__mcpSessionId", "mcp-session-1"],
     ["__executionId", "execution-1"],
     ["__executionStartTime", 1_000],
@@ -4254,7 +4270,7 @@ describe("provisionDevice handler", () => {
     // Absolute deadline on the shared timer clock, so it must be far-future.
     ["__mcpRequestDeadlineMs", 8_640_000_000_000],
     ["__mcpLiveDeadlineKey", "live-deadline-1"],
-  ] as const)(
+  ])(
     "strips the internal %s param before re-parsing against the strict schema",
     async (param, value) => {
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -4561,7 +4577,7 @@ describe("provisionDevice handler", () => {
     });
   });
 
-  test.each([
+  test.each<readonly [Error, string, Record<string, unknown>]>([
     [
       new DeviceOwnedByOtherDaemonError("emulator-5554", 4242),
       "device_owned_by_other_daemon",
@@ -4582,7 +4598,7 @@ describe("provisionDevice handler", () => {
       "device_shutting_down",
       { retryAfterMs: DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS },
     ],
-  ] as const)(
+  ])(
     "a typed acquisition refusal %# is a retryable %s failure with its hints",
     async (refusal, code, extra) => {
       deviceManager.setBootedDevices("android", [
@@ -4603,10 +4619,10 @@ describe("provisionDevice handler", () => {
     },
   );
 
-  test.each([
+  test.each<readonly [Error, string, boolean]>([
     [new DeviceTransportOfflineError("emulator-5554", "offline"), "device_offline", true],
     [new ActionableError("device unavailable"), "platform_command_failed", false],
-  ] as const)("bind refusal %# maps to %s with retryable=%s", async (refusal, code, retryable) => {
+  ])("bind refusal %# maps to %s with retryable=%s", async (refusal, code, retryable) => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -5079,6 +5095,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       timer,
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async () => ({
           signal: new AbortController().signal,
           identity: { kind: "stable", platform: "android", stableId: booted.name },
@@ -5184,6 +5201,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       timer,
       lifecycleCoordinator: {
+        isReserved: () => false,
         reserve: async () => ({
           signal: new AbortController().signal,
           identity: { kind: "stable", platform: "android", stableId: booted.name },

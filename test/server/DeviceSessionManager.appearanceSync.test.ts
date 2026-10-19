@@ -4,7 +4,7 @@ import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionMa
 import { applyAppearanceOnConnect } from "../../src/daemon/applyAppearanceOnConnect";
 import { isAppearanceSyncEnabled } from "../../src/utils/appearance/appearanceSyncPolicy";
 import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
-import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -13,6 +13,21 @@ import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
+
+/** A runner that is not yet connected but connects and answers readiness probes on demand. */
+class ReadyUnconnectedCtrlProxy extends FakeCtrlProxy {
+  override isConnected(): boolean {
+    return false;
+  }
+
+  override async waitForConnection(): Promise<boolean> {
+    return true;
+  }
+
+  override async verifyServiceReady(): Promise<boolean> {
+    return true;
+  }
+}
 
 const config: AppearanceConfig = {
   syncWithHost: true,
@@ -33,12 +48,7 @@ function harness(
   const adb = new FakeAdbExecutor();
   const simctl = new FakeSimctl();
   const ctrlProxyManager = new FakeCtrlProxyManager();
-  const ctrlProxyClient = {
-    isConnected: () => false,
-    waitForConnection: async () => true,
-    verifyServiceReady: async () => true,
-    resetConnectionBudget: () => {},
-  } as unknown as AndroidCtrlProxy;
+  const ctrlProxyClient = new ReadyUnconnectedCtrlProxy();
   const appearanceSimctl = new FakeSimctl();
   const devices = new FakeDeviceUtils();
   const window = new FakeWindow();
@@ -46,7 +56,7 @@ function harness(
   adb.setDevices(platform === "android" ? [device] : []);
   devices.setBootedDevices(platform, [device]);
   simctl.setBootedSimulators(platform === "ios" ? [device] : []);
-  simctl.setAvailableSimulators([device]);
+  simctl.setAvailableSimulators([{ ...device, isRunning: true }]);
   simctl.setDeviceInfo(device.deviceId, {
     udid: device.deviceId,
     name: device.name,

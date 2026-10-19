@@ -43,7 +43,8 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
 } from "../../src/utils/directSessionDeviceRegistry";
-import { getStructuredField } from "../../src/utils/toolUtils";
+import { readToolResponse, toolField, toolIsError, toolStructured } from "../helpers/toolResponse";
+import { createExecResult } from "../../src/utils/execResult";
 import { snapshotReferences } from "../../src/features/observe/SnapshotReferenceStore";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
@@ -259,7 +260,7 @@ describe("session-free observe device read", () => {
         }),
       });
       const result = await callDeviceRead({ deviceId: device.deviceId });
-      expect(result.structuredContent).toMatchObject({
+      expect(toolStructured(result)).toMatchObject({
         deviceId: device.deviceId,
         screenshotPath,
         screenshotSource: "fresh",
@@ -298,11 +299,11 @@ describe("session-free observe device read", () => {
         deviceId: device.deviceId,
         includeScreenshotImage: true,
       });
-      expect(getStructuredField(response, "screenshotImage")).toMatchObject({
+      expect(toolField(response, "screenshotImage")).toMatchObject({
         included: true,
         mimeType: "image/png",
       });
-      expect(response.content).toContainEqual({
+      expect(readToolResponse(response).content).toContainEqual({
         type: "image",
         data: screenshotBytes.toString("base64"),
         mimeType: "image/png",
@@ -366,13 +367,13 @@ describe("session-free observe device read", () => {
               project: "full",
             }),
         );
-        expect(getStructuredField(response, "viewHierarchy")).toBeDefined();
-        expect(getStructuredField(response, "screenSize")).toBeDefined();
-        expect(getStructuredField(response, "screenshotPath")).toBe("/fake/owned.png");
+        expect(toolField(response, "viewHierarchy")).toBeDefined();
+        expect(toolField(response, "screenSize")).toBeDefined();
+        expect(toolField(response, "screenshotPath")).toBe("/fake/owned.png");
         expect(owner).toEqual({ sessionId: "owner", poolStatus: "assigned" });
         expect(capture).not.toHaveBeenCalled();
-        expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
-        expect(getStructuredField(response, "snapshotReferenceUnavailable")).toBeUndefined();
+        expect(toolField(response, "snapshotReference")).toBeUndefined();
+        expect(toolField(response, "snapshotReferenceUnavailable")).toBeUndefined();
       } finally {
         capture.mockRestore();
       }
@@ -436,7 +437,7 @@ describe("session-free observe device read", () => {
         includeScreenshotImage: false,
         screenshot: "none",
       });
-      expect(getStructuredField(result, "snapshotReference")).toBeUndefined();
+      expect(toolField(result, "snapshotReference")).toBeUndefined();
       expect(capture).not.toHaveBeenCalled();
       expect(notify).not.toHaveBeenCalled();
     } finally {
@@ -515,10 +516,10 @@ describe("session-free observe device read", () => {
         skipBackStack: true,
         screenshot: "none",
       });
-      expect(getStructuredField(response, "matched")).toBe(true);
-      expect(getStructuredField(response, "polls")).toBe(1);
-      expect(getStructuredField(response, "rawViewHierarchy")).toBeDefined();
-      expect(response.isError).not.toBe(true);
+      expect(toolField(response, "matched")).toBe(true);
+      expect(toolField(response, "polls")).toBe(1);
+      expect(toolField(response, "rawViewHierarchy")).toBeDefined();
+      expect(toolIsError(response)).not.toBe(true);
       expect(events).toEqual(["navigation", "audit", "session-observe", "raw"]);
       expect(reads).toEqual([]);
       expect(manager.getLastEnsureDeviceReadyDeviceId()).toBe(device.deviceId);
@@ -593,20 +594,18 @@ describe("session-free observe device read", () => {
           sessionUuid,
         });
         if (hasRotation) {
-          expect(getStructuredField(response, "rotation")).toBe(0);
+          expect(toolField(response, "rotation")).toBe(0);
           expect(observation.viewHierarchy?.rotation).toBe(
             rotationSource === "runner" ? 0 : undefined,
           );
-          expect(getStructuredField(response, "snapshotReference")).toMatchObject({
+          expect(toolField(response, "snapshotReference")).toMatchObject({
             snapshotId: expect.any(String),
             expiresAt: expect.any(Number),
           });
-          expect(getStructuredField(response, "snapshotReferenceUnavailable")).toBeUndefined();
+          expect(toolField(response, "snapshotReferenceUnavailable")).toBeUndefined();
         } else {
-          expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
-          expect(getStructuredField(response, "snapshotReferenceUnavailable")).toEqual([
-            "rotation",
-          ]);
+          expect(toolField(response, "snapshotReference")).toBeUndefined();
+          expect(toolField(response, "snapshotReferenceUnavailable")).toEqual(["rotation"]);
         }
       } finally {
         restorePipeline();
@@ -746,16 +745,18 @@ describe("session-free observe device read", () => {
         skipBackStack: false,
         raw: false,
       });
-      expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
-      expect(response.structuredContent).toMatchObject({ screenshotPath: "/fake/read.png" });
-      expect(getStructuredField(response, "viewHierarchy")?.hierarchy?.node).toBeDefined();
-      expect(getStructuredField(response, "screenSize")).toMatchObject({
+      expect(toolField(response, "snapshotReference")).toBeUndefined();
+      expect(toolStructured(response)).toMatchObject({ screenshotPath: "/fake/read.png" });
+      expect(toolField(response, "viewHierarchy")).toMatchObject({
+        hierarchy: { node: expect.anything() },
+      });
+      expect(toolField(response, "screenSize")).toMatchObject({
         width: 1080,
         height: 2400,
       });
-      expect(getStructuredField(response, "activeWindow")).toBeDefined();
-      expect(getStructuredField(response, "display")).toBeDefined();
-      expect(getStructuredField(response, "deviceLock")).toEqual({
+      expect(toolField(response, "activeWindow")).toBeDefined();
+      expect(toolField(response, "display")).toBeDefined();
+      expect(toolField(response, "deviceLock")).toEqual({
         locked: false,
         keyguardShowing: false,
       });
@@ -871,7 +872,7 @@ describe("session-free observe device read", () => {
       screenshotOptions: { format: "webp", quality: 80 },
     });
     expect(capturedOptions).toEqual([{ format: "webp", quality: 80, displayId: undefined }]);
-    expect(response.structuredContent).toMatchObject({
+    expect(toolStructured(response)).toMatchObject({
       screenshotPath: "/fake/read.webp",
       screenshotFormat: "webp",
       screenshotMimeType: "image/webp",
@@ -893,11 +894,13 @@ describe("session-free observe device read", () => {
       },
     };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     const cached = {
       ...loadAndroidHomeObserve().observe,
       display: { key: "cover", role: "cover", posture: "closed", generation: 0 },

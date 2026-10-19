@@ -11,11 +11,15 @@ import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeTo
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+type DiscoveryManager = Pick<
+  PlatformDeviceManager,
+  "getBootedDevicesDetailed" | "getDeviceImagesDetailed"
+>;
 type BootedResult = Awaited<ReturnType<PlatformDeviceManager["getBootedDevicesDetailed"]>>;
 type ImageResult = Awaited<ReturnType<PlatformDeviceManager["getDeviceImagesDetailed"]>>;
 
 /** adb failed this sweep: no device list, Android not in succeededPlatforms. */
-function adbDownDeviceManager(): PlatformDeviceManager {
+function adbDownDeviceManager(): DiscoveryManager {
   return managerWith(
     {
       succeededPlatforms: new Set(),
@@ -30,7 +34,7 @@ function adbDownDeviceManager(): PlatformDeviceManager {
 function managerWith(
   booted: Partial<BootedResult>,
   images: Partial<ImageResult>,
-): PlatformDeviceManager {
+): DiscoveryManager {
   return {
     getBootedDevicesDetailed: async () => ({
       devices: [],
@@ -42,11 +46,11 @@ function managerWith(
       succeededPlatforms: new Set(["android"]),
       ...images,
     }),
-  } as unknown as PlatformDeviceManager;
+  };
 }
 
 async function resolveOutcome(
-  manager: PlatformDeviceManager,
+  manager: DiscoveryManager,
 ): Promise<{ error?: unknown; target?: unknown }> {
   return await resolveAndroidStartStableDeviceLifecycleTarget(
     "emulator-5554",
@@ -61,7 +65,7 @@ async function resolveOutcome(
 }
 
 function emulator(name: string): BootedDevice {
-  return { name, platform: "android", deviceId: "emulator-5554" } as BootedDevice;
+  return { name, platform: "android", deviceId: "emulator-5554" };
 }
 
 function wire(error: unknown): { success: boolean; code?: string; retryable?: boolean } {

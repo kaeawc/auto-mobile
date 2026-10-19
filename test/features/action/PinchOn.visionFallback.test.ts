@@ -64,9 +64,7 @@ describe("PinchOn vision fallback", () => {
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
       FakeCtrlProxyManager.withAvailability(true),
     );
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as any,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
   });
 
   afterEach(() => {

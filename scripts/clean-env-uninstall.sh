@@ -31,8 +31,13 @@ RESET='\033[0m'
 # ============================================================================
 # Utility Functions
 # ============================================================================
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+    RUN_STATUS=0
+    "$@" || RUN_STATUS=$?
 }
 
 log_info() {
@@ -163,13 +168,20 @@ run_cmd() {
     CHANGES_MADE=true
 }
 
+# run_cmd for cleanup steps whose failure (e.g. package already gone) must not
+# abort the remaining categories.
+run_cmd_best_effort() {
+    run_capture_status run_cmd "$@"
+}
+
 # ============================================================================
 # Category 1: AutoMobile components (delegate to uninstall.sh)
 # ============================================================================
 remove_automobile() {
     local details="Delegates to scripts/uninstall.sh --all"
 
-    if ! confirm_category "1. AutoMobile components" "${details}"; then
+    run_capture_status confirm_category "1. AutoMobile components" "${details}"
+    if (( RUN_STATUS != 0 )); then
         log_info "Skipping AutoMobile components"
         return 0
     fi
@@ -200,10 +212,10 @@ remove_bun() {
         # shellcheck disable=SC2088 # Tilde is intentional for display purposes
         found+=("~/.bun/ directory")
     fi
-    if command_exists brew && brew list oven-sh/bun/bun >/dev/null 2>&1; then
+    if command -v brew >/dev/null 2>&1 && brew list oven-sh/bun/bun >/dev/null 2>&1; then
         found+=("Homebrew: oven-sh/bun/bun")
     fi
-    if command_exists npm && npm list -g bun >/dev/null 2>&1; then
+    if command -v npm >/dev/null 2>&1 && npm list -g bun >/dev/null 2>&1; then
         found+=("npm global bun package (legacy)")
     fi
 
@@ -215,24 +227,25 @@ remove_bun() {
     local details
     details=$(printf '  - %s\n' "${found[@]}")
 
-    if ! confirm_category "2. Bun" "${details}"; then
+    run_capture_status confirm_category "2. Bun" "${details}"
+    if (( RUN_STATUS != 0 )); then
         log_info "Skipping Bun"
         return 0
     fi
 
     # Remove Homebrew bun and tap
-    if command_exists brew; then
+    if command -v brew >/dev/null 2>&1; then
         if brew list oven-sh/bun/bun >/dev/null 2>&1; then
-            run_cmd brew uninstall oven-sh/bun/bun || true
+            run_cmd_best_effort brew uninstall oven-sh/bun/bun
         fi
         if brew tap 2>/dev/null | grep "oven-sh/bun" >/dev/null; then
-            run_cmd brew untap oven-sh/bun || true
+            run_cmd_best_effort brew untap oven-sh/bun
         fi
     fi
 
     # Remove legacy npm global bun if present
-    if command_exists npm && npm list -g bun >/dev/null 2>&1; then
-        run_cmd npm uninstall -g bun || true
+    if command -v npm >/dev/null 2>&1 && npm list -g bun >/dev/null 2>&1; then
+        run_cmd_best_effort npm uninstall -g bun
     fi
 
     # Remove ~/.bun directory
@@ -253,7 +266,7 @@ remove_node_nvm() {
         # shellcheck disable=SC2088 # Tilde is intentional for display purposes
         found+=("~/.nvm/ directory")
     fi
-    if command_exists brew && brew list node >/dev/null 2>&1; then
+    if command -v brew >/dev/null 2>&1 && brew list node >/dev/null 2>&1; then
         found+=("Homebrew: node")
     fi
 
@@ -265,14 +278,15 @@ remove_node_nvm() {
     local details
     details=$(printf '  - %s\n' "${found[@]}")
 
-    if ! confirm_category "3. Node.js / nvm" "${details}"; then
+    run_capture_status confirm_category "3. Node.js / nvm" "${details}"
+    if (( RUN_STATUS != 0 )); then
         log_info "Skipping Node.js / nvm"
         return 0
     fi
 
     # Remove Homebrew node
-    if command_exists brew && brew list node >/dev/null 2>&1; then
-        run_cmd brew uninstall --ignore-dependencies node || true
+    if command -v brew >/dev/null 2>&1 && brew list node >/dev/null 2>&1; then
+        run_cmd_best_effort brew uninstall --ignore-dependencies node
     fi
 
     # Remove nvm directory
@@ -287,7 +301,7 @@ remove_node_nvm() {
 # Category 4: Homebrew packages
 # ============================================================================
 remove_homebrew_packages() {
-    if ! command_exists brew; then
+    if ! command -v brew >/dev/null 2>&1; then
         log_info "Homebrew packages: brew not found, skipping"
         return 0
     fi
@@ -325,13 +339,14 @@ remove_homebrew_packages() {
     local details
     details=$(printf '  - %s\n' "${installed[@]}")
 
-    if ! confirm_category "4. Homebrew packages" "${details}"; then
+    run_capture_status confirm_category "4. Homebrew packages" "${details}"
+    if (( RUN_STATUS != 0 )); then
         log_info "Skipping Homebrew packages"
         return 0
     fi
 
     for pkg in ${installed[@]+"${installed[@]}"}; do
-        run_cmd brew uninstall --ignore-dependencies "${pkg}" || true
+        run_cmd_best_effort brew uninstall --ignore-dependencies "${pkg}"
     done
 
     log_info "Homebrew packages removed"
@@ -344,7 +359,7 @@ remove_java() {
     local found=()
 
     # Check for Homebrew zulu-jdk
-    if command_exists brew; then
+    if command -v brew >/dev/null 2>&1; then
         # Zulu JDK cask names
         for cask in zulu-jdk21 zulu-jdk zulu21 zulu; do
             if brew list --cask "${cask}" >/dev/null 2>&1; then
@@ -373,16 +388,17 @@ remove_java() {
     local details
     details=$(printf '  - %s\n' "${found[@]}")
 
-    if ! confirm_category "5. Java 21" "${details}"; then
+    run_capture_status confirm_category "5. Java 21" "${details}"
+    if (( RUN_STATUS != 0 )); then
         log_info "Skipping Java 21"
         return 0
     fi
 
     # Remove Homebrew casks
-    if command_exists brew; then
+    if command -v brew >/dev/null 2>&1; then
         for cask in zulu-jdk21 zulu-jdk zulu21 zulu; do
             if brew list --cask "${cask}" >/dev/null 2>&1; then
-                run_cmd brew uninstall --cask "${cask}" || true
+                run_cmd_best_effort brew uninstall --cask "${cask}"
             fi
         done
     fi
@@ -434,7 +450,7 @@ remove_manual_tools() {
     done
 
     # Check for xcpretty gem
-    if command_exists xcpretty; then
+    if command -v xcpretty >/dev/null 2>&1; then
         found+=("xcpretty (Ruby gem)")
     fi
 
@@ -446,7 +462,8 @@ remove_manual_tools() {
     local details
     details=$(printf '  - %s\n' "${found[@]}")
 
-    if ! confirm_category "6. Manual tool installs" "${details}"; then
+    run_capture_status confirm_category "6. Manual tool installs" "${details}"
+    if (( RUN_STATUS != 0 )); then
         log_info "Skipping manual tool installs"
         return 0
     fi
@@ -466,8 +483,8 @@ remove_manual_tools() {
     done
 
     # Remove xcpretty gem
-    if command_exists xcpretty; then
-        run_cmd gem uninstall xcpretty --all --executables || true
+    if command -v xcpretty >/dev/null 2>&1; then
+        run_cmd_best_effort gem uninstall xcpretty --all --executables
     fi
 
     log_info "Manual tool installs removed"

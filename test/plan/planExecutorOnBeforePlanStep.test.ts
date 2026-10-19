@@ -78,7 +78,7 @@ describe("PlanExecutor — onBeforePlanStep", () => {
   });
 
   test("invokes onBeforePlanStep once per step with correct indices", async () => {
-    const hook = mock(async () => {});
+    const hook = mock(async (_context?: PlanStepLifecycleContext) => {});
 
     const plan: Plan = {
       name: "hook-test",
@@ -109,7 +109,7 @@ describe("PlanExecutor — onBeforePlanStep", () => {
   });
 
   test("invokes hook from startStep offset with correct totalSteps", async () => {
-    const hook = mock(async () => {});
+    const hook = mock(async (_context?: PlanStepLifecycleContext) => {});
 
     const plan: Plan = {
       name: "hook-offset",

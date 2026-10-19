@@ -24,6 +24,31 @@ enum PrototypeStacks {
         return "\(path).screens[\(encoded)]"
     }
 
+    private static func validateActions(
+        _ nodes: [(node: PrototypeNode, path: String)],
+        stacks: [String: PrototypeNode]
+    )
+        throws
+    {
+        for (node, path) in nodes {
+            var groups: [(actions: [PrototypeAction], path: String)] = [(node.onTap ?? [], "\(path).onTap")]
+            groups += [(node.navigationIcon?.onTap ?? [], "\(path).navigationIcon.onTap")]
+            for (index, button) in (node.actions ?? []).enumerated() {
+                groups.append((button.onTap ?? [], "\(path).actions[\(index)].onTap"))
+            }
+            groups += [
+                (node.confirm?.onTap ?? [], "\(path).confirm.onTap"),
+                (node.dismiss?.onTap ?? [], "\(path).dismiss.onTap"),
+                (node.action?.onTap ?? [], "\(path).action.onTap"),
+            ]
+            for group in groups {
+                for (index, action) in group.actions.enumerated() {
+                    try validate(action, path: "\(group.path)[\(index)]", stacks: stacks)
+                }
+            }
+        }
+    }
+
     /// The new stack forms are checked at show, like the agent's theme-mode forms. All screens
     /// participate, including inactive screens and actions in composite buttons.
     static func validate(root: PrototypeNode) throws {
@@ -53,23 +78,7 @@ enum PrototypeStacks {
             }
             stacks[id] = node
         }
-        for (node, path) in nodes {
-            var groups: [(actions: [PrototypeAction], path: String)] = [(node.onTap ?? [], "\(path).onTap")]
-            groups += [(node.navigationIcon?.onTap ?? [], "\(path).navigationIcon.onTap")]
-            for (index, button) in (node.actions ?? []).enumerated() {
-                groups.append((button.onTap ?? [], "\(path).actions[\(index)].onTap"))
-            }
-            groups += [
-                (node.confirm?.onTap ?? [], "\(path).confirm.onTap"),
-                (node.dismiss?.onTap ?? [], "\(path).dismiss.onTap"),
-                (node.action?.onTap ?? [], "\(path).action.onTap"),
-            ]
-            for group in groups {
-                for (index, action) in group.actions.enumerated() {
-                    try validate(action, path: "\(group.path)[\(index)]", stacks: stacks)
-                }
-            }
-        }
+        try validateActions(nodes, stacks: stacks)
     }
 
     private static func validate(_ action: PrototypeAction, path: String, stacks: [String: PrototypeNode]) throws {

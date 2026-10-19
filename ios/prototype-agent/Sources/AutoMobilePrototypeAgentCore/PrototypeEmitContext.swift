@@ -110,6 +110,15 @@ struct PrototypeEmitContext: Decodable {
         return count <= PrototypeLimits.maxEmitPayloadBytes
     }
 
+    private static func objectByteCount(_ fields: [String: JSONValue]) -> Int? {
+        var count = 2 + max(0, fields.count - 1)
+        for (key, item) in fields {
+            guard let keyBytes = jsonByteCount(.string(key)), let bytes = jsonByteCount(item) else { return nil }
+            count += keyBytes + 1 + bytes
+        }
+        return count
+    }
+
     /// Foundation supplies JSON string escaping; number sizes follow the host's JSON.stringify.
     /// Count recursively so numbers in data objects/arrays use the same spelling as scalar bindings.
     private static func jsonByteCount(_ value: JSONValue) -> Int? {
@@ -127,12 +136,7 @@ struct PrototypeEmitContext: Decodable {
             }
             return count
         case let .object(fields):
-            var count = 2 + max(0, fields.count - 1)
-            for (key, item) in fields {
-                guard let keyBytes = jsonByteCount(.string(key)), let bytes = jsonByteCount(item) else { return nil }
-                count += keyBytes + 1 + bytes
-            }
-            return count
+            return objectByteCount(fields)
         case let .string(value): return quotedByteCount(value)
         }
     }

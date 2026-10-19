@@ -213,25 +213,9 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
             arguments["action"] = "tap"
         }
         if name == "sendKeys" {
-            let action = arguments.removeValue(forKey: "action") as? String ?? "type"
-            let command: [String: Any]
-            switch action {
-            case "type":
-                guard let text = arguments.removeValue(forKey: "text") as? String else {
-                    return "{\"error\":\"text is required for type\"}"
-                }
-                command = ["action": "type", "text": text, "operation": "replace"]
-            case "clear":
-                command = ["action": "clear"]
-            case "key":
-                guard let key = arguments.removeValue(forKey: "key") as? String else {
-                    return "{\"error\":\"key is required for key\"}"
-                }
-                command = ["action": "key", "key": key]
-            default:
-                return "{\"error\":\"action must be type, clear, or key\"}"
+            if let error = Self.buildSendKeysCommands(in: &arguments) {
+                return error
             }
-            arguments["commands"] = [command]
         }
 
         do {
@@ -251,6 +235,29 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
             let message = SecretRedaction.redact(String(describing: error), secretValues: secretValues)
             return "{\"error\":\"\(Self.escapeForJSON(message))\"}"
         }
+    }
+
+    private static func buildSendKeysCommands(in arguments: inout [String: Any]) -> String? {
+        let action = arguments.removeValue(forKey: "action") as? String ?? "type"
+        let command: [String: Any]
+        switch action {
+        case "type":
+            guard let text = arguments.removeValue(forKey: "text") as? String else {
+                return "{\"error\":\"text is required for type\"}"
+            }
+            command = ["action": "type", "text": text, "operation": "replace"]
+        case "clear":
+            command = ["action": "clear"]
+        case "key":
+            guard let key = arguments.removeValue(forKey: "key") as? String else {
+                return "{\"error\":\"key is required for key\"}"
+            }
+            command = ["action": "key", "key": key]
+        default:
+            return "{\"error\":\"action must be type, clear, or key\"}"
+        }
+        arguments["commands"] = [command]
+        return nil
     }
 
     private func observeDeviceState(context: FailedStepContext, secretValues: [String]) async throws -> String? {

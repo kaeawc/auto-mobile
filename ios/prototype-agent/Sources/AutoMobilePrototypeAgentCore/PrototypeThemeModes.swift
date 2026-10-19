@@ -96,12 +96,12 @@ enum PrototypeGradient: Decodable, Equatable {
         start: PrototypeUnitPoint, end: PrototypeUnitPoint
     ) {
         let radians = angle * .pi / 180
-        let dx = cos(radians)
-        let dy = sin(radians)
-        let half = (abs(width * dx) + abs(height * dy)) / 2
+        let horizontalDelta = cos(radians)
+        let verticalDelta = sin(radians)
+        let half = (abs(width * horizontalDelta) + abs(height * verticalDelta)) / 2
         // An empty box draws nothing; keep the line finite.
-        let x = width > 0 ? dx * half / width : 0
-        let y = height > 0 ? dy * half / height : 0
+        let x = width > 0 ? horizontalDelta * half / width : 0
+        let y = height > 0 ? verticalDelta * half / height : 0
         return (PrototypeUnitPoint(x: 0.5 - x, y: 0.5 - y), PrototypeUnitPoint(x: 0.5 + x, y: 0.5 + y))
     }
 
@@ -120,7 +120,7 @@ enum PrototypeNavVisual: Equatable {
     case icon(String)
     /// An image was named but is not uploaded, and there is no icon to fall back to.
     case placeholder
-    case none
+    case absent
 }
 
 extension NavItem {
@@ -132,7 +132,7 @@ extension NavItem {
         if let icon {
             return PrototypeIconSymbolTable.shared.resolve(icon) == .unknown ? .placeholder : .icon(icon)
         }
-        return id == nil ? .none : .placeholder
+        return id == nil ? .absent : .placeholder
     }
 }
 

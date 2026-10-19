@@ -83,16 +83,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(tapCallCount).toBe(0);
   });
@@ -110,16 +105,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(tapCallCount).toBe(1);
   });
@@ -137,16 +127,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(tapCallCount).toBe(0);
   });
@@ -167,16 +152,11 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(
-      preTapHash,
-      { x: 60, y: 45 },
-      "tap",
-      0,
-      makeElement(),
-      { action: "tap" },
-      false,
-      { width: 1080, height: 1920 },
-    );
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      options: { action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 1080, height: 1920 },
+    });
 
     expect(sleepDurations).toEqual([300, 100]);
   });
@@ -454,25 +434,18 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
         _y: number,
         _dur: number,
         _el: Element,
-        _signal: unknown,
-        _opts: unknown,
-        isTalkBack: boolean,
+        context,
       ) => {
-        capturedIsTalkBackEnabled = isTalkBack;
+        capturedIsTalkBackEnabled = context?.isTalkBackEnabled;
       };
 
       const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-      await tap.retryTapIfNoChange(
-        preTapHash,
-        { x: 60, y: 45 },
-        "tap",
-        0,
-        makeElement(),
-        { action: "tap" },
-        talkBackEnabled,
-        { width: 1080, height: 1920 },
-      );
+      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+        options: { action: "tap" },
+        isTalkBackEnabled: talkBackEnabled,
+        screenSize: { width: 1080, height: 1920 },
+      });
 
       expect(capturedIsTalkBackEnabled).toBe(talkBackEnabled);
     });

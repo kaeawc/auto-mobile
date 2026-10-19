@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
   const timer = new FakeTimer();
@@ -133,7 +134,7 @@ describe("DeviceAutolockManager", () => {
       const h = harness();
       try {
         await h.sessions.createSession("holder", h.device.id, "android");
-        h.device.sessionId = "holder";
+        patchBinding(h.device, { sessionId: "holder" });
         h.port.holderReleaseRemainingMs = (holder) => {
           expect(holder).toBe("holder");
           return retryAfterMs;
@@ -173,8 +174,8 @@ describe("DeviceAutolockManager", () => {
       const h = harness();
       try {
         const session = await h.sessions.createSession("resumed-R", h.device.id, "android");
-        h.device.sessionId = session.sessionId;
-        h.device.status = "busy";
+        patchBinding(h.device, { sessionId: session.sessionId });
+        patchBinding(h.device, { status: "busy" });
         const recordReadiness = h.sessions.setDeviceReadiness.bind(h.sessions);
         h.sessions.setDeviceReadiness = (id, level) => {
           expect(h.manager.captureAutolockSessionForMcpSession("owner")).toBeUndefined();
@@ -229,7 +230,7 @@ describe("DeviceAutolockManager", () => {
     const h = harness();
     try {
       await h.sessions.createSession("resumed-R", h.device.id, "android");
-      h.device.sessionId = "resumed-R";
+      patchBinding(h.device, { sessionId: "resumed-R" });
       h.port.recordBindOwnership = () => false;
       await h.manager.adoptResumedAutolockSession(
         "resumed-R",
@@ -255,9 +256,9 @@ describe("DeviceAutolockManager", () => {
     const h = harness();
     try {
       await h.sessions.createSession("resumed-R", h.device.id, "android");
-      h.device.sessionId = "resumed-R";
+      patchBinding(h.device, { sessionId: "resumed-R" });
       h.port.withAssignmentLock = async (operation) => {
-        h.device.sessionId = "rival";
+        patchBinding(h.device, { sessionId: "rival" });
         h.device.autolockSessionId = "rival";
         return await operation();
       };
@@ -366,7 +367,7 @@ describe("DeviceAutolockManager", () => {
     const { manager, sessions, device, timer } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");
     device.autolockSessionId = "replacement";
-    device.sessionId = "replacement";
+    patchBinding(device, { sessionId: "replacement" });
     timer.advanceTime(1);
     manager.clearReleasedAutolockState(first!, device.id);
     expect(device.autolockSessionId).toBe("replacement");

@@ -19,6 +19,7 @@ import {
   releasingSessionId as sessionId,
   releasingDeviceId as deviceId,
 } from "../helpers/releasingSessionHarness";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const notFound = {
   success: false,
@@ -238,8 +239,8 @@ describe("remaining paths during session release", () => {
     if (!device || !port) {
       throw new Error("Expected pooled device and liveness port");
     }
-    device.sessionId = sessionId;
-    device.status = "assigned";
+    patchBinding(device, { sessionId: sessionId });
+    patchBinding(device, { status: "busy" });
     return { pool, device, port };
   }
 

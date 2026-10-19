@@ -183,6 +183,7 @@ interface FakeToolCall {
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
       getSession: () => null,
       getDeviceLabels: () => undefined,

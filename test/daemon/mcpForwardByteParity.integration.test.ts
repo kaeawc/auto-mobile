@@ -87,7 +87,9 @@ const refusals = new Map(buildRefusalWireFixtures().map((fixture) => [fixture.co
 function fakeDaemonState() {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,

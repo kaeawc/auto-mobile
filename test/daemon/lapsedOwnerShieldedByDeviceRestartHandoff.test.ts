@@ -121,6 +121,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 1, assigned: 0, error: 0 }),
       }),

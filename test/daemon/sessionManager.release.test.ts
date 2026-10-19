@@ -18,6 +18,7 @@ import {
   makeSessionManager,
   quietPersistence,
 } from "../helpers/sessionManagerSuite";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 describe("SessionManager", () => {
   let sessionManager: SessionManager;
@@ -374,8 +375,8 @@ describe("SessionManager", () => {
 
       // A same-serial replacement must not be released by the old deferred callback.
       const oldDevice = pool.getDevice("device-1")!;
-      oldDevice.sessionId = null;
-      oldDevice.status = "idle";
+      patchBinding(oldDevice, { sessionId: null });
+      patchBinding(oldDevice, { status: "idle" });
       await pool.removeDevice("device-1");
       await pool.initializeWithDevices([
         { name: "device-1", deviceId: "device-1", platform: "android" },

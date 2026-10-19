@@ -552,6 +552,7 @@ test("a failed token declaration is logged and does not stop owned-session resto
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const pool = {
     refreshDevices: async () => 0,
+    releaseDevice: async () => {},
     getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
     declareMcpSessionLivenessOwnerToken: () => {
       throw failure;

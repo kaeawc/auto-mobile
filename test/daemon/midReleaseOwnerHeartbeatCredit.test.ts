@@ -83,6 +83,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

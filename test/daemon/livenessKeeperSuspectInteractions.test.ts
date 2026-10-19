@@ -24,6 +24,7 @@ const KEEPER_TOKEN = "keeper-token";
 const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 
 const DEVICE_POOL = {
+  releaseDevice: async () => {},
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };

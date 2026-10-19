@@ -17,6 +17,7 @@ import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline
 import type { ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const deviceId = "emulator-5554";
 
@@ -319,7 +320,7 @@ describe("MissingDeviceLiveness", () => {
       await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), new Set()),
     ).toBe(0);
     expect(h.misses.has(deviceId)).toBe(false);
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     expect(await emptyRefresh(h)).toBe(0);
     expect(h.calls).toEqual([]);
   });
@@ -388,7 +389,7 @@ describe("MissingDeviceLiveness", () => {
   test("releases an assigned session before removing its device", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     h.devices.set(deviceId, device);
     await h.liveness.evictMissingPooledDevice(device, "absent");
     expect(h.calls).toEqual(["finish preparation", "release", "complete", "remove", "settle"]);
@@ -398,7 +399,7 @@ describe("MissingDeviceLiveness", () => {
   test("stops eviction when session preservation owns recovery", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     h.devices.set(deviceId, device);
     h.port.tryPreserveSessionForMissingDevice = async () => {
       h.calls.push("preserve");
@@ -478,7 +479,7 @@ describe("MissingDeviceLiveness", () => {
   test("finishes an opened incident when session release declines", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     h.devices.set(deviceId, device);
     h.port.releaseSessionForEvictedDevice = async () => false;
     await h.liveness.evictMissingPooledDevice(device, "absent", {
@@ -492,7 +493,7 @@ describe("MissingDeviceLiveness", () => {
   test("does not finish again when session release already finished a replaced incarnation", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     h.devices.set(deviceId, device);
     h.port.releaseSessionForEvictedDevice = async () => {
       h.devices.set(deviceId, pooled());
@@ -509,7 +510,7 @@ describe("MissingDeviceLiveness", () => {
   test("settles a throwing session release and rethrows its original error", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     h.devices.set(deviceId, device);
     const failure = new Error("release failed");
     h.port.releaseSessionForEvictedDevice = async () => {
@@ -558,7 +559,7 @@ describe("MissingDeviceLiveness", () => {
   test("leaves a deferred incident to session-preserving recovery", async () => {
     const h = harness();
     const device = pooled();
-    device.sessionId = "session";
+    patchBinding(device, { sessionId: "session" });
     h.devices.set(deviceId, device);
     const deferred = new Map<string, string>();
     h.port.tryPreserveSessionForMissingDevice = async (_device, _attempt, id) => {

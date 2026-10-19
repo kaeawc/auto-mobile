@@ -49,6 +49,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

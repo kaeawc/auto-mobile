@@ -9,6 +9,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const sessionId = "releasing-loss-session";
 const android: BootedDevice = {
@@ -44,8 +45,8 @@ async function harness(booted: BootedDevice) {
   await pool.initializeWithDevices([booted]);
   const session = await sessions.createSession(sessionId, booted.deviceId, booted.platform);
   const device = pool.getDevice(booted.deviceId)!;
-  device.sessionId = sessionId;
-  device.status = "assigned";
+  patchBinding(device, { sessionId: sessionId });
+  patchBinding(device, { status: "busy" });
   // Same private-map inspection as devicePool.test.ts, with the public finalizer as the overlap.
   const internals = pool as RecoveryInternals;
   return {

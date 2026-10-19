@@ -24,6 +24,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 // #11174 part b / #11178 part a: a device a broker binding holds is never generic capacity, even
 // while idle with no session. Every case below has no live session on the assigned device.
@@ -374,8 +375,8 @@ describe("DevicePool binding exclusion", () => {
     await sessions.createSession("existing", "SIM-HELD", "ios");
     // Seed control that predates registry discovery without taking a device through its gate.
     const held = pool.getDevice("SIM-HELD")!;
-    held.sessionId = "existing";
-    held.status = "assigned";
+    patchBinding(held, { sessionId: "existing" });
+    patchBinding(held, { status: "busy" });
     registry.snapshotManagedDevices = async () => {
       throw new Error("registry never readable");
     };
@@ -462,8 +463,8 @@ describe("DevicePool binding exclusion", () => {
     await assignBindingDevice(registry, "ios", "SIM-SLOT", "runner", "peer");
     await setUp([ios("SIM-SLOT")]);
     const held = pool.getDevice("SIM-SLOT")!;
-    held.sessionId = "local";
-    held.status = "assigned";
+    patchBinding(held, { sessionId: "local" });
+    patchBinding(held, { status: "busy" });
     await expect(
       pool.assertNotAssignedToBinding({
         action: "tapOn",

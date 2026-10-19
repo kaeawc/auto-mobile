@@ -9,6 +9,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import type { DeviceInfo } from "../../src/models";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 // Regressions for #11123 (items 1-3): tracked-process, release-capture and start-timer leaks.
 const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
@@ -73,10 +74,10 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
 
   it("drops released-device captures for a removed device", async () => {
     const device = pool.getDevice("emulator-5554")!;
-    device.sessionId = "s1";
+    patchBinding(device, { sessionId: "s1" });
     internals(pool).captureReleasedDevice("s1", "emulator-5554");
     expect(internals(pool).releasedDeviceCaptures.has("s1")).toBe(true);
-    device.sessionId = null;
+    patchBinding(device, { sessionId: null });
 
     await pool.removeDevice("emulator-5554");
 

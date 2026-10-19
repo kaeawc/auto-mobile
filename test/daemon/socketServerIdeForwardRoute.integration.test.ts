@@ -36,6 +36,7 @@ function createFakeSession(
 function createFakeDaemonState(sessionDevices: Map<string, string>) {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);

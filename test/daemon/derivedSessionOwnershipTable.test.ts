@@ -174,6 +174,7 @@ async function heartbeat(w: World, sessionId: string, token: string, claim: bool
       isInitialized: () => true,
       getSessionManager: () => w.manager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),

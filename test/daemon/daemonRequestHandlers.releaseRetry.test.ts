@@ -13,6 +13,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const deviceId = "emulator-5554";
 const explicitSessionId = "00000000-0000-4000-8000-000000000001";
@@ -200,7 +201,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     const replacementId = "00000000-0000-4000-8000-000000000002";
     await manager.createSession(replacementId, deviceId, "android");
     const device = pool.getDevice(deviceId)!;
-    device.sessionId = replacementId;
+    patchBinding(device, { sessionId: replacementId });
     device.assignmentCount++;
     persistence.failure = null;
     if (path === "retry") {

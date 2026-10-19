@@ -48,7 +48,9 @@ const deviceHolders = new Map<string, string>();
 function createDaemonState() {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getSessionForDevice: (deviceId: string) => deviceHolders.get(deviceId) ?? null,
       getDeviceLabels: () => undefined,

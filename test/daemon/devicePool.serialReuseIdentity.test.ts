@@ -16,6 +16,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { warmedTests } from "../helpers/warmedTests";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const warmedTest = warmedTests(() => {});
 
@@ -518,8 +519,8 @@ for (const pin of [
       try {
         if (pin === "unresolved pooled identity") {
           await h.sessions.createSession("holder", device.deviceId, device.platform);
-          h.entry.sessionId = "holder";
-          h.entry.status = "assigned";
+          patchBinding(h.entry, { sessionId: "holder" });
+          patchBinding(h.entry, { status: "busy" });
         } else {
           await h.pool.bindOrReuseDeviceSession(
             "holder",
@@ -659,8 +660,8 @@ warmedTest(
       const born = h.pool.getDevice(original.deviceId)!;
       expect(born.identityUnresolved).toBe(true);
       await h.sessions.createSession("holder", original.deviceId, "android");
-      born.sessionId = "holder";
-      born.status = "assigned";
+      patchBinding(born, { sessionId: "holder" });
+      patchBinding(born, { status: "busy" });
       h.manager.bootedDevices = [replacement];
       await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
         settleMembership: true,
@@ -808,7 +809,7 @@ warmedTest("terminal target-busy recovery drops the restart hold", async () => {
     const returned = { ...original, deviceId: "emulator-5556" };
     h.manager.bootedDevices = [replacement, returned];
     await h.pool.initializeWithDevices([returned]);
-    h.pool.getDevice(returned.deviceId)!.status = "busy";
+    patchBinding(h.pool.getDevice(returned.deviceId)!, { status: "busy" });
     await expect(
       h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
     ).rejects.toMatchObject({ reason: "target-busy" });
@@ -858,8 +859,8 @@ warmedTest(
       // Another pool observation republishes the old identity while that release is fenced.
       await h.pool.initializeWithDevices([original]);
       const republished = h.pool.getDevice(original.deviceId)!;
-      republished.sessionId = "holder";
-      republished.status = "assigned";
+      patchBinding(republished, { sessionId: "holder" });
+      patchBinding(republished, { status: "busy" });
       h.manager.bootedDevices = [replacement];
       expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
       expect((await h.persistence.getSession!("holder"))?.release_reason).toBe(

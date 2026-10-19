@@ -8,6 +8,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 interface PredicateContext {
   pool: DevicePool;
@@ -28,8 +29,8 @@ const rows: PredicateRow[] = [
   {
     name: "available",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      patchBinding(device, { status: "idle" });
+      patchBinding(device, { sessionId: null });
       session.assignedDevice = "";
     },
     expected: [false, true, false, false],
@@ -103,8 +104,8 @@ const rows: PredicateRow[] = [
   {
     name: "idle identity quarantine",
     prepare: ({ device, session }) => {
-      device.status = "idle";
-      device.sessionId = null;
+      patchBinding(device, { status: "idle" });
+      patchBinding(device, { sessionId: null });
       device.identityUnresolved = true;
       session.assignedDevice = "";
     },
@@ -160,7 +161,7 @@ test("captured release is refused when another session holds the device", async 
   const { pool, manager, device, session } = await createContext(false);
   try {
     const assignmentCount = device.assignmentCount;
-    device.sessionId = "other-session";
+    patchBinding(device, { sessionId: "other-session" });
     expect(pool["isCapturedReleaseCurrent"](device, session.sessionId, assignmentCount)).toBe(
       false,
     );

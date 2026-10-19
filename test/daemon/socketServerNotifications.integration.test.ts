@@ -26,7 +26,12 @@ import { isDaemonResponse, parseWireFrameLine } from "./helpers/parseDaemonRespo
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getDeviceLabels: () => undefined,
+      getSession: () => null,
+      releaseSession: async () => null,
+    }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,

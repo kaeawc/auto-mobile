@@ -13,7 +13,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,

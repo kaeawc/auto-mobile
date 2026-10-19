@@ -39,6 +39,7 @@ import {
   devicePoolSuiteActions,
   enableRebootOnDeath,
 } from "../helpers/devicePoolSuite";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 useSessionIdleWindowForSuite();
 
@@ -207,7 +208,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "busy";
+        patchBinding(unavailable, { status: "busy" });
       });
 
       await expect(
@@ -225,7 +226,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "busy";
+        patchBinding(unavailable, { status: "busy" });
         fakeTimer.advanceTime(1001);
       });
 

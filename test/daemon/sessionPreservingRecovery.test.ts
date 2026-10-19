@@ -10,6 +10,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 async function harness() {
   const timer = new FakeTimer();
@@ -109,9 +110,11 @@ describe("SessionPreservingRecoveryRunner", () => {
       const h = await harness();
       h.device.androidImage = undefined;
       h.port.releaseDisconnectedRecoverySessionWithRetry = async () => {
-        h.device.sessionId = scenario === "new-owner" ? "other-session" : "session";
+        patchBinding(h.device, {
+          sessionId: scenario === "new-owner" ? "other-session" : "session",
+        });
         h.device.assignmentCount++;
-        h.device.status = "busy";
+        patchBinding(h.device, { status: "busy" });
       };
       expect(await h.run()).toBe("released");
       expect(h.device).toMatchObject({

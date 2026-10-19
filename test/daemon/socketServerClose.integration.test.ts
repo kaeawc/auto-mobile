@@ -18,7 +18,12 @@ const isWindows = platform() === "win32";
 function createFakeDaemonState(refreshDevices: () => Promise<number> = async () => 0) {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getDeviceLabels: () => undefined,
+      getSession: () => null,
+      releaseSession: async () => null,
+    }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices,

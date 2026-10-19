@@ -197,6 +197,7 @@ type DropFirstTwo<T extends unknown[]> = T extends [unknown, unknown, ...infer R
 function fakeDaemonState() {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
       // The session the fake boot minted is live, so the proxy's binding heartbeat is answered.
       getSession: (sessionId: string) => (sessionId === BOOTED_SESSION ? { sessionId } : null),

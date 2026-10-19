@@ -64,6 +64,7 @@ const LEASE_MS = 10_000;
 /** Time a daemon's suspect refusal reports as left in its grace window. */
 const REFUSAL_REMAINING_MS = SUSPECT_GRACE_MS - 1_000;
 const DEVICE_POOL = {
+  releaseDevice: async () => {},
   refreshDevices: async () => 0,
   getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
 };

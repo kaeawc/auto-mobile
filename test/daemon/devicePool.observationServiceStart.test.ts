@@ -4,6 +4,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
 import { daemonObservationServiceOwnershipGuard } from "../../src/features/observe/ObservationReadServiceStart";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -40,7 +41,7 @@ test.each([
   const h = await harness();
   const device = h.pool.getDevice(h.device.deviceId)!;
   if (kind === "busy" || kind === "error") {
-    device.status = kind;
+    patchBinding(device, kind === "busy" ? { status: "busy" } : { health: "error" });
   } else if (kind === "identityReconcileOwner") {
     device.identityReconcileOwner = Symbol("reconcile");
   } else {
@@ -226,10 +227,10 @@ test("observation declines bound/busy/error rows before collecting recovery fact
   try {
     const device = h.pool.getDevice(h.device.deviceId)!;
     expect(h.pool.isSafeForObservationServiceStart("missing")).toBe(false);
-    device.sessionId = "owner";
+    patchBinding(device, { sessionId: "owner" });
     expect(h.safe()).toBe(false);
-    device.sessionId = null;
-    device.status = "busy";
+    patchBinding(device, { sessionId: null });
+    patchBinding(device, { status: "busy" });
     expect(h.safe()).toBe(false);
     markDeviceError(device);
     expect(h.safe()).toBe(false);

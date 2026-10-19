@@ -77,6 +77,7 @@ describe("appearance socket set_appearance as a control call on the holder's ses
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

@@ -52,6 +52,7 @@ describe("daemon/registerSession on managed connections", () => {
       getBrokerConnectionScopes: () => scopes,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       }),

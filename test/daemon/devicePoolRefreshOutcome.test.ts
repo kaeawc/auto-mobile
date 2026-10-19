@@ -16,6 +16,7 @@ import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { logger } from "../../src/utils/logger";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 let sessions: SessionManager;
 
@@ -52,7 +53,7 @@ describe("allocation after a partial refresh failure", () => {
           ...port,
           setDeviceSessionTracking: async () => {
             if (busy) {
-              port.getDevices().get(device.deviceId)!.status = "busy";
+              patchBinding(port.getDevices().get(device.deviceId)!, { status: "busy" });
             }
             if (persistentFailure || trackingAttempts++ === 0) {
               throw new Error(failure);
@@ -504,9 +505,9 @@ describe("Android discovery failure refresh outcome", () => {
           { deviceId: "emulator-5600", name: "Pixel", platform: "android" },
         ]);
         const pooled = pool.getDevice("emulator-5600")!;
-        pooled.status = status;
+        patchBinding(pooled, { status });
         if (status === "busy") {
-          pooled.sessionId = "held-session";
+          patchBinding(pooled, { sessionId: "held-session" });
           await sessions.createSession("held-session", pooled.id, "android");
         }
         for (let refresh = 0; refresh < 4; refresh++) {

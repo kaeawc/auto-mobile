@@ -23,6 +23,7 @@ const MAX_CREDIBLE_STALL_MS = 120_000;
 const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 
 const DEVICE_POOL = {
+  releaseDevice: async () => {},
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };

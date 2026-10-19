@@ -10,6 +10,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 /** Parks the next recovery cold boot on a deferred the test resolves. */
 class ParkingBootDeviceManager extends FakeDeviceManager {
@@ -218,7 +219,7 @@ describe("DevicePool exhausted session release ownership", () => {
           if (attempts === 1 && scenario !== "present") {
             await sessions.releaseSession("session", "daemon-shutdown");
             if (scenario === "new-owner") {
-              device.sessionId = "other-session";
+              patchBinding(device, { sessionId: "other-session" });
             }
             if (scenario === "new-assignment") {
               device.assignmentCount++;

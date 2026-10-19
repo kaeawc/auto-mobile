@@ -19,6 +19,7 @@ import {
 import type { RetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 function pooledDevice(incarnation = 1): PooledDevice {
   return {
@@ -150,7 +151,7 @@ describe("DeviceDisconnectHandler", () => {
     await h.handler.removeDisconnectedDevice(h.device.id, false, "incident");
     expect(h.events).toEqual(["finish:not-attempted"]);
     const assigned = harness();
-    assigned.device.sessionId = "session";
+    patchBinding(assigned.device, { sessionId: "session" });
     await assigned.handler.removeDisconnectedDevice(assigned.device.id, false, "incident");
     expect(assigned.events).toEqual(["finish:not-attempted"]);
     expect(assigned.devices.get(assigned.device.id)).toBe(assigned.device);
@@ -215,7 +216,7 @@ describe("DeviceDisconnectHandler", () => {
 
   test("retains an assigned intentional shutdown marker until release", async () => {
     const h = harness();
-    h.device.sessionId = "session";
+    patchBinding(h.device, { sessionId: "session" });
     h.markers.set(h.device.id, h.device.incarnation);
     await h.handler.removeDisconnectedDevice(h.device.id, false, "incident");
     expect(h.markers.get(h.device.id)).toBe(h.device.incarnation);

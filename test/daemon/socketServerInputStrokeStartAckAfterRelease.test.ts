@@ -124,6 +124,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
     server = createHarnessServer(
       "unused",
       {
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,

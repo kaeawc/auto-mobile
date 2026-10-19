@@ -10,6 +10,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 // #10153: a labelled plan whose label maps to its base session must count the
 // device that session already holds instead of waiting for an idle device.
@@ -205,7 +206,7 @@ for (const criteria of [false, true]) {
       await pool.bindOrReuseDeviceSession("base", "d1", "android");
       await pool.bindOrReuseDeviceSession("other-client", "d2", "android");
       // The session survives, but the pool no longer attributes d1 to it.
-      pool.getDevice("d1")!.sessionId = "someone-else";
+      patchBinding(pool.getDevice("d1")!, { sessionId: "someone-else" });
 
       const outcome = String(await settle(observe(["base"], 2_000).result));
 

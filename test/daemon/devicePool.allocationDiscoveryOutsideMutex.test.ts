@@ -19,6 +19,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 // Each gate holds exactly one discovery, with the observation captured before
 // parking. Later calls proceed independently, including a fresh retry snapshot.
@@ -473,8 +474,8 @@ describe("allocation discovery outside assignmentMutex", () => {
       ): Promise<boolean> {
         const present = await super.ensurePooledDevicePresent(...args);
         if (args[0].id === android[0].deviceId) {
-          args[0].status = "busy";
-          args[0].sessionId = "concurrent-owner";
+          patchBinding(args[0], { status: "busy" });
+          patchBinding(args[0], { sessionId: "concurrent-owner" });
         }
         return present;
       }

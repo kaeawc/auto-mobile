@@ -21,6 +21,7 @@ const device = {
 function createDaemonState(options?: { useLabeledSession?: boolean }) {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
       getSession: () => null,
       getSessionForDevice: (deviceId: string) =>

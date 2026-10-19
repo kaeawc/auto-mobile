@@ -13,6 +13,7 @@ import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { listDevicePayloads } from "../../src/server/deviceTools";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 // Inventory contract: every surface reports the same status for a device. A device in the pool's
 // `error` state that is also reserved (restart-recovery reservation) is reported `error` by
@@ -150,7 +151,7 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     healthMarkers.mark("UNHEALTHY", pool.getDeviceIncarnation("UNHEALTHY") ?? 0, "app-cleanup");
     const busy = pool.getDevice("BUSY");
     if (busy) {
-      busy.status = "busy";
+      patchBinding(busy, { status: "busy" });
     }
   }
 

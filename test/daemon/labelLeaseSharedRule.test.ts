@@ -64,6 +64,7 @@ describe("shared label owner lease (#11722)", () => {
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),

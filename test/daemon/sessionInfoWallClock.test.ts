@@ -31,6 +31,7 @@ async function steppedDaemon() {
     isInitialized: () => true,
     getSessionManager: () => manager,
     getDevicePool: () => ({
+      releaseDevice: async () => {},
       refreshDevices: async () => 0,
       getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
     }),
@@ -130,6 +131,7 @@ describe("session reports in wall-clock ms after a wall step (#11243)", () => {
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

@@ -56,6 +56,7 @@ describe("idle release while the holder's device call is in flight", () => {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

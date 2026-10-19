@@ -47,6 +47,7 @@ function createFakeDaemonState(
 ) {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
       getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
       getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,

@@ -38,6 +38,7 @@ describe("proxy --initial-session-uuid startup claim", () => {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

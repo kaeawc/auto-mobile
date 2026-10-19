@@ -140,6 +140,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
@@ -240,6 +241,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     server = createHarnessServer(
       "unused",
       {
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,

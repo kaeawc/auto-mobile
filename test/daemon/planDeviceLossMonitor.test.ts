@@ -21,6 +21,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { InMemoryAdbTransportRestartRegistry } from "../../src/utils/android-cmdline-tools/AdbTransportRestartRegistry";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 const executionIds: string[] = [];
 const previousPlanActive = serverConfig.isPlanExecutionActive();
@@ -589,7 +590,7 @@ describe("confirmed plan device loss", () => {
       const h = harness();
       const plan = h.start("executePlan");
       if (state === "idle" || state === "error") {
-        h.device.status = state;
+        patchBinding(h.device, state === "error" ? { health: "error" } : { status: "idle" });
       }
       if (state === "leased") {
         h.leased = true;

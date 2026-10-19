@@ -61,6 +61,7 @@ describe("the proxy heartbeats behind a claim whose reply is still outstanding",
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),

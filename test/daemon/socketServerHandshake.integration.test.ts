@@ -14,7 +14,13 @@ import { DaemonClient } from "../../src/daemon/client";
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getDeviceLabels: () => undefined,
+      getSession: () => null,
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),

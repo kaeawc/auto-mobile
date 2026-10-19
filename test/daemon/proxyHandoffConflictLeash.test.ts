@@ -33,6 +33,7 @@ const SESSION = "handoff-session";
 const INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const PROXY_LEASE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
 const DEVICE_POOL = {
+  releaseDevice: async () => {},
   refreshDevices: async () => 0,
   getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
 };

@@ -21,6 +21,7 @@ import type { BootedDevice } from "../../src/models";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import { fakeDaemonShutdownIo } from "../helpers/daemonShutdownIoFakes";
 import { settlesOnMicrotasksAlone } from "../helpers/shutdownStageHarness";
+import { patchBinding } from "../helpers/devicePoolBinding";
 
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
@@ -282,8 +283,8 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
         expect(timer.getPendingSleeps()).toEqual([1000]);
         const pooled = pool.getDevice(device.deviceId)!;
-        pooled.sessionId = owner === "idle" ? null : owner;
-        pooled.status = owner === "idle" ? "idle" : "busy";
+        patchBinding(pooled, { sessionId: owner === "idle" ? null : owner });
+        patchBinding(pooled, { status: owner === "idle" ? "idle" : "busy" });
         pooled.assignmentCount++;
         warn.mockClear();
         info.mockClear();

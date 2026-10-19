@@ -16,7 +16,10 @@ import { sendSocketRequest } from "../helpers/socketRequest";
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getSessionManager: () => ({
+      hasSession: () => false,
+      getDeviceLabels: () => undefined,
       getSession: () => null,
       getAllSessions: () => [],
       releaseSession: async () => null,
@@ -49,6 +52,7 @@ describe("sequential startup-option reconciliation", () => {
         enabledTools: ["listDevices", "provisionDevice", "deleteDevice"],
       };
       server = new UnixSocketServer(socketPath, createFakeDaemonState(), timer, null, {
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
         identityStartedAt: 1,
         startupOptions: {},
       });
@@ -70,6 +74,7 @@ describe("sequential startup-option reconciliation", () => {
           restartedWith = options;
           await server!.close();
           server = new UnixSocketServer(socketPath, createFakeDaemonState(), timer, null, {
+            getDeviceSessionRegistry: () => ({ list: () => [] }),
             identityStartedAt: 2,
             startupOptions: options,
           });

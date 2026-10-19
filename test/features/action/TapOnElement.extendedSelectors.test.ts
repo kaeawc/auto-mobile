@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -554,7 +555,12 @@ describe("TapOnElement extended selectors", () => {
         flow.strategy = strategy;
         flow.selectionStateTracker = { prepare: async () => null, finalize: async () => [] };
         tapOn.observedInteraction = (callback) =>
-          callback({ viewHierarchy: initialHierarchy, screenSize: { width: 1080, height: 2400 } });
+          callback(
+            buildObserveResult({
+              viewHierarchy: initialHierarchy,
+              screenSize: { width: 1080, height: 2400 },
+            }),
+          );
         const stable = spyOn(
           tapOn,
           "resolveAndroidStableTapTargetAfterRefreshes",

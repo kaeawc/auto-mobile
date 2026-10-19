@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, spyOn, describe, test, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 import { logger } from "../../../src/utils/logger";
@@ -66,8 +67,10 @@ describe("DeepLinkManager", () => {
     fakeAdbFactory = { create: () => fakeAdb };
 
     // Set up default responses for dumpsys package
-    fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", {
-      stdout: `Package [com.example.app] (12345):
+    fakeAdb.setCommandResponse(
+      "dumpsys package 'com.example.app'",
+      createExecResult(
+        `Package [com.example.app] (12345):
   userId=10123
   pkg=Package{abcdef com.example.app}
   codePath=/data/app/com.example.app-1
@@ -127,8 +130,9 @@ Receiver Resolver Table:
       androidx.profileinstaller.action.INSTALL_PROFILE:
         abcdef123 com.example.app/androidx.profileinstaller.ProfileInstallReceiver filter 654321
           Action: "androidx.profileinstaller.action.INSTALL_PROFILE"`,
-      stderr: "",
-    });
+        "",
+      ),
+    );
 
     // Create mock parser and geometry, injected into the manager
     mockParser = new DefaultElementParser();
@@ -216,10 +220,10 @@ Receiver Resolver Table:
     });
 
     test("should report a missing package with actionable guidance", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.not.installed'", {
-        stdout: missingPackageDump,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "dumpsys package 'com.example.not.installed'",
+        createExecResult(missingPackageDump, ""),
+      );
 
       const result = await deepLinkManager.getDeepLinks("com.example.not.installed");
 
@@ -253,10 +257,10 @@ Receiver Resolver Table:
     );
 
     test("should fail for a captured missing package with stderr", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.not.installed'", {
-        stdout: missingPackageDump,
-        stderr: stderrWarning,
-      });
+      fakeAdb.setCommandResponse(
+        "dumpsys package 'com.example.not.installed'",
+        createExecResult(missingPackageDump, stderrWarning),
+      );
 
       const result = await deepLinkManager.getDeepLinks("com.example.not.installed");
 
@@ -265,10 +269,10 @@ Receiver Resolver Table:
     });
 
     test("should fail for captured stdout without a package marker and with stderr", async () => {
-      fakeAdb.setCommandResponse(`dumpsys package '${playgroundAppId}'`, {
-        stdout: installedPackageDump.split("\n").slice(0, 10).join("\n"),
-        stderr: stderrWarning,
-      });
+      fakeAdb.setCommandResponse(
+        `dumpsys package '${playgroundAppId}'`,
+        createExecResult(installedPackageDump.split("\n").slice(0, 10).join("\n"), stderrWarning),
+      );
 
       const result = await deepLinkManager.getDeepLinks(playgroundAppId);
 
@@ -277,8 +281,10 @@ Receiver Resolver Table:
     });
 
     test("should succeed for an installed package without deep links", async () => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.empty'", {
-        stdout: `Package [com.example.empty] (12345):
+      fakeAdb.setCommandResponse(
+        "dumpsys package 'com.example.empty'",
+        createExecResult(
+          `Package [com.example.empty] (12345):
   userId=10123
   pkg=Package{abcdef com.example.empty}
   codePath=/data/app/com.example.empty-1
@@ -287,8 +293,9 @@ Receiver Resolver Table:
   versionName=1.0
   flags=[ INSTALLED HAS_CODE ]
   User 0: ceDataInode=123456 installed=true hidden=false suspended=false stopped=false notLaunched=false enabled=0 instant=false virtual=false`,
-        stderr: "",
-      });
+          "",
+        ),
+      );
 
       const result = await deepLinkManager.getDeepLinks("com.example.empty");
 
@@ -586,10 +593,7 @@ Receiver Resolver Table:
 
   describe("parsePackageDumpsysOutput", () => {
     const parseDumpsys = async (output: string) => {
-      fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", {
-        stdout: output,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", createExecResult(output, ""));
       return (await deepLinkManager.getDeepLinks("com.example.app")).deepLinks;
     };
 

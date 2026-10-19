@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
@@ -58,12 +59,13 @@ describe("DragAndDrop vision fallback", () => {
     updatedAt: Date.now(),
   });
 
-  const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy ?? createEmptyHierarchy(),
-  });
+  const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy ?? createEmptyHierarchy(),
+    });
 
   beforeEach(() => {
     fakeObserveScreen = new FakeObserveScreen();

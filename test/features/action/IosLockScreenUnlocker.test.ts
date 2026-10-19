@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   IosLockScreenUnlocker,
@@ -96,7 +97,11 @@ describe("IosLockScreenUnlocker", () => {
       displayTransitions.notifyTransition(device.deviceId, "Home");
       observe.setObserveSequence([
         cached,
-        { ...cached, screenSize: { width: 600, height: 1200 }, freshness: { isFresh: true } },
+        buildObserveResult({
+          ...cached,
+          screenSize: { width: 600, height: 1200 },
+          freshness: { isFresh: true },
+        }),
       ]);
       const coordinates: number[][] = [];
       const swipe = new SwipeOn(device, null, {

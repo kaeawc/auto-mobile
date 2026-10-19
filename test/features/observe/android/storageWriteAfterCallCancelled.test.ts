@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
@@ -40,9 +41,9 @@ describe("a storage write whose call was cancelled before it was sent", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setScreenState(true);
-    adb.setCommandResponse("pidof", { stdout: "4242\n", stderr: "" });
+    adb.setCommandResponse("pidof", createExecResult("4242\n", ""));
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
     AndroidCtrlProxyManager.getInstance(

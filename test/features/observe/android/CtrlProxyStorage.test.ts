@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
@@ -26,10 +27,10 @@ describe("CtrlProxyStorage (Android)", function () {
     fakeTimer.enableAutoAdvance();
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
     // The inspected app has a live process unless a test says otherwise (#10246).
-    fakeAdb.setCommandResponse("pidof", { stdout: "4242\n", stderr: "" });
+    fakeAdb.setCommandResponse("pidof", createExecResult("4242\n", ""));
 
     testDevice = {
       deviceId: "test-device-storage",
@@ -360,7 +361,7 @@ describe("CtrlProxyStorage (Android)", function () {
 
   describe("subscribeStorage", function () {
     test("refuses a stopped app before any provider request and never starts it (#10246)", async function () {
-      fakeAdb.setCommandResponse("pidof", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("pidof", createExecResult("", ""));
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
         webSocketFactory: factory,

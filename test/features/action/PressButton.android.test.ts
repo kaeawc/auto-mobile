@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -411,10 +412,7 @@ describe("PressButton Android keycode dispatch", () => {
       // An epoch token is registered, so the entry would otherwise survive the
       // full TTL -- only the failure eviction can make the next call re-resolve.
       setDeviceIncarnationResolver(() => 1);
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.a/.Main", ""));
 
       await expect(
         verifier(sequencedWindow(["com.other.app"])).testHooks.verifyAndroidHomeForeground({
@@ -422,10 +420,7 @@ describe("PressButton Android keycode dispatch", () => {
         }),
       ).resolves.toBe(false);
 
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
         await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
       ).toBe("com.launcher.b");
@@ -433,10 +428,7 @@ describe("PressButton Android keycode dispatch", () => {
 
     test("keeps the cached HOME package when verification succeeds", async () => {
       setDeviceIncarnationResolver(() => 1);
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.a/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.a/.Main", ""));
 
       await expect(
         verifier(sequencedWindow(["com.launcher.a"])).testHooks.verifyAndroidHomeForeground({
@@ -444,10 +436,7 @@ describe("PressButton Android keycode dispatch", () => {
         }),
       ).resolves.toBe(true);
 
-      fakeAdb.setCommandResponse("resolve-activity", {
-        stdout: "com.launcher.b/.Main",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
         await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
       ).toBe("com.launcher.a");

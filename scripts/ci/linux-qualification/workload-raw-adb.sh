@@ -10,8 +10,7 @@ while (( timestamp < end )) && [[ ! -f "$CYCLE_DIR/exit-time" ]]; do
   operation tap adb -s "$SERIAL" shell input tap "${TAP_X:-200}" "${TAP_Y:-150}"
   operation text adb -s "$SERIAL" shell input text wifi
   operation keyevent adb -s "$SERIAL" shell input keyevent 66
-  # shellcheck disable=SC2016 # Expanded by the bounded child shell.
-  operation screencap bash -c 'adb -s "$SERIAL" exec-out screencap -p > /dev/null'
+  operation screencap bash -c "adb -s \"\$SERIAL\" exec-out screencap -p > /dev/null"
   pause 1
   timestamp=$(now)
 done

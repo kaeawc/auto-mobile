@@ -96,7 +96,7 @@ import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
-import { DaemonState, type DaemonStateLike } from "./daemonState";
+import { type DaemonStateLike, daemonStateLikeFrom, defaultDaemonContext } from "./daemonContext";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { sequenceBackoff } from "../utils/Backoff";
 import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryExecutor";
@@ -553,7 +553,7 @@ export class DaemonManager implements DaemonManagerLike {
   constructor(options: DaemonManagerOptions = {}) {
     const {
       clientFactory,
-      stateProvider = () => DaemonState.getInstance(),
+      stateProvider = () => daemonStateLikeFrom(defaultDaemonContext),
       timer = defaultTimer,
       lockFilePath = LOCK_FILE_PATH,
       pidFilePath = PID_FILE_PATH,

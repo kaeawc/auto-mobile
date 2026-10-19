@@ -51,8 +51,12 @@ import { createStructuredToolResponse } from "../../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutError";
 import { fixedBackoff } from "../../utils/Backoff";
-import { DaemonState, type DaemonStateLike } from "../../daemon/daemonState";
-import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
+import type { DaemonStateLike } from "../../daemon/daemonState";
+import {
+  defaultDaemonContext,
+  type DaemonContext,
+  type DevicePoolReads,
+} from "../../daemon/daemonContext";
 import { type Session, type SessionManager } from "../../daemon/sessionManager";
 import type {
   StartDeviceRunnerReadinessInput,
@@ -984,8 +988,7 @@ export function configuredImageForAcquiredDevice(
 }
 
 export function initializedDevicePool(): DevicePool | undefined {
-  const daemonState = DaemonState.getInstance();
-  return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  return defaultDaemonContext.fullDevicePool();
 }
 
 /** Generic provisionDevice never adopts a device a broker binding holds (#11174). */
@@ -2674,10 +2677,9 @@ export async function rebuildSameIdReplacement(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
   replacement: BootedDevice,
-  daemonState: DaemonStateLike,
+  devicePool: DevicePool,
   stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
-  const devicePool = daemonState.getDevicePool();
   const rebuilt = await devicePool.replaceDeviceForShutdown(
     expectedPooledDevice,
     replacement,
@@ -2981,26 +2983,32 @@ export async function findReplacementAfterSessionRelease(
   );
 }
 
+/** The slice of {@link DaemonContext} the shutdown ownership retirement reads. */
+export type ShutdownDaemonView = Pick<
+  DaemonContext,
+  "isInitialized" | "requireFullDevicePool" | "requireSessionManager"
+>;
+
 export function captureCurrentShutdownPooledOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
 ):
-  | { daemonState: DaemonStateLike; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
+  | { daemon: ShutdownDaemonView; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
   | undefined {
   if (!expectedPooledDevice) {
     return undefined;
   }
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const daemon: ShutdownDaemonView = defaultDaemonContext;
+  if (!daemon.isInitialized()) {
     return undefined;
   }
-  const devicePool = daemonState.getDevicePool();
+  const devicePool = daemon.requireFullDevicePool();
   // A fast reboot can reuse a serial. Do not release or remove a later pool
   // incarnation that happens to use the same device ID.
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return undefined;
   }
-  return { daemonState, devicePool, expectedPooledDevice };
+  return { daemon, devicePool, expectedPooledDevice };
 }
 
 export async function findReplacementOrRetainShutdownReservation(
@@ -3170,7 +3178,7 @@ export function preserveLateShutdownRetirement(
 
 export async function releaseShutdownSessionOwnership(
   context: ShutdownOwnershipContext,
-  daemonState: DaemonStateLike,
+  daemon: Pick<ShutdownDaemonView, "requireSessionManager">,
   observedReplacement: BootedDevice | undefined,
   strictDeadline: boolean,
   options: {
@@ -3187,7 +3195,7 @@ export async function releaseShutdownSessionOwnership(
     disappearanceConfirmed,
     skipAndroidNameEnrichment,
   } = options;
-  const sessionManager = daemonState.getSessionManager();
+  const sessionManager = daemon.requireSessionManager();
   const sessionId = expectedSession?.sessionId;
   if (!sessionId || expectedSession.assignedDevice !== device.deviceId) {
     return;
@@ -3246,11 +3254,11 @@ export async function retireShutdownOwnership(
   if (!ownership) {
     return;
   }
-  const { daemonState, devicePool, expectedPooledDevice: capturedPooledDevice } = ownership;
+  const { daemon, devicePool, expectedPooledDevice: capturedPooledDevice } = ownership;
 
   await releaseShutdownSessionOwnership(
     { ...context, expectedPooledDevice: capturedPooledDevice },
-    daemonState,
+    daemon,
     observedReplacement,
     strictDeadline,
     {
@@ -3282,7 +3290,7 @@ export async function retireShutdownOwnership(
       device,
       capturedPooledDevice,
       replacement,
-      daemonState,
+      devicePool,
       stopPerformanceMonitoring,
     );
     return;

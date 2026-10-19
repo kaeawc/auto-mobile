@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
@@ -137,6 +138,38 @@ describe("ToolRegistry device-aware pipeline", () => {
     expect(tool.supportsProgress).toBe(true);
     expect(tool.debugOnly).toBe(true);
     expect(tool.outputSchema).toBeDefined();
+  });
+
+  test("registry unwraps a transport refusal before the actionable-error catch", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      device.deviceId,
+      new Error("device offline"),
+    );
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async (input) => ({
+          args: input.args,
+          device,
+          internalCall: false,
+          baseSessionUuid: undefined,
+          sessionUuid: undefined,
+          shouldResolveDevice: true,
+        }),
+      },
+      auditRunner: {
+        run: async () => {
+          throw new ActionableError("outer", { cause: typed });
+        },
+      },
+      planLifecycleManager: { afterExecution: async () => {} },
+    });
+    ToolRegistry.registerDeviceAware("transportProbe", "probe", z.object({}), async () => ({
+      success: true,
+    }));
+    await expect(ToolRegistry.getTool("transportProbe")!.handler({})).rejects.toBe(typed);
   });
 
   test("wrapped handler delegates to fakeable pipeline collaborators in order", async () => {

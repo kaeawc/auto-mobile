@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
 import {
   AndroidAvdIdentityUnresolvedError,
@@ -166,6 +167,7 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
   | DeviceUnhealthyError
@@ -183,6 +185,7 @@ function hasSelfDescribedRefusalPayload(
   | BindingDiscoveryIncompleteError
   | BindingOwnershipUnconfirmedError {
   return [
+    AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
     DeviceUnhealthyError,

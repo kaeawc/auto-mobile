@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { ToolRegistryClass } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import type { ToolCallRecord } from "../../src/db/toolCallRepository";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
 
@@ -59,6 +60,19 @@ describe("ToolRegistry tool call status", () => {
         errorType: "ActionableError",
         errorMessage: "Target missing",
       }),
+    ]);
+  });
+  test("records a wrapped transport refusal as device_transport_unavailable", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("adb: device 'emulator-5554' not found"),
+    );
+    const { call, records } = setup(async () => {
+      throw new Error("Failed to launch app", { cause: typed });
+    });
+    await expect(call()).rejects.toBe(typed);
+    expect(records).toEqual([
+      expect.objectContaining({ status: "failure", errorType: "device_transport_unavailable" }),
     ]);
   });
   test("records MCP error text", async () => {

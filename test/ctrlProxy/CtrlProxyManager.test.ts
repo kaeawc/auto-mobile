@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyManager,
@@ -1027,6 +1028,17 @@ describe("CtrlProxyManager", function () {
         warn.mockRestore();
         error.mockRestore();
       }
+    });
+
+    test("status probe preserves an exhausted transport refusal without confirming loss", async () => {
+      const typed = new AdbDeviceTransportUnavailableError(
+        testDevice.deviceId,
+        new Error("adb: device 'test-device' not found"),
+      );
+      fakeAdb.setCommandError(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, typed);
+      await expect(accessibilityServiceClient.isInstalled()).rejects.toBe(typed);
+      const setup = await accessibilityServiceClient.setup();
+      expect(setup).toMatchObject({ success: false, category: "deviceConnection", cause: typed });
     });
 
     test.each(["adb: device offline", "error: device is offline"])(

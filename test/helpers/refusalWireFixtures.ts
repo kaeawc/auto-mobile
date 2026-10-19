@@ -116,6 +116,7 @@ import {
 } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
   createToolErrorResponse,
@@ -364,6 +365,17 @@ const BUILDERS: readonly FixtureEntry[] = [
             { deviceId: DEVICE, platform: "android" },
             { deviceId: "emulator-5556", platform: "android" },
           ],
+        ),
+      ),
+  ],
+  [
+    "device_transport_unavailable",
+    "AdbDeviceTransportUnavailableError via shapeToolCallError",
+    () =>
+      shaped(
+        new AdbDeviceTransportUnavailableError(
+          DEVICE,
+          new Error(`adb: device '${DEVICE}' not found`),
         ),
       ),
   ],

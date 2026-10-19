@@ -59,7 +59,7 @@ const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Bound the assertion with microtasks rather than a real timer if cleanup never settles. */
 async function pendingSentinel(): Promise<"pending"> {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 200; i++) {
     await Promise.resolve();
   }
   return "pending";
@@ -208,7 +208,7 @@ function filePullHarness(
   const timer = new FakeTimer();
   const commands: string[] = [];
   const failure = new Error("capture failed");
-  const cleanupFailure = new Error("device offline during cleanup");
+  const cleanupFailure = new Error("permission denied during cleanup");
   const adb = new AdbClient(
     androidDevice("file-pull-cleanup"),
     async (command: string) => {

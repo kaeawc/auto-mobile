@@ -5,7 +5,8 @@ import {
   runWithPostActionCaptureScope,
   postActionCaptures,
 } from "../utils/PostActionCaptureContext";
-import { toActionableError } from "../models/ActionableError";
+import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { toolExecutionError } from "./toolExecutionError";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
@@ -43,7 +44,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
+import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { executionTracker } from "../daemon/executionTracker";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
@@ -466,13 +467,12 @@ export class ToolRegistryClass {
               } catch (error) {
                 recording.executionError = { error };
                 throwDeviceLostFromAbortSignal(signal);
-                if (error instanceof ActionableError || isDeviceLostError(error)) {
-                  throw error;
+                const transportFailure = findDeviceTransportUnavailable(error);
+                if (transportFailure) {
+                  // Record the typed code (device_transport_unavailable), not the wrapper.
+                  recording.executionError = { error: transportFailure };
                 }
-                const deviceContext = resolvedTarget.device
-                  ? ` on device ${resolvedTarget.device.deviceId}`
-                  : "";
-                throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
+                throw toolExecutionError(error, name, resolvedTarget.device);
               } finally {
                 await this.afterPlanLifecycle({
                   ...resolvedTarget,

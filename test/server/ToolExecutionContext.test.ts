@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -619,6 +620,26 @@ describe("ToolExecutionContext", () => {
       expect(setupCalls).toBe(1);
     },
   );
+
+  test("readiness preserves the typed transport cause", async () => {
+    const typed = new AdbDeviceTransportUnavailableError("device-1", new Error("device offline"));
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => ({
+        success: false,
+        message: "setup failed",
+        error: typed.message,
+        cause: new Error("context", { cause: typed }),
+        category: "deviceConnection" as const,
+      }),
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await expect(
+      createToolExecutionContext("setup-transport", sessionManager, devicePool, sessionOptions),
+    ).rejects.toBe(typed);
+  });
 
   // Issue #13392: a confirmed device loss keeps its typed cause and is terminal
   // even though its message classifies as deviceConnection.

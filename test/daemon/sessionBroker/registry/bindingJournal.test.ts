@@ -9,8 +9,8 @@ import {
 import {
   BindingJournal,
   BindingJournalInFlight,
-  BindingJournalRedriveLoop,
 } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalRedriveLoop } from "../../../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
 import type {
   AdvanceBindingJournalInput,
   BindingJournalOwner,

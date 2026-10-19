@@ -3,6 +3,9 @@ import {
   type BoundSessionFenceGatePort,
   isToolOutputResourceUri,
 } from "./proxy/BoundSessionFenceGate";
+import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
+import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
 export { resourceUriNamesSession } from "./proxy/BoundSessionFenceGate";
 import {
   SessionBinding,
@@ -104,10 +107,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
 import { getRemovedToolHint } from "../utils/removedTools";
 import {
-  DaemonBoundSessionLostError,
   DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
   type DaemonClientFactory,

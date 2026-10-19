@@ -20,6 +20,7 @@ import {
 import {
   evaluateDeviceDisconnects,
   recordingCandidateIncarnations,
+  type DisconnectCandidateIncarnation,
 } from "../../src/daemon/disconnectMonitor";
 import { notifyAdbMissingDevice } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -126,7 +127,6 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
   pool.removeDisconnectedDevice = async (id: string) => {
     actions.push(`remove:${id}`);
     pooled = false;
-    return true;
   };
   const sessions = daemon.getSessionManager();
   sessions.getAllSessions = () => (sessionActive ? [session] : []);
@@ -630,8 +630,8 @@ describe("disconnect monitor miss counting", () => {
     candidateDeviceIds: Set<string>,
     succeededPlatforms: Set<DiscoveryPlatform> = new Set(),
     candidatePlatforms: Map<string, DiscoveryPlatform> = new Map(),
-    candidateIncarnations: Map<string, number> = new Map(),
-    deviceDisconnectMissIncarnations: Map<string, number> = new Map(),
+    candidateIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map(),
+    deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map(),
   ): { disconnected: string[]; skippedAllDiscoveryFailed: boolean } => {
     return evaluateDeviceDisconnects({
       deviceDisconnectMisses,
@@ -811,9 +811,9 @@ describe("disconnect monitor miss counting", () => {
     const forced = new Set(["emulator-5554"]);
     const input = {
       deviceDisconnectMisses: misses,
-      confirmedDisconnectedDeviceIds: new Set(),
+      confirmedDisconnectedDeviceIds: new Set<string>(),
       forceDisconnectedDeviceIds: forced,
-      bootedDeviceIds: new Set(),
+      bootedDeviceIds: new Set<string>(),
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map(),
@@ -918,6 +918,8 @@ describe("disconnect monitor miss counting", () => {
           expect(confirmation.disconnected).toEqual([]);
         }
         return {
+          observationId: `observation-${index}`,
+          display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
           updatedAt: timer.now() + 1,
           screenSize: { width: 200, height: 200 },
           systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },

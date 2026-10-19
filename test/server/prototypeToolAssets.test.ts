@@ -1,3 +1,4 @@
+import { toolIsError, toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -47,14 +48,14 @@ describe("prototype tool assets", () => {
     restore();
   });
 
-  async function call(input: unknown, signal?: AbortSignal) {
+  async function call(input: Record<string, unknown>, signal?: AbortSignal) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       input,
       undefined,
       signal,
     );
-    return { response, payload: prototypeOutputSchema.parse(response.structuredContent) };
+    return { response, payload: prototypeOutputSchema.parse(toolStructured(response)) };
   }
   const assets = [{ id: "logo", path: "/img/logo.png" }];
 
@@ -71,7 +72,7 @@ describe("prototype tool assets", () => {
       return show(...args);
     };
     const { response, payload } = await call({ action: "show", spec, assets });
-    expect(response.isError).not.toBe(true);
+    expect(toolIsError(response)).toBe(false);
     expect(order).toEqual(["put:logo", "show"]);
     expect(payload.uploadedAssets).toEqual([{ id: "logo", mimeType: "image/png", bytes: 12 }]);
     expect(reader.reads).toEqual(["/img/logo.png"]);
@@ -92,7 +93,7 @@ describe("prototype tool assets", () => {
       spec,
       assets: [{ id: "logo", path: "/img/missing.png" }],
     });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain("cannot read file");
     expect(payload.error).toContain("No assets were uploaded");
     expect(client.getPrototypeAssetHistory()).toEqual([]);
@@ -114,7 +115,7 @@ describe("prototype tool assets", () => {
       spec,
       assets: [...assets, { id: "b", path: "/img/b.png" }],
     });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain("Already uploaded: logo");
     expect(payload.uploadedAssets?.map((asset) => asset.id)).toEqual(["logo"]);
     expect(payload.lastResult).toMatchObject({ lastAction: "show", success: false });
@@ -129,7 +130,7 @@ describe("prototype tool assets", () => {
       throw new Error(message);
     };
     const { response, payload } = await call({ action: "show", spec, assets });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain(message);
     expect(client.getPrototypeHistory()).toEqual([]);
   });
@@ -159,7 +160,7 @@ describe("prototype tool assets", () => {
       { action: "show", spec, assets: [{ id: "a", path: "/x.png", extra: 1 }] },
     ]) {
       const { response, payload } = await call(input);
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
       expect(payload.error).toContain("Invalid prototype input");
     }
     expect(client.getPrototypeAssetHistory()).toEqual([]);
@@ -174,7 +175,7 @@ describe("prototype tool assets", () => {
     test("an id the call did not supply is surfaced with a warning and success stays true", async () => {
       client.setPrototypeResult({ success: true, missingAssets: ["avatar", "banner"] });
       const { response, payload } = await call({ action: "show", spec });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).toBe(false);
       expect(payload.success).toBe(true);
       expect(payload.missingAssets).toEqual(["avatar", "banner"]);
       expect(payload.warning).toContain("'avatar', 'banner'");
@@ -194,7 +195,7 @@ describe("prototype tool assets", () => {
     test("a supplied asset reported missing is re-uploaded and the prototype re-sent once", async () => {
       client.queuePrototypeResults({ success: true, missingAssets: ["logo"] }, { success: true });
       const { response, payload } = await call({ action: "show", spec, assets });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).toBe(false);
       expect(payload.success).toBe(true);
       expect(payload.missingAssets).toBeUndefined();
       expect(payload.warning).toBeUndefined();
@@ -230,7 +231,7 @@ describe("prototype tool assets", () => {
     test("still missing after the single retry returns success with a warning and does not loop", async () => {
       client.setPrototypeResult({ success: true, missingAssets: ["logo"] });
       const { response, payload } = await call({ action: "show", spec, assets });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).toBe(false);
       expect(payload.success).toBe(true);
       expect(payload.missingAssets).toEqual(["logo"]);
       expect(payload.warning).toContain("re-uploaded and the prototype re-sent once");
@@ -249,7 +250,7 @@ describe("prototype tool assets", () => {
           : { success: false, error: "store full", dispatched: true, acknowledged: true };
       };
       const { response, payload } = await call({ action: "show", spec, assets });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).toBe(false);
       expect(payload.success).toBe(true);
       expect(payload.warning).toContain("did not complete");
       expect(payload.warning).toContain("store full");
@@ -286,7 +287,7 @@ describe("prototype tool assets", () => {
     test("a failed show is never retried", async () => {
       client.setPrototypeResult({ success: false, error: "no", missingAssets: ["logo"] });
       const { response, payload } = await call({ action: "show", spec, assets });
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
       expect(payload.missingAssets).toBeUndefined();
       expect(client.getPrototypeHistory()).toHaveLength(1);
     });
@@ -299,7 +300,7 @@ describe("prototype tool assets", () => {
         spec,
         assets: [{ id: "logo", observation: shotUri }],
       });
-      expect(response.isError).not.toBe(true);
+      expect(toolIsError(response)).toBe(false);
       expect(observationReads).toEqual([shotUri]);
       expect(reader.reads).toEqual([]);
       expect(payload.uploadedAssets).toEqual([{ id: "logo", mimeType: "image/png", bytes: 12 }]);
@@ -314,7 +315,7 @@ describe("prototype tool assets", () => {
           { id: "logo", observation: "automobile:observation/fake-prototype/gone/screenshot" },
         ],
       });
-      expect(response.isError).toBe(true);
+      expect(toolIsError(response)).toBe(true);
       expect(payload.error).toContain("superseded");
       expect(payload.error).toContain("No assets were uploaded");
       expect(client.getPrototypeAssetHistory()).toEqual([]);
@@ -334,7 +335,7 @@ describe("prototype tool assets", () => {
         { id: "logo", path: "/img/logo.png", observation: shotUri },
       ]) {
         const { response, payload } = await call({ action: "show", spec, assets: [entry] });
-        expect(response.isError).toBe(true);
+        expect(toolIsError(response)).toBe(true);
         expect(payload.error).toContain("exactly one of path or observation");
       }
       expect(observationReads).toEqual([]);

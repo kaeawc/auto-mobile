@@ -3,22 +3,25 @@
     import Network
 
     enum SdkHttpResponseWriter {
+        private static func statusText(for statusCode: Int) -> String {
+            switch statusCode {
+            case 200: return "OK"
+            case 204: return "No Content"
+            case 400: return "Bad Request"
+            case 404: return "Not Found"
+            case 405: return "Method Not Allowed"
+            case 409: return "Conflict"
+            case 431: return "Request Header Fields Too Large"
+            case 500: return "Internal Server Error"
+            case 503: return "Service Unavailable"
+            default: return "Unknown"
+            }
+        }
+
         static func sendResponse(
             _ connection: NWConnection, statusCode: Int, body: Data?, extraHeaders: [(String, String)] = []
         ) {
-            let statusText: String
-            switch statusCode {
-            case 200: statusText = "OK"
-            case 204: statusText = "No Content"
-            case 400: statusText = "Bad Request"
-            case 404: statusText = "Not Found"
-            case 405: statusText = "Method Not Allowed"
-            case 409: statusText = "Conflict"
-            case 431: statusText = "Request Header Fields Too Large"
-            case 500: statusText = "Internal Server Error"
-            case 503: statusText = "Service Unavailable"
-            default: statusText = "Unknown"
-            }
+            let statusText = statusText(for: statusCode)
 
             let bodyData = body ?? Data()
             var header = "HTTP/1.1 \(statusCode) \(statusText)\r\n"

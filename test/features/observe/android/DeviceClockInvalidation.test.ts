@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { concreteCtrlProxyClient } from "../../../helpers/concreteCtrlProxyClient";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { invalidateDisplayCaches } from "../../../../src/features/observe/DisplayTransition";
 import {
@@ -20,7 +21,9 @@ test("backward clock jump clears the cached hierarchy and accepts a newly pushed
   const timer = new FakeTimer();
   const cache = new FakeObserveCacheStore(timer);
   setObserveCacheStore(cache);
-  const client = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+  const client = concreteCtrlProxyClient(
+    AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
+  );
   const connected = spyOn(client, "ensureConnected").mockResolvedValue(true);
   const now = Date.parse("2030-01-01T12:00:00Z");
   const newer = { updatedAt: now, packageName: "" };

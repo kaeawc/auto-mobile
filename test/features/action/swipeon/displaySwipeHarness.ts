@@ -137,7 +137,6 @@ export function harness({
     return executeObserve(options);
   });
   const gesture = new FakeGestureExecutor();
-  // @ts-expect-error -- Fake supplies the adb methods exercised by this harness.
   const action = new SwipeOn({ ...device, platform }, adb, {
     timer,
     observeScreen: observe,

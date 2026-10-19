@@ -1,4 +1,5 @@
 import { createExecResult } from "../../../../src/utils/execResult";
+import { concreteCtrlProxyClient } from "../../../helpers/concreteCtrlProxyClient";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -145,7 +146,9 @@ describe("Android CtrlProxy singleton incarnation", () => {
   }
 
   function resolve(adb = adbForForwards()): AndroidCtrlProxyClient {
-    const client = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory(adb));
+    const client = concreteCtrlProxyClient(
+      AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory(adb)),
+    );
     // getInstance is the production memoizing funnel; inject its I/O and clock before connecting.
     Reflect.set(client, "timer", timer);
     Reflect.set(client, "webSocketFactory", createSuccessWebSocketFactory(timer));

@@ -116,7 +116,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+    protected readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "appearance",
       // An observer may store its own config; it applies once the observer holds a device (#10976).
       { allowObserverSessions: true },

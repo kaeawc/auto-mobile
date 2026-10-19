@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { RealBootGatesOverFakeFleet } from "../helpers/realBootGatesOverFakeFleet";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -62,21 +61,20 @@ describe("a failed start does not stop the device it booted once another session
   };
 
   /** The boot's process handle: `kill` is what stops the cold-booted device. */
-  class RecordingBootHandle extends EventEmitter {
-    readonly pid = 4242;
-    exitCode: number | null = null;
-    readonly signalCode: NodeJS.Signals | null = null;
-    killed = false;
-
+  class RecordingBootHandle extends FakeChildProcess {
     constructor(private readonly onKill: () => void) {
       super();
+      this.pid = 4242;
     }
 
-    kill(): boolean {
+    override kill(): boolean {
       this.killed = true;
       this.onKill();
       this.exitCode = 0;
-      queueMicrotask(() => this.emit("exit", 0, null));
+      queueMicrotask(() => {
+        this.emit("exit", 0, null);
+        this.emit("close", 0, null);
+      });
       return true;
     }
   }
@@ -106,8 +104,8 @@ describe("a failed start does not stop the device it booted once another session
       devices.setBootedDevices("android", []);
       devices.setBootedDevices("ios", []);
     });
-    devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-    devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+    devices.setMockChildProcess(avd.name, bootHandle);
+    devices.setMockChildProcess(simulator.name, bootHandle);
     // Every boot is admitted through the real gates, at a limit of one device a platform.
     gates = new RealBootGatesOverFakeFleet(devices, timer, 1);
     const idGenerator = new CountingIdGenerator("booter");
@@ -305,7 +303,7 @@ describe("a failed start does not stop the device it booted once another session
         devices.setBootedDevices("android", []);
         bootHandle.kill();
         await Promise.resolve();
-        devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
+        devices.setMockChildProcess(avd.name, replacement);
       };
       duringReadiness = async () => {
         if (!runningBefore) {

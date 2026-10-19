@@ -607,6 +607,7 @@ test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts
 test/features/device/virtualDeviceCapabilities.test.ts
 test/features/element-resolution/ConsumerAgreement.test.ts
+test/features/element-resolution/DeviceHierarchyCapture.test.ts
 test/features/element-resolution/ElementResolver.acceptance.test.ts
 test/features/element-resolution/ElementResolver.review.test.ts
 test/features/element-resolution/ElementResolver.staleSyntheticId.test.ts
@@ -695,10 +696,7 @@ test/features/observe/ScreenshotMetadata.test.ts
 test/features/observe/SelectedDisplayReadRetry.test.ts
 test/features/observe/SingleDisplayStages.test.ts
 test/features/observe/TakeScreenshot.AndroidAdbFilePull.test.ts
-test/features/observe/TakeScreenshot.AndroidCancellation.test.ts
-test/features/observe/TakeScreenshot.AndroidCtrlProxy.test.ts
 test/features/observe/TakeScreenshot.AndroidPhysicalDisplayId.test.ts
-test/features/observe/TakeScreenshot.Encoding.test.ts
 test/features/observe/TakeScreenshot.PathGeneration.test.ts
 test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts
 test/features/observe/TrackedScreenGeometry.property.test.ts
@@ -776,6 +774,7 @@ test/features/observe/ios/CtrlProxyStructure.test.ts
 test/features/observe/ios/CtrlProxyText.test.ts
 test/features/observe/ios/CtrlProxyWireDeadline.test.ts
 test/features/observe/ios/CtrlProxyWireDeadlineOutcome.test.ts
+test/features/observe/ios/IOSCtrlProxyClientMessageOrder.test.ts
 test/features/observe/ios/IosRunnerResponseContract.contract.test.ts
 test/features/observe/ios/IosScreenIdentity.test.ts
 test/features/observe/ios/IosScreenIdentityKeyboardVisibility.test.ts
@@ -910,6 +909,7 @@ test/features/record/ToolCallRecorderStylusPointer.test.ts
 test/features/record/android/GestureClassifier.characterization.test.ts
 test/features/record/android/GestureClassifier.property.test.ts
 test/features/record/android/GestureClassifier.test.ts
+test/features/record/android/PenDigitizer.test.ts
 test/features/record/android/TimelineGeometry.test.ts
 test/features/record/android/TouchFrameReconstructor.test.ts
 test/features/record/android/TouchNodeCaptures.test.ts
@@ -1009,6 +1009,7 @@ test/helpers/fastCheckConfig.test.ts
 test/helpers/inMemoryDaemonWire.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
 test/helpers/isolateEmptyToolRegistry.test.ts
+test/helpers/observeFixture.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/spawnProbe.test.ts
 test/helpers/toolResponse.test.ts
@@ -1095,6 +1096,7 @@ test/models/formFactor.test.ts
 test/models/releaseReasonsReexport.test.ts
 test/models/screenScaleMetadata.test.ts
 test/models/tierLeafReexports.test.ts
+test/models/tryOrElse.test.ts
 test/package/knipRuntimeGraph.test.ts
 test/package/noBundledCoordinationServer.guard.test.ts
 test/package/webrtcRuntimeMetadata.test.ts

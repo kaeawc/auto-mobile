@@ -1,16 +1,10 @@
 /**
- * Build a deliberately partial or off-spec fixture object typed as `T`.
+ * Build the array form captures emit in single-node slots (`hierarchy.node` as an array).
  *
- * Tests use this to feed the real code shapes that capture produces but the
- * static model does not spell out (single-object `node` slots, string
- * booleans, array bounds). Centralizing it keeps the test files free of
- * `as any`.
+ * The static model types `hierarchy.node` as one node, so these legacy captures cannot be
+ * spelled without a cast; the two callers exercise the array-root paths of the output
+ * sanitizer. Replaced by a typed model once `Hierarchy.node` admits the array form.
  */
-export function partialFixture<T extends object>(attrs: Record<string, unknown>): T {
-  return Object.assign({} as T, attrs);
-}
-
-/** Like {@link partialFixture}, for the array form captures emit in single-node slots. */
 export function partialFixtureArray<T extends object>(items: readonly object[]): T {
   return Object.assign([], items) as T;
 }

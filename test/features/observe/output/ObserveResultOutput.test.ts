@@ -15,9 +15,13 @@ import {
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
-import { partialFixture, partialFixtureArray } from "../../../helpers/partialFixture";
+import { partialFixtureArray } from "../../../helpers/partialFixture";
 import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
-import { flatNodeAttributes } from "../flatHierarchyBuilders";
+import {
+  createFlatNodeForTest,
+  createObserveResultForTest,
+  flatNodeAttributes,
+} from "../flatHierarchyBuilders";
 
 // The first cl100k encode in a process pays the tokenizer's JIT warm-up (~20 ms on the
 // baseline fixture); pay it here rather than in whichever test measures first.
@@ -471,7 +475,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({
+            node: createFlatNodeForTest({
               "view-id": "distinct-uuid",
               "resource-id": "android:id/content",
               node: [],
@@ -535,7 +539,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({
+            node: createFlatNodeForTest({
               clickable: "false",
               "long-clickable": false,
               focusable: "true",
@@ -570,7 +574,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({
+            node: createFlatNodeForTest({
               enabled: enabled,
               "resource-id": "id/keep",
               node: [],
@@ -651,16 +655,21 @@ describe("sanitizeObserveResult", () => {
     test("per-node trim does not touch rawViewHierarchy (raw stays raw)", () => {
       const { observe } = loadAndroidHomeObserve();
       observe.rawViewHierarchy = {
-        hierarchy: partialFixture({
-          node: {
-            "view-id": "android:id/content",
-            "resource-id": "android:id/content",
-            clickable: "false",
-            text: "",
-            node: [],
-            $: {},
+        json: JSON.stringify({
+          hierarchy: {
+            node: {
+              "view-id": "android:id/content",
+              "resource-id": "android:id/content",
+              clickable: "false",
+              text: "",
+              node: [],
+              $: {},
+            },
           },
         }),
+        source: "accessibility-service",
+        timestamp: 0,
+        device: { deviceId: "fingerprint", platform: "android" },
       };
       const rawBefore = JSON.stringify(observe.rawViewHierarchy);
 
@@ -789,7 +798,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({ "resource-id": "id/no-bounds", node: [], $: {} }),
+            node: createFlatNodeForTest({ "resource-id": "id/no-bounds", node: [], $: {} }),
           },
         },
       };
@@ -833,7 +842,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({
+            node: createFlatNodeForTest({
               "resource-id": "id/root",
               "view-id": "id/root", // dup → trimmed
               clickable: "false", // default-false → trimmed
@@ -881,38 +890,42 @@ describe("sanitizeObserveResult", () => {
   describe("compact flattens EVERY bounds site, not just nodes (#2978)", () => {
     /** Observe result seeded with a bounds object at every distinct site. */
     function makeMultiSiteObserve(): ObserveResult {
-      return {
+      return createObserveResultForTest({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
-        focusedElement: partialFixture({ bounds: { left: 1, top: 2, right: 3, bottom: 4 } }),
-        accessibilityFocusedElement: partialFixture({
+        focusedElement: { bounds: { left: 1, top: 2, right: 3, bottom: 4 } },
+        accessibilityFocusedElement: {
           bounds: { left: 9, top: 10, right: 11, bottom: 12 },
-        }),
-        awaitedElement: partialFixture({ bounds: { left: 13, top: 14, right: 15, bottom: 16 } }),
+        },
+        awaitedElement: { bounds: { left: 13, top: 14, right: 15, bottom: 16 } },
         elements: {
-          clickable: [
-            partialFixture({ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" }),
+          clickable: [{ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" }],
+          scrollable: [{ bounds: { left: 30, top: 31, right: 32, bottom: 33 } }],
+          text: [{ bounds: { left: 40, top: 41, right: 42, bottom: 43 } }],
+          media: [
+            {
+              className: "android.widget.ImageView",
+              mediaType: "image",
+              bounds: { left: 50, top: 51, right: 52, bottom: 53 },
+            },
           ],
-          scrollable: [partialFixture({ bounds: { left: 30, top: 31, right: 32, bottom: 33 } })],
-          text: [partialFixture({ bounds: { left: 40, top: 41, right: 42, bottom: 43 } })],
-          media: [partialFixture({ bounds: { left: 50, top: 51, right: 52, bottom: 53 } })],
         },
         viewHierarchy: {
           systemInsets: { top: 1, bottom: 2, left: 3, right: 4 },
           hierarchy: {
-            bounds: partialFixture({ left: 0, top: 0, right: 1080, bottom: 2400 }),
-            node: partialFixture({
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: createFlatNodeForTest({
               "resource-id": "root",
               bounds: { left: 60, top: 61, right: 62, bottom: 63 },
             }),
           },
-          windows: [partialFixture({ bounds: { left: 70, top: 71, right: 72, bottom: 73 } })],
+          windows: [{ bounds: { left: 70, top: 71, right: 72, bottom: 73 } }],
           contentHiddenRegions: [
             { bounds: { left: 80, top: 81, right: 82, bottom: 83 }, reason: "x", areaPercent: 1 },
           ],
         },
-      } as ObserveResult;
+      });
     }
 
     test("flattens elements[].bounds across all four element buckets", () => {
@@ -948,11 +961,16 @@ describe("sanitizeObserveResult", () => {
 
     test("leaves rawViewHierarchy untouched (raw stays raw)", () => {
       const obs = makeMultiSiteObserve();
-      obs.rawViewHierarchy = partialFixture({
-        hierarchy: {
-          node: { "resource-id": "raw", bounds: { left: 90, top: 91, right: 92, bottom: 93 } },
-        },
-      });
+      obs.rawViewHierarchy = {
+        json: JSON.stringify({
+          hierarchy: {
+            node: { "resource-id": "raw", bounds: { left: 90, top: 91, right: 92, bottom: 93 } },
+          },
+        }),
+        source: "accessibility-service",
+        timestamp: 0,
+        device: { deviceId: "fingerprint", platform: "android" },
+      };
       const rawBefore = JSON.stringify(obs.rawViewHierarchy);
 
       const out = sanitizeObserveResult(obs, COMPACT);
@@ -1268,7 +1286,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({ class: "android.view.View", ...attrs, node: [], $: {} }),
+            node: createFlatNodeForTest({ class: "android.view.View", ...attrs, node: [], $: {} }),
           },
         },
       };
@@ -1326,13 +1344,15 @@ describe("sanitizeObserveResult", () => {
   describe("bounds-compaction shape table (A3/P4)", () => {
     /** Compact a single node whose `bounds` is `input`; return the emitted bounds. */
     function compactNodeBounds(input: unknown): unknown {
+      // `bounds` is deliberately off-model (malformed shapes), so it enters through an open record.
+      const malformed: Record<string, unknown> = { bounds: input };
       const obs: ObserveResult = {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: partialFixture({ "resource-id": "r", bounds: input, node: [], $: {} }),
+            node: createFlatNodeForTest({ "resource-id": "r", ...malformed, node: [], $: {} }),
           },
         },
       };
@@ -1394,7 +1414,7 @@ describe("sanitizeObserveResult", () => {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
-        viewHierarchy: { hierarchy: { node: partialFixture({ "resource-id": "r" }) } },
+        viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ "resource-id": "r" }) } },
       };
       expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({
         top: 5,
@@ -1521,7 +1541,9 @@ describe("sanitizeObserveResult", () => {
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
-          hierarchy: { node: partialFixture({ "resource-id": "r", ...attrs, node: [], $: {} }) },
+          hierarchy: {
+            node: createFlatNodeForTest({ "resource-id": "r", ...attrs, node: [], $: {} }),
+          },
         },
       };
       return flatNodeAttributes(sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node);
@@ -1653,7 +1675,7 @@ describe("sanitizeObserveResult", () => {
       screenSize: { width: 1, height: 1 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
-        hierarchy: { node: partialFixture({ "resource-id": "r", node: [], $: {} }) },
+        hierarchy: { node: createFlatNodeForTest({ "resource-id": "r", node: [], $: {} }) },
       },
     };
 

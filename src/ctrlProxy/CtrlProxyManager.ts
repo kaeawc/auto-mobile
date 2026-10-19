@@ -2893,7 +2893,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  private async getExpectedChecksum(useSharedCache = true): Promise<string> {
+  public async getExpectedChecksum(useSharedCache = true): Promise<string> {
     if (this.shouldSkipChecksum()) {
       return "";
     }

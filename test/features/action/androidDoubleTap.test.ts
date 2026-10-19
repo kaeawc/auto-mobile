@@ -146,7 +146,9 @@ describe("dispatchAndroidDoubleTap", () => {
       client,
       point,
       timer,
-      tap: () => client.requestTapCoordinates({ x: 10, y: 20, duration: 10 }),
+      tap: async () => {
+        await client.requestTapCoordinates({ x: 10, y: 20, duration: 10 });
+      },
     });
     expect(doubleRequests).toHaveLength(1);
     expect(tapStarts).toHaveLength(2);
@@ -248,7 +250,9 @@ describe("dispatchAndroidDoubleTap", () => {
     await dispatchAndroidDoubleTap({
       point,
       timer,
-      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
+      tap: async () => {
+        await client.requestTapCoordinates({ x: 10, y: 20 });
+      },
     });
     expect(tapStarts[1] - tapStarts[0]).toBe(DOUBLE_TAP_GAP_MS);
     expect(timer.getSleepHistory()).toEqual([150, DOUBLE_TAP_GAP_MS - 150, 150]);
@@ -264,7 +268,9 @@ describe("dispatchAndroidDoubleTap", () => {
         point,
         timer,
         onWarning,
-        tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
+        tap: async () => {
+          await client.requestTapCoordinates({ x: 10, y: 20 });
+        },
       });
       // No extra gap is added on top of the slow round trip.
       expect(tapStarts[1] - tapStarts[0]).toBe(SLOW_ROUND_TRIP_MS + 20);
@@ -285,7 +291,9 @@ describe("dispatchAndroidDoubleTap", () => {
       point,
       timer,
       onWarning,
-      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
+      tap: async () => {
+        await client.requestTapCoordinates({ x: 10, y: 20 });
+      },
     });
     expect(onWarning).not.toHaveBeenCalled();
   });
@@ -298,7 +306,9 @@ describe("dispatchAndroidDoubleTap", () => {
       point,
       timer,
       signal: controller.signal,
-      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
+      tap: async () => {
+        await client.requestTapCoordinates({ x: 10, y: 20 });
+      },
     });
     // Microtasks only: a real turn would let auto-advance finish the gap first.
     await drainUntil(() => tapStarts.length === 1, { description: "the first tap" });
@@ -319,7 +329,9 @@ describe("dispatchAndroidDoubleTap", () => {
           throw new ActionableError("Display changed");
         }
       },
-      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
+      tap: async () => {
+        await client.requestTapCoordinates({ x: 10, y: 20 });
+      },
     });
     // Microtasks only: a real turn would let auto-advance finish the gap first.
     await drainUntil(() => tapStarts.length === 1, { description: "the first tap" });
@@ -450,13 +462,16 @@ describe("tapAt (Android)", () => {
     observeScreen.setObserveSequence(
       frames.map((frame) => ({
         ...observation(100, 200, frame),
-        display: { key: "0", role: "unknown", generation: 0 },
+        display: { key: "0", role: "unknown", generation: 0, posture: "unknown" },
       })),
     );
     const tapAt = new TapAtCoordinate(androidDevice, new FakeAdbExecutor(), {
       timer,
       androidClient: client,
-      iosClient: client,
+      iosClient: {
+        requestTapCoordinates: client.requestTapCoordinates,
+        requestDoubleTapCoordinates: async () => ({ success: true }),
+      },
       lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
     });
     setFakeTapAtWindow(tapAt);
@@ -619,8 +634,13 @@ describe("tapAny (Android default display)", () => {
   function createTapAny(timer: FakeTimer, client: ReturnType<typeof timedClient>["client"]) {
     const service = {
       ...client,
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => ({
+        ...(await client.requestTapCoordinates(request)),
+        totalTimeMs: 1,
+      }),
       requestAction: async (action: string) => ({ success: true, action, totalTimeMs: 1 }),
       supportsNodeActionSelectors: async () => true,
+      requestNodeAction: async () => ({ success: true, totalTimeMs: 1 }),
     };
     const tapAny = new TapAnyElement(androidDevice, new FakeAdbExecutor(), {
       timer,
@@ -632,6 +652,9 @@ describe("tapAny (Android default display)", () => {
     });
     tapAny.observedInteraction = runBlockWith(() =>
       recordObservationRead({
+        ...observation(500, 500),
+        display: { key: "0", role: "unknown", generation: 0, posture: "unknown" },
+        updatedAt: 1,
         viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ marker: "before" }) } },
         screenSize: { width: 500, height: 500 },
       }),
@@ -727,7 +750,7 @@ describe("tapOn (Android default display)", () => {
         0,
         { ...plainElement, "hierarchy-source": "uiautomator" },
         undefined,
-        { onActivationWarning: (warning) => warnings.push(warning) },
+        { action: "doubleTap", onActivationWarning: (warning) => warnings.push(warning) },
         false,
       );
       expect(warnings.join("\n")).toContain("double-tap timeout");

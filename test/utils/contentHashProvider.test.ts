@@ -11,6 +11,7 @@ import {
   parsePmPathOutput,
   type AppContentHasher,
 } from "../../src/utils/ContentHashProvider";
+import { createExecResult } from "../../src/utils/execResult";
 
 /**
  * AC2 coverage for #4984: contentHash is derived from installed app *bytes*,
@@ -107,14 +108,14 @@ describe("AndroidApkContentHasher device-shell boundary", () => {
     const adb = new FakeAdbExecutor();
     const packageId = "com.example; input keyevent 3";
     const apkPath = "/data/app/base$(id).apk";
-    adb.setCommandResponse(`shell pm path 'com.example; input keyevent 3'`, {
-      stdout: `package:${apkPath}\n`,
-      stderr: "",
-    });
-    adb.setCommandResponse(`shell sh -c 'sha256sum '\\''/data/app/base$(id).apk'\\'''`, {
-      stdout: `${DIGEST_A}  ${apkPath}\n`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      `shell pm path 'com.example; input keyevent 3'`,
+      createExecResult(`package:${apkPath}\n`, ""),
+    );
+    adb.setCommandResponse(
+      `shell sh -c 'sha256sum '\\''/data/app/base$(id).apk'\\'''`,
+      createExecResult(`${DIGEST_A}  ${apkPath}\n`, ""),
+    );
 
     await new AndroidApkContentHasher(adb).computeHash(fakeDevice("emu-1"), packageId, 1);
 

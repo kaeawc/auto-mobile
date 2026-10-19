@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { FakeAdbClient } from "./FakeAdbClient";
 import { FakeAdbExecutor } from "./FakeAdbExecutor";
+import { createExecResult } from "../../src/utils/execResult";
 
 test.each(["client", "executor"] as const)(
   "%s emits response stdout before success or failure",
@@ -11,7 +12,7 @@ test.each(["client", "executor"] as const)(
       if (adb instanceof FakeAdbClient) {
         adb.setCommandResult(command, "4242\n");
       } else {
-        adb.setCommandResponse(command, { stdout: "4242\n", stderr: "" });
+        adb.setCommandResponse(command, createExecResult("4242\n", ""));
       }
       const error = new Error("host failed");
       if (fail) {

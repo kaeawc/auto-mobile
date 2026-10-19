@@ -24,7 +24,7 @@ import {
   stopDeviceGestureRecording,
   resetStoppedDeviceGestureRecordings,
   DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice, PlanStep } from "../../src/models";

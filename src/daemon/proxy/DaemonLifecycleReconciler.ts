@@ -15,7 +15,7 @@ import {
   buildIdentityFromStatus,
   type BuildIdentity,
 } from "../buildIdentity";
-import { compareStrictNumericVersions } from "../../server/deviceMatcher";
+import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { releaseVersion } from "../../utils/mcpVersion";
 import { daemonProcessOptions } from "../daemonOptionScopes";
 import { DaemonRestartDeferredError } from "../daemonRestartAdmission";

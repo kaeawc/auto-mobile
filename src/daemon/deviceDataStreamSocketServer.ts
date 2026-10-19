@@ -24,7 +24,7 @@ import type {
 } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,

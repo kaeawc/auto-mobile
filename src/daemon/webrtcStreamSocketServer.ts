@@ -11,9 +11,9 @@ import {
   getDaemonStreamDeviceLifecycleEmitter,
   type StreamDeviceLifecycleEvents,
 } from "./streamDeviceLifecycleEvents";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
-import { WebRtcSubscriptionEndedError } from "../server/WebRtcSubscriptionEndedError";
+import { WebRtcSubscriptionEndedError } from "./WebRtcSubscriptionEndedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";

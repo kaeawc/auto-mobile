@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { ErrorCode, McpError } from "../../src/server/mcpError";
+import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";

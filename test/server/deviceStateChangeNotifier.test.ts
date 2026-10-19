@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createDeviceStateChangeNotifier,
   DEVICE_STATE_NOTIFY_DEBOUNCE_MS,
-} from "../../src/server/deviceStateChangeNotifier";
+} from "../../src/daemon/deviceStateChangeNotifier";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("createDeviceStateChangeNotifier (#11413)", () => {

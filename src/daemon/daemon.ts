@@ -31,7 +31,7 @@ import {
   createStatelessMcpServer,
   type StatelessMcpServerBase,
 } from "./statelessMcpServerFactory";
-import { releaseDaemonTaskLeases } from "../server/tasks/daemonTaskManager";
+import { releaseDaemonTaskLeases } from "./tasks/daemonTaskManager";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -171,7 +171,7 @@ import { executionTracker } from "./executionTracker";
 import {
   createDeviceStateChangeNotifier,
   type DeviceStateChangeNotifier,
-} from "../server/deviceStateChangeNotifier";
+} from "./deviceStateChangeNotifier";
 import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
@@ -180,12 +180,12 @@ import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../utils/NetworkState";
-import {} from "../server/networkStateSessionCleanup";
+import {} from "./networkStateSessionCleanup";
 import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
 import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";

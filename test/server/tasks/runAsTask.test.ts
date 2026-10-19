@@ -5,8 +5,8 @@ import {
   runAsTask,
   toJsonRpcError,
 } from "../../../src/server/tasks/runAsTask";
-import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
-import { McpError } from "../../../src/server/mcpError";
+import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
+import { McpError } from "../../../src/daemon/mcpError";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 
 const OK = { content: [{ type: "text" as const, text: "ok" }] };

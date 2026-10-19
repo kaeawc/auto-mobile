@@ -15,8 +15,8 @@ import {
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

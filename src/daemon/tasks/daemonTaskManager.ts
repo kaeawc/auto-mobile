@@ -1,4 +1,4 @@
-import { defaultDaemonContext } from "../../daemon/daemonContext";
+import { defaultDaemonContext } from "../daemonContext";
 import { McpTaskRepository } from "../../db/mcpTaskRepository";
 import { logger } from "../../utils/logger";
 import { DefaultTaskManager, type TaskManager } from "./TaskManager";

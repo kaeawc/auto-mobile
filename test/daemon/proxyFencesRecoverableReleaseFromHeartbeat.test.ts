@@ -10,7 +10,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { isRecoverableDaemonReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

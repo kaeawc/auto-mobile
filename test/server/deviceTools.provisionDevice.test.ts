@@ -10,7 +10,7 @@ import {
   type RefusalWireResult,
 } from "../helpers/refusalWireFixtures";
 import { AvdCreateInterruptedError } from "../../src/utils/android-cmdline-tools/AvdManagerClient";
-import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
+import { provisionCancellationOutcomes } from "../../src/daemon/provisionCancellationOutcomes";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
   DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,

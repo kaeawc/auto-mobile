@@ -46,7 +46,7 @@ import {
   getDefaultSessionHeartbeatTimeoutMs,
 } from "../../src/daemon/sessionManager";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";

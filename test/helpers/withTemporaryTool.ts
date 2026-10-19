@@ -1,4 +1,4 @@
-import { setToolTransportRecovery } from "../../src/server/toolTransportRecovery";
+import { setToolTransportRecovery } from "../../src/daemon/toolTransportRecovery";
 import { afterAll, beforeAll } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 

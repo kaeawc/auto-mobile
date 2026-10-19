@@ -1,4 +1,4 @@
-import { McpError, ErrorCode } from "../../src/server/mcpError";
+import { McpError, ErrorCode } from "../../src/daemon/mcpError";
 import { describe, expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";

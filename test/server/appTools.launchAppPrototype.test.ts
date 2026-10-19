@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAppTools } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {

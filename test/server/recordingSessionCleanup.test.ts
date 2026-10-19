@@ -22,7 +22,7 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { VideoRecorderService } from "../../src/features/video";
 import {
   markVideoRecordingIncomplete,

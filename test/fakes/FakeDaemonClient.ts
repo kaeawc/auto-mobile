@@ -3,7 +3,7 @@ import type {
   DaemonMethodCallOptions,
   DaemonToolCallOptions,
 } from "../../src/daemon/client";
-import type { TaskRelayFrame, TaskRelayMethod } from "../../src/server/tasks/taskRelay";
+import type { TaskRelayFrame, TaskRelayMethod } from "../../src/daemon/tasks/taskRelay";
 import { DaemonRequestNotDeliveredError, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";

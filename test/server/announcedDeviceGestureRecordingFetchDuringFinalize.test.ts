@@ -15,7 +15,7 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

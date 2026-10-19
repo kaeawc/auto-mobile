@@ -10,12 +10,12 @@ import {
 } from "../../src/daemon/constants";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import type { BootedDevice } from "../../src/models";
-import { resolveAppearanceMode } from "../../src/server/appearanceManager";
+import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";
 import {
   LIST_CHANGED_NOTIFICATION_METHODS,
   ListChangedBroadcaster,
 } from "../../src/server/listChangedBroadcast";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { applyAppearanceToDevice } from "../../src/utils/deviceAppearance";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";

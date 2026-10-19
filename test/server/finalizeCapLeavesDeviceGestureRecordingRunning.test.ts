@@ -14,7 +14,7 @@ import {
   resetStoppedDeviceGestureRecordings,
   startDeviceGestureRecording,
   stopDeviceGestureRecording,
-} from "../../src/server/deviceGestureRecordingManager";
+} from "../../src/daemon/deviceGestureRecordingManager";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,

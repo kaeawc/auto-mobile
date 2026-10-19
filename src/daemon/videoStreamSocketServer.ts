@@ -6,7 +6,7 @@ import {
   type DeviceCaptureRegistry,
 } from "../features/webrtc/deviceCaptureRegistry";
 import { createVideoStreamRelaySingleton, type VideoStreamRelay } from "./videoStreamRelay";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
 import {
   decideLifecycleEvent,

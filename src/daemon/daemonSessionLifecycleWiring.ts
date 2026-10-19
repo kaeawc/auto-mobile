@@ -5,9 +5,9 @@ import { registerLocationRouteSessionCleanup } from "../features/utility/Locatio
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import {
   DefaultDeviceSettingsAccess,
@@ -20,8 +20,8 @@ import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepo
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
-} from "../server/networkStateSessionCleanup";
-import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
+} from "./networkStateSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,

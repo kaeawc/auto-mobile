@@ -887,7 +887,7 @@
 - systemTray dismiss wipes the whole collapsed notification group (and further collateral) while reporting a single "Dismissed notification" ([#7185](https://github.com/kaeawc/auto-mobile/issues/7185)) (bot-filed, routine:exploratory)
 - postNotification misreports an absent SDK receiver as a receiver-side failure (supported:true) — am broadcast to a nonexistent explicit component prints result=0, not "no receiver" ([#7184](https://github.com/kaeawc/auto-mobile/issues/7184)) (bot-filed, routine:exploratory)
 - Preserve rootable Android image preference across minor API versions ([#7183](https://github.com/kaeawc/auto-mobile/issues/7183))
-- Keep FakeIOSCtrlProxy structurally aligned with the exported IosCtrlProxy interface ([#7182](https://github.com/kaeawc/auto-mobile/issues/7182))
+- Keep FakeIOSCtrlProxy structurally aligned with the exported IOSCtrlProxy interface ([#7182](https://github.com/kaeawc/auto-mobile/issues/7182))
 - Isolate iOS CtrlProxy handshake cancellation between concurrent callers ([#7181](https://github.com/kaeawc/auto-mobile/issues/7181))
 - Keep provision replay non-successful until failed-session cleanup settles ([#7180](https://github.com/kaeawc/auto-mobile/issues/7180))
 - Fail closed when Android booted-device discovery is incomplete ([#7179](https://github.com/kaeawc/auto-mobile/issues/7179))

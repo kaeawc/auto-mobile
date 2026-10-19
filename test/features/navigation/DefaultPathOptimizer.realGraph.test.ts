@@ -61,7 +61,7 @@ describe("DefaultPathOptimizer against a real navigation graph", () => {
       sequenceNumber: sequence,
       applicationId: APP_ID,
     });
-    await manager.recordBackStack({ depth, currentTaskId: 1, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth, currentTaskId: 1 });
   }
 
   test("uses two Back presses when the target leads to the current screen in two edges", async () => {
@@ -166,7 +166,7 @@ describe("DefaultPathOptimizer adjacency reads", () => {
       sequenceNumber: timestamp,
       applicationId: APP_ID,
     });
-    await manager.recordBackStack({ depth, currentTaskId: 1, activities: [], tasks: [] });
+    await manager.recordBackStack({ depth, currentTaskId: 1 });
   }
 
   /** Add `count` extra rows for an existing transition (repeated traversals). */

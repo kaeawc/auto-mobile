@@ -48,8 +48,6 @@ describe("SmartNavigationHelper", function () {
       await navGraph.recordBackStack({
         depth: 0,
         currentTaskId: 100,
-        activities: [],
-        tasks: [],
       });
 
       await navGraph.recordNavigationEvent({
@@ -65,8 +63,6 @@ describe("SmartNavigationHelper", function () {
       await navGraph.recordBackStack({
         depth: 1,
         currentTaskId: 100,
-        activities: [],
-        tasks: [],
       });
 
       const result = await SmartNavigationHelper.shouldUseBackButton(
@@ -96,8 +92,6 @@ describe("SmartNavigationHelper", function () {
       await navGraph.recordBackStack({
         depth: 2,
         currentTaskId: 100,
-        activities: [],
-        tasks: [],
       });
 
       await navGraph.recordNavigationEvent({
@@ -112,8 +106,6 @@ describe("SmartNavigationHelper", function () {
       await navGraph.recordBackStack({
         depth: 5,
         currentTaskId: 100,
-        activities: [],
-        tasks: [],
       });
 
       const result = await SmartNavigationHelper.shouldUseBackButton(
@@ -158,7 +150,7 @@ describe("SmartNavigationHelper", function () {
         sequenceNumber: 1,
         applicationId: "com.example.app",
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       // Record a tool call before navigation to create an edge (within correlation window)
       navGraph.recordToolCall("tapOn", { text: "Next" });
@@ -172,7 +164,7 @@ describe("SmartNavigationHelper", function () {
         timestamp: baseTime + 100,
         sequenceNumber: 2,
       });
-      await navGraph.recordBackStack({ depth: 1, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 1, currentTaskId: 100 });
 
       // Another tool call
       navGraph.recordToolCall("tapOn", { text: "Next" });
@@ -185,7 +177,7 @@ describe("SmartNavigationHelper", function () {
         timestamp: baseTime + 200,
         sequenceNumber: 3,
       });
-      await navGraph.recordBackStack({ depth: 2, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 2, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.shouldUseBackButton(
         "ScreenC",
@@ -212,7 +204,7 @@ describe("SmartNavigationHelper", function () {
         sequenceNumber: 1,
         applicationId: "com.example.app",
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       await navGraph.recordNavigationEvent({
         destination: "ScreenB",
@@ -222,7 +214,7 @@ describe("SmartNavigationHelper", function () {
         timestamp: Date.now() + 100,
         sequenceNumber: 2,
       });
-      await navGraph.recordBackStack({ depth: 1, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 1, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.areInSameTask("ScreenA", "ScreenB");
 
@@ -239,7 +231,7 @@ describe("SmartNavigationHelper", function () {
         sequenceNumber: 1,
         applicationId: "com.example.app",
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       await navGraph.recordNavigationEvent({
         destination: "ScreenB",
@@ -249,7 +241,7 @@ describe("SmartNavigationHelper", function () {
         timestamp: Date.now() + 100,
         sequenceNumber: 2,
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 200, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 200 });
 
       const result = await SmartNavigationHelper.areInSameTask("ScreenA", "ScreenB");
 
@@ -284,7 +276,7 @@ describe("SmartNavigationHelper", function () {
         sequenceNumber: 1,
         applicationId: "com.example.app",
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       await navGraph.recordNavigationEvent({
         destination: "ScreenB",
@@ -294,7 +286,7 @@ describe("SmartNavigationHelper", function () {
         timestamp: Date.now() + 100,
         sequenceNumber: 2,
       });
-      await navGraph.recordBackStack({ depth: 1, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 1, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.getNavigationRecommendation(
         "ScreenA",
@@ -316,7 +308,7 @@ describe("SmartNavigationHelper", function () {
         sequenceNumber: 1,
         applicationId: "com.example.app",
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       navGraph.recordToolCall("tapOn", { text: "Next" });
 
@@ -328,7 +320,7 @@ describe("SmartNavigationHelper", function () {
         timestamp: Date.now() + 100,
         sequenceNumber: 2,
       });
-      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100, activities: [], tasks: [] });
+      await navGraph.recordBackStack({ depth: 0, currentTaskId: 100 });
 
       const result = await SmartNavigationHelper.getNavigationRecommendation(
         "ScreenB",

@@ -1,3 +1,4 @@
+import { InstallerOperationRecorder } from "../../../fakes/FakePrototypeInstaller";
 import { beforeAll, describe, expect, test } from "bun:test";
 import AdmZip from "adm-zip";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
@@ -415,7 +416,7 @@ describe("PrototypeViewerTemplateProvider", () => {
       expect(published).toEqual([h.app]);
       expect(readFileSync(path.join(h.app, "Info.plist"), "utf8")).toBe("winner");
       expect(readFileSync(h.metadata, "utf8")).toBe(winnerMetadata);
-      expect(readFileSync(h.archive)).toEqual(payload);
+      expect<unknown>(readFileSync(h.archive)).toEqual(payload);
       expect(readdirSync(h.pinDir).sort()).toEqual(
         [
           PROTOTYPE_VIEWER_METADATA_FILENAME,
@@ -488,7 +489,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     );
     expect(appRenames).toBe(2);
     expect(readFileSync(path.join(h.app, "other"), "utf8")).toBe("other attempt");
-    expect(readFileSync(h.archive)).toEqual(payload);
+    expect<unknown>(readFileSync(h.archive)).toEqual(payload);
     expect(existsSync(h.metadata)).toBe(false);
     expect(readdirSync(h.pinDir).sort()).toEqual(
       [PROTOTYPE_VIEWER_ARCHIVE_FILENAME, "PrototypeViewer.app"].sort(),
@@ -519,11 +520,11 @@ describe("PrototypeViewerTemplateProvider", () => {
     const h = harness({ expectedChecksum: "" });
     const installer = new IosPrototypeInstaller({
       template: h.provider(),
-      files: new FakeInstallerFileSystem(),
-      plist: new FakePrototypePlist(),
-      icons: new FakePrototypeIconRenderer(),
-      simctl: new FakePrototypeSimctl(),
-      data: new FakePrototypeDataWriter(),
+      files: new FakeInstallerFileSystem(new InstallerOperationRecorder()),
+      plist: new FakePrototypePlist(new InstallerOperationRecorder()),
+      icons: new FakePrototypeIconRenderer(new InstallerOperationRecorder()),
+      simctl: new FakePrototypeSimctl(new InstallerOperationRecorder()),
+      data: new FakePrototypeDataWriter(new InstallerOperationRecorder()),
       commands: new FakeHostCommandExecutor(),
     });
     const error = await installer

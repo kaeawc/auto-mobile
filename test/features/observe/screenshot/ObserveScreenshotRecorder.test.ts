@@ -573,6 +573,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
   test("start() tracks performance via startOperation/endOperation", async () => {
     const calls: string[] = [];
     const fakeTracker = {
+      fork: () => fakeTracker,
       serial: () => fakeTracker,
       parallel: () => fakeTracker,
       track: async <T>(_n: string, fn: () => Promise<T>) => fn(),

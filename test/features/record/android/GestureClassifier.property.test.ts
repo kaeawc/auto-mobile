@@ -365,7 +365,7 @@ describe("GestureClassifier (property-based)", () => {
         (d, x0, y0, x1, y1, durationMs) => {
           const g = singleFinger(d, { x: x0, y: y0 }, { x: x1, y: y1 }, durationMs);
           expect(g).not.toBeNull();
-          expect(["tap", "longPress", "swipe"]).toContain(g?.type);
+          expect<unknown>(["tap", "longPress", "swipe"]).toContain(g?.type);
         },
       ),
       RUN_OPTIONS,

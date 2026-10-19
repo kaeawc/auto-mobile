@@ -1,5 +1,5 @@
 import type { DaemonRequest } from "../types";
-import type { McpForwardRoute } from "../socketServer";
+import type { McpForwardRoute } from "./McpForwardRouter";
 
 /**
  * Typed view of the MCP forward-routing internals that daemon integration tests drive directly

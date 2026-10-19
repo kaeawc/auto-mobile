@@ -404,11 +404,6 @@ test/server/navigationTools.test.ts TS2339 3
 test/server/navigationTools.test.ts TS2345 1
 test/server/navigationTools.test.ts TS2352 1
 test/server/navigationTools.test.ts TS2739 2
-test/server/observeDeviceRead.test.ts TS18046 5
-test/server/observeDeviceRead.test.ts TS2339 1
-test/server/observeDeviceRead.test.ts TS2345 21
-test/server/observeDeviceRead.test.ts TS2739 1
-test/server/observeDeviceRead.test.ts TS2769 6
 test/server/planBaseEndEndsLabels.test.ts TS2322 1
 test/server/planBaseEndEndsLabels.test.ts TS2339 1
 test/server/planBaseEndEndsLabels.test.ts TS2353 1
@@ -480,12 +475,6 @@ test/server/recordingTeardownRedrivePeerRecorder.test.ts TS2344 1
 test/server/recordingTeardownRedrivePeerRecorder.test.ts TS2345 2
 test/server/releaseCallerOrderingPreservedSession.test.ts TS2352 1
 test/server/releaseCallerOrderingPreservedSession.test.ts TS2540 1
-test/server/reservedDeviceStopPolicy.test.ts TS18046 3
-test/server/reservedDeviceStopPolicy.test.ts TS2341 2
-test/server/reservedDeviceStopPolicy.test.ts TS2345 9
-test/server/reservedDeviceStopPolicy.test.ts TS2571 7
-test/server/reservedDeviceStopPolicy.test.ts TS2741 5
-test/server/reservedDeviceStopPolicy.test.ts TS2769 14
 test/server/resourceDeviceAdmission.test.ts TS2339 1
 test/server/resourceRegistryListChanged.test.ts TS2322 1
 test/server/resourceUriLoneSurrogate.test.ts TS2322 1
@@ -513,11 +502,6 @@ test/server/sendKeysSchema.test.ts TS2769 1
 test/server/sessionBiometricEnrollment.test.ts TS2322 3
 test/server/sessionBrokerToolGate.test.ts TS2740 3
 test/server/sessionClock.test.ts TS2540 1
-test/server/sessionDisplayPin.test.ts TS18046 6
-test/server/sessionDisplayPin.test.ts TS2322 4
-test/server/sessionDisplayPin.test.ts TS2339 1
-test/server/sessionDisplayPin.test.ts TS2345 23
-test/server/sessionDisplayPin.test.ts TS2769 1
 test/server/sessionLocation.test.ts TS18046 3
 test/server/sessionLocation.test.ts TS2571 1
 test/server/sessionLogTools.test.ts TS2571 3

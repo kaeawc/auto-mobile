@@ -54,10 +54,13 @@ function isChildProcessRequire(expression: ts.Expression): boolean {
 
 function isDiagnosticProcessTableCall(file: string, node: ts.CallExpression): boolean {
   const command = node.arguments[0];
-  if (file !== "src/daemon/processTable.ts" || !command || !ts.isStringLiteral(command)) {
+  if (!command || !ts.isStringLiteral(command)) {
     return false;
   }
-  return command.text.startsWith("ps -eo ") || command.text.startsWith("powershell.exe ");
+  if (file === "src/daemon/WindowsDaemonProcessFinder.ts") {
+    return command.text.startsWith("powershell.exe ");
+  }
+  return file === "src/daemon/processTable.ts" && command.text.startsWith("ps -eo ");
 }
 
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {

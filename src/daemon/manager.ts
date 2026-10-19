@@ -167,12 +167,10 @@ import { ENV } from "../config/env";
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
-  WindowsDaemonProcessFinder,
   createDefaultDaemonProcessFinder,
   parseBusyBoxDaemonProcessTable,
   parseDaemonProcessTable,
   parseDarwinDaemonProcessTable,
-  parseWindowsDaemonProcessTable,
   type DaemonProcessFinder,
   type DaemonProcessLivenessChecker,
   type DaemonProcessRecord,

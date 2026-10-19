@@ -18,12 +18,12 @@ import {
   parseDarwinDaemonProcessTable,
   parseDaemonProcessTable,
   PsDaemonProcessFinder,
-  WindowsDaemonProcessFinder,
   type DaemonProcessFinder,
   type DaemonProcessLivenessChecker,
   type DaemonProcessSignaler,
   type DaemonProcessRecord,
 } from "../../src/daemon/processTable";
+import { WindowsDaemonProcessFinder } from "../../src/daemon/WindowsDaemonProcessFinder";
 import {
   NetDaemonPortAvailabilityChecker,
   type DaemonPortAvailabilityChecker,

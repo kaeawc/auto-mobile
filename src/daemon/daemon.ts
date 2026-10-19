@@ -68,7 +68,8 @@ import { createDaemonHealthCheck, type HealthFailureKind } from "./daemonHealthC
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
+import { type PlanDeviceLossPort } from "./deviceDisconnectHandler";
+import { PlanDeviceLossMonitor } from "./PlanDeviceLossMonitor";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { ForwardLeaseForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import {

@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
+import type { ListChangedKind } from "../../src/server/listChangedBroadcast";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
 import {
   DEFAULT_SOCKET_PATH,
@@ -201,14 +202,13 @@ describe("the harness's control socket is opened by the socket server's own star
       ]);
 
       // A dead process's server is off the process-wide broadcasters: nothing is written for it.
-      const dead = scenario.daemon.socket.server as unknown as {
-        broadcastListChanged(kind: string): void;
-      };
+      const dead = scenario.daemon.socket.server.testHooks;
       await scenario.daemonRestart();
-      const deadFanOut = spyOn(dead, "broadcastListChanged");
+      const deadFanOut = mock<(kind: ListChangedKind) => void>();
+      const restore = dead.broadcastListChanged.intercept(() => deadFanOut);
       ListChangedBroadcaster.emit("tools");
       expect(deadFanOut).not.toHaveBeenCalled();
-      deadFanOut.mockRestore();
+      restore();
     },
   );
 });

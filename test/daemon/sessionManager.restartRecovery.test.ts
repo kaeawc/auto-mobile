@@ -595,7 +595,7 @@ describe("SessionManager", () => {
       skipped: [],
       timedOut: false,
     });
-    expect(session).toBe(restarted.getSession(sessionUuid));
+    expect(session).toBe(restarted.getSession(sessionUuid) ?? undefined);
     expect(session?.ownership).toBe("owned");
   });
 
@@ -631,7 +631,7 @@ describe("SessionManager", () => {
         skipped: [],
         timedOut: false,
       });
-      expect(session).toBe(restarted.getSession(sessionUuid));
+      expect(session).toBe(restarted.getSession(sessionUuid) ?? undefined);
       expect(session?.ownership).toBe("awaiting-owner");
     } finally {
       releaseAssignment.resolve();

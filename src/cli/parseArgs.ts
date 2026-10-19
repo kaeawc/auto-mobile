@@ -100,7 +100,6 @@ const externalValueFlags = [
 /** Parses daemon options from explicit argument tokens, rather than process.argv. */
 // The existing option surface is intentionally preserved during this extraction.
 // A declarative parser migration is separate behavior-changing work.
-// eslint-disable-next-line complexity
 export function parseArgs(
   args: string[],
   log: ParseLogger,
@@ -131,11 +130,7 @@ export function parseArgs(
   const daemonMode = hasFlag("daemon-mode");
   const noProxy = hasFlag("no-proxy") || hasFlag("direct");
   const noDaemon = hasFlag("no-daemon");
-  const daemonCommandIndex = args.indexOf("--daemon");
-  const daemonRequested = daemonCommandIndex >= 0;
-  const daemonCommand =
-    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
-  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
+  const { daemonRequested, daemonCommand, daemonArgs } = parseDaemonCommand(args);
   const debugPerf =
     hasFlag("debug-perf") || hasFlag("ui-perf-debug") || readEnvRaw(ENV.DEBUG_PERF) === "1";
   const debug = hasFlag("debug") || readEnvRaw(ENV.DEBUG) === "1";
@@ -164,19 +159,7 @@ export function parseArgs(
     process.env,
     resolveDaemonLaunchWorkingDirectory(),
   );
-  const runnerReadinessEnv =
-    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
-    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
-  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
-  // Undefined means this client has no opinion about a running daemon's
-  // readiness budget. The daemon's ServerConfig owns the product default.
-  const runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
-  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
-    log.warn(
-      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
-        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
-    );
-  }
+  const runnerReadinessTimeoutMs = parseReadinessEnvironment(environment, log);
   const video = createVideoRecordingDefaults(log);
   const { videoRecordingDefaults } = video;
 
@@ -698,4 +681,30 @@ function applyVideoNumber(
   if (value !== undefined) {
     defaults[key] = value;
   }
+}
+
+function parseReadinessEnvironment(environment: NodeJS.ProcessEnv, log: ParseLogger) {
+  const runnerReadinessEnv =
+    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
+    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
+  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
+  // Undefined means this client has no opinion about a running daemon's
+  // readiness budget. The daemon's ServerConfig owns the product default.
+  const runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
+  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
+    log.warn(
+      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
+        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+    );
+  }
+  return runnerReadinessTimeoutMs;
+}
+
+function parseDaemonCommand(args: string[]) {
+  const daemonCommandIndex = args.indexOf("--daemon");
+  const daemonRequested = daemonCommandIndex >= 0;
+  const daemonCommand =
+    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
+  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
+  return { daemonRequested, daemonCommand, daemonArgs };
 }

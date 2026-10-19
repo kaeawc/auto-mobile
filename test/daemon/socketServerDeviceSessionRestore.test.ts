@@ -609,7 +609,7 @@ test("a token declaration after socket close leaves no inert identity or later m
   const other = h.connect();
   const entered = Promise.withResolvers<void>();
   const proceed = Promise.withResolvers<void>();
-  const startup = spyOn(h.server, "waitForStartup").mockImplementation(async () => {
+  const restoreStartup = h.server.testHooks.waitForStartup.intercept(() => async () => {
     entered.resolve();
     await proceed.promise;
   });
@@ -645,7 +645,7 @@ test("a token declaration after socket close leaves no inert identity or later m
     expect(h.manager.getSession("later-mint")?.livenessOwnerToken).toBeUndefined();
   } finally {
     proceed.resolve();
-    startup.mockRestore();
+    restoreStartup();
     other.socket.destroy();
     h.close();
   }

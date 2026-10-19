@@ -29,6 +29,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { DaemonRequest } from "../../src/daemon/types";
+import { isRecord } from "../../src/server/pipeline/isRecord";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -225,11 +226,15 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
       registerTools();
     }
     const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    if (!isRecord(forwarded)) {
+      throw new Error("Expected forwarded tool arguments to be an object");
+    }
     // The first call pays one-time cold-start cost (~0.4 s locally, ~3.5-4.3 s on Windows CI,
     // which sits on the fixture's 4 s default); the tests carry a 30 s timeout of their own.
-    const result = await fixture.client.callTool({ name, arguments: forwarded }, undefined, {
-      timeout: 20_000,
-    });
+    const result = await fixture.client.callTool(
+      { name, arguments: forwarded },
+      { timeout: 20_000 },
+    );
     socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };

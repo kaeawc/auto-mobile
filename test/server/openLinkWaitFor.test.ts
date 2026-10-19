@@ -36,6 +36,8 @@ const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 const makeObservation = (marker: string): ObserveResult => ({
+  observationId: `obs-${marker}`,
+  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 200, height: 200 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -667,6 +669,14 @@ describe("openLink iOS app-open alert acceptance", () => {
   });
 });
 
+/** Narrows the payload union to the wait-carrying shape, failing when no wait fields are present. */
+function waitedPayload(payload: ReturnType<typeof buildOpenLinkPayload>) {
+  if (!("polls" in payload)) {
+    throw new Error(`payload carries no wait outcome: ${JSON.stringify(payload)}`);
+  }
+  return payload;
+}
+
 describe("buildOpenLinkPayload", () => {
   const openResult: OpenURLResult = {
     success: true,
@@ -680,7 +690,7 @@ describe("buildOpenLinkPayload", () => {
     expect("awaitTimeout" in payload).toBe(false);
     expect("awaitedElement" in payload).toBe(false);
     expect("timeoutReason" in payload).toBe(false);
-    expect(payload).toEqual({ message: "Opened link slack://open", ...openResult });
+    expect<unknown>(payload).toEqual({ message: "Opened link slack://open", ...openResult });
   });
 
   test("failure message describes the open error", () => {
@@ -695,17 +705,19 @@ describe("buildOpenLinkPayload", () => {
   test("surfaces the timeout reason when the integrated posture wait times out", () => {
     const timeoutReason =
       'Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"';
-    const payload = buildOpenLinkPayload("slack://open", openResult, {
-      observation: makeObservation("opened"),
-      awaitDuration: 5000,
-      awaitTimeout: true,
-      matched: false,
-      timedOut: true,
-      timeoutReason,
-      polls: 3,
-      waitMs: 5000,
-      candidates: [],
-    });
+    const payload = waitedPayload(
+      buildOpenLinkPayload("slack://open", openResult, {
+        observation: makeObservation("opened"),
+        awaitDuration: 5000,
+        awaitTimeout: true,
+        matched: false,
+        timedOut: true,
+        timeoutReason,
+        polls: 3,
+        waitMs: 5000,
+        candidates: [],
+      }),
+    );
     expect(payload.timeoutReason).toBe(timeoutReason);
     expect(payload.timedOut).toBe(true);
   });
@@ -716,18 +728,20 @@ describe("buildOpenLinkPayload", () => {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       "resource-id": "home_tab_bar",
     };
-    const payload = buildOpenLinkPayload("slack://open", openResult, {
-      observation: awaited,
-      awaitedElement,
-      awaitDuration: 1200,
-      awaitTimeout: false,
-      matched: true,
-      timedOut: false,
-      polls: 2,
-      waitMs: 1200,
-      matchedElement: awaitedElement,
-      candidates: [],
-    });
+    const payload = waitedPayload(
+      buildOpenLinkPayload("slack://open", openResult, {
+        observation: awaited,
+        awaitedElement,
+        awaitDuration: 1200,
+        awaitTimeout: false,
+        matched: true,
+        timedOut: false,
+        polls: 2,
+        waitMs: 1200,
+        matchedElement: awaitedElement,
+        candidates: [],
+      }),
+    );
     expect(payload.observation).toBe(awaited);
     expect(payload.awaitedElement).toBe(awaitedElement);
     expect(payload.awaitDuration).toBe(1200);

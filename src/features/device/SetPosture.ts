@@ -12,7 +12,7 @@ import {
   parseAndroidDeviceStates,
   type AndroidDeviceState,
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -97,7 +97,7 @@ export interface SetPostureDependencies {
   adbFactory?: AdbClientFactory;
   androidHingeAngleConsole?: AndroidHingeAngleConsole;
   observeFactory?: (device: BootedDevice) => ObserveScreen;
-  iosClientProvider?: (device: BootedDevice) => IOSCtrlProxy;
+  iosClientProvider?: (device: BootedDevice) => IosCtrlProxy;
   simctl?: Pick<SimCtl, "getDeviceInfo">;
   timer?: Timer;
   transitionSink?: DisplayTransitionSink;
@@ -579,7 +579,7 @@ export class SetPosture {
   private readonly adbFactory: AdbClientFactory;
   private readonly androidHingeAngleConsole: AndroidHingeAngleConsole;
   private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
-  private readonly iosClientProvider: (device: BootedDevice) => IOSCtrlProxy;
+  private readonly iosClientProvider: (device: BootedDevice) => IosCtrlProxy;
   private readonly simctl?: Pick<SimCtl, "getDeviceInfo">;
   private readonly timer: Timer;
   private readonly transitionSink: DisplayTransitionSink;

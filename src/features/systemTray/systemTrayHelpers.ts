@@ -1,10 +1,6 @@
 import { readActiveNotificationKeysForApp as readActiveKeys } from "./systemTrayNotificationList";
 import { NOTIFICATION_TITLE_FIELD_IDS } from "./notificationHints";
-export {
-  NOTIFICATION_TITLE_FIELD_IDS,
-  SYSTEM_TRAY_SCROLL_IDLE_POLL_MS,
-  SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS,
-} from "./notificationHints";
+export {} from "./notificationHints";
 import {
   readTrayNotificationFields as readNotificationFields,
   listSystemTrayNotifications as listNotifications,
@@ -2540,7 +2536,6 @@ export const clearIosSystemTrayNotifications = async (
 };
 
 export { NotificationShadeNotOpenError } from "./systemTrayNotificationList";
-export type { ListedTrayNotification, TrayOwnershipEvidence } from "./systemTrayNotificationList";
 /** Verify label ownership against a successful, fresh installed-package inventory. */
 export const resolveUniqueTrayAppLabel = async (
   device: BootedDevice,

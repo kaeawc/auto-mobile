@@ -39,7 +39,16 @@ import * as orphanRecorderRefusal from "../../src/server/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
-import * as daemonErrors from "../../src/daemon/proxy/daemonErrors";
+import * as nsDaemonAmbiguousSessionSelectorError from "../../src/daemon/proxy/DaemonAmbiguousSessionSelectorError";
+import * as nsDaemonAssetVersionMismatchError from "../../src/daemon/proxy/DaemonAssetVersionMismatchError";
+import * as nsDaemonBoundSessionExpiredError from "../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import * as nsDaemonBuildMismatchError from "../../src/daemon/proxy/DaemonBuildMismatchError";
+import * as nsDaemonConnectionSessionReleasedError from "../../src/daemon/proxy/DaemonConnectionSessionReleasedError";
+import * as nsDaemonSessionStalledError from "../../src/daemon/proxy/DaemonSessionStalledError";
+import * as nsDaemonToolOutcomeUnknownError from "../../src/daemon/proxy/DaemonToolOutcomeUnknownError";
+import * as nsDaemonToolUnavailableError from "../../src/daemon/proxy/DaemonToolUnavailableError";
+import * as nsDaemonVersionMismatchError from "../../src/daemon/proxy/DaemonVersionMismatchError";
+import * as nsLifecycleConnectionInFlightError from "../../src/daemon/proxy/LifecycleConnectionInFlightError";
 import * as sessionManager from "../../src/daemon/sessionManager";
 import * as sessionOwnership from "../../src/models/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
@@ -144,7 +153,16 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "server/orphanRecorderRefusal": orphanRecorderRefusal,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
-  "daemon/proxy/daemonErrors": daemonErrors,
+  "daemon/proxy/DaemonAmbiguousSessionSelectorError": nsDaemonAmbiguousSessionSelectorError,
+  "daemon/proxy/DaemonAssetVersionMismatchError": nsDaemonAssetVersionMismatchError,
+  "daemon/proxy/DaemonBoundSessionExpiredError": nsDaemonBoundSessionExpiredError,
+  "daemon/proxy/DaemonBuildMismatchError": nsDaemonBuildMismatchError,
+  "daemon/proxy/DaemonConnectionSessionReleasedError": nsDaemonConnectionSessionReleasedError,
+  "daemon/proxy/DaemonSessionStalledError": nsDaemonSessionStalledError,
+  "daemon/proxy/DaemonToolOutcomeUnknownError": nsDaemonToolOutcomeUnknownError,
+  "daemon/proxy/DaemonToolUnavailableError": nsDaemonToolUnavailableError,
+  "daemon/proxy/DaemonVersionMismatchError": nsDaemonVersionMismatchError,
+  "daemon/proxy/LifecycleConnectionInFlightError": nsLifecycleConnectionInFlightError,
   "daemon/sessionManager": sessionManager,
   "models/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,

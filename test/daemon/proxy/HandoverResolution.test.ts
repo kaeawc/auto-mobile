@@ -6,7 +6,7 @@ import {
 } from "../../../src/daemon/proxyLivenessRecovery";
 import type { PendingHeldSessionLoss } from "../../../src/daemon/proxy/HeldSessionLosses";
 import { SESSION_NOT_FOUND_REASON } from "../../../src/daemon/releaseReasons";
-import { DaemonSessionStalledError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonSessionStalledError } from "../../../src/daemon/proxy/DaemonSessionStalledError";
 import {
   HandoverResolution,
   type HandoverResolutionPort,

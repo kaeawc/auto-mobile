@@ -279,7 +279,7 @@ import {
   LegacySlotDeviceRetirement,
   prepareBindingRegistryForStartup,
 } from "./sessionBroker/registry/legacySlotDeviceRetirement";
-import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
+import { ProcessTableReader } from "../devices/bootAdmission/processTableRetry";
 import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { PlatformLegacySlotDeviceStopper } from "./sessionBroker/registry/platformLegacySlotDeviceStopper";

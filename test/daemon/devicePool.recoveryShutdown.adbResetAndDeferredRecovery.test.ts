@@ -13,8 +13,6 @@ import {
   PerAvdBlockingReadyManager,
   FailingGetIncidentStore,
   setup,
-  DaemonDisconnectInternals,
-  DaemonDeferredRecoverySweepInternals,
   assertNoRecoveryReservationsRemain,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -674,9 +672,9 @@ test("disconnect recovery retries through the daemon after its deferred shutdown
     {},
     { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
   );
-  const internals = daemon as unknown as DaemonDisconnectInternals;
-  internals.devicePool = pool;
-  internals.sessionManager = sessions;
+  const internals = daemon.testHooks;
+  internals.replaceDevicePool(pool);
+  internals.replaceSessionManager(sessions);
   pool.isCurrentDisconnectedDevice = async () => "current";
   try {
     const firstPass = internals.recordAndTryRecoverCapturedDisconnect(
@@ -722,13 +720,13 @@ test("a tracked deferred recovery sweep does not block another due-retry check",
     {},
     { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
   );
-  const internals = daemon as unknown as DaemonDeferredRecoverySweepInternals;
+  const internals = daemon.testHooks;
   try {
     await deferFirstLossRecovery({ timer, manager, pool, captured });
 
     timer.advanceTime(30_000);
     const blockedRetry = pool.retryDueDeferredSessionRecoveries();
-    internals.trackDeferredSessionRecoverySweep(blockedRetry);
+    daemon.trackDeferredSessionRecoverySweep(blockedRetry);
     await flush();
     expect(internals.deferredSessionRecoverySweeps.has(blockedRetry)).toBe(true);
 

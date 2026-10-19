@@ -1,5 +1,6 @@
 import { createServer as createHttpServer } from "http";
 import type { HttpListener } from "./daemonHttpIngress";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import {
   createDefaultBindingExclusion,
   type BindingExclusion,
@@ -54,6 +55,8 @@ export interface DaemonDependencies {
   liveDaemonSessionIdProvider?: LiveDaemonSessionIdProvider;
   incumbentOwnerGuard?: IncumbentOwnerGuard;
   avdManagerFactory?: () => Pick<AvdManager, "listDeviceImages">;
+  /** The readiness service iOS startup warm-up verifies simulators through. */
+  iosDeviceVerifier?: () => Pick<DeviceReadiness, "verifyIosDevice">;
   /** Managed-binding exclusion for the pool (#11174); defaults to the host-wide SQLite registry. */
   bindingExclusionFactory?: (timer: Timer) => BindingExclusion;
   /** Host forward evidence is supplied by the production entry point only (#12220). */
@@ -119,6 +122,7 @@ function resolveFactories(dependencies: DaemonDependencies) {
       dependencies.toolSelectionProfileProvenanceLoader ?? defaultToolSelectionProfileRegistry,
     httpServerFactory: dependencies.httpServerFactory ?? (() => createHttpServer()),
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
+    iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => DeviceReadiness.getInstance()),
     bindingExclusionFactory: dependencies.bindingExclusionFactory ?? createDefaultBindingExclusion,
     daemonState: dependencies.daemonState ?? defaultDaemonStateWrites,
   };

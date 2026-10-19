@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
-import type { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
@@ -9,6 +9,7 @@ import { PortManager } from "../../src/utils/PortManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 
 // #10649: a caller such as getApple extends the shared health-poll deadline to its
 // whole acquisition budget. A runner frozen at launch must still be relaunched
@@ -26,16 +27,15 @@ const HEALTH_MAX_ATTEMPTS = "3";
 const WINDOW_MS = 1_500;
 const FIRST_LAUNCH_WINDOW_MS = 3_000;
 
-function fakeBuilder(): IosCtrlProxyBuilder {
-  return {
+function fakeBuilder(): IosCtrlProxyBuilderSurface {
+  return fakeIosCtrlProxyBuilder({
     getXctestrunPath: async () => "/tmp/CtrlProxy.xctestrun",
-    getRunnerBinaryPath: async () => null,
     verifyRunnerBinaryBeforeLaunch: async () => {},
     writeRunnerEnvironment: async () => "/tmp/automobile-runner.xctestrun",
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
-    getExpectedAppHash: () => null,
-  } as unknown as IosCtrlProxyBuilder;
+    getExpectedAppHash: () => "",
+  });
 }
 
 interface Harness {

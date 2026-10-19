@@ -169,7 +169,7 @@ export function createFakeBuilder(xctestrunPath = "/tmp/CtrlProxy.xctestrun") {
   return createStartableBuilder(xctestrunPath, {
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
-    getExpectedAppHash: () => null,
+    getExpectedAppHash: () => "",
   });
 }
 

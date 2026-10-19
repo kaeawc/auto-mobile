@@ -17,7 +17,7 @@ import { SessionToolBindingStore } from "../../../src/server/sessionToolBindingS
 import {
   HeartbeatTaskLeaseKeepalive,
   type TaskLeaseHoldRequest,
-} from "../../../src/server/tasks/taskLeaseKeepalive";
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
 import { resetVideoRecordingManagerDependencies } from "../../../src/server/videoRecordingManager";
 import { DefaultDeviceMatcher } from "../../../src/utils/deviceMatcher";

@@ -10,7 +10,7 @@ import { registerPlanTools } from "../../../src/server/planTools";
 import type {
   TaskLeaseHoldRequest,
   TaskLeaseKeepalive,
-} from "../../../src/server/tasks/taskLeaseKeepalive";
+} from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import * as videoRecordingManager from "../../../src/server/videoRecordingManager";

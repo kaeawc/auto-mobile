@@ -10,7 +10,7 @@ import type { DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonShuttingDownFailure } from "./daemonShutdownOutcome";
 import type { McpOverloadFailure } from "./McpTimeoutError";
 import type { SocketRequestAdmissionQueue } from "./socketRequestAdmission";
-import type { RelayedJsonRpcError, TaskRelayFrame } from "../server/tasks/taskRelay";
+import type { RelayedJsonRpcError, TaskRelayFrame } from "./tasks/taskRelay";
 
 /**
  * Request sent from CLI client to daemon

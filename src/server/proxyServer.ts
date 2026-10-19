@@ -60,8 +60,8 @@ import {
   isCreateTaskResult,
   missingTasksCapabilityError,
   requestDeclaresTasks,
-} from "./tasks/mcpTasksExtension";
-import { toRelayedProtocolError, isRelayedJsonRpcError } from "./tasks/taskRelay";
+} from "../daemon/tasks/mcpTasksExtension";
+import { toRelayedProtocolError, isRelayedJsonRpcError } from "../daemon/tasks/taskRelay";
 import { ENV } from "../config/env";
 
 const LIVE_ACCEPTANCE_ENV = ENV.ACCEPTANCE_LIVE.name;

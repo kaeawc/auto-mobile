@@ -7,7 +7,7 @@ import {
   relayedJsonRpcError,
   restoreCreateTaskResult,
   withCompleteResultType,
-} from "../../server/tasks/taskRelay";
+} from "../tasks/taskRelay";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { DaemonRequest, DaemonResponse } from "../types";

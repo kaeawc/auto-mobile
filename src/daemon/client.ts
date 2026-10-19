@@ -11,7 +11,7 @@ import {
   isRelayedJsonRpcError,
   type TaskRelayFrame,
   type TaskRelayMethod,
-} from "../server/tasks/taskRelay";
+} from "./tasks/taskRelay";
 import type { LivenessOwnerHold } from "./livenessOwnerLease";
 import {
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,

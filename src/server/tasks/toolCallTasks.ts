@@ -1,8 +1,8 @@
 import type { McpToolCallExtra, McpToolCallResult, ToolCall } from "../toolCallDispatch";
-import { requestDeclaresTasks, type CreateTaskResult } from "./mcpTasksExtension";
+import { requestDeclaresTasks, type CreateTaskResult } from "../../daemon/tasks/mcpTasksExtension";
 import { runAsTask, type TaskWorkRun } from "./runAsTask";
-import type { TaskManager } from "./TaskManager";
-import type { TaskLeaseKeepalive } from "./taskLeaseKeepalive";
+import type { TaskManager } from "../../daemon/tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "../../daemon/tasks/taskLeaseKeepalive";
 
 /**
  * Tools whose `tools/call` may run as an MCP task (#4668). `startDevice` is the first (owner

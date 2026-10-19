@@ -3,9 +3,9 @@ import { z } from "zod/v4";
 import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
-} from "../../../src/server/tasks/TaskManager";
-import { TASKS_EXTENSION_ID } from "../../../src/server/tasks/mcpTasksExtension";
-import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
+} from "../../../src/daemon/tasks/TaskManager";
+import { TASKS_EXTENSION_ID } from "../../../src/daemon/tasks/mcpTasksExtension";
+import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { currentTaskContext } from "../../../src/server/tasks/runAsTask";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { executionTracker } from "../../../src/server/executionTracker";

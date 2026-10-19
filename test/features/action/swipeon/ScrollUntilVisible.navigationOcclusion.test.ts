@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -83,10 +84,10 @@ describe("scroll-until-visible synthetic iOS navigation occlusion (#9096)", () =
     expect(h.swipeCount()).toBe(0);
 
     for (const observation of [
-      { viewHierarchy: noChrome, screenSize: navigationScreen },
-      {},
-      { screenSize: navigationScreen },
-      { viewHierarchy: { hierarchy: {} } },
+      buildObserveResult({ viewHierarchy: noChrome, screenSize: navigationScreen }),
+      buildObserveResult({}),
+      buildObserveResult({ screenSize: navigationScreen }),
+      buildObserveResult({ viewHierarchy: { hierarchy: {} } }),
     ] satisfies ObserveResult[]) {
       expect(
         h.scroll["isElementWithinContainer"]({ bounds: row }, navigationViewport, observation),

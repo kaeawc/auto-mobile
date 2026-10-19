@@ -126,7 +126,7 @@ describe("SystemConfigurationAdapter", () => {
       it(`retains the ${entry.name} typed failure and warns`, async () => {
         const adb = new FakeAdbExecutor();
         adb.setAndroidApiLevel(entry.legacy ? 32 : 33);
-        adb.setCommandResponse("shell id", { stdout: "uid=0(root)", stderr: "" });
+        adb.setCommandResponse("shell id", createExecResult("uid=0(root)", ""));
         adb.setCommandError(entry.command, new Error("write denied"));
         const capability = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
           throw new Error("optional service unavailable");

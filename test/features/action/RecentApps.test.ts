@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { BootedDevice, ObserveResult } from "../../../src/models";
@@ -91,7 +92,7 @@ describe("RecentApps", () => {
         screenSize: { width: 1080, height: 2400 },
         systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
       }));
-      fakeAdb.setCommandResponse("shell input keyevent 187", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("shell input keyevent 187", createExecResult("", ""));
 
       const result = await recentApps.execute();
 
@@ -109,7 +110,7 @@ describe("RecentApps", () => {
           ? { ...capturedRecents, timestamp: fakeTimer.now() }
           : createObserveResult(createAppHierarchy()),
       );
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
 
       let callbackCalled = false;
       const progressCallback = () => {
@@ -125,7 +126,7 @@ describe("RecentApps", () => {
       fakeObserveScreen.setObserveResult(() => {
         return { ...createObserveResult(), viewHierarchy: undefined };
       });
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
 
       const result = await recentApps.execute();
 
@@ -153,7 +154,7 @@ describe("RecentApps", () => {
     const pressed = () => fakeAdb.getExecutedCommands().includes("shell input keyevent 187");
 
     test("does not press Recents again when the overview is already open", async () => {
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
       fakeObserveScreen.setObserveResult(() => overview(true));
       serveCache(overview(false), () => overview(true));
 
@@ -164,7 +165,7 @@ describe("RecentApps", () => {
     });
 
     test("re-reads once when the first fresh read is still reported stale", async () => {
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeAdb.setDefaultResponse(createExecResult("", ""));
       fakeObserveScreen.setObserveResult(() => overview(true));
       let floorReads = 0;
       const origExecute = fakeObserveScreen.execute.bind(fakeObserveScreen);

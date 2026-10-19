@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
@@ -46,7 +47,9 @@ function harness() {
   );
   action.observedInteraction = (callback) =>
     callback(
-      recordObservationRead({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+      recordObservationRead(
+        buildObserveResult({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+      ),
     );
   return {
     adb,

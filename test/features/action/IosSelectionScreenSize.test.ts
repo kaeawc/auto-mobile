@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -87,12 +88,12 @@ test("tapOn text selection dispatches the derived right-hand target's centre wit
     tapStrategy: new FakeTapStrategy(),
     selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
   });
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
     observationId: "derived-geometry",
     updatedAt: 1,
     viewHierarchy: hierarchy,
     screenSize: { width: 951, height: 669 },
-  };
+  });
   const points: Array<{ x: number; y: number }> = [];
   tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
   tap.executeiOSTap = async (_action, x, y) => {

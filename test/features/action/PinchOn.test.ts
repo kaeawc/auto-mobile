@@ -1,3 +1,5 @@
+import { createExecResult } from "../../../src/utils/execResult";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -64,12 +66,13 @@ describe("PinchOn", () => {
     updatedAt: Date.now(),
   });
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy(),
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchy(),
+    });
 
   const pinchWith = (capture: FakeHierarchyCapture): PinchOn =>
     new PinchOn(device, fakeAdb, {
@@ -133,10 +136,13 @@ describe("PinchOn", () => {
         ...before,
         viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 0 },
       };
-      fakeAdb.setCommandResponse("cmd display get-displays", {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "cmd display get-displays",
+        createExecResult(
+          'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
+          "",
+        ),
+      );
       fakeA11yService.setSupportedCommands(["gesture_display_id_v1"]);
       const transitions = new FakeDisplayTransitionReader();
       transitions.generation = 0;

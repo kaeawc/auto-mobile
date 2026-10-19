@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
@@ -36,7 +37,7 @@ function settle<T>(timer: FakeTimer, promise: Promise<T>, description: string): 
 
 function createHarness(timer: FakeTimer, gateMs: number, onGateStart?: () => void) {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   let healthy = false;
   const manager: AndroidServiceRecoveryManager = {

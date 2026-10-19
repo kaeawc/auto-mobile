@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
@@ -551,10 +552,10 @@ describe("review regressions", () => {
         "utf8",
       ),
     );
-    const baseline: ObserveResult = {
+    const baseline: ObserveResult = buildObserveResult({
       viewHierarchy: hierarchy,
       screenSize: { width: 1080, height: 2400 },
-    };
+    });
     const nodes: ViewHierarchyNode[] = [];
     for (const root of parser.extractRootNodes(hierarchy)) {
       parser.traverseNode(root, (node) => {
@@ -595,10 +596,10 @@ describe("review regressions", () => {
         "utf8",
       ),
     );
-    const baseline: ObserveResult = {
+    const baseline: ObserveResult = buildObserveResult({
       viewHierarchy: hierarchy,
       screenSize: { width: 1080, height: 2400 },
-    };
+    });
     const nodes: ViewHierarchyNode[] = [];
     for (const root of parser.extractRootNodes(hierarchy)) {
       parser.traverseNode(root, (node) => {

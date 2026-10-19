@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 /**
  * Wire-driven tests for the CtrlProxyCertificates delegate, exercised through AndroidCtrlProxyClient.
  *
@@ -41,7 +42,7 @@ describe("CtrlProxyCertificates (Android)", function () {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
 
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     fakeAdb.setScreenState(true);
 
     testDevice = {

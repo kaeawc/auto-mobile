@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, beforeEach, describe, expect, test, spyOn, mock } from "bun:test";
 import {
@@ -42,16 +43,17 @@ const makeClickableElement = (): Element =>
     clickable: "true",
   }) as Element;
 
-const createObserveResult = (): ObserveResult => ({
-  updatedAt: Date.now(),
-  screenSize: { width: 390, height: 844 },
-  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy: {
-    hierarchy: { node: {} },
-    packageName: "com.test.app",
+const createObserveResult = (): ObserveResult =>
+  buildObserveResult({
     updatedAt: Date.now(),
-  },
-});
+    screenSize: { width: 390, height: 844 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy: {
+      hierarchy: { node: {} },
+      packageName: "com.test.app",
+      updatedAt: Date.now(),
+    },
+  });
 
 describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   let fakeIosClient: FakeIOSCtrlProxy;

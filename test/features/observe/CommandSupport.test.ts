@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -75,7 +76,7 @@ async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType
 
 function androidClient(): AndroidCtrlProxyClient {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setCommandResponse("forward", createExecResult("8765", ""));
   adb.setScreenState(true);
   const timer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();

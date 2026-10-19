@@ -1,3 +1,4 @@
+import { toolExecutionError } from "./toolExecutionError";
 import type { z, ZodType } from "zod/v4";
 import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
 import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
@@ -5,7 +6,6 @@ import {
   runWithPostActionCaptureScope,
   postActionCaptures,
 } from "../utils/PostActionCaptureContext";
-import { toActionableError } from "../models/ActionableError";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
@@ -42,7 +42,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
+import { throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { executionTracker } from "../daemon/executionTracker";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
@@ -458,13 +458,7 @@ export class ToolRegistryClass {
               return afterToolCallResult.finalizedResponse;
             } catch (error) {
               throwDeviceLostFromAbortSignal(signal);
-              if (error instanceof ActionableError || isDeviceLostError(error)) {
-                throw error;
-              }
-              const deviceContext = resolvedTarget.device
-                ? ` on device ${resolvedTarget.device.deviceId}`
-                : "";
-              throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
+              throw toolExecutionError(error, name, resolvedTarget.device);
             } finally {
               await this.afterPlanLifecycle({
                 ...resolvedTarget,

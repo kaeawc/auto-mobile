@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
@@ -89,6 +90,23 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     await expect(
       ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId }),
     ).rejects.toThrow("App is not installed");
+  });
+
+  test("launchApp preserves a transport refusal in a wrapped cause", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      device.deviceId,
+      new Error("device offline"),
+    );
+    appTools.configure("launchApp", {
+      createLaunchApp: () => ({
+        execute: async () => {
+          throw new ActionableError("launch failed", { cause: typed });
+        },
+      }),
+    });
+    await expect(
+      ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, { appId }),
+    ).rejects.toBe(typed);
   });
 
   test("an existing actionable error is rethrown without another launch prefix", async () => {

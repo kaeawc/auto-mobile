@@ -1,3 +1,4 @@
+import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { defineDeviceTool } from "./defineTool";
 import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
@@ -809,16 +810,6 @@ function prepareLaunchArguments(
   };
 }
 
-function redactLaunchMessage(message: string, token: string | undefined): string {
-  return token ? message.split(token).join("[REDACTED]") : message;
-}
-
-function redactLaunchError(error: unknown, token: string | undefined): unknown {
-  return token && String(error).includes(token)
-    ? new Error(redactLaunchMessage(String(error), token))
-    : error;
-}
-
 export type UninstallAppArgs = z.output<typeof uninstallAppSchema>;
 
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
@@ -972,26 +963,6 @@ function executeLaunch(
     launchArguments,
     launchEnvironment: prototypeLaunch?.environment,
   });
-}
-
-/** Clears the launch's mutation token and returns the error to throw, token redacted. */
-function launchFailure(
-  error: unknown,
-  device: BootedDevice,
-  appId: string,
-  mutationToken: string | undefined,
-): unknown {
-  if (mutationToken) {
-    iosMutationTokens.clear(device.deviceId, appId, mutationToken);
-  }
-  const safeError = redactLaunchError(error, mutationToken);
-  // A typed launch failure (uninstalled package, foreground mismatch) is
-  // already an actionable error — surface it verbatim rather than re-wrapping
-  // it as "Failed to launch app: Error: ..." (#5868).
-  if (isDeviceLostError(error) || safeError instanceof ActionableError) {
-    return safeError;
-  }
-  return toActionableError(safeError, `Failed to launch app`);
 }
 
 // Launch app handler

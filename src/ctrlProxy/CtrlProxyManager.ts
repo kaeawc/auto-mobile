@@ -1,3 +1,4 @@
+import { findDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import { ctrlProxyManagerHost, type SavedPrototypeService } from "./ctrlProxyManagerHost";
@@ -709,6 +710,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private statusInspectionDeviceError(error: unknown): Error | undefined {
+    const transport = findDeviceTransportUnavailable(error);
+    if (transport) {
+      return transport;
+    }
     const message = errorMessage(error);
     if (isAdbMissingDeviceError(error, this.device.deviceId)) {
       return new DeviceLostError(this.device.deviceId, message);

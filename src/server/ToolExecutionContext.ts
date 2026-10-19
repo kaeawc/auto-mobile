@@ -1,3 +1,4 @@
+import { rethrowDeviceTransportUnavailable } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
@@ -719,6 +720,7 @@ async function handleSetupFailure(
     return;
   }
 
+  rethrowDeviceTransportUnavailable(setupResult.cause);
   throw new ActionableError(
     `Failed to setup accessibility service for device ${ctx.deviceId} (session ${ctx.sessionId}): ${errorMsg}`,
     isDeviceLostError(setupResult.cause) ? { cause: setupResult.cause } : undefined,

@@ -15,6 +15,7 @@ import {
   KillTrackingShutdownManager,
   RearmableShutdownManager,
   setup,
+  setupWith,
   setupPassiveRestart,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -137,7 +138,7 @@ test("same-AVD replacement is reserved while session tracking persistence stalls
       await super.setSessionTracking(daemonId, deviceId, startedAt);
     }
   }
-  const { sessions, manager, pool, captured, timer } = await setup(
+  const { sessions, manager, pool, captured, timer } = await setupWith(
     new KillTrackingShutdownManager(),
     undefined,
     undefined,

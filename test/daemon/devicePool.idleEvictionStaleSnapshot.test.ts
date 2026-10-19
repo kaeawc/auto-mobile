@@ -38,7 +38,7 @@ class ParkingFakeDeviceManager extends FakeDeviceManager {
     return super.getBootedDevicesDetailed(platform);
   }
 
-  override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+  override async startDevice(device: DeviceInfo): Promise<ChildProcess | null> {
     if (this.parkRecoveryStart) {
       this.parkRecoveryStart = false;
       await new Promise<void>((resolve) => this.parkedRecoveryStarts.push({ resolve }));
@@ -80,14 +80,9 @@ describe("idle eviction with a stale discovery snapshot", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
-        name,
-        async (row: T) => {
-          await arrangeHarness();
-          await fn(row);
-        },
-        timeout,
-      );
+      for (const row of table) {
+        arranged(name.replace("%s", String(row)), () => fn(row), timeout);
+      }
     };
   }
 
@@ -153,7 +148,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
         }
         expect(staleRemovalCalls).toBe(1);
         expect(replacement?.incarnation).not.toBe(original.incarnation);
-        expect(pool.getDevice(udid)).toBe(replacement);
+        expect(pool.getDevice(udid) ?? undefined).toBe(replacement);
         if (path === "prune") {
           expect(result).toBe(0);
         }
@@ -182,7 +177,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     const replacement = pool.getDevice(sim.deviceId)!;
     deviceManager.parked[0].resolve();
     expect(await prune).toBe(0);
-    expect(pool.getDevice(sim.deviceId)).toBe(replacement);
+    expect(pool.getDevice(sim.deviceId) ?? undefined).toBe(replacement);
   });
 
   arrangedEach(["retire", "replace"] as const)(
@@ -212,7 +207,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
         } else {
           expect(await pool.replaceDeviceForShutdown(original, sim)).toBeUndefined();
         }
-        expect(pool.getDevice(sim.deviceId)).toBe(replacement);
+        expect(pool.getDevice(sim.deviceId) ?? undefined).toBe(replacement);
       } finally {
         pool.removeDevice = remove;
       }

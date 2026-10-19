@@ -140,7 +140,11 @@ function setRestoreState(
   } else if (reason === "network-condition") {
     manager.setNetworkCondition("old", { initialProfile: "none" });
   } else {
-    manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+    manager.getSession("old")!.cacheData.clock = {
+      initialAutomaticTime: 1,
+      clockChangedByUs: false,
+      rootedByUs: false,
+    };
   }
 }
 
@@ -381,7 +385,11 @@ test("clock failure marks busy quarantine and successful retry clears it", async
     deviceId: device.deviceId,
     platform: "android",
   });
-  h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+  h.manager.getSession("old")!.cacheData.clock = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: false,
+    rootedByUs: false,
+  };
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toEqual({ reason: "clock", since: 1000 });
@@ -398,7 +406,7 @@ test("availableDevices surfaces unhealthy only for marked devices", async () => 
   await abandon(h, "network-condition");
   DaemonState.getInstance().initialize(h.manager, h.pool);
   const response = await handleDaemonRequest(
-    { id: "health", method: "daemon/availableDevices" },
+    { id: "health", type: "daemon_request", method: "daemon/availableDevices", params: {} },
     DaemonState.getInstance(),
   );
   expect(response.result?.devices).toEqual([
@@ -442,7 +450,11 @@ test("clock timeout surfaces reason while the original restore remains quarantin
     deviceId: device.deviceId,
     platform: "android",
   });
-  h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
+  h.manager.getSession("old")!.cacheData.clock = {
+    initialAutomaticTime: 1,
+    clockChangedByUs: false,
+    rootedByUs: false,
+  };
   h.pause();
   const release = h.manager.releaseSession("old");
   try {
@@ -1347,7 +1359,9 @@ test("throwing incarnation listener warns and does not break initialization or r
 
 test("pool signals only a newly tracked spawned Android process", async () => {
   const started: string[] = [];
-  const h = await harness(1, undefined, (id) => started.push(id));
+  const h = await harness(1, undefined, (id) => {
+    started.push(id);
+  });
   const pool = h.pool.testHooks;
   await pool.trackStartedDeviceProcess.call(device, undefined);
   expect(started).toEqual([]);

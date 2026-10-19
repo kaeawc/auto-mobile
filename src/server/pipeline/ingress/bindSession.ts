@@ -12,6 +12,7 @@ import {
   isSessionOwnedByAnotherConnection,
   namedSessionAccess,
 } from "../../foreignOwnedSessionRefusal";
+import { getAbortSignal } from "../../../utils/AbortContext";
 import { sessionForToolBinding } from "../../sessionForToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../toolSelectionTools";
@@ -69,11 +70,10 @@ export async function admitNamedSession(
   );
   await defaultDaemonContext
     .requireSessionManager()
-    .admitIssuedSessionForAutomation(
-      providedSessionUuid,
-      sessionExecutionMetadataOf(execution),
-      namedSessionAccess(input.plainReadCall, namesForeignOwnedSession),
-    );
+    .admitIssuedSessionForAutomation(providedSessionUuid, sessionExecutionMetadataOf(execution), {
+      ...namedSessionAccess(input.plainReadCall, namesForeignOwnedSession),
+      signal: getAbortSignal(),
+    });
   if (namesForeignOwnedSession) {
     executionTracker.markReadOnlySessionAccess(execution.id);
   } else {

@@ -130,7 +130,15 @@ describe("removeUnboundBinding", () => {
               kind: "create",
               phase: "creating",
               owner: { daemonId: "daemon", pid: 1 },
-              target: { oldStableId: null, oldName: null, newStableId: null, newName: "created" },
+              target: {
+                oldStableId: null,
+                oldName: null,
+                newStableId: null,
+                newName: "created",
+                requestedSpec: {},
+                resolvedSpec: {},
+                specFingerprint: null,
+              },
               assignment: {
                 kind: "state",
                 expected: { generation, stableDeviceId: null },

@@ -330,7 +330,10 @@ test("busy settled-binding recovery gates the rehydrated session until ready the
   await reowner.reown(["session-a"], { rehydrated: true });
   for (let i = 0; i < 3; i++) {
     expect(reowner.automationRefusal("session-a")).toBeInstanceOf(BindingOwnershipUnconfirmedError);
-    expect(reowner.automationRefusal("session-a")?.code).toBe("binding_ownership_unconfirmed");
+    expect(reowner.automationRefusal("session-a")).toHaveProperty(
+      "code",
+      "binding_ownership_unconfirmed",
+    );
     expect((await h.registry.getAssignment(h.key))?.state).toBe("settling");
     await h.step(1_000);
   }

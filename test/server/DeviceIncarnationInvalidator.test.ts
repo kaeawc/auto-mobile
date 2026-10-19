@@ -222,14 +222,7 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     const installedApps = new FakeInstalledAppsRepository();
     const barrier = new FakeDbWriteBarrier();
     const calls: string[] = [];
-    const createListener = createInstalledAppsDeviceIncarnationListener as unknown as (
-      repository: FakeInstalledAppsRepository,
-      coordinator: PerDeviceInstalledAppsCacheWriteCoordinator,
-      barrier: FakeDbWriteBarrier,
-      invalidateCache: (deviceId: string) => void,
-      notifyResourcesUpdated: (deviceId: string) => Promise<void>,
-    ) => DeviceIncarnationListener;
-    const listener = createListener(
+    const listener = createInstalledAppsDeviceIncarnationListener(
       installedApps,
       new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
       barrier,

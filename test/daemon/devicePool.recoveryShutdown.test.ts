@@ -1,4 +1,3 @@
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { makePool } from "../helpers/makePool";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
@@ -374,8 +373,8 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
     throw new Error("Expected emulator-loss incident to be recorded");
   }
   try {
-    const eviction = poolInternals(pool);
-    await eviction.evictMissingPooledDevice(captured, "not present in adb devices", {
+    const eviction = pool.testHooks;
+    await eviction.evictMissingPooledDevice.call(captured, "not present in adb devices", {
       attemptDeviceLossRecovery: true,
       incidentId,
     });
@@ -969,8 +968,8 @@ async function setupProcessExitPool(
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   const child = exitedChild();
-  const internals = poolInternals(pool);
-  await internals.trackStartedDeviceProcess(original, child);
+  const internals = pool.testHooks;
+  await internals.trackStartedDeviceProcess.call(original, child);
   await pool.bindOrReuseDeviceSession({
     sessionId: "session",
     deviceId: original.deviceId,
@@ -1062,8 +1061,8 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
   expect(first).toMatchObject({ recovery: { outcome: "recovered" }, session: { state: "active" } });
   expect(recoveryInternals(pool).emulatorLossRecoverySettlements.size).toBe(0);
   manager.bootedDevices = [];
-  const late = internals
-    .trackStartedDeviceProcess(original, child)
+  const late = internals.trackStartedDeviceProcess
+    .call(original, child)
     .catch((error: unknown) => error);
   try {
     const secondId = await store.completed.promise;

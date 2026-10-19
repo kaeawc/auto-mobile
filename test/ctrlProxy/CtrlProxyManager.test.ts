@@ -14,7 +14,6 @@ import { AdbClient, AdbCommandTimeoutError } from "../../src/utils/android-cmdli
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice, type ExecResult } from "../../src/models";
 import * as fs from "fs/promises";
-import type { Dirent } from "fs";
 import { readFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -2948,7 +2947,7 @@ describe("CtrlProxyManager", function () {
         new FakeTimer(),
         undefined,
         calculator,
-      ) as unknown as { getExpectedChecksum(): Promise<string> };
+      );
       expect(
         await Promise.all([manager.getExpectedChecksum(), manager.getExpectedChecksum()]),
       ).toEqual(["first", "first"]);
@@ -4679,12 +4678,11 @@ describe("CtrlProxyManager", function () {
         ),
       );
       const stale = await makeAgedDir("auto-mobile-prefetch-z-stale", 2 * HOUR_MS);
-      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(
-        [...freshDirs, stale].map((dir) => ({
-          name: path.basename(dir),
-          isDirectory: () => true,
-        })) as unknown as Dirent[],
+      const names = new Set([...freshDirs, stale].map((dir) => path.basename(dir)));
+      const entries = (await fs.readdir(scratchRoot, { withFileTypes: true })).filter((entry) =>
+        names.has(entry.name),
       );
+      const readdirSpy = spyOn(fs, "readdir").mockResolvedValue(entries);
 
       try {
         await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);

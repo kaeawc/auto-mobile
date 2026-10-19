@@ -729,16 +729,20 @@ describe("DevicePool autolock", () => {
           await release;
           await restoringPool.releaseDevice("emulator-5554", "reused-session");
           await expect(
-            restoringPool.bindOrReuseDeviceSession("reused-session", "emulator-5554", "android"),
+            restoringPool.bindOrReuseDeviceSession({
+              sessionId: "reused-session",
+              deviceId: "emulator-5554",
+              platform: "android",
+            }),
           ).rejects.toThrow("cleanup");
           const cleanup = restoringManager.getPendingDeviceCleanup("emulator-5554");
           finishRestore();
           await cleanup;
-          await restoringPool.bindOrReuseDeviceSession(
-            "reused-session",
-            "emulator-5554",
-            "android",
-          );
+          await restoringPool.bindOrReuseDeviceSession({
+            sessionId: "reused-session",
+            deviceId: "emulator-5554",
+            platform: "android",
+          });
 
           expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
             sessionId: "reused-session",

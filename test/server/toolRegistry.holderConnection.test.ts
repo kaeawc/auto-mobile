@@ -78,19 +78,13 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
       },
       { deviceReadOnly: true },
     );
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: HOLDER_CONNECTION,
+    });
     manager.setDeviceReadiness(HOLDER, "automationReady");
   }
 

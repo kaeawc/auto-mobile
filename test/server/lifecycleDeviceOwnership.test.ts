@@ -469,7 +469,11 @@ describe("already-dead Android shutdown ownership", () => {
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessions, pool);
     manager.setBootedDevices("android", [device]);
-    await pool.bindOrReuseDeviceSession("holder", device.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     manager.setBootedDevices("android", []);
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("holder");
     const reserve = pool.reserveDeviceForShutdown.bind(pool);

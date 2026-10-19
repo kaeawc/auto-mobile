@@ -73,7 +73,11 @@ async function harness(failures: number, baseline = false, mixedFailure = false)
     warn.mockRestore();
   });
   await pool.initializeWithDevices([device]);
-  await pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   manager.setKeepScreenAwake("old", { applied: true, method: "svc", svcWasEnabled: false });
   const step = async (ms: number) => {
     await timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
@@ -166,7 +170,11 @@ test("bounded failed outcomes mark the slot unhealthy until recovery restores it
   expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("keep-screen-awake");
   expect(h.pool.getStats().idle).toBe(0);
   await expect(
-    h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android"),
+    h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
   ).rejects.toThrow();
   h.succeed();
   await h.step(1000);

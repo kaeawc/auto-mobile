@@ -32,7 +32,7 @@ import {
   type AssignableIdleDeviceSelection,
   type PooledDevicePresenceOptions,
 } from "./deviceAllocation";
-import { ExplicitDeviceBind, type ExplicitBindOptions } from "./explicitDeviceBind";
+import { ExplicitDeviceBind, type BindDeviceRequest } from "./explicitDeviceBind";
 import { DeviceReplacement } from "./deviceReplacement";
 import {
   MultiDeviceAllocationQueue,
@@ -4847,22 +4847,20 @@ export class DevicePool {
       return false;
     }
     try {
-      await this.bindOrReuseDeviceSession(
-        preservedSessionId,
-        replacement.id,
-        "android",
-        recoveryImage,
-        undefined,
-        {
+      await this.bindOrReuseDeviceSession({
+        sessionId: preservedSessionId,
+        deviceId: replacement.id,
+        platform: "android",
+        sourceImage: recoveryImage,
+        expectedIdentity: {
           deviceId: replacement.id,
           name: replacement.name,
           platform: "android",
         },
-        true,
-        new Set([handoffOwner]),
-        undefined,
-        device.id,
-      );
+        allowSessionRebind: true,
+        readinessReservationOwners: new Set([handoffOwner]),
+        expectedExistingSessionDeviceId: device.id,
+      });
       replacement.autolockSessionId = preservedAutolockSessionId;
       const detachedProcess = this.adbServerResetTrackedProcesses.get(device);
       if (detachedProcess) {
@@ -4948,18 +4946,17 @@ export class DevicePool {
         `Session '${preservedSessionId}' changed while Android AVD '${avdName}' was recovering.`,
       );
     }
-    await this.bindOrReuseDeviceSession(
-      preservedSessionId,
-      ready.deviceId,
-      "android",
-      recoveryImage,
+    await this.bindOrReuseDeviceSession({
+      sessionId: preservedSessionId,
+      deviceId: ready.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
       childProcess,
-      ready,
-      true,
-      handoffOwner ? new Set([handoffOwner]) : undefined,
-      undefined,
-      previousDeviceId,
-    );
+      expectedIdentity: ready,
+      allowSessionRebind: true,
+      readinessReservationOwners: handoffOwner ? new Set([handoffOwner]) : undefined,
+      expectedExistingSessionDeviceId: previousDeviceId,
+    });
     this.sessionManager.setDeviceReadiness(preservedSessionId, "booted");
     const replacement = this.devices.get(ready.deviceId);
     if (holderOf(replacement) === preservedSessionId) {
@@ -6976,40 +6973,8 @@ export class DevicePool {
    * selection. If the device is already bound to a live session, reuse that
    * session so repeated startDevice calls stay idempotent.
    */
-  bindOrReuseDeviceSession(
-    sessionId: string,
-    deviceId: string,
-    platform: Platform,
-    sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    expectedIdentity?: ExplicitBindOptions["expectedIdentity"],
-    allowSessionRebind = false,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    expectedExistingSessionDeviceId?: string,
-    mcpSessionId?: string,
-    oneShotCli = false,
-    receipt?: AcquisitionReceipt,
-    refusePreparedForOtherRequest = false,
-    recoveryTarget?: SessionRecoveryTarget,
-  ): Promise<string> {
-    return this.explicitDeviceBind.bindOrReuseDeviceSession(
-      sessionId,
-      deviceId,
-      platform,
-      sourceImage,
-      childProcess,
-      expectedIdentity,
-      allowSessionRebind,
-      readinessReservationOwners,
-      verifiedAndroidAvdIdentity,
-      expectedExistingSessionDeviceId,
-      mcpSessionId,
-      oneShotCli,
-      receipt,
-      refusePreparedForOtherRequest,
-      recoveryTarget,
-    );
+  bindOrReuseDeviceSession(request: BindDeviceRequest): Promise<string> {
+    return this.explicitDeviceBind.bindOrReuseDeviceSession(request);
   }
 
   /**

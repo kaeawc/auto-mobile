@@ -606,19 +606,14 @@ describe("reserved device stop policy", () => {
           };
           f.manager.setBootedDevices(platform, [f.device, other]);
           await f.pool.initializeWithDevices([f.device, other]);
-          await f.pool.bindOrReuseDeviceSession(
-            "other-session",
-            other.deviceId,
+          await f.pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: other.deviceId,
             platform,
-            undefined,
-            undefined,
-            other,
-            false,
-            undefined,
-            undefined,
-            undefined,
-            "rival-conn",
-          );
+            expectedIdentity: other,
+            allowSessionRebind: false,
+            mcpSessionId: "rival-conn",
+          });
           const before = await snapshot(f);
           await refusal(f.call(tool, undefined, force, "rival-conn"), tool, {
             code: "device_owned_by_other_session",

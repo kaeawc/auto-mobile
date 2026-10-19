@@ -245,19 +245,13 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
   test("an explicit bind reusing the holder is refused terminally, not as suspect", async () => {
     const devicePool = daemon.getDevicePool();
     const bind = () =>
-      devicePool.bindOrReuseDeviceSession(
-        SESSION,
-        DEVICE_ID,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        MCP_CONNECTION,
-      );
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: SESSION,
+        deviceId: DEVICE_ID,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: MCP_CONNECTION,
+      });
     await bind();
     await lapseOwnerLease(SESSION);
 

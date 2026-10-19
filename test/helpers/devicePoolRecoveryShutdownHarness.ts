@@ -182,14 +182,13 @@ export async function setup(
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   return { timer, sessions, manager, pool, captured, persistence };
 }
@@ -213,14 +212,13 @@ export async function setupPassiveRestart(release = true) {
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   manager.bootedDevices = [];
   if (release) {

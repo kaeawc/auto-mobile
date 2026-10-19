@@ -69,19 +69,13 @@ describe("sessionless setActiveDevice respects device ownership (#11071)", () =>
       executionTracker.cancelSessionlessDeviceUse(deviceId);
     });
     tools = new RealToolCallPath([held, free]).install();
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: HOLDER_CONNECTION,
+    });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.

@@ -260,9 +260,11 @@ describe("createIfMissing rollback after System UI recovery", () => {
       ensureCtrlProxyReady: async () => {
         // An internal binder remains permissive under the readiness reservation (#11651);
         // setActiveDevice now refuses this window, so exercise the cleanup safety net directly.
-        await DaemonState.getInstance()
-          .getDevicePool()
-          .bindOrReuseDeviceSession("other-session", createdDeviceId, "android");
+        await DaemonState.getInstance().getDevicePool().bindOrReuseDeviceSession({
+          sessionId: "other-session",
+          deviceId: createdDeviceId,
+          platform: "android",
+        });
         throw new Error("automation runner did not become ready");
       },
     });

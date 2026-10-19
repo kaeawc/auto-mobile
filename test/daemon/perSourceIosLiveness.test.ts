@@ -237,7 +237,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-simulator");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-a", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-a",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).resolves.toBeDefined();
     expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-a");
   });
@@ -247,7 +251,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-physical");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-b", SIMULATOR_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-b",
+        deviceId: SIMULATOR_UDID,
+        platform: "ios",
+      }),
     ).resolves.toBeDefined();
     expect(devicePool.getDevice(SIMULATOR_UDID)?.sessionId).toBe("session-b");
   });
@@ -257,7 +265,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-simulator");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-c", SIMULATOR_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-c",
+        deviceId: SIMULATOR_UDID,
+        platform: "ios",
+      }),
     ).rejects.toThrow(/Unable to verify iOS simulator/);
     // Unverifiable, never proven gone: the pooled entry survives.
     expect(devicePool.getDevice(SIMULATOR_UDID)).toBeDefined();
@@ -317,7 +329,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.bootedDevices = discovery.devices;
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-d", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-d",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).resolves.toBeDefined();
     expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-d");
 
@@ -341,7 +357,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-simulator");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-f", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-f",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).rejects.toThrow(/Unable to verify iOS device/);
     // Unverifiable, never proven gone: retained, not pruned.
     expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
@@ -352,7 +372,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.bootedDevices = [SIMULATOR];
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-e", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-e",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).rejects.toThrow();
     expect(devicePool.getDevice(PHYSICAL_UDID)?.status).toBe("idle");
   });

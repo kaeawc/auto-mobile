@@ -620,19 +620,13 @@ test("a token declaration after socket close leaves no inert identity or later m
       { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
     ];
     await h.pool.initializeWithDevices(h.deviceManager.bootedDevices);
-    await h.pool.bindOrReuseDeviceSession(
-      "later-mint",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "different-connection",
-    );
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "later-mint",
+      deviceId: "emulator-5554",
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "different-connection",
+    });
     expect(h.manager.getSession("later-mint")?.livenessOwnerToken).toBeUndefined();
   } finally {
     proceed.resolve();

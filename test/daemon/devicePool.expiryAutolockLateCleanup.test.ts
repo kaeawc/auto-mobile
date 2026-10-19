@@ -205,7 +205,11 @@ test("#10665: expiry release whose quarantine is chained after notify clears the
   expect(() => pool.assertAutolockAccess(DEVICE.deviceId, undefined)).not.toThrow();
 
   // A non-autolock bind takes the idle device and its tool calls are not refused.
-  await pool.bindOrReuseDeviceSession("studio-session", DEVICE.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "studio-session",
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+  });
   expect(() => pool.assertAutolockAccess(DEVICE.deviceId, "studio-session")).not.toThrow();
   manager.stopCleanupTimer();
 });

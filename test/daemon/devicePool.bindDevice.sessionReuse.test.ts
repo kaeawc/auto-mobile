@@ -47,9 +47,17 @@ describe("DevicePool", () => {
     test("should reuse a live session when the device is already bound", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
-      await devicePool.bindOrReuseDeviceSession("session-1", "sim-1", "ios");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "sim-1",
+        platform: "ios",
+      });
 
-      const sessionId = await devicePool.bindOrReuseDeviceSession("session-2", "sim-1", "ios");
+      const sessionId = await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-2",
+        deviceId: "sim-1",
+        platform: "ios",
+      });
 
       expect(sessionId).toBe("session-1");
       expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
@@ -66,20 +74,14 @@ describe("DevicePool", () => {
       allowSessionRebind = false,
       oneShotCli = false,
     ) =>
-      devicePool.bindOrReuseDeviceSession(
+      devicePool.bindOrReuseDeviceSession({
         sessionId,
-        "sim-1",
-        "ios",
-        undefined,
-        undefined,
-        undefined,
+        deviceId: "sim-1",
+        platform: "ios",
         allowSessionRebind,
-        undefined,
-        undefined,
-        undefined,
         mcpSessionId,
         oneShotCli,
-      );
+      });
     const refusalOf = (promise: Promise<unknown>) =>
       promise.then(
         () => undefined,
@@ -160,20 +162,21 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
       await bindAs("session-1", "cli-connection-1", false, true);
 
-      const sessionId = await devicePool.bindOrReuseDeviceSession(
-        "session-2",
-        "sim-1",
-        "ios",
-        { name: "iPhone 15", platform: "ios", deviceId: "sim-1", isRunning: true, source: "local" },
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        "cli-connection-2",
-        true,
-      );
+      const sessionId = await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-2",
+        deviceId: "sim-1",
+        platform: "ios",
+        sourceImage: {
+          name: "iPhone 15",
+          platform: "ios",
+          deviceId: "sim-1",
+          isRunning: true,
+          source: "local",
+        },
+        allowSessionRebind: false,
+        mcpSessionId: "cli-connection-2",
+        oneShotCli: true,
+      });
 
       expect(sessionId).toBe("session-1");
       expect(sessionManager.getSession("session-2")).toBeNull();
@@ -187,26 +190,22 @@ describe("DevicePool", () => {
       await bindAs("session-1", "cli-connection-1", false, true);
 
       const refusal = await refusalOf(
-        devicePool.bindOrReuseDeviceSession(
-          "session-2",
-          "sim-1",
-          "ios",
-          {
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-2",
+          deviceId: "sim-1",
+          platform: "ios",
+          sourceImage: {
             name: "iPhone 15",
             platform: "ios",
             deviceId: "sim-1",
             isRunning: true,
             source: "local",
           },
-          new FakeChildProcess() as unknown as ChildProcess,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          "cli-connection-2",
-          true,
-        ),
+          childProcess: new FakeChildProcess() as unknown as ChildProcess,
+          allowSessionRebind: false,
+          mcpSessionId: "cli-connection-2",
+          oneShotCli: true,
+        }),
       );
 
       expect(refusal).toBeInstanceOf(Error);
@@ -242,7 +241,11 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [];
 
       await expect(
-        devicePool.bindOrReuseDeviceSession("session-stale", "sim-stale", "ios"),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-stale",
+          deviceId: "sim-stale",
+          platform: "ios",
+        }),
       ).rejects.toThrow(/not available/);
       expect(devicePool.getDevice("sim-stale")?.status).toBe("idle");
       expect(sessionManager.getSession("session-stale")).toBeNull();
@@ -255,7 +258,11 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [];
 
       await expect(
-        devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android"),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: "emulator-5554",
+          platform: "android",
+        }),
       ).rejects.toThrow(/not available|shut down|disconnected/);
 
       expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
@@ -264,11 +271,19 @@ describe("DevicePool", () => {
 
     test("preserves an active session when a pre-lock absent snapshot rejects reuse", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
       fakeDeviceManager.bootedDevices = [];
 
       await expect(
-        devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-2",
+          deviceId: "emulator-5554",
+          platform: "android",
+        }),
       ).rejects.toThrow(/not available|shut down|disconnected/);
 
       expect(devicePool.getDevice("emulator-5554")?.status).toBe("busy");

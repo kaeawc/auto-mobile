@@ -137,19 +137,14 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     });
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessions, pool);
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      device,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: device.deviceId,
+      platform: "android",
+      expectedIdentity: device,
+      allowSessionRebind: false,
+      mcpSessionId: CONNECTION,
+    });
     const live = sessions.getSession(HOLDER)!;
     live.expiresAt = timer.now() + 600_000;
     live.sessionTimeoutMs = 600_000;

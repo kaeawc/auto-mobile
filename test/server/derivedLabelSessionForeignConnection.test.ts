@@ -79,19 +79,13 @@ describe("a derived label session of a base another connection owns", () => {
     // OWNER acquires the base session, then its executePlan allocates the plan's second label
     // exactly as PlanExecutionOrchestrator.allocateDevices does: publish the label map on the
     // base, then hand the derived session to the pool allocator.
-    await pool.bindOrReuseDeviceSession(
-      BASE,
-      primary.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: BASE,
+      deviceId: primary.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     const labels = buildDeviceLabelMap(["A", "B"], BASE);
     labelSession = labels.B;
     manager.setDeviceLabels(BASE, labels);

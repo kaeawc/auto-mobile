@@ -208,12 +208,12 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
 
-      const firstBinding = await devicePool.bindOrReuseDeviceSession(
-        "session-first",
-        "emulator-5554",
-        "android",
+      const firstBinding = await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-first",
+        deviceId: "emulator-5554",
+        platform: "android",
         sourceImage,
-      );
+      });
       expect(firstBinding).toBe("session-first");
       sessionManager.setDeviceReadiness("session-first", "automationReady");
       expect(sessionManager.getDeviceReadiness("session-first")).toBe("automationReady");
@@ -222,12 +222,11 @@ describe("DevicePool", () => {
       // without a fresh source image (mirrors a warm/already-booted
       // acquisition) — the pool hands back the existing session rather than
       // binding the new id.
-      const secondBinding = await devicePool.bindOrReuseDeviceSession(
-        "session-second",
-        "emulator-5554",
-        "android",
-        undefined,
-      );
+      const secondBinding = await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-second",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
       expect(secondBinding).toBe("session-first");
 
       // The caller that requested this acquisition only needed `booted` (or

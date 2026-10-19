@@ -460,14 +460,13 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
   const secondImage: DeviceInfo = { ...image, name: second.name };
   manager.bootedDevices = [original, second];
   await pool.addDevice(second, secondImage);
-  await pool.bindOrReuseDeviceSession(
-    "session-2",
-    second.deviceId,
-    "android",
-    secondImage,
-    undefined,
-    second,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session-2",
+    deviceId: second.deviceId,
+    platform: "android",
+    sourceImage: secondImage,
+    expectedIdentity: second,
+  });
   const capturedSecond = pool.getDevice(second.deviceId)!;
   try {
     for (const [deviceId, device] of [

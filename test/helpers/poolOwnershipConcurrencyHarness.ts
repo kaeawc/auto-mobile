@@ -876,20 +876,14 @@ class OwnershipWorld {
               undefined,
               { autolockEnabled: true },
             )
-          : await this.pool.bindOrReuseDeviceSession(
+          : await this.pool.bindOrReuseDeviceSession({
               sessionId,
-              device.deviceId,
-              "android",
-              undefined,
-              undefined,
-              undefined,
-              false,
-              undefined,
-              undefined,
-              undefined,
-              connection,
-              kind === "cli",
-            );
+              deviceId: device.deviceId,
+              platform: "android",
+              allowSessionRebind: false,
+              mcpSessionId: connection,
+              oneShotCli: kind === "cli",
+            });
       if (bound === undefined) {
         return;
       }
@@ -1430,39 +1424,25 @@ class OwnershipWorld {
             keepScreenAwake: { applied: true, method: "svc", svcWasEnabled: false },
           });
           const receipt: AcquisitionReceipt = {};
-          await this.pool.bindOrReuseDeviceSession(
+          await this.pool.bindOrReuseDeviceSession({
             sessionId,
-            device.deviceId,
-            "android",
-            undefined,
-            undefined,
-            undefined,
-            true,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
+            deviceId: device.deviceId,
+            platform: "android",
+            allowSessionRebind: true,
             receipt,
-            true,
-          );
+            refusePreparedForOtherRequest: true,
+          });
           commitAcquisition(receipt);
           await drainMicrotasks(SETTLE_TURNS);
         } else {
-          await this.pool.bindOrReuseDeviceSession(
+          await this.pool.bindOrReuseDeviceSession({
             sessionId,
-            device.deviceId,
-            "android",
-            undefined,
-            undefined,
-            undefined,
-            true,
-            undefined,
-            undefined,
-            undefined,
-            client.kind === "mcp" ? client.connection : undefined,
-            client.kind === "cli",
-          );
+            deviceId: device.deviceId,
+            platform: "android",
+            allowSessionRebind: true,
+            mcpSessionId: client.kind === "mcp" ? client.connection : undefined,
+            oneShotCli: client.kind === "cli",
+          });
         }
       } catch (error) {
         // Losing the race with the session's own release is the expected outcome of a rebind.

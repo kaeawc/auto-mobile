@@ -33,7 +33,11 @@ async function createContext(): Promise<Context> {
     deviceManager,
   });
   await pool.initializeWithDevices([DEVICE]);
-  await pool.bindOrReuseDeviceSession(SESSION_ID, DEVICE.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: SESSION_ID,
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+  });
   return { timer, manager, pool, allocated: manager.getSession(SESSION_ID)! };
 }
 

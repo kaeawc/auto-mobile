@@ -527,7 +527,11 @@ describe("ToolRegistry autolock session enforcement", () => {
       }),
     );
     await pool.initializeWithDevices([androidA, androidB]);
-    await pool.bindOrReuseDeviceSession("owner-session", androidA.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidA.deviceId,
+      platform: "android",
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
     let handlerCalls = 0;

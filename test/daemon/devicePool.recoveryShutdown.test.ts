@@ -138,14 +138,13 @@ test("same-serial emulator continuity is enabled when the recovery environment i
     });
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const captured = pool.getDevice(original.deviceId)!;
     try {
       expect(pool.getRecoveryPolicy().onLoss).toBe(false);
@@ -191,14 +190,13 @@ test("continuity releases an externally closed emulator without relaunch and reh
   });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const originalConnectionId = `${captured.id}#${captured.incarnation}`;
   const incidentId = await pool.recordEmulatorLossIncident(
@@ -361,14 +359,13 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
   });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const incidentId = await pool.recordEmulatorLossIncident(
     original.deviceId,
@@ -914,14 +911,14 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
     stderr: null,
   }) as ChildProcess;
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "owner",
-    original.deviceId,
-    "android",
-    image,
-    child,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    childProcess: child,
+    expectedIdentity: original,
+  });
   await sessions.releaseSession("owner");
   await pool.releaseDevice(original.deviceId, "owner");
   expect(pool.getDevice(original.deviceId)).toMatchObject({ status: "idle", sessionId: null });
@@ -930,14 +927,14 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   await incidents.writeStarted.promise;
   let failure: unknown;
   try {
-    const binding = pool.bindOrReuseDeviceSession(
-      "new-session",
-      original.deviceId,
-      "android",
-      image,
-      child,
-      original,
-    );
+    const binding = pool.bindOrReuseDeviceSession({
+      sessionId: "new-session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      childProcess: child,
+      expectedIdentity: original,
+    });
     await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
       description: "bind armed the shared incident deadline",
     });
@@ -991,14 +988,14 @@ async function setupProcessExitPool(
   const child = exitedChild();
   const internals = pool as unknown as DevicePoolProcessExitInternals;
   await internals.trackStartedDeviceProcess(original, child);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    child,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    childProcess: child,
+    expectedIdentity: original,
+  });
   return { timer, store, sessions, pool, manager, child, internals };
 }
 

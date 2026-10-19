@@ -87,14 +87,13 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
   const image: DeviceInfo = { name: booted.name, platform, source: "local", isRunning: true };
   manager.bootedDevices = [booted];
   await pool.addDevice(booted, image);
-  await pool.bindOrReuseDeviceSession(
-    "kill-session",
-    booted.deviceId,
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "kill-session",
+    deviceId: booted.deviceId,
     platform,
-    image,
-    undefined,
-    booted,
-  );
+    sourceImage: image,
+    expectedIdentity: booted,
+  });
   const device = pool.getDevice(booted.deviceId)!;
   manager.bootedDevices = [];
 

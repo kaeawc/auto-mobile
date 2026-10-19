@@ -566,6 +566,7 @@ export class Daemon {
   private readonly httpServerFactory: () => HttpListener;
   private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider;
   private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
+  private readonly iosDeviceVerifier: () => Pick<DeviceReadiness, "verifyIosDevice">;
   private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
   private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
   // One probe lifetime shared by all MCP connections and daemon doctor calls.
@@ -735,6 +736,7 @@ export class Daemon {
     this.httpServerFactory = retained.httpServerFactory;
     this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
     this.avdManagerFactory = retained.avdManagerFactory;
+    this.iosDeviceVerifier = retained.iosDeviceVerifier;
     this.bindingExclusionFactory = retained.bindingExclusionFactory;
     this.foreignCtrlProxyForwardEvidence = retained.foreignCtrlProxyForwardEvidence;
     installDefaultProvisionedDeviceTransportFence();
@@ -3422,7 +3424,7 @@ export class Daemon {
     }
 
     logger.info(`[Daemon] Initializing CtrlProxy iOS for ${iosDevices.length} iOS device(s)...`);
-    const deviceSessionManager = DeviceReadiness.getInstance();
+    const deviceSessionManager = this.iosDeviceVerifier();
 
     await initializeIosCtrlProxyAtStartup(
       iosDevices.map((device) => device.id),
@@ -3468,7 +3470,7 @@ export class Daemon {
           this.sessionManager.getSessionForDevice(id) === sessionUuid &&
           this.managedExecutionReowner?.ownershipState(sessionUuid) === undefined
         ) {
-          await DeviceReadiness.getInstance().verifyIosDevice(id, options);
+          await this.iosDeviceVerifier().verifyIosDevice(id, options);
         }
       },
     });
@@ -3622,6 +3624,11 @@ export class Daemon {
       replaceSessionManager: (manager: SessionManager): void => {
         this.sessionManager = manager;
       },
+      replaceDevicePool: (pool: DevicePool): void => {
+        this.devicePool = pool;
+      },
+      recordAndTryRecoverCapturedDisconnect: this.recordAndTryRecoverCapturedDisconnect.bind(this),
+      deferredSessionRecoverySweeps: this.deferredSessionRecoverySweeps,
       replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
         this.observerSessionRegistry = registry;
       },
@@ -3651,6 +3658,13 @@ export class Daemon {
       setSessionBrokerConfigPath: (path: string | undefined): void => {
         this.sessionBrokerConfigPath = path;
       },
+      setExitRecordFileSystem: (fileSystem: DaemonExitRecordFileSystem): void => {
+        this.exitRecordFileSystem = fileSystem;
+      },
+      setupShutdownHandlers: (): void => this.setupShutdownHandlers(),
+      warmAndroidAvdProvenanceCache: (): void => this.warmAndroidAvdProvenanceCache(),
+      androidAvdProvenanceWarmPromise: (): Promise<unknown> | undefined =>
+        this.androidAvdProvenanceWarmPromise,
       setSocketBindCommitted: (committed: boolean): void => {
         this.socketBindCommitted = committed;
       },

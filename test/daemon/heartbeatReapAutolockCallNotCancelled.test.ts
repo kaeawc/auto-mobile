@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -97,7 +98,7 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
   async function reapPastHungCall(startCall: () => ActiveExecution): Promise<ActiveExecution> {
     const sessionManager = daemon.getSessionManager();
     const devicePool = await sessionOnPooledDevice();
-    sessionManager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(sessionManager, SESSION);
     (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
 
     const hung = startCall();

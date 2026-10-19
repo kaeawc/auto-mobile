@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { loggerCallsWithPrefix } from "../../../helpers/loggerCallsWithPrefix";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -157,10 +158,10 @@ describe("observe CtrlProxy readiness regression", () => {
   test("a returned adb error is unknown, even with empty stdout", async () => {
     spyOn(logger, "warn").mockImplementation(() => {});
     const h = harness();
-    h.adb.setCommandResponse("enabled_accessibility_services", {
-      stdout: "",
-      stderr: "ADB read failed",
-    });
+    h.adb.setCommandResponse(
+      "enabled_accessibility_services",
+      createExecResult("", "ADB read failed"),
+    );
     const execute = h.adb.executeCommand.bind(h.adb);
     const command = spyOn(h.adb, "executeCommand").mockImplementation(async (...args) => ({
       ...(await execute(...args)),

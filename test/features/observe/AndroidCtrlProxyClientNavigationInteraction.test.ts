@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterAll, beforeAll, describe, expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
@@ -34,7 +35,7 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
     AndroidCtrlProxyClient.resetInstances();
     AndroidCtrlProxyManager.resetInstances();
     navHarness = await installInMemoryNavManager();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
 
     client = AndroidCtrlProxyClient.createForTesting(device, adb, {
       webSocketFactory: (url) => {

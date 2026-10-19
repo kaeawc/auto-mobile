@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { iosHierarchyAcquisition } from "../../../src/features/observe/ios/types";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { freshTapHierarchy } from "../../../src/features/action/freshTapHierarchy";
@@ -47,14 +48,15 @@ const raw = (left: number | null): XCTestHierarchy => ({
   },
 });
 const converter = new CtrlProxyHierarchy({} as HierarchyDelegateContext);
-const observation = (left: number | null): ObserveResult => ({
-  updatedAt: 1000,
-  settled: true,
-  screenSize: { width: 390, height: 844 },
-  systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-  activeWindow: { appId: "com.example.app", activityName: "", layoutSeqSum: 0 },
-  viewHierarchy: converter.convertToViewHierarchyResult(raw(left)),
-});
+const observation = (left: number | null): ObserveResult =>
+  buildObserveResult({
+    updatedAt: 1000,
+    settled: true,
+    screenSize: { width: 390, height: 844 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    activeWindow: { appId: "com.example.app", activityName: "", layoutSeqSum: 0 },
+    viewHierarchy: converter.convertToViewHierarchyResult(raw(left)),
+  });
 afterEach(() => {
   displayTransitions.reset(device.deviceId);
   resetObserveCacheStore();

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../src/models";
 import {
@@ -21,10 +22,10 @@ describe("touchscreen input", () => {
     test(`rejects ${stream} input failure output despite a successful exit`, async () => {
       const adb = new FakeAdbExecutor();
       const command = "shell input touchscreen -d 0 tap 334 1281";
-      adb.setCommandResponse(command, {
-        stdout: stream === "stdout" ? output : "",
-        stderr: stream === "stderr" ? output : "",
-      });
+      adb.setCommandResponse(
+        command,
+        createExecResult(stream === "stdout" ? output : "", stream === "stderr" ? output : ""),
+      );
       try {
         await executeTouchscreenInput(adb, "tap 334 1281", 0);
         throw new Error("Expected touchscreen input to fail");

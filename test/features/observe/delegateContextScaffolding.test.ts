@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 /**
  * Pinning test for the delegate-context scaffolding shared by the Android and iOS
  * CtrlProxy clients (issue #5458).
@@ -43,7 +44,7 @@ const iosDevice: BootedDevice = {
 
 function createAndroidClient(): AndroidCtrlProxyClient {
   const fakeAdb = new FakeAdbExecutor();
-  fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
   fakeAdb.setScreenState(true);
   const fakeTimer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();

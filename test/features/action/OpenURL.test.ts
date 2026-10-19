@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -35,10 +36,10 @@ describe("OpenURL Android command output", () => {
       timer.enableAutoAdvance();
       // Output from test/features/action/LaunchApp.test.ts: every fallback fails.
       const output = "Error: Activity not started, unable to resolve Intent";
-      fakeAdb.setCommandResponse("am start -a android.intent.action.VIEW", {
-        stdout: stream === "stdout" ? output : "",
-        stderr: stream === "stderr" ? output : "",
-      });
+      fakeAdb.setCommandResponse(
+        "am start -a android.intent.action.VIEW",
+        createExecResult(stream === "stdout" ? output : "", stream === "stderr" ? output : ""),
+      );
       const openURL = new OpenURL(
         { name: "pixel", platform: "android", deviceId: "emulator-5554" },
         fakeAdb,
@@ -80,10 +81,13 @@ describe("OpenURL Android command output", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     // Output from test/features/action/LaunchApp.test.ts: accepted final launcher intent.
-    fakeAdb.setCommandResponse("am start -a android.intent.action.VIEW", {
-      stdout: "Warning: Activity not started, its current task has been brought to the front",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "am start -a android.intent.action.VIEW",
+      createExecResult(
+        "Warning: Activity not started, its current task has been brought to the front",
+        "",
+      ),
+    );
     const openURL = new OpenURL(
       { name: "pixel", platform: "android", deviceId: "emulator-5554" },
       fakeAdb,

@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
@@ -40,13 +41,13 @@ function observation(platform: "android" | "ios" = "android", keyboard = true): 
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 200 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, platform),
-  };
+  });
 }
 
 describe("Android keyboard output projection", () => {
@@ -193,13 +194,13 @@ function iosKeyboardObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 320, height: 700 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "ios"),
-  };
+  });
 }
 
 describe("iOS keyboard output projection (#7214)", () => {
@@ -268,13 +269,13 @@ describe("iOS keyboard output projection (#7214)", () => {
         },
       },
     };
-    const source: ObserveResult = {
+    const source: ObserveResult = buildObserveResult({
       updatedAt: 1,
       screenSize: { width: 320, height: 700 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy,
       elements: new DefaultObserveElementCollector().collect(viewHierarchy, "ios"),
-    };
+    });
     const skeleton = sanitizeObserveResult(source, {
       dropElements: true,
       project: "skeleton",
@@ -368,13 +369,13 @@ function keyboardFloodObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("IME window collapses to one skeleton node (#6871)", () => {
@@ -458,13 +459,13 @@ function decoyKeycapObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("IME identity precedence (#6871)", () => {
@@ -533,13 +534,13 @@ function sharedPackageObservation({ imeKeys = true } = {}): ObserveResult {
       },
     ],
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: viewHierarchy as never,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy as never, "android"),
-  };
+  });
 }
 
 describe("IME window membership (#6871)", () => {
@@ -599,13 +600,13 @@ function loneDecoyKeycapObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("fallback keycap corroboration (#6871)", () => {
@@ -718,13 +719,13 @@ function enclosingImeContainerObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("enclosing IME container folds with its keys (#6871)", () => {
@@ -837,13 +838,13 @@ function uncollectedImeWrapperObservation(): ObserveResult {
       },
     },
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
-  };
+  });
 }
 
 describe("uncollected IME wrapper still bounds the fold (#6908)", () => {
@@ -946,13 +947,13 @@ function crossWindowKeycapObservation(windowKeyCount: number): ObserveResult {
       },
     ],
   };
-  return {
+  return buildObserveResult({
     updatedAt: 1,
     screenSize: { width: 100, height: 800 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: viewHierarchy as never,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy as never, "android"),
-  };
+  });
 }
 
 describe("keycap corroboration is scoped to one window group (#6908)", () => {

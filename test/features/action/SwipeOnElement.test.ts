@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
 import type { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
@@ -9,11 +10,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: BootedDevice = { platform: "android", deviceId: "fake-swipe", name: "Fake" };
 const element: Element = { bounds: { left: 0, top: 0, right: 400, bottom: 800 } };
-const observation: ObserveResult = {
+const observation: ObserveResult = buildObserveResult({
   updatedAt: 0,
   screenSize: { width: 400, height: 800 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-};
+});
 
 class RecordingGesture implements Pick<ExecuteGesture, "swipe"> {
   readonly calls: Parameters<ExecuteGesture["swipe"]>[] = [];

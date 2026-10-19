@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import {
   recordObservationRead,
   wasHierarchyReadDuringCall,
@@ -291,7 +292,7 @@ describe("observation read provenance", () => {
   test("a read in an earlier call does not authorize a cache hit", async () => {
     const hierarchy = { hierarchy: { node: {} } };
     await withObservationReadScope(async () => {
-      recordObservationRead({ viewHierarchy: hierarchy });
+      recordObservationRead(buildObserveResult({ viewHierarchy: hierarchy }));
       expect(wasHierarchyReadDuringCall(hierarchy)).toBe(true);
     });
     await withObservationReadScope(async () => {
@@ -303,7 +304,7 @@ describe("observation read provenance", () => {
     const hierarchy = { hierarchy: { node: {} } };
     await Promise.all([
       withObservationReadScope(async () => {
-        recordObservationRead({ viewHierarchy: hierarchy });
+        recordObservationRead(buildObserveResult({ viewHierarchy: hierarchy }));
         await Promise.resolve();
         expect(wasHierarchyReadDuringCall(hierarchy)).toBe(true);
       }),

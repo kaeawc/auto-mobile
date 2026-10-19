@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -117,7 +118,9 @@ for (const row of scopedSelectionMatrix) {
       },
     });
     tap.observedInteraction = (action) =>
-      action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
+      action(
+        buildObserveResult({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } }),
+      );
     tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });
@@ -156,7 +159,9 @@ for (const row of scopedSelectionMatrix) {
       },
     });
     tap.observedInteraction = (action) =>
-      action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
+      action(
+        buildObserveResult({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } }),
+      );
     tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });

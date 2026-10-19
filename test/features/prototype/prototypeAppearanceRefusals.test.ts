@@ -1,3 +1,4 @@
+import { readToolEnvelopePayload } from "../../../src/utils/toolEnvelopePayload";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
@@ -28,7 +29,7 @@ const android: BootedDevice = { deviceId: "refusal-android", platform: "android"
 const ios: BootedDevice = { deviceId: "refusal-ios", platform: "ios", name: "I" };
 const spec = {
   id: "panel",
-  window: { placement: { type: "fullscreen" as const } },
+  window: { placement: { type: "fullscreen" as const }, opacity: 1 },
   root: { type: "text" as const, text: "Hello" },
 };
 const png = Buffer.concat([
@@ -83,7 +84,7 @@ describe("appearance override refusals happen before any device write (#11416)",
   async function call(device: BootedDevice, input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(readToolEnvelopePayload(response)?.payload);
   }
   const show = (device: BootedDevice, extra: Record<string, unknown>) =>
     call(device, { action: "show", spec, ...extra });

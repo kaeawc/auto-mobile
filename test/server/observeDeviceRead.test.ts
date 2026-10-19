@@ -42,7 +42,7 @@ import {
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { getStructuredField } from "../../src/utils/toolUtils";
 import { snapshotReferences } from "../../src/features/observe/SnapshotReferenceStore";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";

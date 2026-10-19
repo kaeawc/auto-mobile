@@ -11,7 +11,7 @@ import type { BootedDevice, Platform, SomePlatform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness, type DeviceReadyOptions } from "../devices/DeviceReadiness";
+import { DeviceReadiness, type DeviceReadyOptions } from "../daemon/readiness/DeviceReadiness";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
@@ -31,16 +31,16 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "./directSessionDeviceRegistry";
+} from "../utils/directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
 import {
   deviceAssignedToOtherSessionError,
   heldDeviceBindRefusal,
 } from "../daemon/inputDeviceOwnership";
-import { executionTracker } from "./executionTracker";
+import { executionTracker } from "../daemon/executionTracker";
 import { isTypedToolRefusal } from "./shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
-import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
+import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 

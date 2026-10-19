@@ -15,12 +15,12 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import type { BootedDevice } from "../../src/models";
 import { registerPlanTools } from "../../src/server/planTools";
-import * as realDeviceGestureRecordingManager from "../../src/server/deviceGestureRecordingManager";
+import * as realDeviceGestureRecordingManager from "../../src/daemon/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { z } from "zod/v4";
 import { getRemovedToolHint } from "../../src/utils/removedTools";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 
 isolateToolRegistry();
 
@@ -58,7 +58,7 @@ describe("recordDeviceGestures tool", () => {
   });
 
   afterAll(() => {
-    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: realStartDeviceGestureRecording,
       stopDeviceGestureRecording: realStopDeviceGestureRecording,
       getDeviceGestureRecordingStatus: realGetDeviceGestureRecordingStatus,
@@ -75,7 +75,7 @@ describe("recordDeviceGestures tool", () => {
   });
 
   test("successfully starts a new recording", async () => {
-    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mockStartDeviceGestureRecording,
       stopDeviceGestureRecording: mock(() => Promise.resolve({})),
       getDeviceGestureRecordingStatus: mock(() => null),
@@ -103,7 +103,7 @@ describe("recordDeviceGestures tool", () => {
       platform: "android",
     };
 
-    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mock(() => Promise.resolve(existingSession)),
       stopDeviceGestureRecording: mock(() => Promise.resolve({})),
       getDeviceGestureRecordingStatus: mock(() => existingSession),
@@ -121,7 +121,7 @@ describe("recordDeviceGestures tool", () => {
   });
 
   test("returns error when recording fails to start", async () => {
-    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mock(() =>
         Promise.reject(new Error("Unable to connect to accessibility service")),
       ),
@@ -147,7 +147,7 @@ describe("recordDeviceGestures tool", () => {
       status: "booted" as const,
     };
 
-    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+    mock.module("../../src/daemon/deviceGestureRecordingManager", () => ({
       startDeviceGestureRecording: mock(() =>
         Promise.reject(
           new Error(

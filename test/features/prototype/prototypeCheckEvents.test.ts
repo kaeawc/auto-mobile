@@ -11,12 +11,12 @@ test("decode and buffer checked input change and validation_failed events", () =
     { ...event(2), kind: "validation_failed", keys: ["email"] },
   ]) {
     const decoded = decodePrototypeEvent(wire, "test");
-    expect(decoded).toEqual(wire);
+    expect<unknown>(decoded).toEqual(wire);
     if (!decoded) {
       throw new Error("Missing event");
     }
     expect(buffer.push(decoded)).toBe(true);
-    expect(buffer.take({})).toEqual(wire);
+    expect<unknown>(buffer.take({})).toEqual(wire);
   }
 });
 test("new event kinds require their validity or failing keys", () => {

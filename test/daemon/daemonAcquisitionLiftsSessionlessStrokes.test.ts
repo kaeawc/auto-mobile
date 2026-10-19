@@ -59,7 +59,7 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
 
   test("a session acquiring a device lifts the sessionless strokes on that device", async () => {
     const lifted: string[] = [];
-    daemon.setSocketServerForTesting({
+    daemon.testHooks.setSocketServer({
       liftSessionlessStrokesOn: (deviceId) => {
         lifted.push(deviceId);
       },
@@ -71,7 +71,7 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
   });
 
   test("an acquisition before the socket server exists has no stroke to lift and succeeds", async () => {
-    daemon.setSocketServerForTesting(null);
+    daemon.testHooks.setSocketServer(null);
 
     await daemon.getSessionManager().createSession("new-owner", "emulator-5560", "android");
 

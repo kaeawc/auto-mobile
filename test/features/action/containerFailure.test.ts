@@ -8,7 +8,6 @@ import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { ScrollUntilVisible } from "../../../src/features/action/swipeon/ScrollUntilVisible";
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import { shapeToolCallError } from "../../../src/server/shapeToolCallError";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
@@ -30,7 +29,7 @@ const capture: ViewHierarchyResult = JSON.parse(
 const device = { deviceId: "fake-container-failure", name: "Fake", platform: "android" } as const;
 const missing = { elementId: "missing" };
 const nested = { text: "inner", container: missing };
-const empty: ElementResolution = { chosen: null, candidates: [], matchMode: "exact" };
+const empty: ElementResolution = { chosen: null, candidates: [], matches: [], matchMode: "exact" };
 
 afterEach(() => AndroidCtrlProxyClient.removeInstance(device.deviceId));
 
@@ -140,7 +139,7 @@ test("dragAndDrop preserves its fallback diagnostic through wrapping and result 
     create: () => new FakeAdbExecutor(),
   });
   const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
-  const action = new DragAndDrop(device, adb as AdbClient, new FakeTimer(), {
+  const action = new DragAndDrop(device, adb, new FakeTimer(), {
     hierarchyCapture: new FakeHierarchyCapture(() => capture),
     visionConfig: {
       enabled: false,
@@ -152,7 +151,14 @@ test("dragAndDrop preserves its fallback diagnostic through wrapping and result 
     },
   });
   action.observedInteraction = async (callback) =>
-    callback({ timestamp: 1, viewHierarchy: capture });
+    callback({
+      updatedAt: 1,
+      observationId: "container",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+      screenSize: { width: 500, height: 500 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: capture,
+    });
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const gesture = spyOn(client, "requestDrag").mockResolvedValue({ success: true, totalTimeMs: 0 });
   try {

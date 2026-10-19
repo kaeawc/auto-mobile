@@ -1,4 +1,5 @@
-import { McpError } from "../../src/server/mcpError";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { McpError } from "../../src/daemon/mcpError";
 import { AndroidAvdIdentityUnresolvedError } from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -35,6 +36,19 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("transport refusal exposes retry and dispatch fields on both boundaries", () => {
+    const error = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("adb: device 'emulator-5554' not found"),
+    );
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      expect(isTypedToolRefusal(error)).toBe(true);
+      expect(JSON.parse(shapeToolCallError(error, { ...context, source }).content[0].text)).toEqual(
+        { success: false, error: error.message, ...error.toPayload() },
+      );
+    }
   });
 
   test("an unrelated structurally coded actionable error stays plain text", () => {

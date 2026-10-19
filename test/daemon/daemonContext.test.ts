@@ -5,7 +5,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { sessionRenderedObservation } from "../../src/features/action/TargetDisplayAction";
 import { getDeviceLabelMap, planLifecycleSessionUuid } from "../../src/server/deviceLabelMapping";
-import { resolveAppearanceSessionKey } from "../../src/server/appearanceSessionKey";
+import { resolveAppearanceSessionKey } from "../../src/daemon/appearanceSessionKey";
 import { sessionRenderedDisplayGeneration } from "../../src/features/action/BaseVisualChange";
 
 function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>): DaemonContext {

@@ -6,8 +6,8 @@ import {
   UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
 } from "../../src/daemon/unsettledExecutionVeto";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { ExecutionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { ExecutionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

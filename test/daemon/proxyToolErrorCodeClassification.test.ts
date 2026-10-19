@@ -1,4 +1,4 @@
-import { McpError, ErrorCode } from "../../src/server/mcpError";
+import { McpError, ErrorCode } from "../../src/daemon/mcpError";
 import { describe, expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
@@ -10,7 +10,7 @@ import {
   type DaemonResponse,
 } from "../../src/daemon/types";
 import { UnissuedSessionError } from "../../src/daemon/sessionManager";
-import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 
 /**

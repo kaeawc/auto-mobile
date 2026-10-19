@@ -5,9 +5,10 @@ import {
   type DeviceDisconnectPoolPort,
 } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
+import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import type { DeviceInfo } from "../../src/models";
-import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainUntil } from "../helpers/fakeTimerStepping";
@@ -20,7 +21,7 @@ import type { RetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 
-function pooledDevice(incarnation = 1): PooledDevice {
+function pooledDevice(incarnation = 1): MutablePooledDevice {
   return {
     id: "emulator-5554",
     name: "Pixel",

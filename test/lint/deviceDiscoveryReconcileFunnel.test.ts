@@ -147,10 +147,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Disconnect monitor joins the observation to getAllDevices() by serial; reconciles first.",
     },
-    "src/daemon/socketServer.ts": {
-      calls: 2,
-      reason:
-        "Input-target discovery and the ide/* device-addressed routes; each reconciles first.",
+    "src/daemon/socketServer/inputDeviceGating.ts": {
+      calls: 1,
+      reason: "Input-target discovery reconciles first.",
+    },
+    "src/daemon/socketServer/ideDeviceRoutes.ts": {
+      calls: 1,
+      reason: "The ide/* device-addressed routes reconcile first, moved from socketServer.ts.",
     },
     "src/server/bootedDeviceResources.ts": {
       calls: 2,
@@ -171,7 +174,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason: "listDevices reconciles discovery before publishing pool-derived labels and epochs.",
     },
-    "src/server/deviceToolsProvisioning.ts": {
+    "src/server/provisioning/provisioningBoot.ts": {
       calls: 2,
       reason:
         "provisionDevice exact-boot reconciles fresh Android or per-platform discovery into the " +
@@ -211,12 +214,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
 
     // --- Consult no pooled identity -----------------------------------------
-    "src/devices/DeviceReadiness.ts": {
+    "src/daemon/readiness/DeviceReadiness.ts": {
       calls: 1,
       reason:
         "Android readiness verifies the adb-level connection state below the pool and owns no pooled identity.",
     },
-    "src/devices/ReadinessSelection.ts": {
+    "src/daemon/readiness/ReadinessSelection.ts": {
       calls: 3,
       reason:
         "Readiness discovery and selection moved from DeviceReadiness; tracks connection state " +
@@ -329,11 +332,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     const routed = [
       "src/daemon/deviceLossDiscovery.ts",
       "src/daemon/socketServer.ts",
+      "src/daemon/socketServer/ideDeviceRoutes.ts",
+      "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",
       "src/features/deviceLifecycle/deviceLifecycleCore.ts",
       "src/server/deviceToolsStartupLease.ts",
       "src/server/deviceToolsListing.ts",
-      "src/server/deviceToolsProvisioning.ts",
+      "src/server/provisioning/provisioningBoot.ts",
       "src/server/utilityTools.ts",
       "src/daemon/streamDeviceResolver.ts",
       "src/daemon/deviceGestureRecordingSocketServer.ts",

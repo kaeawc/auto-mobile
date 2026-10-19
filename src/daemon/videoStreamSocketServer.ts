@@ -5,8 +5,8 @@ import {
   stopStaleCapture,
   type DeviceCaptureRegistry,
 } from "../features/webrtc/deviceCaptureRegistry";
-import { SocketServerSingleton } from "./socketServerSingleton";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { createVideoStreamRelaySingleton, type VideoStreamRelay } from "./videoStreamRelay";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
 import {
   decideLifecycleEvent,
@@ -25,7 +25,7 @@ import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
@@ -1823,13 +1823,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 }
 
-const socketServer = new SocketServerSingleton<VideoStreamSocketServer>();
+const socketServer = createVideoStreamRelaySingleton();
 
 export function getVideoStreamSocketPath(): string {
   return socketServer.instance?.getSocketPath?.() ?? getSocketPath(VIDEO_STREAM_SOCKET_CONFIG);
 }
 
-export function setVideoStreamSocketServerForTesting(server: VideoStreamSocketServer | null): void {
+export function setVideoStreamSocketServerForTesting(server: VideoStreamRelay | null): void {
   socketServer.instance = server;
 }
 

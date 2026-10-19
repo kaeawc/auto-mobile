@@ -8,7 +8,7 @@ import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import {
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../../daemon/daemonRestartAdmission";
+} from "../../../daemon/daemonRestartPending";
 import { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";
@@ -20,8 +20,8 @@ import { holdsOwnerHeartbeatLease } from "../../../daemon/sessionBroker/provisio
 import {
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../deviceSessionResult";
-import { executionTracker, subscribeRequestCancellation } from "../../executionTracker";
+} from "../../../daemon/deviceSessionResult";
+import { executionTracker, subscribeRequestCancellation } from "../../../daemon/executionTracker";
 import {
   isControlCallOnNamedSession,
   refuseControlOnForeignOwnedSession,
@@ -31,7 +31,7 @@ import { stripInternalToolParams } from "../../internalToolParams";
 import { PlanExecutionInProgressError } from "../../planExecutionInProgressRefusal";
 import type { PlanExecutionLock } from "../../PlanExecutionLock";
 import { withAdmittedSessionEcho } from "../../routedSessionEcho";
-import { withForeignOwnedSessionMeta } from "../../routedSessionMeta";
+import { withForeignOwnedSessionMeta } from "../../../daemon/routedSessionMeta";
 import { isTypedToolRefusal, shapeToolCallError } from "../../shapeToolCallError";
 import {
   responseCarriesStructuredContent,
@@ -41,7 +41,7 @@ import {
 import type { McpToolCallExtra, McpToolCallResult, ToolCall } from "../../toolCallDispatch";
 import { formatToolParamError } from "../../toolParamError";
 import { ToolRegistry, toolHasOutputSchema } from "../../toolRegistry";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import {

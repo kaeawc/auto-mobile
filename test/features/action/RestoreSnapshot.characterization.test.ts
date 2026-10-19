@@ -38,13 +38,11 @@ describe("RestoreSnapshot settings command ordering", () => {
       const factory: AdbClientFactory = {
         create: () => adb as ReturnType<AdbClientFactory["create"]>,
       };
-      const restore = new RestoreSnapshot(
-        device,
-        factory,
-        undefined,
+      const restore = new RestoreSnapshot(device, {
+        adbFactory: factory,
         timer,
-        new DeviceSnapshotStore("/unused-snapshot-store"),
-      );
+        store: new DeviceSnapshotStore("/unused-snapshot-store"),
+      });
       const manifest: DeviceSnapshotManifest = {
         snapshotName: "settings-order",
         timestamp: "2026-01-01T00:00:00.000Z",
@@ -86,7 +84,7 @@ describe("RestoreSnapshot settings command ordering", () => {
         ]);
         expect(result.failures).toEqual([
           {
-            kind: "android_setting",
+            kind: "android_setting" as const,
             namespace: "global",
             key: "invalid key",
             reason: "invalid settings key",
@@ -95,8 +93,8 @@ describe("RestoreSnapshot settings command ordering", () => {
             ? []
             : [
                 {
-                  kind: "android_setting",
-                  namespace: "secure",
+                  kind: "android_setting" as const,
+                  namespace: "secure" as const,
                   key: "android_id",
                   reason: "device rejected setting",
                 },

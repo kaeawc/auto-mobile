@@ -15,11 +15,11 @@ export interface ReleaseReasonSerialisation {
 }
 
 export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
-  "src/server/proxyServer.ts#noActiveDeviceSessionPayload",
+  "src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload",
   "src/server/proxyServer.ts#brokerSessionEndedPayload",
   "src/server/planExecutionOrchestrator.ts#planBaseEndFields",
-  "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
-  "src/server/deviceSessionResult.ts#recoveryIdentityLossDetails",
+  "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
+  "src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails",
   "src/daemon/types.ts#releasedSessionNotFoundFields",
   "src/daemon/types.ts#sanitizeBoundSessionLoss",
   "src/daemon/socketServer/errorFrames.ts#sessionAdmissionRefusalFields",
@@ -34,11 +34,11 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Passes the bound-session error reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [
-    "src/server/deviceSessionResult.ts#recoveryIdentityLoss",
+    "src/daemon/deviceSessionResult.ts#recoveryIdentityLoss",
     "Parses a typed upstream recovery-identity error into in-memory evidence consumed by the guarded loss builders.",
   ],
   [
-    "src/server/deviceSessionResult.ts#recoveryIdentityLossPayload",
+    "src/daemon/deviceSessionResult.ts#recoveryIdentityLossPayload",
     "Passes recovery loss evidence into sessionOwnershipLostPayload and recoveryIdentityLossDetails, which build the wire fields.",
   ],
   [
@@ -50,7 +50,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Passes the release reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [
-    "src/server/deviceSessionResult.ts#sessionReleasedDuringCallPayload",
+    "src/daemon/deviceSessionResult.ts#sessionReleasedDuringCallPayload",
     "Passes the typed call-release reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [
@@ -84,6 +84,14 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
   [
     "src/daemon/sessionManager.ts",
     "In-memory session state and persistence rows; wire builders serialize its release snapshots.",
+  ],
+  [
+    "src/daemon/sessionManager/forcedStuckRelease.ts",
+    "In-memory release snapshots moved from SessionManager; wire builders serialize them.",
+  ],
+  [
+    "src/daemon/sessionManager/recoveredTerminalReleaseIntents.ts",
+    "Recovered in-memory release state moved from SessionManager; wire builders serialize its snapshots.",
   ],
   [
     "src/daemon/planLabelRegistry.ts#PlanLabelRegistry.takeDerivedLabelSessions",

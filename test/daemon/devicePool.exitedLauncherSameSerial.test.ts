@@ -1,3 +1,4 @@
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -17,6 +18,17 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // rejects that ("already running", src/utils/deviceUtils.ts), which spends the
 // crash-loop budget, marks the incident exhausted, and releases the session
 // instead of adopting the live emulator (the new-serial variant adopts).
+
+/** A launcher process that already exited with code 1 and must never be signalled again. */
+function exitedLauncherProcess(): FakeChildProcess {
+  const process = new FakeChildProcess();
+  process.pid = 42;
+  process.exitCode = 1;
+  process.kill = () => {
+    throw new Error("An exited process must not be killed");
+  };
+  return process;
+}
 
 const original: BootedDevice = {
   name: "Pixel_8_API_35",
@@ -77,17 +89,8 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
     const captured = pool.getDevice(original.deviceId)!;
 
     // AutoMobile launched this emulator; its tracked child has since exited.
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = exitedLauncherProcess();
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     // Fresh discovery still lists the same AVD, resolved, at the same serial.
     manager.bootedDevices = [original];
@@ -138,17 +141,8 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
       expectedIdentity: original,
     });
     const captured = pool.getDevice(original.deviceId)!;
-    const exitedProcess = {
-      pid: 42,
-      exitCode: 1,
-      signalCode: null,
-      kill: () => {
-        throw new Error("An exited process must not be killed");
-      },
-    } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    const exitedProcess = exitedLauncherProcess();
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     manager.bootedDevices = [];
     const result = await pool.recoverSessionBoundAndroidDeviceAfterLoss(

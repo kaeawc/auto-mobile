@@ -15,7 +15,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -340,9 +340,7 @@ describe("startDevice --create-if-missing wiring", () => {
       });
       await useFakeTeardown("android");
       // Observe the pool's readiness reservation at the moment the AVD is deleted.
-      const pool = DaemonState.getInstance().getDevicePool() as unknown as {
-        isReservedForReadiness(deviceId: string): boolean;
-      };
+      const pool = DaemonState.getInstance().getDevicePool();
       const reservedDuringRollback: boolean[] = [];
       const reservedIds: string[] = [];
       const reserve = DaemonState.getInstance().getDevicePool().reserveDeviceForReadiness;

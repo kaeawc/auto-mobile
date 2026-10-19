@@ -8,11 +8,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import type { ToolSelectionSessionManager } from "../../src/features/toolSelection/selectionSessionResolver";
-import {
-  ExecutionTrackerPlanExecutionLock,
-  type PlanExecutionLockScopeProvider,
-} from "../../src/server/PlanExecutionLock";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { type PlanExecutionLockScopeProvider } from "../../src/server/PlanExecutionLock";
+import { ExecutionTrackerPlanExecutionLock } from "../../src/server/ExecutionTrackerPlanExecutionLock";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { PlanExecutionLockScope } from "../../src/utils/ServerConfig";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {

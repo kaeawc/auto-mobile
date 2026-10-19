@@ -1,10 +1,6 @@
 import { readActiveNotificationKeysForApp as readActiveKeys } from "./systemTrayNotificationList";
 import { NOTIFICATION_TITLE_FIELD_IDS } from "./notificationHints";
-export {
-  NOTIFICATION_TITLE_FIELD_IDS,
-  SYSTEM_TRAY_SCROLL_IDLE_POLL_MS,
-  SYSTEM_TRAY_SCROLL_IDLE_TIMEOUT_MS,
-} from "./notificationHints";
+export {} from "./notificationHints";
 import {
   readTrayNotificationFields as readNotificationFields,
   listSystemTrayNotifications as listNotifications,
@@ -42,6 +38,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { SwipeRequest } from "../observe/shared/types";
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { ignoreCasePolicy, INSPECT_INTENT } from "../utility/SelectionPolicy";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -96,15 +93,7 @@ export interface SystemTrayAdb {
 
 export interface SystemTrayIosClient {
   requestSwipe(request: SwipeRequest): Promise<IosGestureResult>;
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-  ): Promise<IosGestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
 }
 
 export interface SystemTrayDependencies {
@@ -2547,7 +2536,6 @@ export const clearIosSystemTrayNotifications = async (
 };
 
 export { NotificationShadeNotOpenError } from "./systemTrayNotificationList";
-export type { ListedTrayNotification, TrayOwnershipEvidence } from "./systemTrayNotificationList";
 /** Verify label ownership against a successful, fresh installed-package inventory. */
 export const resolveUniqueTrayAppLabel = async (
   device: BootedDevice,

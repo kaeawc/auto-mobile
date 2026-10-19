@@ -48,10 +48,22 @@ function createExitOrErrorPromise(process: EventEmitter): Promise<void> {
   });
 }
 
+/** Structurally real TrackedChildProcess: an emitter plus the exit/stderr fields the tracker reads. */
+class FakeTrackedProcess extends EventEmitter implements TrackedChildProcess {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  pid?: number;
+  stderr: TrackedChildProcess["stderr"] = null;
+  kill(): boolean {
+    return true;
+  }
+}
+
 describe("ChildProcessTracker", () => {
   describe("createExitTracker", () => {
     test("tracks ignored-stdio processes without a stderr stream", async () => {
-      const process = new EventEmitter() as TrackedChildProcess;
+      const process = new FakeTrackedProcess();
       process.exitCode = null;
       process.signalCode = null;
       process.killed = false;
@@ -74,7 +86,7 @@ describe("ChildProcessTracker", () => {
         stderr: string[];
         write: (chunk: string) => void;
       } {
-        const process = new EventEmitter() as TrackedChildProcess;
+        const process = new FakeTrackedProcess();
         const stream = new EventEmitter();
         process.exitCode = null;
         process.signalCode = null;
@@ -102,7 +114,7 @@ describe("ChildProcessTracker", () => {
     });
 
     test("keeps tracking an aborted spawned child until its exit event", async () => {
-      const process = new EventEmitter() as TrackedChildProcess;
+      const process = new FakeTrackedProcess();
       process.pid = 123;
       process.exitCode = null;
       process.signalCode = null;
@@ -316,12 +328,12 @@ describe("ChildProcessTracker", () => {
 
   describe("createExitTracker stderr + signal attribution", () => {
     test("accumulates stderr chunks emitted by the tracked process", async () => {
-      const process = new EventEmitter() as TrackedChildProcess;
+      const process = new FakeTrackedProcess();
       process.exitCode = null;
       process.signalCode = null;
       process.killed = false;
       const stderrEmitter = new EventEmitter();
-      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.stderr = stderrEmitter;
       process.kill = () => true;
 
       const stderr: string[] = [];
@@ -338,12 +350,12 @@ describe("ChildProcessTracker", () => {
     });
 
     test("keeps collecting stderr after exit until the child close event", async () => {
-      const process = new EventEmitter() as TrackedChildProcess;
+      const process = new FakeTrackedProcess();
       process.exitCode = null;
       process.signalCode = null;
       process.killed = false;
       const stderrEmitter = new EventEmitter();
-      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.stderr = stderrEmitter;
       process.kill = () => true;
 
       const stderr: string[] = [];
@@ -363,7 +375,7 @@ describe("ChildProcessTracker", () => {
     });
 
     test("attributes the terminating signal when the process has already exited", async () => {
-      const process = new EventEmitter() as TrackedChildProcess;
+      const process = new FakeTrackedProcess();
       process.exitCode = 137;
       process.signalCode = "SIGKILL";
       process.killed = true;

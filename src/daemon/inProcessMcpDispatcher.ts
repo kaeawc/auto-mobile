@@ -1,7 +1,7 @@
 import { AsyncResource } from "node:async_hooks";
 import type { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, type McpServer } from "@modelcontextprotocol/server";
-import type { ExecutionCancellationReason } from "../server/executionTracker";
+import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
@@ -12,8 +12,8 @@ import {
 import { JsonBoundaryTransport } from "./jsonBoundaryTransport";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import { executionTracker } from "../server/executionTracker";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
+import { executionTracker } from "./executionTracker";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
   buildMcpRequestContext,
@@ -204,7 +204,7 @@ export function createDaemonMcpDispatcher(options: {
     createServer: (context, scope) => createStatelessMcpServer(options.base(), context, scope),
     cancelScopeExecutions: (requestScopeId, reason) =>
       executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    forgetScopeBindings: (requestScopeId) => forgetDaemonSessionBindingScope(requestScopeId),
     closeReason: options.closeReason ?? (() => MCP_FORWARD_CLOSED_REASON),
   });
 }

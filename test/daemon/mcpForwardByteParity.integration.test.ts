@@ -19,7 +19,7 @@ import {
   DAEMON_SESSION_TOOL_BINDING_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
 } from "../../src/daemon/constants";
-import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
+import { MCP_SESSION_KEY_HEADER } from "../../src/daemon/mcpSessionKey";
 import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
@@ -47,7 +47,7 @@ import {
   runWithSelectedDisplayPin,
 } from "../../src/features/observe/SessionDisplayContext";
 import { ActionableError } from "../../src/models/ActionableError";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {

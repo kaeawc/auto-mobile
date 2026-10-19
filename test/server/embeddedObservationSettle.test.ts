@@ -5,7 +5,7 @@ import type { Element } from "../../src/models/Element";
 import type { GfxMetrics } from "../../src/models/GfxMetrics";
 import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyResult";
 import type { TestHierarchyNode } from "../features/observe/observeScreenTestBuilders";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
   hasPendingTerminalScreenshot,
@@ -45,7 +45,7 @@ import { displayTransitions } from "../../src/features/observe/DisplayTransition
 import { createDeviceHierarchyCapture } from "../../src/features/observe/DeviceHierarchyCapture";
 import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
 import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
 
 /**

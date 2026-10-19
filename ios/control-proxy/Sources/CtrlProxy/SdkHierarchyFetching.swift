@@ -53,12 +53,12 @@ public enum SdkHierarchyFetchFailure: Sendable, Equatable {
 /// SDK did not report (it predates the report): the host then says "sent, not confirmed" rather than
 /// claiming every rule was installed. An empty list is a report that nothing was rejected.
 public struct SdkMockRulesOutcome: Sendable, Equatable {
-    public let ok: Bool
+    public let success: Bool
     public let rejectedMockIds: [String]?
     public let rejectedReasons: [String: String]?
 
-    public init(ok: Bool, rejectedMockIds: [String]? = nil, rejectedReasons: [String: String]? = nil) {
-        self.ok = ok
+    public init(ok success: Bool, rejectedMockIds: [String]? = nil, rejectedReasons: [String: String]? = nil) {
+        self.success = success
         self.rejectedMockIds = rejectedMockIds
         self.rejectedReasons = rejectedReasons
     }

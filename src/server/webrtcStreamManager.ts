@@ -11,7 +11,7 @@ import {
   type StreamSubscriptionEndReason,
   type StreamSubscriptionLifecycleEndReason,
 } from "../daemon/streamSubscriptionPolicy";
-import { WebRtcSubscriptionEndedError } from "./WebRtcSubscriptionEndedError";
+import { WebRtcSubscriptionEndedError } from "../daemon/WebRtcSubscriptionEndedError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";

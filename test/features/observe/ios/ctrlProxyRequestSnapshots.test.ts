@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 /**
  * Field-name wire-parity backstop for the iOS control-proxy TS client ↔ Swift runner
  * (issue #2954, checklist item 3 of #2857).
@@ -92,12 +93,9 @@ function createHarness(): Harness {
   const context: HierarchyDelegateContext = {
     serializeRequest: serializeIosRequest,
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -152,7 +150,9 @@ async function withClient(
     h.context.timer,
   );
   const context = spyOn(client, "createDelegateContext").mockReturnValue(h.context);
-  const gate = spyOn(client, "sdkCapabilityGate").mockResolvedValue(null);
+  const gate = spyOn(client.getSdkCapabilityTestHooks(), "sdkCapabilityGate").mockResolvedValue(
+    null,
+  );
   const send = spyOn(client, "sendMessage").mockImplementation((data) => {
     h.sent.push(data);
     return true;
@@ -170,13 +170,18 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "get_sdk_capabilities",
     builder: "IOSCtrlProxyClient.requestSdkCapabilities",
-    invoke: (h) => withClient(h, (client) => client["requestSdkCapabilities"](-1)),
+    invoke: (h) =>
+      withClient(h, (client) => client.getSdkCapabilityTestHooks().requestSdkCapabilities(-1)),
   },
   {
     name: "request_activate_accessibility_link",
     builder: "CtrlProxyVoiceOver.requestActivateAccessibilityLink",
     invoke: (h) =>
-      new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink("Details", 2, "owner-42"),
+      new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink({
+        text: "Details",
+        occurrence: 2,
+        ownerResourceId: "owner-42",
+      }),
   },
   {
     name: "request_magic_tap",
@@ -244,7 +249,8 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_tap_coordinates",
     builder:
       "SharedGestureDelegate.requestTapCoordinates (via CtrlProxyGestures, roundCoordinates=false)",
-    invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(120.5, 240.25, 35),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestTapCoordinates({ x: 120.5, y: 240.25, duration: 35 }),
   },
   {
     name: "request_tap_coordinates_double_tap",
@@ -283,7 +289,14 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_pinch",
     builder: "SharedGestureDelegate.requestPinch (via CtrlProxyGestures)",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestPinch(160.5, 320.25, 80.5, 200.75, 45.5, 275),
+      new CtrlProxyGestures(h.context).requestPinch({
+        centerX: 160.5,
+        centerY: 320.25,
+        distanceStart: 80.5,
+        distanceEnd: 200.75,
+        rotationDegrees: 45.5,
+        duration: 275,
+      }),
   },
   {
     name: "request_path_gesture",
@@ -778,7 +791,12 @@ describe("iOS integer millisecond request boundary", () => {
       {
         name: "tap",
         builder: "tap",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(1.5, 2.5, 250.5),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestTapCoordinates({
+            x: 1.5,
+            y: 2.5,
+            duration: 250.5,
+          }),
       },
       {
         name: "action",
@@ -823,7 +841,15 @@ describe("iOS integer millisecond request boundary", () => {
       {
         name: "pinch",
         builder: "pinch",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestPinch(1, 2, 3, 4, 0.5, 250.5),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestPinch({
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0.5,
+            duration: 250.5,
+          }),
       },
       {
         name: "multi",

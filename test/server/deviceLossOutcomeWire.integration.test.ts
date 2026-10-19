@@ -7,7 +7,7 @@ import { DeviceLostError, rememberDeviceLossAbort } from "../../src/utils/device
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { McpTestFixture, MCP_TEST_REQUEST_TIMEOUT_MS } from "../fixtures/mcpTestFixture";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";

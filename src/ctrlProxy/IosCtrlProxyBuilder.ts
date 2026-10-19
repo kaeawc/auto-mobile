@@ -1,3 +1,4 @@
+import { CtrlProxyStaleRunnerCacheError } from "./CtrlProxyStaleRunnerCacheError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
@@ -52,7 +53,7 @@ import {
   DefaultCtrlProxyCodesignVerifier,
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
 import { sortedReaddir, sortedReaddirEntries } from "../utils/io";
-import { ENV, readEnvTrimmed } from "../config/env";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 /**
  * When truthy (`1`/`true`), a failed `codesign --verify`, a failed
@@ -62,23 +63,22 @@ import { ENV, readEnvTrimmed } from "../config/env";
  * OS-enforced on the simulator anyway, so the value here is defense-in-depth on
  * physical devices alongside the #4759 hash re-verification.
  */
-export const IOS_HELPER_REQUIRE_CODESIGN_ENV = "AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN";
+export const IOS_HELPER_REQUIRE_CODESIGN_ENV = ENV.IOS_HELPER_REQUIRE_CODESIGN.name;
 /**
  * Optional pinned Apple Team ID. When set, the runner bundle's
  * `TeamIdentifier` must match; a mismatch warns (or refuses, under
  * {@link IOS_HELPER_REQUIRE_CODESIGN_ENV}). Unset by default because we ship no
  * canonical Team ID (issue #4760).
  */
-export const IOS_HELPER_TEAM_ID_ENV = "AUTOMOBILE_IOS_HELPER_TEAM_ID";
+export const IOS_HELPER_TEAM_ID_ENV = ENV.IOS_HELPER_TEAM_ID.name;
 /**
  * Expected SHA256 for an explicitly supplied or source-built runner. This keeps
  * the pre-launch integrity gate active when the local runner intentionally does
  * not match the published release artifact selected by package.json.
  */
-export const IOS_CTRL_PROXY_RUNNER_SHA256_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256";
+export const IOS_CTRL_PROXY_RUNNER_SHA256_ENV = ENV.CTRL_PROXY_IOS_RUNNER_SHA256.name;
 /** Executable represented by {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV}. */
-export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
-  "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET";
+export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV = ENV.CTRL_PROXY_IOS_RUNNER_SHA256_TARGET.name;
 /**
  * First-class "serve a locally built runner" switch (issue #5561). When truthy
  * (`1`/`true`) and no explicit {@link IOS_CTRL_PROXY_RUNNER_SHA256_ENV} is set,
@@ -93,7 +93,7 @@ export const IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV =
  * This removes the run-fail-read-`Got:`-sha-rerun dance the manual-test flow
  * previously required.
  */
-export const IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV = "AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD";
+export const IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV = ENV.CTRL_PROXY_IOS_USE_LOCAL_BUILD.name;
 
 /**
  * Turn a codesign inspection outcome into a list of human-readable problems,
@@ -179,27 +179,6 @@ export type PrefetchBuilder = Pick<
   IosCtrlProxyBuilder,
   "needsRebuild" | "getBuildProductsPath" | "getXctestrunPath" | "build"
 >;
-
-/**
- * Pre-launch runner hash mismatch explained by a stale cache rather than a
- * binary swap (#7032): the extracted runner still hashes to a PREVIOUS
- * release's `runnerSha256`, or the startup prefetch that replaces it is still
- * in flight. Launch is still refused, but callers (the daemon's startup iOS
- * init) treat it as "defer to the first tool call" instead of a tampering
- * incident. `cachedVersion` is null when only the in-flight prefetch explains
- * the mismatch (the on-disk hash is not in the registry, e.g. a nightly).
- */
-export class CtrlProxyStaleRunnerCacheError extends ActionableError {
-  constructor(
-    public readonly cachedVersion: string | null,
-    public readonly expectedVersion: string,
-  ) {
-    super(
-      `cached CtrlProxy runner is from ${cachedVersion ?? "an earlier release"}; ` +
-        `waiting for the ${expectedVersion} bundle`,
-    );
-  }
-}
 
 type IOSCtrlProxyPlatform = "simulator" | "device";
 
@@ -316,17 +295,17 @@ export class IosCtrlProxyBuilder {
     this.config = {
       projectRoot:
         config.projectRoot ||
-        process.env.AUTOMOBILE_PROJECT_ROOT ||
+        readEnvRaw(ENV.PROJECT_ROOT) ||
         IosCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
       derivedDataPath:
         config.derivedDataPath ||
-        process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA ||
+        readEnvRaw(ENV.CTRL_PROXY_IOS_DERIVED_DATA) ||
         getTempDir(IosCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
       scheme: config.scheme || IosCtrlProxyBuilder.DEFAULT_SCHEME,
       destination: config.destination || IosCtrlProxyBuilder.DEFAULT_DESTINATION,
       bundleCacheDir:
         config.bundleCacheDir ||
-        process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR ||
+        readEnvRaw(ENV.CTRL_PROXY_IOS_CACHE_DIR) ||
         // Shared downloaded bundle cache stays coordinated across data dirs.
         // AUTOMOBILE_COORDINATION_DIR relocates it; the cache-specific variable
         // above can relocate it independently.
@@ -997,11 +976,11 @@ export class IosCtrlProxyBuilder {
   }
 
   private getBundleUrl(): string {
-    const override = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL?.trim();
+    const override = readEnvRaw(ENV.CTRL_PROXY_IOS_BUNDLE_URL)?.trim();
     if (override) {
       // Reject a plaintext http:// bundle override unless the opt-out is set
       // (issue #4761); resolveIpaUrl already enforces https on the mirror knob.
-      assertHttpsAssetUrl(override, "AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL");
+      assertHttpsAssetUrl(override, ENV.CTRL_PROXY_IOS_BUNDLE_URL.name);
       return override;
     }
     return resolveIpaUrl();
@@ -1066,7 +1045,7 @@ export class IosCtrlProxyBuilder {
     }
     // For device platform, check generic overrides and the release constant (device build hash)
     if (platform === "device") {
-      const genericOverride = process.env.AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH;
+      const genericOverride = readEnvRaw(ENV.IOS_CTRL_PROXY_APP_HASH);
       if (genericOverride && genericOverride.trim().length > 0) {
         return genericOverride.trim();
       }

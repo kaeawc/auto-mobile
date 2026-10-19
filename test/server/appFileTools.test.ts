@@ -3,9 +3,9 @@ import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { registerAppFileTools } from "../../src/server/appFileTools";
 import {
   createAppFileServiceForTesting,
-  nodeAppFileFileSystem,
   type AppFileService,
 } from "../../src/server/appFileService";
+import { nodeAppFileFileSystem } from "../../src/server/appFileSupport";
 import type {
   StageSharedStorageRequest,
   SharedStorageService,

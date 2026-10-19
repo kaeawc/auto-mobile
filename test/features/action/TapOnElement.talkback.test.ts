@@ -1049,10 +1049,12 @@ describe("TapOnElement precise TalkBack coordinate fallback", () => {
       const events: string[] = [];
       const requestTapCoordinates = driver.requestTapCoordinates.bind(driver);
       const sleep = timer.sleep.bind(timer);
-      spyOn(driver, "requestTapCoordinates").mockImplementation(async (x, y, durationMs) => {
-        events.push("tap");
-        return requestTapCoordinates(x, y, durationMs);
-      });
+      spyOn(driver, "requestTapCoordinates").mockImplementation(
+        async ({ x: x, y: y, duration: durationMs }) => {
+          events.push("tap");
+          return requestTapCoordinates({ x, y, duration: durationMs });
+        },
+      );
       const doubleTap = driver.requestDoubleTapCoordinates.bind(driver);
       spyOn(driver, "requestDoubleTapCoordinates").mockImplementation(async (...args) => {
         events.push("doubleTap");
@@ -1168,15 +1170,25 @@ describe("TapOnElement screen-reader navigation result", () => {
         isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
       },
     });
-    command.refreshViewHierarchy = async () => observation.viewHierarchy;
+    command.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
     coordinate?.driver.setElements([targetElement], 0);
     spyOn(command, "observedInteraction").mockImplementation(async (block) => ({
       ...(await block(observation)),
       observation,
     }));
+    if (!observation.viewHierarchy) {
+      throw new Error("Expected target hierarchy");
+    }
+    const viewHierarchy = observation.viewHierarchy;
     command["searchForElement"] = mock(async () => ({
-      selection: { element: targetElement, indexInMatches: 0, totalMatches: 1, strategy: "first" },
-      viewHierarchy: observation.viewHierarchy,
+      selection: {
+        element: targetElement,
+        indexInMatches: 0,
+        totalMatches: 1,
+        strategy: "first" as const,
+      },
+      viewHierarchy,
+      refreshedFromDevice: true,
       containerFound: true,
       stats: { durationMs: 0, requestCount: 0, changeCount: 0 },
     }));
@@ -1225,18 +1237,18 @@ describe("TapOnElement screen-reader navigation result", () => {
       // Same CtrlProxy-first dispatchCoordinateTapOrAdbFallback path as the legacy fallback.
       expect(service.getTapHistory()).toEqual([{ x: 50, y: 50, duration: 10 }]);
       expect(fallback).toHaveBeenCalledTimes(1);
-      expect(fallback).toHaveBeenCalledWith(
-        50,
-        50,
-        10,
-        undefined,
-        undefined,
-        undefined,
-        expect.any(Function),
-        undefined,
-        undefined,
-        undefined,
-      );
+      expect(fallback).toHaveBeenCalledWith({
+        x: 50,
+        y: 50,
+        duration: 10,
+        timeoutMs: undefined,
+        perf: undefined,
+        frameContext: undefined,
+        onDispatch: expect.any(Function),
+        signal: undefined,
+        displayId: undefined,
+        beforeSend: undefined,
+      });
       expect(result.warnings).toEqual([capabilityWarning]);
     },
   );

@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -16,7 +17,7 @@ import {
 } from "./helpers/inputSocketHarness";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { FakeSocket } from "../fakes/FakeNetServer";
 
@@ -98,16 +99,7 @@ beforeEach(() => {
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
   spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
-    requestTapCoordinates: (
-      x,
-      _y,
-      _duration,
-      timeoutMs,
-      _perf,
-      _frameContext,
-      _onDispatch,
-      signal,
-    ) =>
+    requestTapCoordinates: ({ x, timeoutMs, signal }: TapCoordinatesRequest) =>
       new Promise<A11yTapCoordinatesResult>((resolve) => {
         taps.push({
           x,

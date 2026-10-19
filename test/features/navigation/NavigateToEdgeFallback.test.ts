@@ -223,6 +223,8 @@ describe("navigateTo edge fallback (#10031)", () => {
     backDestination = "Home";
     // The back-stack optimizer declines, so the recorded edge itself is replayed.
     const optimizer: PathOptimizer = {
+      areInSameTask: async () => false,
+      getNavigationRecommendation: async () => ({ method: "unknown", reason: "test" }),
       shouldUseBackButton: async () => ({ shouldUseBack: false, backPresses: 0, reason: "test" }),
     };
 

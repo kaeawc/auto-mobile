@@ -262,7 +262,8 @@ export class NavigationScreenshotManager {
 
       // 1. Capture screenshot. This manager holds a resolved ADB executor (not a factory),
       // so wrap it in a trivial factory to satisfy TakeScreenshot's factory-only contract.
-      const capture = screenshotCapture ?? new TakeScreenshot(device, { create: () => adb });
+      const capture =
+        screenshotCapture ?? new TakeScreenshot(device, { adbFactory: { create: () => adb } });
       const result = await capture.execute();
 
       if (!result.success || !result.path) {

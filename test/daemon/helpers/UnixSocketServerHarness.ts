@@ -3,7 +3,7 @@ import { UnixSocketServer, type StrokeAdmission } from "../../../src/daemon/sock
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
 import type { BootedDevice } from "../../../src/models";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import type { ResourceUpdateTargets } from "../../../src/server/listChangedBroadcast";
+import type { ResourceUpdateTargets } from "../../../src/daemon/listChangedBroadcast";
 import { fakeBindLock, unreachableMcpDispatcher } from "../../helpers/createTestUnixSocketServer";
 
 /**
@@ -16,6 +16,16 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   /** Behave as a server that already finished `start()` without opening a listener. */
   allowRequests(): void {
     this.acceptingRequests = true;
+  }
+
+  /** Whether a forward is queued under this execution key. */
+  hasForwardTail(key: string): boolean {
+    return this.mcpForwardTails.has(key);
+  }
+
+  /** Wait for every in-flight request handler, however each one ends. */
+  async settleActiveRequestHandlers(): Promise<void> {
+    await Promise.allSettled([...this.activeRequestHandlers]);
   }
 
   connect(socket: Socket): void {
@@ -179,6 +189,11 @@ export class UnixSocketServerHarness extends UnixSocketServer {
       notificationSubscribers: this.notificationSubscribers,
       activeRequestHandlers: this.activeRequestHandlers,
     };
+  }
+
+  /** The booted-device lookup the ide/* handlers run before acting on a serial. */
+  lookupBootedDevicesForIde(platform: "android" | "ios", serial: string): Promise<BootedDevice[]> {
+    return this.listBootedDevicesForIdeAction(platform, serial);
   }
 
   /** Sockets that currently own an open streamed gesture. */

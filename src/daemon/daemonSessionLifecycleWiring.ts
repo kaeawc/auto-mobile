@@ -3,12 +3,12 @@ import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
-import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
+import { resolveAppearanceSessionKey } from "./appearanceSessionKey";
 import {
   DefaultDeviceSettingsAccess,
   DeviceSettingDefaults,
@@ -20,8 +20,8 @@ import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepo
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
-} from "../server/networkStateSessionCleanup";
-import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
+} from "./networkStateSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "./performanceMonitorSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   createRecorderTeardownRecoveryMarker,
@@ -36,7 +36,7 @@ import {
   type NavigationGraphService,
 } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";

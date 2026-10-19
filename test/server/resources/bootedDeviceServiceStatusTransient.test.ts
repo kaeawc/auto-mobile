@@ -9,7 +9,7 @@ import {
   type ServiceStatusProbe,
 } from "../../../src/server/bootedDeviceResources";
 import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResources";
-import { describeDevice } from "../../../src/server/deviceDescription";
+import { describeDevice } from "../../../src/daemon/deviceDescription";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../../src/utils/logger";
 import {

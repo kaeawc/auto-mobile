@@ -30,7 +30,7 @@ const device: BootedDevice = {
 };
 const observation: ObserveResult = {
   observationId: "timing",
-  timestamp: 1,
+  updatedAt: 1,
   displayRevision: 0,
   display: { key: "external", role: "external", posture: "unknown", generation: 1 },
   screenSize: { width: 200, height: 200 },
@@ -341,7 +341,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     test("forward failure stops return", async () => {
       const h = harness({ route });
       if (route === "ctrlproxy") {
-        h.ctrl.setSwipeResult({ success: false, error: "forward failed" });
+        h.ctrl.setSwipeResult({ success: false, totalTimeMs: 0, error: "forward failed" });
       } else {
         h.adb.setCommandResult(
           "shell input touchscreen -d 2 swipe 100 160 100 40 300",

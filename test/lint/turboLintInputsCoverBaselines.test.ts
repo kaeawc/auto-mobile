@@ -17,15 +17,7 @@ const LINT_READ_FILES = {
   "turbo.json": "oxfmt formats the task configuration",
   "scripts/oxlint-baseline.txt": "oxlint-baseline.sh",
   "scripts/file-size-baseline.txt": "file-size-baseline.sh",
-  "scripts/utils-import-direction-baseline.txt":
-    "check-utils-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/db.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/devices.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
   "scripts/import-direction-baselines/ctrlProxy.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/features.txt":
     "check-tier-import-direction.ts via check-boundaries.sh",
   "scripts/import-direction-baselines/daemon.txt":
     "check-tier-import-direction.ts via check-boundaries.sh",
@@ -69,7 +61,7 @@ describe("turbo lint inputs cover declared configuration and baseline reads", ()
   });
 
   test("baseline globs are precise and turbo exclusions take precedence", () => {
-    const path = "scripts/utils-import-direction-baseline.txt";
+    const path = "scripts/file-size-baseline.txt";
     expect(coveredBy(["scripts/*-baseline.txt"], path)).toBe(true);
     expect(coveredBy(["scripts/*-baseline.txt"], "scripts/nested/other-baseline.txt")).toBe(false);
     expect(coveredBy(["scripts/*-baseline.txt"], "scripts/not-a-baseline.json")).toBe(false);

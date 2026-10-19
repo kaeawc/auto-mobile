@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -6,7 +7,7 @@ import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { PredictionHistoryRepository } from "../../../src/db/predictionHistoryRepository";
 import type { PredictionOutcomeRecord } from "../../../src/db/predictionHistoryRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
-import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
+import { buildPredictionActionContext } from "../../../src/features/action/postActionAnnotations";
 import {
   createNavigationGraphResolver,
   type NavigationDeviceRef,
@@ -16,9 +17,7 @@ import { PredictionAnalyzer } from "../../../src/features/observe/PredictionAnal
 import { PredictiveUIState } from "../../../src/features/observe/PredictiveUIState";
 import type { Element, ObserveResult } from "../../../src/models";
 import { PortManager } from "../../../src/utils/PortManager";
-import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
-import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
@@ -33,10 +32,20 @@ const SESSION_A_DEVICE: NavigationDeviceRef = { deviceId: "emulator-5554", platf
 const SESSION_B_DEVICE: NavigationDeviceRef = { deviceId: "emulator-5556", platform: "android" };
 const UNBOUND_DEVICE: NavigationDeviceRef = { deviceId: "emulator-5558", platform: "android" };
 
-const observation: ObserveResult = { updatedAt: 1, viewHierarchy: { hierarchy: {} } };
+const observation: ObserveResult = buildObserveResult({
+  updatedAt: 1,
+  screenSize: { width: 1080, height: 2400 },
+  systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+  viewHierarchy: { hierarchy: {} },
+});
 
 function interactable(text: string): Element {
-  return { text, "resource-id": text.toLowerCase(), clickable: true };
+  return {
+    text,
+    "resource-id": text.toLowerCase(),
+    clickable: true,
+    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+  };
 }
 
 describe("prediction reads follow the device's bound session graph (#10197)", () => {
@@ -81,12 +90,12 @@ describe("prediction reads follow the device's bound session graph (#10197)", ()
   }
 
   function predictiveState(buttonText: string): PredictiveUIState {
-    const state = new PredictiveUIState(resolver);
-    state["historyRepository"] = new PredictionHistoryRepository(harness.db);
     const parser = new FakeElementParser();
     parser.nextFlattenedElements = [{ element: interactable(buttonText), index: 0, depth: 0 }];
-    state["elementParser"] = parser;
-    return state;
+    return new PredictiveUIState(resolver, {
+      historyRepository: new PredictionHistoryRepository(harness.db),
+      elementParser: parser,
+    });
   }
 
   const predictedScreens = (state: PredictiveUIState, device?: NavigationDeviceRef) =>
@@ -200,24 +209,12 @@ describe("prediction outcomes are recorded on the graph that produced the predic
     });
   }
 
-  function visualChange(device: NavigationDeviceRef): BaseVisualChange {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const change = new BaseVisualChange(
-      { name: "test-device", ...device },
-      new FakeAdbExecutor(),
-      timer,
-    );
-    change.navigationGraphResolver = resolver;
-    return change;
-  }
-
   const tapOpen = { toolName: "tapOn", toolArgs: { text: "Open" } };
 
   test("buildPredictionContext reads the bound session's app and screen", async () => {
     await moveSessionTo("Home", 1_000);
 
-    const context = visualChange(SESSION_A_DEVICE)["buildPredictionContext"](tapOpen);
+    const context = buildPredictionActionContext(tapOpen, () => resolver(SESSION_A_DEVICE));
 
     expect(context).toMatchObject({ appId: APP, fromScreen: "Home", toolName: "tapOn" });
     expect(context?.navigationGraph).toBe(sessionGraph);
@@ -235,25 +232,25 @@ describe("prediction outcomes are recorded on the graph that produced the predic
       applicationId: APP,
     });
 
-    const context = visualChange(UNBOUND_DEVICE)["buildPredictionContext"](tapOpen);
+    const context = buildPredictionActionContext(tapOpen, () => resolver(UNBOUND_DEVICE));
 
     expect(context).toMatchObject({ appId: APP, fromScreen: "GlobalHome" });
     expect(context?.navigationGraph).toBe(harness.manager);
   });
 
   test("a device with no session graph screen yields no context", () => {
-    expect(visualChange(SESSION_A_DEVICE)["buildPredictionContext"](tapOpen)).toBeUndefined();
+    expect(buildPredictionActionContext(tapOpen, () => resolver(SESSION_A_DEVICE))).toBeUndefined();
   });
 
   test("the outcome compares the landing screen on the session graph that built the context", async () => {
     await moveSessionTo("Home", 1_000);
-    const context = visualChange(SESSION_A_DEVICE)["buildPredictionContext"](tapOpen);
+    const context = buildPredictionActionContext(tapOpen, () => resolver(SESSION_A_DEVICE));
     await moveSessionTo("Detail", 2_000);
     const history = new RecordingHistory();
     // The global manager never learned any screen, as in a session-bound client.
     expect(harness.manager.getCurrentScreen()).toBeNull();
     const analyzer = new PredictionAnalyzer(history);
-    const previous: ObserveResult = {
+    const previous: ObserveResult = buildObserveResult({
       ...observation,
       predictions: {
         likelyActions: [
@@ -267,7 +264,7 @@ describe("prediction outcomes are recorded on the graph that produced the predic
         ],
         interactableElements: [],
       },
-    };
+    });
 
     await analyzer.recordOutcomeForAction(previous, observation, context!);
 

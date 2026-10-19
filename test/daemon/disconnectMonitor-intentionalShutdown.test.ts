@@ -7,7 +7,7 @@ import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiv
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker, executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

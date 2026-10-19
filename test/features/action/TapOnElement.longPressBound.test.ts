@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
@@ -25,7 +26,15 @@ function harness() {
     "hierarchy-source": "uiautomator",
     bounds: { left: 10, top: 20, right: 110, bottom: 70 },
   };
-  const hierarchy: ViewHierarchyResult = { hierarchy: { node: element } };
+  const hierarchy: ViewHierarchyResult = {
+    hierarchy: {
+      node: createFlatNodeForTest({
+        text: element.text,
+        clickable: element.clickable,
+        bounds: element.bounds,
+      }),
+    },
+  };
   const action = new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "long-press-bound" },
     adb,
@@ -48,7 +57,12 @@ function harness() {
   action.observedInteraction = (callback) =>
     callback(
       recordObservationRead(
-        buildObserveResult({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+        buildObserveResult({
+          updatedAt: 0,
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: hierarchy,
+          screenSize: { width: 500, height: 500 },
+        }),
       ),
     );
   return {
@@ -116,7 +130,7 @@ describe("tapOn long press safety", () => {
       const h = harness();
       const observe = spyOn(h.action, "observedInteraction");
       const call = h.action.execute(
-        { text: "ListItem", action: "longPress", duration: 20000, display: 1 },
+        { text: "ListItem", action: "longPress", duration: 20000, display: "1" },
         { deadlineMs: h.timer.now() + remaining },
       );
       await expect(call).rejects.toBeInstanceOf(ActionableError);

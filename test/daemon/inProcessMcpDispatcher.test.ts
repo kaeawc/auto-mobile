@@ -11,7 +11,7 @@ import {
 } from "../../src/daemon/socketServer/forwardSessionKey";
 import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
 import type { McpRequestSessionContext } from "../../src/daemon/statelessMcpServerFactory";
-import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
+import type { ExecutionCancellationReason } from "../../src/daemon/executionTracker";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 

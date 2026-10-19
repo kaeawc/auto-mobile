@@ -81,7 +81,15 @@ describe("gesture request sequences", () => {
           error: "refused",
         };
       };
-      proxy.requestTwoFingerSwipe = async (x1, y1, x2, y2, duration, offset, timeout) => {
+      proxy.requestTwoFingerSwipe = async ({
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        offset,
+        timeoutMs: timeout,
+      }) => {
         calls.push(`two:${x1}:${y1}:${x2}:${y2}:${duration}:${offset}:${timeout}`);
         return { success: true, totalTimeMs: 1 };
       };
@@ -206,6 +214,16 @@ describe("gesture request sequences", () => {
         timer,
         elementSelector: selector,
         accessibilityDetector: new FakeAccessibilityDetector(),
+        androidTapper: {
+          executeAndroidTap: async (_action, x, y, duration, _target, context) => {
+            calls.push(`tap:${x}:${y}:${duration}`);
+            throwIfAborted(context?.signal);
+            context?.onActivationWarnings?.(["activation warning"]);
+          },
+          retryAndroidTapIfNoChange: async () => {
+            calls.push("retry-check");
+          },
+        },
       });
       const controller = new AbortController();
       tap.observedInteraction = async (action) => {
@@ -230,14 +248,6 @@ describe("gesture request sequences", () => {
         selector.setNextElement(element);
         return hierarchy;
       });
-      tap["executeAndroidTap"] = async (_action, x, y, duration, _target, context) => {
-        calls.push(`tap:${x}:${y}:${duration}`);
-        throwIfAborted(context?.signal);
-        context?.onActivationWarnings?.(["activation warning"]);
-      };
-      tap["retryAndroidTapIfNoChange"] = async () => {
-        calls.push("retry-check");
-      };
       const run = tap.execute(
         { action: "tap", searchUntil: { duration: mode === "expired" ? 100 : 500 } },
         { signal: controller.signal },

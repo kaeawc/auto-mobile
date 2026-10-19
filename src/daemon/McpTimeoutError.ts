@@ -1,3 +1,5 @@
+import { MCP_OVERLOAD_ERROR_CODE, type McpOverloadFailure } from "./McpOverloadError";
+
 /** Deadline expired before dispatch; retry cannot duplicate a device operation. */
 export const MCP_QUEUE_TIMEOUT_ERROR_CODE = "daemon_queue_timeout";
 
@@ -31,28 +33,6 @@ export class McpTimeoutError extends Error {
   }
 }
 
-export const MCP_OVERLOAD_ERROR_CODE = "daemon_overloaded";
-
-export interface McpOverloadFailure {
-  code: typeof MCP_OVERLOAD_ERROR_CODE;
-  retryable: true;
-  retryAfterMs: number;
-  reason: "insufficient_forward_budget";
-  queueWaitMs: number;
-  remainingTimeoutMs: number;
-}
-
-/** A live daemon rejected queued work before its caller's deadline expired. */
-export class McpOverloadError extends Error {
-  constructor(
-    message: string,
-    readonly failure: McpOverloadFailure,
-  ) {
-    super(message);
-    this.name = "McpOverloadError";
-  }
-}
-
 function isNonNegativeFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
@@ -81,3 +61,9 @@ export function sanitizeMcpOverloadFailure(value: unknown): McpOverloadFailure |
     remainingTimeoutMs: failure.remainingTimeoutMs as number,
   };
 }
+
+export { McpOverloadError } from "./McpOverloadError";
+
+export { type McpOverloadFailure } from "./McpOverloadError";
+
+export { MCP_OVERLOAD_ERROR_CODE } from "./McpOverloadError";

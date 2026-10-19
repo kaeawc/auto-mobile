@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
+import {
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -35,12 +38,7 @@ describe("explicit release of a session with a call in flight", () => {
 
   test("the cut call is answered with the typed terminal session_ownership_lost refusal", async () => {
     const execution = tracker.startExecution("tapOn", undefined, SESSION);
-    const state = {
-      isInitialized: () => true,
-      getSessionManager: () => manager,
-      getDeviceSessionRegistry: () => ({ list: () => [] }),
-      getDevicePool: () => ({ releaseDevice: async () => {} }),
-    } as unknown as Parameters<typeof handleDaemonRequest>[1];
+    const state = stateWithPool(async () => {});
 
     const reply = await handleDaemonRequest(
       {
@@ -65,18 +63,24 @@ describe("explicit release of a session with a call in flight", () => {
     });
   });
 
-  /** Releases `sessionId` through the socket method; `onFree` runs when the pool frees the device. */
-  function explicitRelease(sessionId: string, onFree: () => void = () => {}, signal?: AbortSignal) {
-    const state = {
+  function stateWithPool(releaseDevice: () => Promise<void>): DaemonStateAccess {
+    return {
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDeviceSessionRegistry: () => ({ list: () => [] }),
       getDevicePool: () => ({
-        releaseDevice: async () => {
-          onFree();
-        },
+        releaseDevice,
+        refreshDevices: async () => 0,
+        getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       }),
-    } as unknown as Parameters<typeof handleDaemonRequest>[1];
+    };
+  }
+
+  /** Releases `sessionId` through the socket method; `onFree` runs when the pool frees the device. */
+  function explicitRelease(sessionId: string, onFree: () => void = () => {}, signal?: AbortSignal) {
+    const state = stateWithPool(async () => {
+      onFree();
+    });
     return handleDaemonRequest(
       {
         id: "r1",

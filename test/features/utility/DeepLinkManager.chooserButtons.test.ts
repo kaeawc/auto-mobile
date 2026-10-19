@@ -1,3 +1,4 @@
+import type { ViewHierarchyNode } from "../../../src/models";
 import { IntentChooserHandler } from "../../../src/features/utility/IntentChooserHandler";
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
@@ -14,16 +15,16 @@ const capture = JSON.parse(
 const device = { deviceId: "emulator-5556", name: "emulator-5556", platform: "android" } as const;
 const manager = new IntentChooserHandler(device, { create: () => new FakeAdbExecutor() });
 const parser = manager.parser;
-const rootNodes: unknown[] = parser.extractRootNodes(capture.viewHierarchy);
+const rootNodes = parser.extractRootNodes(capture.viewHierarchy);
 
 type Props = Record<string, unknown>;
-const propsOf = (node: unknown): Props => parser.extractNodeProperties(node as never) as Props;
+const propsOf = (node: ViewHierarchyNode): Props => parser.extractNodeProperties(node);
 
 /** Every node of the capture in traversal order. */
-function allNodes(): unknown[] {
-  const nodes: unknown[] = [];
+function allNodes(): ViewHierarchyNode[] {
+  const nodes: ViewHierarchyNode[] = [];
   for (const root of rootNodes) {
-    parser.traverseNode(root as never, (node: unknown) => {
+    parser.traverseNode(root, (node: ViewHierarchyNode) => {
       nodes.push(node);
     });
   }
@@ -31,9 +32,9 @@ function allNodes(): unknown[] {
 }
 
 /** The matcher as it was before moving onto the shared SearchableNode predicate. */
-function legacyFindButtonByText(root: unknown, textOptions: string[]): unknown {
+function legacyFindButtonByText(root: ViewHierarchyNode, textOptions: string[]): unknown {
   let found: unknown = null;
-  parser.traverseNode(root as never, (node: unknown) => {
+  parser.traverseNode(root, (node: ViewHierarchyNode) => {
     if (found) {
       return;
     }
@@ -50,7 +51,7 @@ function legacyFindButtonByText(root: unknown, textOptions: string[]): unknown {
   return found;
 }
 
-function find(root: unknown, textOptions: string[]): unknown {
+function find(root: ViewHierarchyNode, textOptions: string[]): ViewHierarchyNode | null {
   return manager.findButtonByText(root, textOptions);
 }
 
@@ -91,6 +92,9 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
   ])("finds the %s button", (_name, options, resourceId, text) => {
     const found = rootNodes.map((root) => find(root, options)).find(Boolean);
     expect(found).toBeDefined();
+    if (!found) {
+      throw new Error("Expected chooser button");
+    }
     expect(propsOf(found)).toMatchObject({ "resource-id": resourceId, text });
   });
 
@@ -152,7 +156,7 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
     Object.defineProperty(patched, "findButtonByText", { value: () => node });
     const element = patched.findChooserButton(rootNodes as never, ["Never"]);
     expect(element?.["resource-id"]).toBe("android:id/button_always");
-    expect(element?.bounds).toEqual(parser.parseNodeBounds(node as never)?.bounds);
+    expect(element?.bounds).toEqual(parser.parseNodeBounds(node ?? null)?.bounds);
   });
 
   test.each([
@@ -164,7 +168,7 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
     const result = await tapper.handleIntentChooser(capture.viewHierarchy, preference);
     expect(result).toMatchObject({ success: true, detected: true, action: preference });
     const node = allNodes().find((candidate) => propsOf(candidate)["resource-id"] === resourceId);
-    const bounds = parser.parseNodeBounds(node as never)?.bounds;
+    const bounds = parser.parseNodeBounds(node ?? null)?.bounds;
     expect(bounds).toBeDefined();
     const center = manager.geometry.getElementCenter({ bounds } as never);
     expect(adb.getExecutedCommands()).toContain(`shell input tap ${center.x} ${center.y}`);

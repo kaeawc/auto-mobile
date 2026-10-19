@@ -4,6 +4,7 @@ import type {
   A11yActionResult,
   A11yTapCoordinatesResult,
 } from "../observe/android/types";
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import type { TalkBackDriverClient, TalkBackNavigationDriver } from "./TalkBackNavigationDriver";
 
 /**
@@ -30,21 +31,15 @@ export class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver
     return this.accessibilityService.requestCurrentFocus();
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    durationMs: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.accessibilityService.requestTapCoordinates(
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult> {
+    const { x, y, duration: durationMs = 10, onDispatch } = request;
+
+    return this.accessibilityService.requestTapCoordinates({
       x,
       y,
-      durationMs,
-      undefined,
-      undefined,
-      undefined,
+      duration: durationMs,
       onDispatch,
-    );
+    });
   }
 
   async requestDoubleTapCoordinates(

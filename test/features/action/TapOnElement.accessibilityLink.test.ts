@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -121,7 +122,7 @@ describe("tapOn semantic link outcomes", () => {
               }
             }
             expect(activate).toHaveBeenCalledTimes(1);
-            expect(activate.mock.calls[0][5]).toBe(controller.signal);
+            expect(activate.mock.calls[0][0]?.signal).toBe(controller.signal);
             expect(android.getTapHistory()).toHaveLength(0);
             expect(ios.getTapHistory()).toHaveLength(0);
             expect(adb.getCommandCalls()).toEqual([]);
@@ -188,7 +189,7 @@ describe("tapOn semantic link runner warning (#10082)", () => {
           },
         );
         const capture = spyOn(tap, "prepareSelectionCapture").mockResolvedValue(null);
-        tap.observedInteraction = async (run) => run(observation);
+        tap.observedInteraction = runBlockWith(observation);
         try {
           const outcome = await tap.execute({
             action: "tap",

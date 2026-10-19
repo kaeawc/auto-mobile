@@ -3,7 +3,7 @@ import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import {
   DEVICE_OUTSIDE_BOUND_SESSION_CODE,
   DeviceOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 
 const devices = new Map([

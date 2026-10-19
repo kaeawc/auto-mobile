@@ -101,7 +101,7 @@ describe("iOS stalled command recovery", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const instanceSpy = spyOnIosClientInstance(client);
     restoreInstance = () => instanceSpy.mockRestore();

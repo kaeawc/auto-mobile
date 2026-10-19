@@ -33,18 +33,18 @@ describe("CaptureSnapshot settings characterization", () => {
       });
       const client = new FakeCtrlProxy();
       spyOn(client, "requestSettingsList").mockImplementation(
-        async (namespace: SettingsNamespace) => {
+        async (namespace: SettingsNamespace): ReturnType<FakeCtrlProxy["requestSettingsList"]> => {
           events.push(`a11y ${namespace}`);
           if (mode === "throw") {
             throw new Error("optional service unavailable");
           }
           if (mode === "entries") {
-            return { success: true, entries: { namespace } };
+            return { totalTimeMs: 0, success: true, entries: { namespace } };
           }
           if (mode === "empty") {
-            return { success: true, entries: {} };
+            return { totalTimeMs: 0, success: true, entries: {} };
           }
-          return { success: mode === "missing" };
+          return { totalTimeMs: 0, success: mode === "missing" };
         },
       );
       const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
@@ -54,9 +54,7 @@ describe("CaptureSnapshot settings characterization", () => {
       );
       const capture = new CaptureSnapshot(
         { deviceId: "settings-fake", name: "Fake", platform: "android" },
-        { create: () => adb },
-        undefined,
-        new FakeTimer(),
+        { adbFactory: { create: () => adb }, timer: new FakeTimer() },
       );
       const result = await capture["captureSettings"]();
       const fallback = { key: "value=tail", blank: "" };

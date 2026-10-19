@@ -2,7 +2,7 @@ import {
   createHarnessServer,
   type UnixSocketServerHarness,
 } from "./helpers/UnixSocketServerHarness";
-import { ResourceUpdatedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { Socket } from "node:net";
 import * as net from "node:net";
@@ -12,7 +12,7 @@ import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { daemonSessionToolBindingStore } from "../../src/server/daemonSessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
@@ -20,7 +20,7 @@ import {
   getToolCallRecordingStatus,
   resetToolCallRecordingState,
   startToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { daemonNotificationFrameSchema } from "../helpers/wireMessageSchemas";
 
 class RpcSocket extends FakeSocket {

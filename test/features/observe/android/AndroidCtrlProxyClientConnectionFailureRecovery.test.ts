@@ -1,6 +1,5 @@
 import { createExecResult } from "../../../../src/utils/execResult";
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
   type AndroidServiceRecoveryManager,
@@ -28,14 +27,6 @@ import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlPr
  * checks the accessibility service's health through an injected manager seam,
  * rebinding (#7470) or running full setup only when it is actually unhealthy.
  */
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
-
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
   maskRealCtrlProxyWebSocketOptIn();
 
@@ -113,7 +104,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     await new Promise((resolve) => setImmediate(resolve));
   };
 
-  test("recovers exactly once after 3 consecutive connection failures", async function () {
+  const recoverAfterThreeFailures = async (): Promise<void> => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const fakeAdb = buildFakeAdb();
@@ -132,7 +123,9 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.setupCallCount).toBe(0);
     // An actual rebind repair resets the foreground cooldown immediately.
     expect(client.getReconnectStatus()).toBeNull();
-  });
+  };
+
+  test("recovers exactly once after 3 consecutive connection failures", recoverAfterThreeFailures);
 
   test("the unit-test WebSocket guard propagates and never escalates to recovery (#10470)", async function () {
     const fakeTimer = new FakeTimer();
@@ -150,16 +143,16 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
         RealCtrlProxyWebSocketInTestError,
       );
     }
-    await expect(client.requestTapCoordinates(10, 20)).rejects.toBeInstanceOf(
+    await expect(client.requestTapCoordinates({ x: 10, y: 20 })).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
     // The typed-result wrappers must rethrow it too, not resolve a failed action.
     await expect(client.requestAction("click")).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
-    await expect(client.requestActivateAccessibilityLink("Terms", 0)).rejects.toBeInstanceOf(
-      RealCtrlProxyWebSocketInTestError,
-    );
+    await expect(
+      client.requestActivateAccessibilityLink({ text: "Terms", occurrence: 0 }),
+    ).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
     await flushMicrotasks();
 
     expect(manager.isAccessibilityServiceHealthyCallCount).toBe(0);

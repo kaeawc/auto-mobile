@@ -52,7 +52,7 @@ function capture(payload: Record<string, unknown>, name: string, mode: "always" 
   const writer = new FakeArtifactWriter();
   const response = finalizeToolResponse(createStructuredToolResponse(payload), {
     name,
-    args: { project: "full" },
+    args: { project: "full", includeExtras: true },
     artifactWriter: writer,
     artifactMode: mode,
   });
@@ -99,6 +99,7 @@ describe("finalizeToolResponse serialization bytes", () => {
     const writer = new FakeArtifactWriter();
     finalizeToolResponse(response, {
       name: "fixture",
+      args: { includeExtras: true },
       artifactWriter: writer,
       artifactMode: "oversized",
     });
@@ -124,6 +125,7 @@ describe("finalizeToolResponse serialization bytes", () => {
     const writer = new FakeArtifactWriter();
     const finalized = finalizeToolResponse(response, {
       name: "tapOn",
+      defaultsToSkeletonObservation: true,
       args: { project: "full" },
       artifactWriter: writer,
       artifactMode: "oversized",
@@ -157,6 +159,7 @@ describe("finalizeToolResponse serialization bytes", () => {
       createStructuredToolResponse({ success: true, observation: observation("Done") }),
       {
         name: "tapOn",
+        defaultsToSkeletonObservation: true,
         args: { project },
         sessionUuid: "fixture",
         baselineStore,

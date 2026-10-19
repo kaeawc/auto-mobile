@@ -1,5 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -9,14 +7,19 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
-import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { androidDevice } from "./helpers/inputSocketHarness";
+import {
+  createIdeMutationServer,
+  stubAndroidCtrlProxyManager,
+  useBootedAndroidDevice,
+} from "./helpers/ideMutationServerHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
@@ -30,22 +33,45 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * exactly as daemon.ts wires it. Only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const SESSION = "ide-mid-call-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
 const IDLE_MS = 60_000;
 
+// Every device write reports its dispatch, then waits on the test's gated device call.
+class GatedCtrlProxy extends FakeCtrlProxy {
+  constructor(private readonly deviceCall: () => Promise<unknown>) {
+    super();
+  }
+
+  override getScreenScaleMetadata(): ReturnType<FakeCtrlProxy["getScreenScaleMetadata"]> {
+    return null;
+  }
+
+  override async requestTapCoordinates(
+    ...args: Parameters<FakeCtrlProxy["requestTapCoordinates"]>
+  ): ReturnType<FakeCtrlProxy["requestTapCoordinates"]> {
+    args[0].onDispatch?.();
+    await this.deviceCall();
+    return { success: true, totalTimeMs: 0 };
+  }
+
+  override async setPreference(
+    ...args: Parameters<FakeCtrlProxy["setPreference"]>
+  ): ReturnType<FakeCtrlProxy["setPreference"]> {
+    if (typeof args[5] === "object") {
+      args[5].onDispatch?.();
+    }
+    await this.deviceCall();
+  }
+}
+
 describe("idle release while the holder's device call is in flight", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let server: ReturnType<typeof createIdeMutationServer>;
+  let restoreCtrlProxyManager: () => void = () => {};
   let deviceCallStarted: boolean;
   let deviceCallSignal: AbortSignal | undefined;
   let finishDeviceCall: () => void;
@@ -56,6 +82,7 @@ describe("idle release while the holder's device call is in flight", () => {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
@@ -137,61 +164,22 @@ describe("idle release while the holder's device call is in flight", () => {
       deviceCallSignal?.throwIfAborted();
       return { success: true };
     };
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => [androidDevice],
-      getBootedDevicesDetailed: async () => ({
-        devices: [androidDevice],
-        succeededPlatforms: new Set(["android", "ios"]),
-      }),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      getScreenScaleMetadata: () => null,
-      requestTapCoordinates: (
-        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-      ) => {
-        args[6]?.();
-        return deviceCall();
-      },
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        await deviceCall();
-      },
-    }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      () =>
-        ({
-          ensureCompatibleVersion: async () => {
-            await deviceCall();
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
+    useBootedAndroidDevice(androidDevice);
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+      () => new GatedCtrlProxy(deviceCall),
     );
-    const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
-      "unused",
-      {
-        isInitialized: () => true,
-        getSessionManager: () => sessionManager,
-        getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
-      new FakeTimer(),
-      null,
-      { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
-    );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    restoreCtrlProxyManager = stubAndroidCtrlProxyManager(androidDevice, deviceCall);
+    server = createIdeMutationServer(sessionManager);
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    server.connect(socket);
   };
 
   const tearDown = async () => {
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await server.settleActiveHandlers();
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
+    restoreCtrlProxyManager();
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
     sessionManager.stopCleanupTimer();
@@ -248,7 +236,7 @@ describe("idle release while the holder's device call is in flight", () => {
 
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await server.settleActiveHandlers();
 
     expect(socket.responses.find((frame) => frame.id === "frame")).toMatchObject({ success: true });
     // The route ended its execution: nothing keeps the session past the write.
@@ -282,7 +270,7 @@ describe("idle release while the holder's device call is in flight", () => {
 
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await server.settleActiveHandlers();
 
     expect(socket.responses.find((frame) => frame.id === "frame")).toMatchObject({ success: true });
     expect(executionTracker.hasActiveSessionUuidExecutions(SESSION)).toBe(false);
@@ -314,7 +302,7 @@ describe("idle release while the holder's device call is in flight", () => {
 
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await server.settleActiveHandlers();
 
     expect(socket.responses.find((frame) => frame.id === "frame")).toMatchObject({
       success: false,

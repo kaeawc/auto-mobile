@@ -1,9 +1,13 @@
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
@@ -43,24 +47,17 @@ import {
   McpTimeoutError,
   McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
 import {
-  DaemonRestartDeferredError,
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../src/daemon/daemonRestartAdmission";
+} from "../../src/daemon/daemonRestartPending";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  daemonResponseError,
-  DaemonHandshakeMismatchError,
-  DaemonBoundSessionLostError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  DaemonRequestNotDeliveredError,
-} from "../../src/daemon/client";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -116,20 +113,23 @@ import {
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
   createToolErrorResponse,
   PooledAvdIdentityError,
   ProvisionDeviceRollbackError,
 } from "../../src/server/deviceTools";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import {
+  noActiveDeviceSessionPayload,
+  sessionOwnershipLostPayload,
+} from "../../src/daemon/deviceSessionResult";
 import {
   mcpOverloadResult,
   noActiveDeviceSessionResult,
-  noActiveDeviceSessionPayload,
   deviceControlTransportFailureResult,
   ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";
@@ -365,6 +365,17 @@ const BUILDERS: readonly FixtureEntry[] = [
             { deviceId: DEVICE, platform: "android" },
             { deviceId: "emulator-5556", platform: "android" },
           ],
+        ),
+      ),
+  ],
+  [
+    "device_transport_unavailable",
+    "AdbDeviceTransportUnavailableError via shapeToolCallError",
+    () =>
+      shaped(
+        new AdbDeviceTransportUnavailableError(
+          DEVICE,
+          new Error(`adb: device '${DEVICE}' not found`),
         ),
       ),
   ],

@@ -4,14 +4,12 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import type { TerminalReleaseIntent } from "../../src/daemon/terminalReleaseJournal";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionManager,
   TerminalSessionError,
-  type RehydrationDeviceReservation,
 } from "../../src/daemon/sessionManager";
 import {
   AndroidBootAdmissionGate,
@@ -31,32 +29,13 @@ const SPARE: BootedDevice = { deviceId: "spare-sim", name: "spare-sim", platform
 const HOLDER = "restart-holder";
 const DAEMON_A = "restart-daemon-a";
 const DAEMON_B = "restart-daemon-b";
-interface ReservationInternals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    sessionId: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-    attempt?: () => Promise<void>,
-  ): Promise<void>;
-  notifyRehydrationReservationChanged(target: RehydrationDeviceReservation["target"]): void;
-  rehydrationReservations: Map<
-    string,
-    RehydrationDeviceReservation["target"] & {
-      restartHandoff?: boolean;
-      daemonRehydration?: boolean;
-      expiryTimer?: ReturnType<FakeTimer["setTimeout"]>;
-      releasePersistence?: Promise<void>;
-    }
-  >;
-}
-
 describe("device restart reserves the entire recovery window", () => {
   let timer: FakeTimer;
   let sessions: SessionManager;
   let persistence: FakeDeviceSessionPersistence;
   let manager: FakeDeviceManager;
   let pool: DevicePool;
-  let internals: ReservationInternals;
+  let internals: DevicePool["testHooks"];
   let notifications: number;
   let managed: boolean;
   let refreshFails: boolean;
@@ -152,12 +131,11 @@ describe("device restart reserves the entire recovery window", () => {
       recoveryPolicy: { onLoss: false, maxAttempts: 1 },
       ...(withSlots ? { bindingExclusion: bindings } : {}),
     });
-    internals = pool as unknown as ReservationInternals;
-    const notify = internals.notifyRehydrationReservationChanged.bind(pool);
-    internals.notifyRehydrationReservationChanged = (target) => {
+    internals = pool.testHooks;
+    internals.notifyRehydrationReservationChanged.intercept((notify) => (target) => {
       notifications++;
       notify(target);
-    };
+    });
     await pool.initializeWithDevices(devices);
     await pool.bindOrReuseDeviceSession({
       sessionId: HOLDER,
@@ -194,7 +172,7 @@ describe("device restart reserves the entire recovery window", () => {
     );
   async function absent() {
     manager.bootedDevices = [];
-    await pool.removeDevice(SIM.deviceId, true, pool.getDevice(SIM.deviceId));
+    await pool.removeDevice(SIM.deviceId, true, pool.getDevice(SIM.deviceId) ?? undefined);
   }
   async function returned() {
     manager.bootedDevices = [SIM];
@@ -245,7 +223,7 @@ describe("device restart reserves the entire recovery window", () => {
       }),
     ).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
     expect(pool.getDevice(SIM.deviceId)?.id).toBe(SIM.deviceId);
-    expect(pool.getDevicesByPlatform("ios")).toHaveLength(1);
+    expect(pool.getAllDevices().filter((device) => device.platform === "ios")).toHaveLength(1);
   });
   arranged("bindings win at reserve time and afterwards", async () => {
     await setup([SIM], true);

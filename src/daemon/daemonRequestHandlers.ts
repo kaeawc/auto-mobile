@@ -1,14 +1,11 @@
 import { holderOf } from "./deviceBinding";
 import type { SessionBrokerService } from "./sessionBroker/service";
 import type { SessionBrokerProtocolErrorCode } from "../devices/sessionBrokerResult";
-import { SESSION_BROKER_CAPABILITY } from "./sessionBroker/hostConfig";
 import {
-  handleAbandonBrokerSessionRequest,
-  bindBrokerRegistration,
-  handlePrepareBrokerSession,
-  handleBrokerSessionStatus,
-  handleReleaseBrokerSession,
-} from "./sessionBroker/handlers";
+  SESSION_BROKER_CAPABILITY,
+  SESSION_BROKER_EXPORT_CAPABILITY,
+} from "./sessionBroker/hostConfig";
+import { bindBrokerRegistration, BROKER_DAEMON_METHOD_HANDLERS } from "./sessionBroker/handlers";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import type { BindingInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -76,7 +73,7 @@ import {
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
 import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
@@ -591,7 +588,9 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
-          ...(state.isSessionBrokerMode?.() ? [SESSION_BROKER_CAPABILITY] : []),
+          ...(state.isSessionBrokerMode?.()
+            ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
+            : []),
         ],
       },
     };
@@ -607,7 +606,7 @@ export async function handleDaemonRequest(
   return handleInitializedDaemonRequest(request, state, executions, signal, context);
 }
 
-type InitializedDaemonMethodHandler = (
+export type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions: ReleaseCutExecutions | undefined,
@@ -618,21 +617,7 @@ type InitializedDaemonMethodHandler = (
 /** Socket daemon methods served once the daemon is initialized, by method name. */
 const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonMethodHandler> =
   new Map<string, InitializedDaemonMethodHandler>([
-    [
-      "daemon/prepareSession",
-      (request, state, _executions, signal, context) =>
-        handlePrepareBrokerSession(request, state, signal, context.socketSessionId),
-    ],
-    [
-      "daemon/sessionRequestStatus",
-      (request, state, _executions, _signal, context) =>
-        handleBrokerSessionStatus(request, state, context.socketSessionId),
-    ],
-    [
-      "daemon/abandonSessionRequest",
-      (request, state) => handleAbandonBrokerSessionRequest(request, state),
-    ],
-    ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
+    ...BROKER_DAEMON_METHOD_HANDLERS,
     [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],
     [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
     [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],
@@ -839,19 +824,7 @@ async function handleHeartbeat(
   request: DaemonRequest,
   state: DaemonStateAccess,
 ): Promise<DaemonMethodResult> {
-  const heartbeatParams = request.params as
-    | {
-        sessionId?: string;
-        livenessPolicy?: string;
-        idleTimeoutMs?: number;
-        livenessOwnerToken?: string;
-        claimLivenessOwnership?: boolean;
-        reportIdleRelease?: boolean;
-        reportDaemonInstance?: boolean;
-        expectedDaemonInstance?: string;
-        livenessOwnerKind?: string;
-      }
-    | undefined;
+  const heartbeatParams = parseHeartbeatParams(request);
   const sessionId = heartbeatParams?.sessionId;
   if (!sessionId) {
     return {
@@ -868,137 +841,150 @@ async function handleHeartbeat(
   if (instanceRefusal) {
     return instanceRefusal;
   }
-  const ackReport: HeartbeatAckReport = {
-    idleRelease: heartbeatParams?.reportIdleRelease === true,
-    ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
-  };
+  const ackReport = heartbeatAckReport(heartbeatParams, daemonInstance);
   const manager = state.getSessionManager();
   const session = sessionForIngress(manager, sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
-    const miss = await resolveHeartbeatMiss(
-      manager,
-      state.getObserverSessionRegistry?.(),
-      sessionId,
-      typeof heartbeatParams?.livenessOwnerToken === "string"
-        ? heartbeatParams.livenessOwnerToken
-        : undefined,
-    );
-    if (miss.kind === "observer") {
-      return { success: true, result: { sessionId } };
-    }
-    return notFoundResult(sessionId, miss.recordedReason, ackReport.daemonInstance);
+    return heartbeatMiss(state, manager, sessionId, heartbeatParams, ackReport);
   }
-  const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
-  if (keeperRefusal) {
-    return keeperRefusal;
-  }
-  if (isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, session)) {
-    return cliKeeperNoopAck(sessionId);
-  }
-  const livenessOwnerToken =
-    typeof heartbeatParams?.livenessOwnerToken === "string" &&
-    heartbeatParams.livenessOwnerToken.length > 0
+  const context = { manager, session, sessionId, params: heartbeatParams, report: ackReport };
+  return heartbeatOwnership(context);
+}
+
+function parseHeartbeatParams(request: DaemonRequest) {
+  return request.params as
+    | {
+        sessionId?: string;
+        livenessPolicy?: string;
+        idleTimeoutMs?: number;
+        livenessOwnerToken?: string;
+        claimLivenessOwnership?: boolean;
+        reportIdleRelease?: boolean;
+        reportDaemonInstance?: boolean;
+        expectedDaemonInstance?: string;
+        livenessOwnerKind?: string;
+      }
+    | undefined;
+}
+
+interface HeartbeatContext {
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>;
+  session: Session;
+  sessionId: string;
+  params: ReturnType<typeof parseHeartbeatParams>;
+  report: HeartbeatAckReport;
+}
+
+async function heartbeatMiss(
+  state: DaemonStateAccess,
+  manager: HeartbeatContext["manager"],
+  sessionId: string,
+  heartbeatParams: ReturnType<typeof parseHeartbeatParams>,
+  ackReport: HeartbeatAckReport,
+): Promise<DaemonMethodResult> {
+  const miss = await resolveHeartbeatMiss(
+    manager,
+    state.getObserverSessionRegistry?.(),
+    sessionId,
+    typeof heartbeatParams?.livenessOwnerToken === "string"
       ? heartbeatParams.livenessOwnerToken
-      : undefined;
-  const claimsLivenessOwnership = heartbeatParams?.claimLivenessOwnership === true;
-  if (!livenessOwnerToken && isTokenOwnedOrClaimPending(session)) {
-    // Tokenless clients predate liveness ownership. Keep them compatible
-    // only until a token-bearing owner has claimed this session; afterward
-    // they are stale by definition and must not change policy or deadlines.
+      : undefined,
+  );
+  if (miss.kind === "observer") {
     return { success: true, result: { sessionId } };
   }
-  if (livenessOwnerToken) {
-    // The current owner's heartbeat renews its lease on arrival, before ownership resolves across
-    // an await (#11321). A control call arriving right behind it would otherwise read the lapsed
-    // lease, release the session, and leave this heartbeat answered "not found". Only the token
-    // that already owns the session is stamped here, so a rejected claim stays a no-op (#10050).
-    if (manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken)) {
+  return notFoundResult(sessionId, miss.recordedReason, ackReport.daemonInstance);
+}
+
+function heartbeatOwnershipGuard(ctx: HeartbeatContext): DaemonMethodResult | undefined {
+  return (
+    refuseCliKeeperOnProxySession(ctx.params?.livenessOwnerKind, ctx.session) ??
+    (isCliKeeperOnCliIdleSession(ctx.params?.livenessOwnerKind, ctx.session)
+      ? cliKeeperNoopAck(ctx.sessionId)
+      : undefined)
+  );
+}
+
+async function heartbeatOwnership(ctx: HeartbeatContext): Promise<DaemonMethodResult> {
+  const { manager, sessionId, report } = ctx;
+  const refusal = heartbeatOwnershipGuard(ctx);
+  if (refusal) {
+    return refusal;
+  }
+  const token = heartbeatOwnerToken(ctx.params);
+  const claimsOwnership = ctx.params?.claimLivenessOwnership === true;
+  if (!token && isTokenOwnedOrClaimPending(ctx.session)) {
+    // After an ownership claim, tokenless clients cannot change policy or deadlines.
+    return { success: true, result: { sessionId } };
+  }
+  if (token) {
+    // Renew only the current owner before awaiting a claim, preventing expiry races (#11321, #10050).
+    if (manager.hasLivenessOwnership?.(sessionId, token)) {
       manager.recordHeartbeat?.(sessionId);
     }
-    const outcome = await resolveLivenessOwnership(
-      manager,
-      sessionId,
-      livenessOwnerToken,
-      claimsLivenessOwnership,
-    );
-    // No authorization crosses an await: check the session and owner at the final
-    // synchronous boundary before changing policy or recording the heartbeat.
-    const rejection = rejectHeartbeatWithoutOwnership(
-      manager,
-      session,
-      sessionId,
-      livenessOwnerToken,
-      outcome,
-    );
-    if (rejection?.code === DAEMON_SESSION_NOT_FOUND_CODE) {
-      // The release that ended the session while the claim was resolving is named like on every
-      // other not-found answer (#11646); the lookup changes nothing and nothing is recorded after.
-      return sessionNotFoundResult(manager, sessionId, ackReport.daemonInstance);
-    }
+    const outcome = await resolveLivenessOwnership(manager, sessionId, token, claimsOwnership);
+    // Revalidate ownership synchronously before changing policy or recording the heartbeat.
+    const rejection = heartbeatOwnershipRejection(ctx, token, outcome);
     if (rejection) {
-      // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
-      // with its own token) while the keeper's claim was resolving; the keeper still no-ops.
-      const current = sessionForIngress(manager, sessionId);
-      return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
-        current &&
-        isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, current)
-        ? cliKeeperNoopAck(sessionId)
-        : rejection;
+      return rejection;
     }
-    if (!claimsLivenessOwnership) {
-      // A verified keeper proves only that its current owner is still
-      // alive. Policy changes are explicit claims, never recurring ticks.
+    if (!claimsOwnership) {
+      // Recurring keepers renew; only explicit claims change policy.
       manager.recordHeartbeat?.(sessionId);
-      return heartbeatAck(manager, sessionId, ackReport);
+      return heartbeatAck(manager, sessionId, report);
     }
   }
-  // A one-shot `--cli` client declares itself here (issue #6870) so the
-  // daemon stops holding its session to the 10 s heartbeat contract no
-  // one-shot process can keep. An unmarked Desktop heartbeat restores that
-  // strict contract when a prior CLI invocation widened the same session.
-  if (
-    heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY &&
-    sessionForIngress(manager, sessionId)?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY
-  ) {
-    // A managed execution's session stays on its owner lease (#11176): the CLI declaration is
-    // refused, and the ack says which policy still governs the session.
-    manager.recordHeartbeat?.(sessionId);
-    return heartbeatAck(manager, sessionId, ackReport, {
-      livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY,
-      livenessUnchanged: true,
-    });
+  return applyHeartbeatPolicy(ctx);
+}
+
+function heartbeatOwnershipRejection(
+  ctx: HeartbeatContext,
+  token: string,
+  outcome: Awaited<ReturnType<typeof resolveLivenessOwnership>>,
+): DaemonMethodResult | Promise<DaemonMethodResult> | undefined {
+  const { manager, sessionId, report } = ctx;
+  const rejection = rejectHeartbeatWithoutOwnership(
+    manager,
+    ctx.session,
+    sessionId,
+    token,
+    outcome,
+  );
+  if (rejection?.code === DAEMON_SESSION_NOT_FOUND_CODE) {
+    // Name the release that ended this claim without recording anything afterward (#11646).
+    return sessionNotFoundResult(manager, sessionId, report.daemonInstance);
   }
-  if (heartbeatParams?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
-    // The invocation carries its own resolved idle timeout: it reuses a
-    // running daemon, whose process env was read at startup and cannot
-    // reflect this invocation's override (issue #6870 review). The manager
-    // re-validates and bounds it.
-    manager.adoptCliLivenessPolicy?.(sessionId, heartbeatParams.idleTimeoutMs);
-    // Reports the idle instant like every other ack when asked (#10972).
-    return heartbeatAck(manager, sessionId, ackReport, {
-      livenessPolicy: "cli-idle",
-      idleTimeoutMs: sessionForIngress(manager, sessionId)?.heartbeatTimeoutMs,
-    });
+  if (rejection) {
+    // A concurrent CLI claim can switch to cli-idle; its keeper must still no-op.
+    const current = sessionForIngress(manager, sessionId);
+    return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
+      current &&
+      isCliKeeperOnCliIdleSession(ctx.params?.livenessOwnerKind, current)
+      ? cliKeeperNoopAck(sessionId)
+      : rejection;
+  }
+  return undefined;
+}
+
+function applyHeartbeatPolicy(ctx: HeartbeatContext): DaemonMethodResult {
+  const { manager, sessionId, report } = ctx;
+  const cliAck = applyCliHeartbeatPolicy(ctx);
+  if (cliAck) {
+    return cliAck;
   }
   if (
-    heartbeatParams?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY ||
-    heartbeatParams?.livenessPolicy === undefined
+    ctx.params?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY ||
+    ctx.params?.livenessPolicy === undefined
   ) {
-    // A long-lived stdio/HTTP proxy CAN keep the strict contract and says so
-    // on every heartbeat, so a session a previous `--cli` invocation moved
-    // onto the minutes-long idle window goes back to it (issue #6870
-    // review) instead of holding its device for that window after this
-    // client disconnects.
-    // `restoreHeartbeatLivenessPolicy` records the heartbeat itself as part
-    // of re-stamping the deadlines off the restored timeouts.
+    // Restore the proxy's strict contract after CLI use; restoration also records the heartbeat (#6870).
     if (manager.restoreHeartbeatLivenessPolicy?.(sessionId)) {
-      return heartbeatAck(manager, sessionId, ackReport, {
+      return heartbeatAck(manager, sessionId, report, {
         livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
       });
     }
   }
   manager.recordHeartbeat?.(sessionId);
-  return heartbeatAck(manager, sessionId, ackReport);
+  return heartbeatAck(manager, sessionId, report);
 }
 
 /** What a heartbeat asked its acknowledgement to report besides the session id. */
@@ -1008,11 +994,7 @@ interface HeartbeatAckReport {
   daemonInstance?: string;
 }
 
-/**
- * Refuse, before anything changes, a heartbeat meant for another daemon process (#10989). A proxy
- * probing for a daemon that resumed after a stall names the process it last heard from, so a
- * restarted daemon is not adopted behind the harness's back.
- */
+/** Refuse another daemon's heartbeat before mutation, so probes cannot adopt a restart (#10989). */
 function refuseOtherDaemonInstance(
   expected: unknown,
   daemonInstance: string,
@@ -1029,12 +1011,8 @@ function refuseOtherDaemonInstance(
 }
 
 /**
- * A heartbeat acknowledgement that also reports when the daemon would idle-release the session
- * when the heartbeat asks (`reportIdleRelease`, so other clients' wire fixtures stay as they are)
- * (`idleReleaseAt`, an epoch-ms instant from the daemon's own idle window, veto included, the same
- * value `session-info` reports). It reports without extending anything: the proxy judges idleness
- * by the daemon's clock instead of its own (#10823). A numerical idle deadline moves only with
- * tool activity; a managed execution reports null while its judged owner lease is non-lapsed.
+ * Opt-in idleReleaseAt matches session-info's vetoed daemon wall clock without extending it (#10823).
+ * Tool activity alone moves idle deadlines; managed executions with a live owner lease report null.
  */
 function heartbeatAck(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
@@ -1062,21 +1040,14 @@ function heartbeatAck(
   return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
 }
 
-/**
- * A proxy owns a session when a token has claimed it under the strict heartbeat policy: stdio/HTTP
- * proxies claim with `heartbeat`, while one-shot `--cli` owners move the session to `cli-idle`.
- */
+/** Proxy tokens claim heartbeat policy; one-shot CLI owners use cli-idle. */
 function isProxyOwnedSession(session: Session): boolean {
   return (
     holdsOwnerHeartbeatLease(session.livenessPolicy) && session.livenessOwnerToken !== undefined
   );
 }
 
-/**
- * The external CLI keeper is for one-shot CLI sessions only. Refuse it on a proxy-owned session
- * whatever its token or lease state, before any ownership or policy logic runs, so the refusal
- * changes nothing on the session (#10054). Requests without the keeper marker are unaffected.
- */
+/** Refuse marked CLI keepers on proxy sessions before any ownership/policy mutation (#10054). */
 export function refuseCliKeeperOnProxySession(
   livenessOwnerKind: string | undefined,
   session: Session,
@@ -1092,12 +1063,9 @@ export function refuseCliKeeperOnProxySession(
 }
 
 /**
- * Owner decision 2026-10-09 (#11096): an external `--daemon heartbeat` keeper adds nothing to a
- * `cli-idle` session — its idle window runs from tool calls, not heartbeats, and it never holds a
- * live owner lease — while every one-shot `--cli` call re-claims its liveness, so a keeper that
- * claimed it was displaced by the next call and failed its next tick. A keeper heartbeat on such
- * a session is therefore a successful no-op: it neither claims liveness ownership nor touches the
- * session. Sessions on the strict heartbeat contract keep the keeper's existing behaviour.
+ * Owner decision 2026-10-09 (#11096): CLI-idle keepers succeed without touching or claiming sessions;
+ * only tool calls move their idle windows, and each CLI call reclaims ownership. Strict leases retain
+ * keeper behavior, while this no-op prevents the next CLI call from displacing an unnecessary claim.
  */
 function isCliKeeperOnCliIdleSession(
   livenessOwnerKind: string | undefined,
@@ -1116,11 +1084,8 @@ function cliKeeperNoopAck(sessionId: string): DaemonMethodResult {
 }
 
 /**
- * Verify the resolved ownership outcome at the synchronous heartbeat mutation boundary.
- * Returns the failure to answer with, or undefined
- * when the token owns the session. A rejected claim is a complete liveness
- * no-op: it cannot change the owner, restore a policy, or extend
- * lastUsedAt/lastHeartbeat/expiresAt (#10050).
+ * Revalidate ownership at the synchronous mutation boundary; undefined means ownership is valid.
+ * Rejected claims cannot change ownership, policy, lastUsedAt/lastHeartbeat/expiresAt (#10050).
  */
 function rejectHeartbeatWithoutOwnership(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
@@ -1322,7 +1287,7 @@ export interface SessionExecutionCounter {
 
 export async function handleSessionInfo(
   request: DaemonRequest,
-  state: DaemonStateAccess,
+  state: Pick<DaemonStateAccess, "getSessionManager">,
   executions: SessionExecutionCounter = executionTracker,
 ): Promise<DaemonMethodResult> {
   const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
@@ -1792,4 +1757,49 @@ async function handleRelinquishDeviceLease(
   // device's client synchronously before its first await.
   await port.release(deviceId);
   return { success: true, result: { ...status, released: true, reason: decision.reason } };
+}
+
+function heartbeatAckReport(
+  heartbeatParams: ReturnType<typeof parseHeartbeatParams>,
+  daemonInstance: string,
+): HeartbeatAckReport {
+  return {
+    idleRelease: heartbeatParams?.reportIdleRelease === true,
+    ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
+  };
+}
+
+function heartbeatOwnerToken(
+  heartbeatParams: ReturnType<typeof parseHeartbeatParams>,
+): string | undefined {
+  return typeof heartbeatParams?.livenessOwnerToken === "string" &&
+    heartbeatParams.livenessOwnerToken.length > 0
+    ? heartbeatParams.livenessOwnerToken
+    : undefined;
+}
+
+function applyCliHeartbeatPolicy(ctx: HeartbeatContext): DaemonMethodResult | undefined {
+  // One-shot CLI use widens idle policy; proxy heartbeats restore the strict contract (#6870).
+  if (
+    ctx.params?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY &&
+    sessionForIngress(ctx.manager, ctx.sessionId)?.livenessPolicy ===
+      MANAGED_EXECUTION_LIVENESS_POLICY
+  ) {
+    // Managed executions retain their owner lease and report the unchanged policy (#11176).
+    ctx.manager.recordHeartbeat?.(ctx.sessionId);
+    return heartbeatAck(ctx.manager, ctx.sessionId, ctx.report, {
+      livenessPolicy: MANAGED_EXECUTION_LIVENESS_POLICY,
+      livenessUnchanged: true,
+    });
+  }
+  if (ctx.params?.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
+    // Revalidate this invocation's timeout; a running daemon cannot reread its override (#6870).
+    ctx.manager.adoptCliLivenessPolicy?.(ctx.sessionId, ctx.params.idleTimeoutMs);
+    // Reports the idle instant like every other ack when asked (#10972).
+    return heartbeatAck(ctx.manager, ctx.sessionId, ctx.report, {
+      livenessPolicy: "cli-idle",
+      idleTimeoutMs: sessionForIngress(ctx.manager, ctx.sessionId)?.heartbeatTimeoutMs,
+    });
+  }
+  return undefined;
 }

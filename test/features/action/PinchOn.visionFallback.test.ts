@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -40,7 +41,7 @@ describe("PinchOn vision fallback", () => {
   let managerSpy: ReturnType<typeof spyOn> | null = null;
 
   const createHierarchy = (): ViewHierarchyResult => ({
-    hierarchy: { node: [] },
+    hierarchy: { node: createFlatNodeForTest({ node: [] }) },
     packageName: "com.test.app",
     updatedAt: Date.now(),
   });

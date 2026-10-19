@@ -1,7 +1,8 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
-import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { expect, spyOn, test } from "bun:test";
+import type { SessionPreservingRecoveryResult } from "../../src/daemon/devicePool";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -20,7 +21,7 @@ async function setupFailedReleaseFence() {
   context.sessions.setActiveSessionExecutionChecker((id) =>
     context.pool.isSessionRecoveryInFlight(id),
   );
-  const internals = poolInternals(context.pool);
+  const internals = context.pool.testHooks;
   const record = internals.startAndroidRecoveryRecord("session", { deviceId: original.deviceId }, [
     "loss",
     "quarantine",
@@ -96,7 +97,7 @@ test("a live heartbeat leaves a due failed-release fence untouched", async () =>
 
 test("an in-flight promise blocks reaping a failed-release fence with or without a deadline", async () => {
   const { pool, timer, monitor, releases, record } = await setupFailedReleaseFence();
-  const recovery = Promise.withResolvers<void>();
+  const recovery = Promise.withResolvers<SessionPreservingRecoveryResult>();
   recoveryInternals(pool).sessionPreservingRecoveries.set("session", {
     promise: recovery.promise,
   });
@@ -107,7 +108,7 @@ test("an in-flight promise blocks reaping a failed-release fence with or without
     await monitor.tick();
   }
   expect(releases).toEqual([]);
-  recovery.resolve();
+  recovery.resolve("released");
 });
 
 test("idle cleanup retries a failed terminal release and honors its backoff", async () => {

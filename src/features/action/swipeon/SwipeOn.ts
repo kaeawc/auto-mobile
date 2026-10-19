@@ -49,8 +49,8 @@ import {
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import { resolveSwipeDirection } from "./swipeOnUtils";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
+import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -440,7 +440,6 @@ export class SwipeOn extends BaseVisualChange {
     return this.autoTargeting.withAutoTargetDecision({ result, decision });
   }
 
-  // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
   private async executeLegacy(
     options: SwipeOnOptions,
     progress?: ProgressCallback,

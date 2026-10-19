@@ -67,7 +67,12 @@ describe("RestoreSnapshot", () => {
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create RestoreSnapshot instance with fakes
-    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, fakeEmulator, fakeTimer, store);
+    restoreSnapshot = new RestoreSnapshot(device, {
+      adbFactory: fakeAdbFactory,
+      emulator: fakeEmulator,
+      timer: fakeTimer,
+      store,
+    });
 
     // Setup default command results
     fakeAdb.setCommandResult("shell pm clear com.example.app", "Success");
@@ -192,18 +197,16 @@ describe("RestoreSnapshot", () => {
         includeSettings: false,
       };
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
-      const notReadyEmulator = {
-        waitForEmulatorReady: async () => {
-          throw new ActionableError("timed out waiting for boot completion");
-        },
-      } as AndroidEmulatorClient;
-      const restoring = new RestoreSnapshot(
-        device,
-        fakeAdbFactory,
-        notReadyEmulator,
-        fakeTimer,
+      const notReadyEmulator = new AndroidEmulatorClient();
+      notReadyEmulator.waitForEmulatorReady = async () => {
+        throw new ActionableError("timed out waiting for boot completion");
+      };
+      const restoring = new RestoreSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        emulator: notReadyEmulator,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       const restoringPromise = restoring.execute({ snapshotName, manifest, useVmSnapshot: true });
       await expect(restoringPromise).rejects.toThrow(
@@ -226,19 +229,17 @@ describe("RestoreSnapshot", () => {
       };
       const calls: string[] = [];
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
-      const notReadyEmulator = {
-        waitForEmulatorReady: async () => {
-          calls.push("ready");
-          throw new Error("timed out waiting for boot completion");
-        },
-      } as AndroidEmulatorClient;
-      const restoring = new RestoreSnapshot(
-        device,
-        fakeAdbFactory,
-        notReadyEmulator,
-        fakeTimer,
+      const notReadyEmulator = new AndroidEmulatorClient();
+      notReadyEmulator.waitForEmulatorReady = async () => {
+        calls.push("ready");
+        throw new Error("timed out waiting for boot completion");
+      };
+      const restoring = new RestoreSnapshot(device, {
+        adbFactory: fakeAdbFactory,
+        emulator: notReadyEmulator,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       await expect(
         restoring.execute({
@@ -407,13 +408,11 @@ describe("RestoreSnapshot", () => {
         platform: "android",
       };
 
-      const restorePhysical = new RestoreSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const restorePhysical = new RestoreSnapshot(physicalDevice, {
+        adbFactory: fakeAdbFactory,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       // Create VM snapshot manifest (but can't restore on physical device)
       const manifest: DeviceSnapshotManifest = {
@@ -810,18 +809,11 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
   );
 
   function makeRestoreWithFileOperations(
-    operations: NonNullable<ConstructorParameters<typeof RestoreSnapshot>[7]>,
+    operations: NonNullable<
+      NonNullable<ConstructorParameters<typeof RestoreSnapshot>[1]>["iosRestoreOperations"]
+    >,
   ): RestoreSnapshot {
-    return new RestoreSnapshot(
-      device,
-      undefined,
-      undefined,
-      undefined,
-      store,
-      simctl,
-      undefined,
-      operations,
-    );
+    return new RestoreSnapshot(device, { store, simctl, iosRestoreOperations: operations });
   }
 
   it("returns the failed bundle while another iOS bundle restores", async () => {
@@ -939,18 +931,16 @@ describe("RestoreSnapshot (iOS)", () => {
   });
 
   function makeRestore(
-    operations?: ConstructorParameters<typeof RestoreSnapshot>[7],
+    operations?: NonNullable<
+      ConstructorParameters<typeof RestoreSnapshot>[1]
+    >["iosRestoreOperations"],
   ): RestoreSnapshot {
-    return new RestoreSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    return new RestoreSnapshot(device, {
+      timer: new FakeTimer(),
       store,
       simctl,
-      undefined,
-      operations,
-    );
+      iosRestoreOperations: operations,
+    });
   }
 
   // All gate version values below are synthetic.
@@ -1123,9 +1113,9 @@ describe("RestoreSnapshot (iOS)", () => {
     // restore over a failing simctl transport (#5620).
     device = { deviceId: "00008030-001C2D3E1234567A", name: "iPhone 15 Pro", platform: "ios" };
 
-    await expect(makeRestore().execute({ snapshotName: "physical" })).rejects.toThrow(
-      /physical iOS device/i,
-    );
+    await expect(
+      makeRestore().execute({ snapshotName: "physical", manifest: compatibilityManifest("17.0") }),
+    ).rejects.toThrow(/physical iOS device/i);
     expect(simctl.getMethodCalls("launchApp").length).toBe(0);
   });
 

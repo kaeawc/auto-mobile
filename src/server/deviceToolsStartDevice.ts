@@ -15,7 +15,7 @@ import {
   isAnonymousAcquisitionSession,
   type SessionRecoveryTarget,
 } from "../daemon/sessionManager";
-import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import type { DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 import { recordAcquiredSessionReadiness } from "./recordAcquiredSessionReadiness";
 import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -33,18 +33,18 @@ import {
   trackDeviceAcquisitionReadiness,
 } from "../utils/deviceReadinessLock";
 import {
-  createDefaultRunnerReadinessService,
   RunnerReadinessError,
   type RunnerReadinessRequest,
 } from "../ctrlProxy/RunnerReadinessService";
+import { createDefaultRunnerReadinessService } from "../daemon/defaultRunnerReadinessService";
 import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
-import { registerDirectSessionDevice } from "./directSessionDeviceRegistry";
-import { describeDevice, projectBootedDevice } from "./deviceDescription";
+import { registerDirectSessionDevice } from "../utils/directSessionDeviceRegistry";
+import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
 import type { StartDeviceReadiness } from "./toolOutputSchemas";
 import { ProgressCallback } from "./toolRegistry";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -1032,10 +1032,7 @@ async function resumePreparedDeviceSession(
       resumeSessionId,
       {
         assignDeviceToSession: async (_id, _platform, target) => {
-          if (
-            !target ||
-            !daemonState.getDevicePool().matchesRestartRecoveryTarget(device, target)
-          ) {
+          if (!target || !pool.matchesRestartRecoveryTarget(device, target)) {
             throw new ActionableError(
               `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
             );
@@ -1049,6 +1046,7 @@ async function resumePreparedDeviceSession(
       device.platform,
       undefined,
       true,
+      { signal: getAbortSignal() },
     );
     if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
       throw new ActionableError(

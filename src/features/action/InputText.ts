@@ -123,7 +123,7 @@ interface KeyboardCloser {
 type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory) => KeyboardCloser;
 
 const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory) => {
-  const keyboard = new Keyboard(device, adbFactory);
+  const keyboard = new Keyboard(device, { adbFactory });
   return {
     close: (signal) => keyboard.execute("close", signal),
   };

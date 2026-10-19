@@ -1,17 +1,18 @@
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { DeviceSessionManager } from "../../src/daemon/readiness/DeviceSessionManager";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
 import type { MockLocationClears } from "../../src/features/utility/MockLocationClear";
-import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { registerPerformanceMonitorSessionCleanup } from "../../src/daemon/performanceMonitorSessionCleanup";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -85,7 +86,12 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
     return sessionA;
   }
 
-  for (const lateReason of ["device-killed", "explicit-release", "heartbeat-timeout"]) {
+  const lateReasons: SessionReleaseReason[] = [
+    "device-killed",
+    "explicit-release",
+    "heartbeat-timeout",
+  ];
+  for (const lateReason of lateReasons) {
     test(`a late ${lateReason} leaves B's route and sampling running`, async () => {
       const sessionA = await handOverToB();
 

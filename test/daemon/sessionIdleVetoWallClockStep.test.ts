@@ -7,13 +7,13 @@ import {
 } from "../../src/daemon/sessionManager";
 import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/models/deviceAcquisitionRefusals";
 import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
 import {
   ExecutionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../../src/server/executionTracker";
+} from "../../src/daemon/executionTracker";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,

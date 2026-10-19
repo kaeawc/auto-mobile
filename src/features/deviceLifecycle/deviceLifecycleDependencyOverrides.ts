@@ -6,11 +6,16 @@ import type { DeviceToolsDependencies } from "./deviceLifecycleCore";
 export function provisionDeviceDependencyOverrides(
   deps: Partial<DeviceToolsDependencies>,
   currentDeps: DeviceToolsDependencies,
-): Pick<DeviceToolsDependencies, "exactDeviceProvisionerFactory" | "checkBootCapacity"> {
+): Pick<
+  DeviceToolsDependencies,
+  "exactDeviceProvisionerFactory" | "checkBootCapacity" | "provisionAndroidIdentityBackoff"
+> {
   return {
     exactDeviceProvisionerFactory:
       deps.exactDeviceProvisionerFactory ?? currentDeps.exactDeviceProvisionerFactory,
     checkBootCapacity: deps.checkBootCapacity ?? currentDeps.checkBootCapacity,
+    provisionAndroidIdentityBackoff:
+      deps.provisionAndroidIdentityBackoff ?? currentDeps.provisionAndroidIdentityBackoff,
   };
 }
 

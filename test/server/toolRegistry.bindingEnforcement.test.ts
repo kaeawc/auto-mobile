@@ -1,6 +1,6 @@
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";

@@ -18,7 +18,7 @@ import { findAccessibilityFocusedElement, findFocusedElement } from "./Hierarchy
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient, type ViewHierarchyAndroidCtrlProxy } from "./android";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "./ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "./ios";
 import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -42,6 +42,10 @@ import {
   type ObserveAccessibilityManagerFactory,
 } from "./android/ObserveAccessibilityRecovery";
 import { resolveViewHierarchyReadArgs, type ViewHierarchyReadRequest } from "./hierarchyReadArgs";
+import {
+  androidNullHierarchyFailure,
+  annotateAndroidHierarchyAvailability,
+} from "./ViewHierarchyAndroidAvailability";
 
 function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
   const reason = result?.unavailableReason ?? "unknown";
@@ -258,7 +262,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
   private classifyDisconnectedIosHierarchy(
     result: ViewHierarchyResult,
-    client: Pick<IOSCtrlProxy, "isConnected">,
+    client: Pick<IosCtrlProxy, "isConnected">,
   ): void {
     // A request-scoped runner error can be untyped while the host socket has
     // already closed. The known disconnect is sufficient to join recovery.
@@ -541,13 +545,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         logger.debug(
           `[VIEW_HIERARCHY] Successfully retrieved hierarchy from accessibility service in ${duration}ms`,
         );
-        const prepared = this.prepareHierarchyForResponse(accessibilityHierarchy);
-        if (prepared.hierarchy.transportFailure) {
-          Object.assign(prepared.hierarchy, this.androidTransportFailureFields());
-        } else if (prepared.ctrlProxyIncomplete && !prepared.hierarchy.node) {
-          prepared.hierarchy.unavailableReason = "incomplete_capture";
-        }
-        return prepared;
+        return annotateAndroidHierarchyAvailability(
+          this.prepareHierarchyForResponse(accessibilityHierarchy),
+          () => this.androidTransportFailureFields(),
+        );
       }
 
       // A null hierarchy may be a screen-off response, sync timeout, or runner
@@ -560,24 +561,13 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         signal,
         timeoutMs,
       );
-      // A confirmed keyguard block is a device state, so rebind cannot repair it.
-      const deviceLocked = error.startsWith("Device is locked;");
-      const transportFailure =
-        !signal?.aborted &&
-        !deviceLocked &&
-        this.accessibilityServiceClient.isConnected?.() === false;
       return {
-        hierarchy: {
+        hierarchy: androidNullHierarchyFailure(
           error,
-          ...(transportFailure ? { transportFailure: true } : {}),
-          ...(signal?.aborted
-            ? {}
-            : deviceLocked
-              ? { unavailableReason: "device_locked" as const }
-              : transportFailure || this.accessibilityServiceClient.isRecoveryInFlight?.()
-                ? this.androidTransportFailureFields()
-                : { unavailableReason: "unknown" as const }),
-        },
+          this.accessibilityServiceClient,
+          () => this.androidTransportFailureFields(),
+          signal,
+        ),
         updatedAt: this.timer.now(),
       };
     } catch (err) {

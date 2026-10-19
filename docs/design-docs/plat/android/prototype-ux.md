@@ -2426,8 +2426,9 @@ CtrlProxy calls `ShortcutManager.requestPinShortcut` with the stored label and a
 prototype id; tapping it opens `SavedPrototypeActivity`, which needs no host.
 
 - Android never pins silently: the default launcher always shows its confirmation dialog, so a
-  fresh pin is reported `pending`. Declining delivers no callback. Automatic acceptance is #12266
-  and is device-verification work (launcher dialogs differ).
+  fresh pin is reported `pending`. Declining delivers no callback. `autoConfirm` taps the dialog's accept
+  button by label and reports `pinned` only after `listSaved` confirms (#12266, device-verification
+  work: launcher dialogs differ).
 - An unsupported launcher keeps the save and reports `pinned:"unsupported"`. A locked or
   screen-off device reports `device_locked`; the save remains and a retry is safe.
 - The app cannot remove a pinned icon: `deleteSaved` disables the shortcut. `removeIcon:true`

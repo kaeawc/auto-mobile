@@ -1,6 +1,7 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { Server } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { beforeAll, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ActionableError } from "../../src/models";
@@ -12,7 +13,6 @@ import {
   DaemonConnectionSessionReleasedError,
   DaemonRestartDeferredError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../../src/daemon/client";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 

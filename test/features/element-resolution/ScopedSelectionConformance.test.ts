@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, it, spyOn } from "bun:test";
 import fc from "fast-check";
@@ -179,8 +180,9 @@ function buildTap(scenario: Scenario) {
     elementSelector: new ResolverElementSelector(new ElementResolver(() => 0)),
     tapStrategy: new FakeTapStrategy(),
   });
-  action.observedInteraction = (run) =>
-    run(recordObservationRead(observation(hierarchy(scenario))));
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(observation(hierarchy(scenario))),
+  );
   return action;
 }
 async function tapOn(scenario: Scenario): Promise<Outcome> {
@@ -199,8 +201,9 @@ async function tapAny(scenario: Scenario): Promise<Outcome> {
     accessibilityService: service,
   });
   action.testHooks.setRefreshViewHierarchy(async () => null);
-  action.observedInteraction = (run) =>
-    run(recordObservationRead(observation(hierarchy(scenario))));
+  action.observedInteraction = runBlockWith(() =>
+    recordObservationRead(observation(hierarchy(scenario))),
+  );
   const result = await action.execute({
     container: scope(scenario),
     selectionStrategy: "unique",
@@ -222,7 +225,7 @@ async function drag(scenario: Scenario, endpoint: "source" | "target"): Promise<
     hierarchyCapture: new FakeHierarchyCapture(() => capture),
     selector: new ResolverElementSelector(new ElementResolver(() => 0)),
   });
-  action.observedInteraction = (run) => run(observation(capture));
+  action.observedInteraction = runBlockWith(() => observation(capture));
   const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
   const dispatch = spyOn(client, "requestDrag").mockResolvedValue({
     success: true,
@@ -257,7 +260,7 @@ async function pinch(scenario: Scenario): Promise<Outcome> {
     resolver: new ElementResolver(() => 0),
   });
   action.observeScreen = observe;
-  action.observedInteraction = (run) => run(observation(capture));
+  action.observedInteraction = runBlockWith(() => observation(capture));
   const client = IOSCtrlProxyClient.getInstance(ios, 9999);
   const dispatch = spyOn(client, "requestPinch").mockResolvedValue({
     success: true,
@@ -271,10 +274,12 @@ async function pinch(scenario: Scenario): Promise<Outcome> {
     });
     return {
       ...result,
-      gestures: dispatch.mock.calls.map(([x, y]: Parameters<typeof client.requestPinch>) => ({
-        x,
-        y,
-      })),
+      gestures: dispatch.mock.calls.map(
+        ([{ centerX: x, centerY: y }]: Parameters<typeof client.requestPinch>) => ({
+          x,
+          y,
+        }),
+      ),
     };
   } finally {
     dispatch.mockRestore();

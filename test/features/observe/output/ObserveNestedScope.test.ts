@@ -38,13 +38,13 @@ const snapshot = {
   id: "widgets-capture",
   nodes: new SearchableHierarchy().project(observation.viewHierarchy!),
 };
-function scope(query = focus) {
+function scope(query: Parameters<ElementResolver["resolve"]>[1] = focus) {
   return applyObserveScopeExperiments(
     observation,
     buildObserveScopeConfig(flags, { focus: query }),
   );
 }
-function resolve(query = focus) {
+function resolve(query: Parameters<ElementResolver["resolve"]>[1] = focus) {
   return new ElementResolver().resolve(snapshot, query, { action: "inspect" });
 }
 
@@ -89,7 +89,7 @@ describe("nested observe subtree scope", () => {
   test("selects the indexed repeated row's child and reports outer-to-leaf counts", () => {
     const result = scope();
     const chosen = resolve().chosen!;
-    expect(result.viewHierarchy?.hierarchy.node).toEqual([chosen.source]);
+    expect<unknown>(result.viewHierarchy?.hierarchy.node).toEqual([chosen.source]);
     expect(snapshot.nodes[chosen.parentIndex!].label).toBe("Battery");
     expect(
       result.observeScope?.focus?.chain?.map(({ selector, matchCount }) => ({
@@ -155,7 +155,7 @@ describe("nested observe subtree scope", () => {
       matched: false,
       error: "Target not found within container",
     });
-    expect(scope(query).viewHierarchy?.hierarchy.node).toEqual([]);
+    expect<unknown>(scope(query).viewHierarchy?.hierarchy.node).toEqual([]);
   });
 
   test("unique rejects an ambiguous inner level without changing its message", () => {
@@ -171,7 +171,7 @@ describe("nested observe subtree scope", () => {
   });
 
   test("scope chain and structured failure survive observe wire serialization", () => {
-    const render = (query: typeof focus) =>
+    const render = (query: Parameters<ElementResolver["resolve"]>[1]) =>
       finalizeToolResponse(createStructuredToolResponse(observation), {
         name: "observe",
         args: { project: "full", scope: { focus: query } },
@@ -236,11 +236,7 @@ describe("nested observe subtree scope", () => {
         timeoutMs: 300,
         settled: { quietPeriodMs: 500 },
       },
-      undefined,
-      true,
-      timer,
-      "android",
-      "none",
+      { skipBackStack: true, timer, platform: "android", screenshot: "none" },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.containerFailure).toMatchObject({
@@ -258,11 +254,7 @@ describe("nested observe subtree scope", () => {
     const outcome = await waitForObservation(
       screen,
       { elementId: focus.elementId, container: { elementId: "missing" }, timeoutMs: 0 },
-      undefined,
-      true,
-      timer,
-      "android",
-      "none",
+      { skipBackStack: true, timer, platform: "android", screenshot: "none" },
     );
     expect(outcome.containerFailure).toMatchObject({ level: 1, reason: "not-found" });
   });
@@ -276,17 +268,13 @@ describe("nested observe subtree scope", () => {
       const outcome = await waitForObservation(
         screen,
         {
-          ...(dsl ? { for: "appear" as const } : {}),
+          ...(dsl ? { for: "appear" as const } : { for: undefined }),
           elementId: focus.elementId,
           container: { elementId: "missing" },
           selectionStrategy: "unique",
           timeoutMs: 0,
         },
-        undefined,
-        true,
-        timer,
-        "android",
-        "none",
+        { skipBackStack: true, timer, platform: "android", screenshot: "none" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(JSON.parse(JSON.stringify(outcome.containerFailure))).toEqual({

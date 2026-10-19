@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Visitor, type Expression } from "oxc-parser";
 import {
@@ -13,20 +13,30 @@ import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
 
 /**
  * #11848: every environment variable read in src/ must be declared in
- * src/config/env.ts. Unmigrated reads are listed in env-registry-baseline.txt
- * as `<file>\t<NAME>` lines; the list may only shrink. Regenerate after
- * migrating with `UPDATE_ENV_REGISTRY_BASELINE=1 bun test test/lint/envRegistry.test.ts`
- * (refuses to add entries; `=grow` is for the initial seeding only).
+ * src/config/env.ts. There is no baseline: any unregistered read is a failure.
  */
 const ROOT = path.resolve(import.meta.dir, "../..");
 const SRC = path.join(ROOT, "src");
 const REGISTRY_FILE = "src/config/env.ts";
-const BASELINE = path.join(import.meta.dir, "env-registry-baseline.txt");
 const DOCS = path.join(ROOT, "docs/using/environment-variables.md");
 const PRODUCT_NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 /** The registry table itself (`ENV.DATA_DIR`) is not an environment object. */
 const REGISTRY_IDENTIFIER = "ENV";
 const ENV_OBJECT = /(?:^|[a-z])(?:env|environment)$/i;
+
+/**
+ * `AUTOMOBILE_*`-shaped string literals that are not environment variables. They match the
+ * product-name scan but are never read from an environment object; renaming them would change
+ * on-device shell output or user-facing error codes.
+ */
+const NON_ENV_LITERALS: Readonly<Record<string, string>> = {
+  AUTOMOBILE_INCOMPLETE_EXTRACTION:
+    "Error code for an incomplete package extraction, not a variable.",
+  AUTOMOBILE_APP_FILE_BACKUP: "Marker echoed by the on-device app-file backup shell script.",
+  AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY:
+    "Marker echoed by the on-device app-file save shell script.",
+  AUTOMOBILE_SHARED_STORAGE_BACKUP: "Marker echoed by the on-device shared-storage backup script.",
+};
 
 function staticName(node: Expression): string | undefined {
   if (node.type === "Literal" && typeof node.value === "string") {
@@ -165,19 +175,13 @@ function registeredNames(): Set<string> {
   );
 }
 
-function readBaseline(): string[] {
-  return readFileSync(BASELINE, "utf8")
-    .split("\n")
-    .filter((line) => line.length > 0 && !line.startsWith("#"));
-}
-
 function unregisteredReads(files: Map<string, string>): string[] {
   const registered = registeredNames();
   return [...files]
     .filter(([relative]) => relative !== REGISTRY_FILE)
     .flatMap(([relative, source]) =>
       [...findEnvNames(relative, source)]
-        .filter((name) => !registered.has(name))
+        .filter((name) => !registered.has(name) && !Object.hasOwn(NON_ENV_LITERALS, name))
         .map((name) => `${relative}\t${name}`),
     )
     .sort();
@@ -186,6 +190,7 @@ function unregisteredReads(files: Map<string, string>): string[] {
 describe("environment variable registry", () => {
   let found: string[];
   let rawReads: string[];
+  let allowlistedReads: string[];
   // The AST scan of src/ runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
     const files = new Map(
@@ -197,26 +202,16 @@ describe("environment variable registry", () => {
       .filter(([relative]) => relative !== REGISTRY_FILE)
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, registered))
       .sort();
+    const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
+    allowlistedReads = [...files]
+      .filter(([relative]) => relative !== REGISTRY_FILE)
+      .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, allowlisted));
   }, 60_000);
 
-  test("every env read in src/ is registered or on the shrink-only baseline", () => {
-    if (process.env.UPDATE_ENV_REGISTRY_BASELINE) {
-      const existing = new Set(readBaseline());
-      const grown = found.filter((entry) => !existing.has(entry));
-      if (process.env.UPDATE_ENV_REGISTRY_BASELINE !== "grow") {
-        expect(grown, "Register these variables in src/config/env.ts instead.").toEqual([]);
-      }
-      writeFileSync(BASELINE, `${[...found].join("\n")}\n`);
-      return;
-    }
-    const baseline = new Set(readBaseline());
+  test("every env read in src/ is registered", () => {
     expect(
-      found.filter((entry) => !baseline.has(entry)),
+      found,
       "Unregistered environment read(s): declare the variable in src/config/env.ts and read it through readEnvTrimmed/readEnvRaw.",
-    ).toEqual([]);
-    expect(
-      [...baseline].filter((entry) => !found.includes(entry)),
-      "Stale baseline entries: rerun with UPDATE_ENV_REGISTRY_BASELINE=1 to shrink it.",
     ).toEqual([]);
   });
 
@@ -249,9 +244,13 @@ describe("environment variable registry", () => {
     ).toEqual(["x.ts\tHOME", "x.ts\tPATH"]);
   });
 
-  test("baseline is sorted and has no duplicates", () => {
-    const baseline = readBaseline();
-    expect(baseline).toEqual([...new Set(baseline)].sort());
+  test("allowlisted non-env literals are never read from process.env or registered", () => {
+    const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
+    expect(registeredNames().intersection(allowlisted).size).toBe(0);
+    expect(allowlistedReads).toEqual([]);
+    for (const reason of Object.values(NON_ENV_LITERALS)) {
+      expect(reason.length).toBeGreaterThan(0);
+    }
   });
 
   test("detector recognises dotted, bracket, destructured and literal forms", () => {

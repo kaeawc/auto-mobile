@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ToolRegistry } from "./toolRegistry";
 import { putAppFileSchema, type PutAppFileArgs } from "./appFileContract";
 import { getAppFileService, type AppFileService } from "./appFileService";
@@ -31,6 +32,11 @@ export function registerAppFileTools(
       const result = await writePromise;
       return createStructuredToolResponse(result);
     },
-    { defaultEnabled: true, outputSchema: putAppFileResultSchema },
+    {
+      ...PLAN_RELEVANT,
+      defaultEnabled: true,
+      outputSchema: putAppFileResultSchema,
+      stagesFiles: true,
+    },
   );
 }

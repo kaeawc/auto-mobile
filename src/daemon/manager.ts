@@ -6,6 +6,8 @@ import {
   type IdentityRecoveryIO,
 } from "./identityRecovery";
 import { createServer } from "node:net";
+import type { DaemonManagerSeams, DaemonManagerTestInternals } from "./managerTestInternals";
+import { fileSystemExtractionCleaner, type ExtractionCleaner } from "./extractionCleaner";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   consumeDaemonExitRecord,
@@ -13,11 +15,10 @@ import {
   removeDaemonExitRecord,
   resolveDaemonExitOptions,
   DAEMON_EXIT_RECORD_TTL_MS,
-  type DaemonExitRecordFileSystem,
 } from "./daemonExitRecord";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { open, readFile, rm } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import {
   constants,
   existsSync,
@@ -27,10 +28,9 @@ import {
   readFileSync,
   writeSync,
 } from "node:fs";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
-import { devNull, tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
+import { devNull } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
-import { isPathInside } from "../utils/filesystem/pathContainment";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   INCOMPLETE_EXTRACTION_CODE,
@@ -158,10 +158,13 @@ import {
   runDaemonCommand as runDaemonCommandWithManager,
   type RunDaemonCommandOptions,
 } from "./cli/runDaemonCommand";
+import { DaemonGenerationExitedBeforeSignalError } from "./DaemonGenerationExitedBeforeSignalError";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
+export { resolveExtractionRootForEntryScript, type ExtractionCleaner } from "./extractionCleaner";
 export type { DaemonManagerOptions } from "./managerOptions";
 import type { DaemonManagerOptions } from "./managerOptions";
+import { ENV } from "../config/env";
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
@@ -171,12 +174,10 @@ export {
   parseDaemonProcessTable,
   parseDarwinDaemonProcessTable,
   parseWindowsDaemonProcessTable,
-} from "./processTable";
-export type {
-  DaemonProcessFinder,
-  DaemonProcessLivenessChecker,
-  DaemonProcessRecord,
-  DaemonProcessSignaler,
+  type DaemonProcessFinder,
+  type DaemonProcessLivenessChecker,
+  type DaemonProcessRecord,
+  type DaemonProcessSignaler,
 } from "./processTable";
 export { NetDaemonPortAvailabilityChecker } from "./portAvailability";
 export type { DaemonPortAvailabilityChecker, ProbeListener } from "./portAvailability";
@@ -223,8 +224,6 @@ export function relayDaemonStderr(daemonProcess: Pick<DaemonLaunchedProcess, "st
   (daemonStderr as typeof daemonStderr & { unref?: () => void }).unref?.();
 }
 
-class DaemonGenerationExitedBeforeSignalError extends Error {}
-
 interface WaitForStopResult {
   stopped: boolean;
   replacedByOtherGeneration: boolean;
@@ -240,48 +239,6 @@ const DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS = 2_000;
 const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
   signal(pid, signal): void {
     process.kill(pid, signal);
-  },
-};
-
-export interface ExtractionCleaner {
-  removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
-}
-
-/** Exported for tests. */
-export function resolveExtractionRootForEntryScript(entryScript: string): string | null {
-  const resolved = resolve(entryScript);
-  const parts = resolved.split(sep);
-  const nodeModulesIndex = parts.lastIndexOf("node_modules");
-  if (nodeModulesIndex <= 0) {
-    return null;
-  }
-
-  const packagePath = parts.slice(nodeModulesIndex + 1, nodeModulesIndex + 3).join("/");
-  if (packagePath !== "@kaeawc/auto-mobile") {
-    return null;
-  }
-
-  const root = parts.slice(0, nodeModulesIndex).join(sep) || sep;
-  if (root === sep) {
-    return null;
-  }
-
-  const tempRoot = resolve(tmpdir());
-  if (!isPathInside(tempRoot, root, { allowEqual: false })) {
-    return null;
-  }
-  return root;
-}
-
-const fileSystemExtractionCleaner: ExtractionCleaner = {
-  async removeExtractionForEntryScript(entryScript: string): Promise<boolean> {
-    const extractionRoot = resolveExtractionRootForEntryScript(entryScript);
-    if (!extractionRoot) {
-      return false;
-    }
-
-    await rm(extractionRoot, { recursive: true, force: true });
-    return true;
   },
 };
 
@@ -520,15 +477,14 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly daemonProtocolHealthProbe: () => Promise<boolean>;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
-  /** Whether a TCP port can be bound right now; replaceable so tests need no real socket. */
-  private portFreeProbe: (port: number) => Promise<boolean> = isTcpPortFree;
-  protected exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
-  private launchLogFileSystem: {
-    openSync(path: string, flags: "w", mode: number): number;
-    closeSync(fd: number): void;
-  } = { openSync, closeSync };
-  private launchWorkingDirectory: () => string = resolveStableDaemonWorkingDirectory;
-  private currentBuildId: () => string = () => getCurrentBuildIdentity().buildId;
+  /** Replaceable I/O seams (port probe, exit-record and launch-log files, cwd, build id) so tests need no real I/O. */
+  protected readonly seams: DaemonManagerSeams = {
+    portFreeProbe: isTcpPortFree,
+    exitRecordFileSystem: defaultDaemonExitRecordFileSystem,
+    launchLogFileSystem: { openSync, closeSync },
+    launchWorkingDirectory: resolveStableDaemonWorkingDirectory,
+    currentBuildId: () => getCurrentBuildIdentity().buildId,
+  };
   private readonly runningRestartOptions = new WeakSet<DaemonOptions>();
   /**
    * A per-instance owner token written into the startup lock alongside the PID
@@ -551,35 +507,10 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe;
 
   constructor(options: DaemonManagerOptions = {}) {
-    const {
-      clientFactory,
-      stateProvider = () => daemonStateLikeFrom(defaultDaemonContext),
-      timer = defaultTimer,
-      lockFilePath = LOCK_FILE_PATH,
-      pidFilePath = PID_FILE_PATH,
-      socketPath = SOCKET_PATH,
-      processFinder = createDefaultDaemonProcessFinder(),
-      processSpawner,
-      extractionCleaner = fileSystemExtractionCleaner,
-      launcher,
-      launchCommandResolver,
-      processSignaler = defaultDaemonProcessSignaler,
-      idGenerator = defaultIdGenerator,
-      peerSocketReachability,
-      platform: platformOverride = process.platform,
-      portAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
-      retryExecutor = new DefaultRetryExecutor(timer),
-      daemonProtocolHealthProbe,
-      identityRecoveryIO,
-      lockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
-    } = options;
-    this.lockOwnerGenerationProbe = lockOwnerGenerationProbe;
-    this.identityRecoveryIO = identityRecoveryIO ?? {
-      // Windows named pipes cannot use this POSIX socket identity probe. This accepted
-      // platform gap means a live Windows daemon with missing PID metadata will not
-      // self-heal here; retain the pre-identity-recovery behavior on Windows.
-      // On win32, namespace attribution uses only the argv socket marker or our PID
-      // record; the default IO never probes a socket owner.
+    const resolved = resolveDaemonManagerOptions(options);
+    this.lockOwnerGenerationProbe = resolved.lockOwnerGenerationProbe;
+    this.identityRecoveryIO = resolved.identityRecoveryIO ?? {
+      // Windows uses argv/PID namespace attribution; POSIX socket-owner recovery is unavailable.
       socketExists: () => this.platform !== "win32" && existsSync(this.socketPath),
       readRecord: () => readPidFileDataSync(this.pidFilePath),
       probe: () =>
@@ -591,43 +522,42 @@ export class DaemonManager implements DaemonManagerLike {
             )
           : new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
     };
-    this.platform = platformOverride;
-    this.portAvailabilityChecker = portAvailabilityChecker;
-    this.retryExecutor = retryExecutor;
-    this.startupLockOwnerToken = idGenerator.next();
-    // Construct the reachability probe here (not in a field initializer) so its connect
-    // timeout is bound to the injected timer — a field initializer would capture the
-    // real wall-clock even when this manager runs under a FakeTimer (issue #6103).
-    this.peerSocketReachability = peerSocketReachability ?? new DaemonSocketReachability({ timer });
-    this.stateProvider = stateProvider;
-    this.timer = timer;
-    this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
-    this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(pidFilePath);
-    this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
-    this.processFinder = processFinder;
-    this.processLivenessChecker = hasProcessLivenessChecker(processFinder)
-      ? processFinder
+    this.platform = resolved.platform;
+    this.portAvailabilityChecker = resolved.portAvailabilityChecker;
+    this.retryExecutor = resolved.retryExecutor;
+    this.startupLockOwnerToken = resolved.idGenerator.next();
+    // Construct with the injected timer so FakeTimer controls peer probes (#6103).
+    this.peerSocketReachability =
+      resolved.peerSocketReachability ?? new DaemonSocketReachability({ timer: resolved.timer });
+    this.stateProvider = resolved.stateProvider;
+    this.timer = resolved.timer;
+    this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(resolved.lockFilePath);
+    this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(resolved.pidFilePath);
+    this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(resolved.socketPath);
+    this.processFinder = resolved.processFinder;
+    this.processLivenessChecker = hasProcessLivenessChecker(resolved.processFinder)
+      ? resolved.processFinder
       : createDefaultDaemonProcessFinder();
-    this.processSignaler = processSignaler;
-    this.extractionCleaner = extractionCleaner;
-    this.launchCommandResolver = launchCommandResolver;
+    this.processSignaler = resolved.processSignaler;
+    this.extractionCleaner = resolved.extractionCleaner;
+    this.launchCommandResolver = resolved.launchCommandResolver;
     this.launcher =
-      launcher ??
+      resolved.launcher ??
       new DaemonLauncher({
-        spawn: processSpawner?.spawn.bind(processSpawner),
-        timer,
+        spawn: resolved.processSpawner?.spawn.bind(resolved.processSpawner),
+        timer: resolved.timer,
       });
     this.fallbackLauncher = new DaemonLauncher({
       entryScript: null,
-      spawn: processSpawner?.spawn.bind(processSpawner),
-      timer,
+      spawn: resolved.processSpawner?.spawn.bind(resolved.processSpawner),
+      timer: resolved.timer,
     });
     this.clientFactory =
-      clientFactory ??
+      resolved.clientFactory ??
       ((options) =>
-        new DaemonClient(this.socketPath, undefined, timer, {}, options?.clientIdentity));
+        new DaemonClient(this.socketPath, undefined, resolved.timer, {}, options?.clientIdentity));
     this.daemonProtocolHealthProbe =
-      daemonProtocolHealthProbe ??
+      resolved.daemonProtocolHealthProbe ??
       (async () => {
         try {
           await new DaemonClient(this.socketPath, undefined, this.timer).getDaemonStatus();
@@ -1236,13 +1166,13 @@ export class DaemonManager implements DaemonManagerLike {
 
   /** Restore startup policy after a self-exit on this control socket. */
   private async inheritExitSettings(options: DaemonOptions): Promise<DaemonOptions> {
-    const record = consumeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+    const record = consumeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
     const resolution = resolveDaemonExitOptions(
       options,
       record,
       this.timer.now(),
       DAEMON_EXIT_RECORD_TTL_MS,
-      this.currentBuildId(),
+      this.seams.currentBuildId(),
     );
     if (resolution.outcome === "stale" || resolution.outcome === "build-mismatch") {
       logger.info(`Ignoring daemon exit record: ${resolution.outcome}`);
@@ -1254,7 +1184,7 @@ export class DaemonManager implements DaemonManagerLike {
     let portNote = "";
     if (resolution.inheritedPort && inherited.port !== undefined) {
       // A stolen predecessor port must not wedge every auto-start (#11074).
-      inherited.strictPort = await this.portFreeProbe(inherited.port);
+      inherited.strictPort = await this.seams.portFreeProbe(inherited.port);
       if (!inherited.strictPort) {
         portNote = "; previous port is busy, binding without strictness";
       }
@@ -1509,7 +1439,7 @@ export class DaemonManager implements DaemonManagerLike {
     if (inheritExitRecord) {
       options = await this.inheritExitSettings(options);
     } else {
-      removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+      removeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
     }
     stderrLog("Starting AutoMobile daemon...");
 
@@ -1552,7 +1482,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Open with restricted permissions (0o600 = owner read/write only).
     // Stderr-only containers deliberately skip the file capture and do not need
     // a writable AutoMobile data directory.
-    const logFd = this.launchLogFileSystem.openSync(logPath, "w", 0o600);
+    const logFd = this.seams.launchLogFileSystem.openSync(logPath, "w", 0o600);
 
     try {
       await this.launchWithExtractionRetry(
@@ -1588,7 +1518,7 @@ export class DaemonManager implements DaemonManagerLike {
       throw error;
     } finally {
       // Close our reference to the log file (daemon process still has it open)
-      this.launchLogFileSystem.closeSync(logFd);
+      this.seams.launchLogFileSystem.closeSync(logFd);
     }
 
     const newStatus = await this.lifecycleStatus();
@@ -1632,7 +1562,7 @@ export class DaemonManager implements DaemonManagerLike {
           args,
           spawnOptions: {
             detached: true,
-            cwd: this.launchWorkingDirectory(),
+            cwd: this.seams.launchWorkingDirectory(),
             stdio: [
               "ignore",
               capturesLaunchOutput ? logFd : "ignore",
@@ -1696,13 +1626,13 @@ export class DaemonManager implements DaemonManagerLike {
     }
     childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
     if (this.pidFilePath !== PID_FILE_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
+      childEnv[ENV.DAEMON_PID_FILE_PATH.name] = this.pidFilePath;
     }
     if (this.lockFilePath !== LOCK_FILE_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
+      childEnv[ENV.DAEMON_LOCK_FILE_PATH.name] = this.lockFilePath;
     }
     if (this.socketPath !== SOCKET_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
+      childEnv[ENV.DAEMON_SOCKET_PATH.name] = this.socketPath;
     }
     if (options.toolOutputsDir) {
       childEnv[TOOL_OUTPUTS_DIR_ENV] = options.toolOutputsDir;
@@ -1716,121 +1646,12 @@ export class DaemonManager implements DaemonManagerLike {
       ...launch.args,
       `${DAEMON_SOCKET_PATH_FLAG}=${encodeURIComponent(this.socketPath)}`,
     ];
-    if (options.port) {
-      args.push("--port", options.port.toString());
-    }
-    if (options.host) {
-      args.push("--host", options.host);
-    }
-    if (options.strictPort) {
-      args.push("--strict-port");
-    }
-    if (options.debug) {
-      args.push("--debug");
-    }
-    if (options.debugPerf) {
-      args.push("--debug-perf");
-    }
-    if (options.planExecutionLockScope) {
-      args.push("--plan-execution-lock-scope", options.planExecutionLockScope);
-    }
-    if (options.runnerReadinessTimeoutMs !== undefined) {
-      args.push(RUNNER_READINESS_TIMEOUT_FLAG, options.runnerReadinessTimeoutMs.toString());
-    }
-    if (options.videoQualityPreset) {
-      args.push("--video-quality", options.videoQualityPreset);
-    }
-    if (options.videoTargetBitrateKbps !== undefined) {
-      args.push("--video-target-bitrate-kbps", options.videoTargetBitrateKbps.toString());
-    }
-    if (options.videoMaxThroughputMbps !== undefined) {
-      args.push("--video-max-throughput-mbps", options.videoMaxThroughputMbps.toString());
-    }
-    if (options.videoFps !== undefined) {
-      args.push("--video-fps", options.videoFps.toString());
-    }
-    if (options.videoFormat) {
-      args.push("--video-format", options.videoFormat);
-    }
-    if (options.videoMaxArchiveSizeMb !== undefined) {
-      args.push("--video-archive-size-mb", options.videoMaxArchiveSizeMb.toString());
-    }
-    if (options.networkMockable) {
-      args.push("--network-mockable");
-    }
-    if (options.embeddedSdk) {
-      args.push("--embedded-sdk");
-    }
-    for (const toolName of options.enabledTools ?? []) {
-      args.push("--enable-tool", toolName);
-    }
-    for (const toolName of options.disabledTools ?? []) {
-      args.push("--disable-tool", toolName);
-    }
-    if (options.dismissKeyboardAfterInput) {
-      args.push("--dismiss-keyboard-after-input");
-    }
-    if (options.eventAllMarkers && options.eventAllMarkers.length > 0) {
-      args.push(EVENT_ALL_MARKERS_FLAG, options.eventAllMarkers.join(","));
-    } else if (options.eventAllMarkersCliOverride) {
-      args.push(`${EVENT_ALL_MARKERS_FLAG}=`);
-    }
-    if (options.noUiPerfMode) {
-      args.push("--no-ui-perf-mode");
-    }
-    if (options.noNavigationScreenshots) {
-      args.push("--no-navigation-screenshots");
-    }
-    if (options.noWaitForPollingOverhead) {
-      args.push("--no-waitfor-polling-overhead");
-    }
-    if (options.noOcclusion) {
-      args.push("--no-occlusion");
-    }
-    // Accessibility-service view-filter flags (issue #4344 propagation audit):
-    // these were in the daemon-options object but serialized nowhere, so a
-    // manager-spawned daemon never received them on either transport.
-    if (options.noA11yIncludeNotImportantViews) {
-      args.push("--no-include-not-important-views");
-    }
-    if (options.noA11yReportViewIds) {
-      args.push("--no-report-view-ids");
-    }
-    if (options.noA11yRetrieveInteractiveWindows) {
-      args.push("--no-retrieve-interactive-windows");
-    }
-    if (options.memPerfAudit) {
-      args.push("--mem-perf-audit");
-    }
-    if (options.accessibilityAudit) {
-      args.push("--accessibility-audit");
-    }
-    if (options.accessibilityLevel) {
-      args.push("--a11y-level", options.accessibilityLevel);
-    }
-    if (options.accessibilityFailureMode) {
-      args.push("--a11y-failure-mode", options.accessibilityFailureMode);
-    }
-    if (options.accessibilityMinSeverity) {
-      args.push("--a11y-min-severity", options.accessibilityMinSeverity);
-    }
-    if (options.accessibilityUseBaseline) {
-      args.push("--a11y-use-baseline");
-    }
-    if (options.predictiveUi) {
-      args.push("--predictive-ui");
-    }
-    if (options.rawElementSearch) {
-      args.push("--raw-element-search");
-    }
-    if (options.skipCtrlProxyDownload) {
-      args.push("--skip-ctrl-proxy-download");
-    }
-    if (options.toolCallRecording) {
-      args.push("--tool-call-recording");
-    }
-    // Output-reduction flags (issue #2756): serialized off the shared specs so
-    // they can't drift from the daemon-side parse in parseDaemonArgs.
+    appendDaemonConnectionArgs(args, options);
+    appendDaemonVideoArgs(args, options);
+    appendDaemonToolArgs(args, options);
+    appendDaemonViewArgs(args, options);
+    appendDaemonFeatureArgs(args, options);
+    // Shared specs keep output-reduction launch flags aligned with parseDaemonArgs (#2756).
     args.push(...outputReductionFlagsToArgs(options));
     return { command: launch.command, args };
   }
@@ -2228,13 +2049,13 @@ export class DaemonManager implements DaemonManagerLike {
       // remove that CONFIRMED-DEAD daemon's PID FILE here — but NOT its
       // socket pathname (see removeConfirmedDeadPidFile for why).
       await this.removeConfirmedDeadPidFile();
-      removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+      removeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
       stderrLog("Daemon is not running");
       return;
     }
 
     await this.stopRunningDaemon(status, timeout);
-    removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+    removeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
   }
 
   /**
@@ -2734,7 +2555,7 @@ export class DaemonManager implements DaemonManagerLike {
    * never delete a record this method cannot prove is still the confirmed-dead
    * one.
    */
-  private async removeConfirmedDeadPidFile(): Promise<void> {
+  protected async removeConfirmedDeadPidFile(): Promise<void> {
     // Cheap unlocked pre-check: skip acquiring the lock entirely when there is
     // plainly nothing to clean up (already gone, or already live).
     const unlockedRecord = await this.readConfirmedDeadPidData();
@@ -2797,7 +2618,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private recordedStatus(): DaemonStatus {
+  protected recordedStatus(): DaemonStatus {
     const record = this.identityRecoveryIO.readRecord();
     return record && record.socketPath === this.socketPath && this.isRecordedDaemonRunning(record)
       ? { ...record, running: true }
@@ -3279,7 +3100,7 @@ export class DaemonManager implements DaemonManagerLike {
    * Explicit restart may stop an orphan only when its marker or this socket's
    * response attributes it to this namespace. Ordinary start remains non-destructive.
    */
-  private async stopNamespaceOrphansForExplicitRestart(recordedPid?: number): Promise<void> {
+  protected async stopNamespaceOrphansForExplicitRestart(recordedPid?: number): Promise<void> {
     const candidates = (await this.findNamespaceDaemonProcessRecords()).filter(
       (candidate) => candidate.pid !== recordedPid,
     );
@@ -3436,7 +3257,7 @@ export class DaemonManager implements DaemonManagerLike {
    * consume the final budget; signaling after that would violate fail-closed
    * daemon recovery semantics.
    */
-  private async verifyDaemonGenerationBeforeSignal(
+  protected async verifyDaemonGenerationBeforeSignal(
     expected: DaemonProcessRecord,
     recoveryDeadline: number | undefined,
     context: string = "Daemon recovery",
@@ -3950,6 +3771,18 @@ export class DaemonManager implements DaemonManagerLike {
     return this.platform === "win32" || existsSync(this.socketPath);
   }
 
+  /** Test-only typed view of the injectable collaborators and private steps suites drive. */
+  getInternalsForTesting(): DaemonManagerTestInternals {
+    return {
+      seams: this.seams,
+      identityRecoveryIO: this.identityRecoveryIO,
+      inheritExitSettings: (options) => this.inheritExitSettings(options),
+      recoveryOptions: (status, options) => this.recoveryOptions(status, options),
+      tryJoinPeerDaemonAfterSpawnExit: (budgetMs) => this.tryJoinPeerDaemonAfterSpawnExit(budgetMs),
+      isIsolatedSocketNamespace: () => this.isIsolatedSocketNamespace(),
+    };
+  }
+
   /** Compare built-in defaults so environment-overridden namespaces keep their short rejoin grace. */
   private isIsolatedSocketNamespace(): boolean {
     return this.pidFilePath !== DEFAULT_PID_FILE_PATH || this.socketPath !== DEFAULT_SOCKET_PATH;
@@ -4178,4 +4011,148 @@ export async function runDaemonCommand(
   options: RunDaemonCommandOptions = {},
 ): Promise<void> {
   return runDaemonCommandWithManager(command, args, options, DaemonManager);
+}
+
+function resolveDaemonManagerOptions(options: DaemonManagerOptions) {
+  const paths = resolveDaemonManagerPaths(options);
+  const {
+    extractionCleaner = fileSystemExtractionCleaner,
+    processSignaler = defaultDaemonProcessSignaler,
+    idGenerator = defaultIdGenerator,
+    platform = process.platform,
+    portAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
+    retryExecutor = new DefaultRetryExecutor(paths.timer),
+    lockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
+  } = options;
+  return {
+    ...options,
+    ...paths,
+    extractionCleaner,
+    processSignaler,
+    idGenerator,
+    platform,
+    portAvailabilityChecker,
+    retryExecutor,
+    lockOwnerGenerationProbe,
+  };
+}
+
+function appendDaemonConnectionArgs(args: string[], options: DaemonOptions): void {
+  if (options.port) {
+    args.push("--port", options.port.toString());
+  }
+  if (options.host) {
+    args.push("--host", options.host);
+  }
+  appendDaemonSwitchArgs(args, [
+    [options.strictPort, "--strict-port"],
+    [options.debug, "--debug"],
+    [options.debugPerf, "--debug-perf"],
+  ]);
+  if (options.planExecutionLockScope) {
+    args.push("--plan-execution-lock-scope", options.planExecutionLockScope);
+  }
+  if (options.runnerReadinessTimeoutMs !== undefined) {
+    args.push(RUNNER_READINESS_TIMEOUT_FLAG, options.runnerReadinessTimeoutMs.toString());
+  }
+}
+
+function appendDaemonVideoArgs(args: string[], options: DaemonOptions): void {
+  if (options.videoQualityPreset) {
+    args.push("--video-quality", options.videoQualityPreset);
+  }
+  if (options.videoTargetBitrateKbps !== undefined) {
+    args.push("--video-target-bitrate-kbps", options.videoTargetBitrateKbps.toString());
+  }
+  if (options.videoMaxThroughputMbps !== undefined) {
+    args.push("--video-max-throughput-mbps", options.videoMaxThroughputMbps.toString());
+  }
+  if (options.videoFps !== undefined) {
+    args.push("--video-fps", options.videoFps.toString());
+  }
+  if (options.videoFormat) {
+    args.push("--video-format", options.videoFormat);
+  }
+  if (options.videoMaxArchiveSizeMb !== undefined) {
+    args.push("--video-archive-size-mb", options.videoMaxArchiveSizeMb.toString());
+  }
+}
+
+function appendDaemonToolArgs(args: string[], options: DaemonOptions): void {
+  appendDaemonSwitchArgs(args, [
+    [options.networkMockable, "--network-mockable"],
+    [options.embeddedSdk, "--embedded-sdk"],
+  ]);
+  for (const toolName of options.enabledTools ?? []) {
+    args.push("--enable-tool", toolName);
+  }
+  for (const toolName of options.disabledTools ?? []) {
+    args.push("--disable-tool", toolName);
+  }
+  if (options.dismissKeyboardAfterInput) {
+    args.push("--dismiss-keyboard-after-input");
+  }
+  if (options.eventAllMarkers && options.eventAllMarkers.length > 0) {
+    args.push(EVENT_ALL_MARKERS_FLAG, options.eventAllMarkers.join(","));
+  } else if (options.eventAllMarkersCliOverride) {
+    args.push(`${EVENT_ALL_MARKERS_FLAG}=`);
+  }
+}
+
+function appendDaemonViewArgs(args: string[], options: DaemonOptions): void {
+  appendDaemonSwitchArgs(args, [
+    [options.noUiPerfMode, "--no-ui-perf-mode"],
+    [options.noNavigationScreenshots, "--no-navigation-screenshots"],
+    [options.noWaitForPollingOverhead, "--no-waitfor-polling-overhead"],
+    [options.noOcclusion, "--no-occlusion"],
+    [options.noA11yIncludeNotImportantViews, "--no-include-not-important-views"],
+    [options.noA11yReportViewIds, "--no-report-view-ids"],
+    [options.noA11yRetrieveInteractiveWindows, "--no-retrieve-interactive-windows"],
+  ]);
+}
+
+function appendDaemonFeatureArgs(args: string[], options: DaemonOptions): void {
+  appendDaemonSwitchArgs(args, [
+    [options.memPerfAudit, "--mem-perf-audit"],
+    [options.accessibilityAudit, "--accessibility-audit"],
+  ]);
+  if (options.accessibilityLevel) {
+    args.push("--a11y-level", options.accessibilityLevel);
+  }
+  if (options.accessibilityFailureMode) {
+    args.push("--a11y-failure-mode", options.accessibilityFailureMode);
+  }
+  if (options.accessibilityMinSeverity) {
+    args.push("--a11y-min-severity", options.accessibilityMinSeverity);
+  }
+  appendDaemonSwitchArgs(args, [
+    [options.accessibilityUseBaseline, "--a11y-use-baseline"],
+    [options.predictiveUi, "--predictive-ui"],
+    [options.rawElementSearch, "--raw-element-search"],
+    [options.skipCtrlProxyDownload, "--skip-ctrl-proxy-download"],
+    [options.toolCallRecording, "--tool-call-recording"],
+  ]);
+}
+
+function resolveDaemonManagerPaths(options: DaemonManagerOptions) {
+  const {
+    stateProvider = () => daemonStateLikeFrom(defaultDaemonContext),
+    timer = defaultTimer,
+    lockFilePath = LOCK_FILE_PATH,
+    pidFilePath = PID_FILE_PATH,
+    socketPath = SOCKET_PATH,
+    processFinder = createDefaultDaemonProcessFinder(),
+  } = options;
+  return { stateProvider, timer, lockFilePath, pidFilePath, socketPath, processFinder };
+}
+
+function appendDaemonSwitchArgs(
+  args: string[],
+  flags: ReadonlyArray<readonly [boolean | undefined, string]>,
+): void {
+  for (const [enabled, flag] of flags) {
+    if (enabled) {
+      args.push(flag);
+    }
+  }
 }

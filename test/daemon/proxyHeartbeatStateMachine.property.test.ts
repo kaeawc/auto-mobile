@@ -1,10 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import fc from "fast-check";
-import {
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../src/daemon/client";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DaemonMcpProxy,
@@ -13,8 +10,8 @@ import {
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import { ROUTED_SESSION_META_KEY } from "../../src/server/routedSessionMeta";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { ROUTED_SESSION_META_KEY } from "../../src/daemon/routedSessionMeta";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -2277,7 +2274,7 @@ describe("not-found peer and retained handoff regressions", () => {
       results.set(name, world.violations);
     }
   });
-  test.each(cases)("%s", (name) => {
+  test.each([...cases])("%s", (name) => {
     expect(results.get(name)).toEqual([]);
   });
 });

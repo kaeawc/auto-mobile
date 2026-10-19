@@ -1,6 +1,6 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
@@ -13,8 +13,8 @@ import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettle
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -26,11 +26,6 @@ import { asPlanAllocation } from "../helpers/planLabelAllocation";
 // with the typed release, so their callers get `session_ownership_lost` and not a generic abort.
 // These drive the daemon's own wiring (the heartbeat reap and the owner-disconnect port built in
 // daemon.ts) against the process execution tracker, rather than a copy of that wiring.
-
-interface DaemonMonitorInternals {
-  heartbeatMonitor: { stop(): Promise<void> } | null;
-  startHeartbeatMonitor(): void;
-}
 
 const DEVICE: BootedDevice = {
   name: "Pixel_8_API_35",
@@ -61,7 +56,7 @@ function expectTerminalRefusal(execution: ActiveExecution, reason: string): void
 
 describe("Daemon session releases cancel in-flight calls with the typed release (#11381)", () => {
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: DaemonLifecycleHarness;
   let started: ActiveExecution[];
 
   const settle = (ms: number) =>
@@ -70,7 +65,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
   beforeEach(() => {
     resetDbWriteBarrier();
     timer = new FakeTimer();
-    daemon = new Daemon(
+    daemon = new DaemonLifecycleHarness(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
@@ -87,7 +82,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     for (const execution of started) {
       executionTracker.endExecution(execution.id);
     }
-    await (daemon as unknown as DaemonMonitorInternals).heartbeatMonitor?.stop();
+    await daemon.stopMonitorAndWait();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -105,7 +100,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     await sessionManager.createSession(SESSION, DEVICE.deviceId, "android", {
       initialOwnership: "awaiting-owner",
     });
-    (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+    daemon.startMonitor();
     // A read never keeps the session (#11322), so the reap lands while it is still running.
     const read = track(executionTracker.startExecution("observe", undefined, SESSION));
     executionTracker.markDeviceReadCall(read.id, read.toolName);
@@ -294,7 +289,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       );
       sessionManager.setDeviceLabels(BASE, { A: BASE, B: DERIVED });
       await deliverDaemonHeartbeat(sessionManager, BASE);
-      (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
+      daemon.startMonitor();
 
       const baseReadOnBaseDevice = startRead(BASE, OWNER_CONNECTION);
       executionTracker.bindDeviceExecution(baseReadOnBaseDevice.id, DEVICE.deviceId);

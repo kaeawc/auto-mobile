@@ -140,8 +140,6 @@ test("the liveness controller's port getSession calls stay within the retained e
 // cannot trade places within a file. Counts may only shrink; a new pure reader must call
 // findSession.
 const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
-  "ToolExecutionContext.ts#consumeSetupTiming": 1,
-  "ToolExecutionContext.ts#storeSetupTiming": 1,
   "deviceLabelMapping.ts#releaseDeviceLabelSessions": 1,
   "deviceToolsStartDevice.ts#callerMayReuse": 1,
   "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
@@ -182,6 +180,9 @@ const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 // findSession (a migrated site drops out, as the appearance sweep did). Counts may only shrink;
 // a new pure reader must call findSession, a new admission site needs an explicit entry here.
 const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  "sessionManager/recoveredTerminalReleaseIntents.ts#applyRecoveredTerminalReleaseIntents": 1,
+  "setupTiming.ts#consumeSetupTiming": 1,
+  "setupTiming.ts#storeSetupTiming": 1,
   "adbServerResetQuarantine.ts#detachAdbServerResetCohort": 1,
   "adbServerResetQuarantine.ts#getAdbResetRecoverySession": 1,
   "adbServerResetQuarantine.ts#getAdbServerResetCohortSessionTargets": 1,
@@ -250,9 +251,9 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionForIngress.ts#sessionForIngress": 1,
   "socketServer.ts#getAssignedDeviceForSession": 1,
   "socketServer.ts#getSessionIncarnation": 1,
-  "socketServer.ts#grantedDeviceOf": 1,
+  "socketServer/inputDeviceGating.ts#grantedDeviceOf": 1,
   "socketServer.ts#hasActiveDaemonSession": 1,
-  "socketServer.ts#selectInputTargetDevice": 1,
+  "socketServer/inputDeviceGating.ts#selectInputTargetDevice": 1,
 };
 
 // src/features: the one remaining reader consumes the session object and, when it is expired,

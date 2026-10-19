@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -9,9 +9,8 @@ import {
   recoveryIdentityLossDetails,
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonState } from "../../src/daemon/daemonState";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { isIdleReleaseReason, type SessionReleaseReason } from "../../src/daemon/releaseReasons";
@@ -91,7 +90,7 @@ interface Surface {
 const surfaces: Surface[] = [
   {
     name: "default proxy tool result",
-    builders: ["src/server/proxyServer.ts#noActiveDeviceSessionPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload"],
     reasonKey: "reason",
     holder: (reason) => {
       const content = noActiveDeviceSessionResult(new DaemonConnectionSessionReleasedError(reason))
@@ -128,7 +127,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "ownership lost",
-    builders: ["src/server/deviceSessionResult.ts#sessionOwnershipLostPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload"],
     reasonKey: "reason",
     holder: (reason) =>
       sessionOwnershipLostPayload({ message: "Released", sessionUuid: SESSION, reason }).error,
@@ -136,7 +135,7 @@ const surfaces: Surface[] = [
   {
     name: "released during call MCP",
     builders: [
-      "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
+      "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
       "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
     ],
     reasonKey: "reason",
@@ -215,24 +214,17 @@ const surfaces: Surface[] = [
     reasonKey: "reason",
     holder: (reason) => {
       const ended = new TerminalSessionError(SESSION, snapshot(reason));
-      const state = spyOn(DaemonState, "getInstance").mockReturnValue({
-        isInitialized: () => true,
-        getSessionManager: () => ({ peekTerminalAnswerForEndedSession: () => ended }),
-      } as unknown as DaemonState);
-      try {
-        return planBaseEndFields(SESSION, false, {
-          error: String(ended),
-          stepIndex: 0,
-          tool: "homeScreen",
-        }).details as Holder;
-      } finally {
-        state.mockRestore();
-      }
+      return planBaseEndFields(
+        SESSION,
+        false,
+        { error: String(ended), stepIndex: 0, tool: "homeScreen" },
+        { sessionManager: () => ({ peekTerminalAnswerForEndedSession: () => ended }) },
+      ).details as Holder;
     },
   },
   {
     name: "recovery identity loss details",
-    builders: ["src/server/deviceSessionResult.ts#recoveryIdentityLossDetails"],
+    builders: ["src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails"],
     reasonKey: "reason",
     holder: (reason) =>
       recoveryIdentityLossDetails({
@@ -272,7 +264,7 @@ const surfaces: Surface[] = [
       } as DaemonStateAccess;
       const refusal = await handleDaemonRequest(
         {
-          type: "request",
+          type: "daemon_request",
           id: "registration-surface",
           method: "daemon/registerSession",
           params: { sessionId: SESSION, clientName: "surface-test" },

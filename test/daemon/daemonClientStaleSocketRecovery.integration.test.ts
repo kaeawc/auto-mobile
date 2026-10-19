@@ -210,7 +210,7 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
       "win32",
     );
 
-    const internals = client as unknown as { socketPathObservable(): boolean };
+    const internals = client.testHooks;
     expect(internals.socketPathObservable()).toBe(true);
   });
 

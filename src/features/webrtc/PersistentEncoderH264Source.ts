@@ -33,7 +33,6 @@ import {
   type VideoServerStreamHeader,
 } from "./VideoServerStreamParser";
 export { InMemoryActiveVideoSessionRegistry } from "./InMemoryActiveVideoSessionRegistry";
-export { VIDEO_SERVER_REMOTE_JAR_PATH } from "./VideoServerJarDeployment";
 export { VIDEO_SERVER_LEASE_DIRECTORY, VIDEO_SERVER_SOCKET_PREFIX } from "./VideoServerLeases";
 
 /**

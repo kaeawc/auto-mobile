@@ -133,8 +133,8 @@ test.each([
     const gate = new AndroidBootAdmissionGate(source, new FakeTimer(), { env });
     const admission = await gate.admit(request);
     admission.handOff("emulator-5554", 501);
-    source.emulatorSerials = serials;
-    source.emulatorProcessPids = pids;
+    source.emulatorSerials = [...serials];
+    source.emulatorProcessPids = pids ? [...pids] : undefined;
     source.emulatorProcessRssBytes = pids?.map(() => 3 * GIB);
     const report = await gate.describeCapacity();
     expect(report).toMatchObject({ booted, inFlight });

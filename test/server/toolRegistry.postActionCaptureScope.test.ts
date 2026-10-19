@@ -10,7 +10,7 @@ import {
   hasPendingTerminalScreenshot,
 } from "../../src/utils/PostActionCaptureContext";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -115,7 +115,7 @@ describe("ToolRegistry post-action capture scope", () => {
         expect(final.observation).toMatchObject({
           observationId: h.captures[0].observationId,
           screenshotPath: `${h.captures[0].observationId}.png`,
-          screenshotCapturedAt: 123,
+          screenshotCapturedAt: new Date(123).toISOString(),
           settled: scenario === "imeAction",
         });
         const text = (response as { content: Array<{ text: string }> }).content[0].text;

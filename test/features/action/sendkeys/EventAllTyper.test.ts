@@ -6,7 +6,7 @@ import {
   ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS,
   type KeyEventPlan,
 } from "../../../../src/utils/android-cmdline-tools/asciiKeyEvents";
-import { eventHost } from "./EventTyperTestHarness";
+import { eventHost, observation } from "./EventTyperTestHarness";
 
 describe("EventAllTyper", () => {
   test("executor callbacks see method patches made after constructor wiring", async () => {
@@ -156,7 +156,7 @@ describe("EventAllTyper", () => {
     const dispatches = calls.filter(
       (call) => typeof call === "object" && call !== null && "plan" in call,
     );
-    expect(dispatches).toEqual([
+    expect<unknown>(dispatches).toEqual([
       { plan: { commands: ["shell input keyevent KEYCODE_A"] }, mutated: false, signal: undefined },
       { plan: { commands: ["shell input keyevent KEYCODE_B"] }, mutated: true, signal: undefined },
     ]);
@@ -187,14 +187,19 @@ describe("EventAllTyper", () => {
     expect(
       calls.filter((call) => typeof call === "object" && call !== null && "plan" in call),
     ).toHaveLength(1);
-    expect(
+    expect<unknown>(
       calls.filter((call) => typeof call === "object" && call !== null && "insert" in call),
     ).toEqual([
       {
         insert: "😀",
         options: {
           expectedSuffix: "a",
-          precedingState: { text: "old", selectionStart: 3, selectionEnd: 3 },
+          precedingState: {
+            text: "old",
+            isShowingHintText: false,
+            selectionStart: 3,
+            selectionEnd: 3,
+          },
         },
         signal: undefined,
       },
@@ -211,7 +216,7 @@ describe("EventAllTyper", () => {
     });
     host.readFreshObservation = async (readSignal, display) => {
       calls.push({ readSignal, display });
-      return { timestamp: 1 };
+      return observation();
     };
     host.readFocusedText = () => "a";
     expect(

@@ -1,9 +1,8 @@
-import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import type { DeviceInfo } from "../../../models/index";
 import {
   androidBindingSpecSchema,
   iosBindingSpecSchema,
-} from "../../../server/provisionDeviceSpecSchemas";
+} from "../../../utils/provisionDeviceSpecSchemas";
 import {
   exponentialBackoff,
   normalizeBackoff,
@@ -19,12 +18,10 @@ import type {
   BindingDeviceClaims,
   BindingDeviceDeleter,
   BindingInventory,
-  BindingInventorySnapshot,
   BindingRequestedSpec,
   ManagedSpecMatcher,
 } from "../provisioning/reconciler";
 import { RegistryRetryPacing } from "./registryRetryPacing";
-import { deviceStableId } from "./deviceIdentity";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import {
   journalOwnersEqual,
@@ -40,6 +37,28 @@ import {
   type BindingRegistry,
   journalCreationPlatform,
 } from "./bindingRegistry";
+import { BindingJournalRemovalRegistryTimeout } from "./BindingJournalRemovalRegistryTimeout";
+import { BindingJournalDriveCancelled } from "./BindingJournalDriveCancelled";
+import { BindingJournalInFlight } from "./BindingJournalInFlight";
+import { BindingJournalDeviceLocator } from "./BindingJournalDeviceLocator";
+import { BindingJournalRemovalFlags } from "./BindingJournalRemovalFlags";
+import { BindingJournalStageRunner } from "./BindingJournalStageRunner";
+import {
+  BINDING_JOURNAL_MAX_ABANDONED_DELETES,
+  BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
+  BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS,
+  BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
+  checkCancellation,
+} from "./bindingJournalSupport";
+
+export {
+  BindingJournalInFlight,
+  BindingJournalRemovalRegistryTimeout,
+  BINDING_JOURNAL_MAX_ABANDONED_DELETES,
+  BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
+  BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS,
+  BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
+};
 
 /**
  * Journal redrive for managed device bindings (#11179, epic #11172).
@@ -73,23 +92,9 @@ export const BINDING_JOURNAL_DISCOVERY_BUDGET_MS = 30_000;
 export const BINDING_JOURNAL_CLAIM_BUDGET_MS = 10_000;
 export const BINDING_JOURNAL_MATCH_BUDGET_MS = 10_000;
 export const BINDING_JOURNAL_DELETE_GRACE_MS = 5_000;
-export const BINDING_JOURNAL_STOP_BUDGET_MS = 100;
-export const BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS = 1_000;
-export const BINDING_JOURNAL_MAX_ABANDONED_DELETES = 3;
-export const BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS = 6;
-/** Durability gets one caller-independent attempt without indefinitely holding its session. */
-export const BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS = 500;
 export const BINDING_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS = 25;
 export const BINDING_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS = 1_000;
 export const BINDING_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
-
-/** Registry removal work exceeded its fixed cap or the caller's deadline. */
-export class BindingJournalRemovalRegistryTimeout extends Error {}
-
-interface RemovalOperation {
-  overdueAtMs?: number;
-  abandoned: boolean;
-}
 
 export interface BindingJournalStageBudgets {
   discoveryMs: number;
@@ -102,18 +107,6 @@ interface DriveOptions {
   signal?: AbortSignal;
 }
 
-/** Internal unwind: cancellation is not a failed cleanup attempt. */
-class BindingJournalDriveCancelled extends Error {
-  constructor(readonly reason: unknown) {
-    super("Journal drive cancelled");
-  }
-}
-
-function checkCancellation(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw new BindingJournalDriveCancelled(signal.reason);
-  }
-}
 /** Bound on phase transitions one drive performs (each phase moves strictly forward). */
 const MAX_STEPS_PER_DRIVE = 6;
 
@@ -122,105 +115,6 @@ export const DEFAULT_BINDING_JOURNAL_BACKOFF = exponentialBackoff({
   multiplier: 2,
   maxDelayMs: 60_000,
 });
-
-/** Entries some code in this process is driving right now; a redrive leaves them alone. */
-export class BindingJournalInFlight {
-  private readonly ids = new Set<number>();
-  private readonly removals = new Map<string, Set<RemovalOperation>>();
-  private readonly operations = new WeakMap<Promise<BindingDeletionResult>, RemovalOperation>();
-  private readonly warned = new Set<string>();
-
-  /** Callers wait for every native operation, including abandoned ones. */
-  hasRemoval(platform: BindingJournalEntry["platform"], stableId: string): boolean {
-    return (this.removals.get(JSON.stringify([platform, stableId]))?.size ?? 0) > 0;
-  }
-
-  /** Only the journal pass opens the retry gate for overdue native operations. */
-  hasRemovalForPass(
-    platform: BindingJournalEntry["platform"],
-    stableId: string,
-    nowMs: number,
-  ): boolean {
-    const records = this.removals.get(JSON.stringify([platform, stableId]));
-    for (const record of records ?? []) {
-      if (
-        record.overdueAtMs !== undefined &&
-        nowMs - record.overdueAtMs >= BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS
-      ) {
-        record.abandoned = true;
-      }
-    }
-    return this.removalBlocked(platform, stableId);
-  }
-
-  /** Non-mutating fence rechecked by steps and at the native delete chokepoint. */
-  removalBlocked(platform: BindingJournalEntry["platform"], stableId: string): boolean {
-    const key = JSON.stringify([platform, stableId]);
-    const records = this.removals.get(key);
-    if (!records) {
-      return false;
-    }
-    const abandoned = [...records].filter((record) => record.abandoned).length;
-    if (abandoned >= BINDING_JOURNAL_MAX_ABANDONED_DELETES) {
-      if (!this.warned.has(key)) {
-        this.warned.add(key);
-        logger.warn(
-          `[BindingJournal] Removal of '${stableId}' reached the pending abandoned delete bound.`,
-        );
-      }
-      return true;
-    }
-    return [...records].some((record) => !record.abandoned);
-  }
-
-  markRemovalOverdue(operation: Promise<BindingDeletionResult>, nowMs: number): void {
-    const record = this.operations.get(operation);
-    if (record && record.overdueAtMs === undefined) {
-      record.overdueAtMs = nowMs;
-    }
-  }
-
-  trackRemoval(
-    platform: BindingJournalEntry["platform"],
-    stableId: string,
-    operation: () => Promise<BindingDeletionResult>,
-  ): Promise<BindingDeletionResult> {
-    const key = JSON.stringify([platform, stableId]);
-    const records = this.removals.get(key) ?? new Set<RemovalOperation>();
-    const record: RemovalOperation = { abandoned: false };
-    records.add(record);
-    this.removals.set(key, records);
-    const promise = Promise.resolve()
-      .then(operation)
-      .finally(() => {
-        if (record.abandoned) {
-          logger.debug(`[BindingJournal] Abandoned removal of '${stableId}' settled late.`);
-        }
-        records.delete(record);
-        this.operations.delete(promise);
-        if (records.size === 0) {
-          this.removals.delete(key);
-        }
-        if (
-          [...records].filter((pending) => pending.abandoned).length <
-          BINDING_JOURNAL_MAX_ABANDONED_DELETES
-        ) {
-          this.warned.delete(key);
-        }
-      });
-    this.operations.set(promise, record);
-    return promise;
-  }
-  add(id: number): void {
-    this.ids.add(id);
-  }
-  delete(id: number): void {
-    this.ids.delete(id);
-  }
-  has(id: number): boolean {
-    return this.ids.has(id);
-  }
-}
 
 export type BindingJournalOwnerLiveness = (owner: BindingJournalOwner) => boolean;
 
@@ -328,17 +222,11 @@ export class BindingJournal {
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
   private readonly budgets: BindingJournalStageBudgets;
-  // Memory bridges registry contention; only an unwritable flag can leave intent lost on death.
-  private readonly removalIntents = new Set<number>();
-  private readonly removalFlagPacing: RegistryRetryPacing;
+  private readonly removalFlags: BindingJournalRemovalFlags;
+  private readonly stages: BindingJournalStageRunner;
+  private readonly locator: BindingJournalDeviceLocator;
 
   constructor(private readonly deps: BindingJournalDependencies) {
-    this.removalFlagPacing = new RegistryRetryPacing({
-      timer: deps.timer,
-      initialDelayMs: BINDING_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS,
-      maxDelayMs: BINDING_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS,
-      maxBlockedWaitMs: BINDING_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
-    });
     this.inFlight = deps.inFlight ?? new BindingJournalInFlight();
     this.isOwnerLive = deps.isOwnerLive ?? defaultBindingExecOwnerLiveness;
     this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
@@ -350,129 +238,40 @@ export class BindingJournal {
       deleteGraceMs: BINDING_JOURNAL_DELETE_GRACE_MS,
       ...deps.stageBudgets,
     };
+    this.removalFlags = new BindingJournalRemovalFlags({
+      timer: deps.timer,
+      pacing: new RegistryRetryPacing({
+        timer: deps.timer,
+        initialDelayMs: BINDING_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS,
+        maxDelayMs: BINDING_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS,
+        maxBlockedWaitMs: BINDING_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
+      }),
+      advance: (entry, input, signal) => this.advanceStep(entry, input, signal),
+    });
+    this.stages = new BindingJournalStageRunner({
+      inventory: deps.inventory,
+      deleter: deps.deleter,
+      claims: deps.claims,
+      timer: deps.timer,
+      inFlight: this.inFlight,
+      budgets: this.budgets,
+    });
+    this.locator = new BindingJournalDeviceLocator(deps.registry, this.stages);
   }
 
   get owner(): BindingJournalOwner {
     return this.deps.owner;
   }
 
-  private removalIntended(entry: BindingJournalEntry): boolean {
-    return entry.target.removalRequested === true || this.removalIntents.has(entry.id);
-  }
-
   markRemovalIntended(entry: BindingJournalEntry): void {
-    if (!entry.target.removalRequested) {
-      this.removalIntents.add(entry.id);
-    }
+    this.removalFlags.markRemovalIntended(entry);
   }
 
-  async requestRemoval(
+  requestRemoval(
     entry: BindingJournalEntry,
     options: { deadlineMs?: number; signal?: AbortSignal } = {},
   ): Promise<BindingJournalEntry> {
-    if (entry.target.removalRequested) {
-      return entry;
-    }
-    this.markRemovalIntended(entry);
-    // Cancellation and an expired deadline only bound retries, never the first durability write.
-    const recorded = await this.tryRemovalFlag(entry, new AbortController().signal, true);
-    if (recorded) {
-      return recorded.kind === "advanced" ? recorded.entry : entry;
-    }
-    if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
-      logger.warn(`[BindingJournal] Removal flag for entry ${entry.id} missed its deadline.`);
-      return entry;
-    }
-    const controller = new AbortController();
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, controller.signal])
-      : controller.signal;
-    try {
-      return await raceWithDeadline(() => this.retryRemovalFlag(entry, signal), {
-        timer: this.deps.timer,
-        timeoutMs:
-          options.deadlineMs === undefined
-            ? undefined
-            : Math.max(0, options.deadlineMs - this.deps.timer.now()),
-        signal,
-        label: `removal flag for entry ${entry.id}`,
-        onTimeout: () => controller.abort(),
-      });
-    } catch (error) {
-      if (!signal.aborted) {
-        // Preserve non-retryable registry failures for the caller's classification.
-        throw error;
-      }
-      logger.warn(
-        `[BindingJournal] Removal flag for entry ${entry.id} interrupted: ${errorMessage(error)}`,
-        error,
-      );
-      return entry;
-    }
-  }
-
-  private async retryRemovalFlag(
-    entry: BindingJournalEntry,
-    signal: AbortSignal,
-  ): Promise<BindingJournalEntry> {
-    for (let attempt = 2; attempt <= BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS; attempt++) {
-      signal.throwIfAborted();
-      await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt - 1), signal);
-      const recorded = await this.tryRemovalFlag(entry, signal);
-      if (recorded) {
-        return recorded.kind === "advanced" ? recorded.entry : entry;
-      }
-    }
-    logger.warn(`[BindingJournal] Removal flag for entry ${entry.id} exhausted registry retries.`);
-    return entry;
-  }
-
-  private async tryRemovalFlag(entry: BindingJournalEntry, signal: AbortSignal, immediate = false) {
-    const startedMs = this.deps.timer.now();
-    const timeout = new Error(`Removal flag for entry ${entry.id} exceeded its write budget.`);
-    try {
-      const write = () =>
-        this.advanceStep(
-          entry,
-          {
-            expectedPhase: entry.phase,
-            phase: entry.phase,
-            target: {
-              removalRequested: true,
-              ...(entry.target.newStableId ? { newStableId: entry.target.newStableId } : {}),
-            },
-          },
-          signal,
-        );
-      const recorded = await (immediate
-        ? raceWithDeadline(write, {
-            timer: this.deps.timer,
-            timeoutMs: BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
-            timeoutError: () => timeout,
-            label: `first removal flag write for entry ${entry.id}`,
-          })
-        : this.removalFlagPacing.run(write, (result) => result.kind === "advanced", signal));
-      if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
-        this.removalIntents.delete(entry.id);
-      }
-      return recorded;
-    } catch (error) {
-      if (error === timeout) {
-        logger.warn(`[BindingJournal] ${errorMessage(error)}`, error);
-        return { kind: "removal_flag_timed_out" as const };
-      }
-      if (classifySqliteError(error) !== "retryable") {
-        // Preserve non-retryable errors; the in-memory intent still prevents adoption.
-        logger.warn(`[BindingJournal] Removal flag failed: ${errorMessage(error)}`, error);
-        throw error;
-      }
-      if (immediate) {
-        this.removalFlagPacing.noteBlocked(startedMs);
-      }
-      // Expected SQLite contention is retried on the shared pacing before any deletion.
-      logger.debug(`[BindingJournal] Removal flag deferred: ${errorMessage(error)}`, error);
-      return undefined;
-    }
+    return this.removalFlags.requestRemoval(entry, options);
   }
 
   /**
@@ -619,13 +418,13 @@ export class BindingJournal {
     }
     const located = options.device
       ? { kind: "present" as const, device: options.device }
-      : await this.locateForDeletion(entry, oldId, signal);
+      : await this.locator.locateForDeletion(entry, oldId, signal);
     if (located.kind === "blocked") {
       return this.recordBlocked(entry, located.reason, located.message, undefined, signal);
     }
     const deletion: BindingDeletionResult =
       located.kind === "present"
-        ? await this.deleteDevice(
+        ? await this.stages.deleteDevice(
             {
               platform: entry.platform,
               stableId: oldId,
@@ -757,7 +556,7 @@ export class BindingJournal {
     signal?: AbortSignal,
   ): Promise<Step> {
     checkCancellation(signal);
-    const located = await this.locateCreated(entry, signal);
+    const located = await this.locator.locateCreated(entry, signal);
     if (located.kind === "absent") {
       return this.removalRegistryStage(
         () => this.closeStep(entry, "rolled_back", signal),
@@ -803,8 +602,8 @@ export class BindingJournal {
     checkCancellation(signal);
     const current = assignment !== null && sameBinding(assignment, entry.binding);
     const spec = recordedSpec(entry);
-    if (options.adopt && !this.removalIntended(entry) && current && spec) {
-      const match = await this.boundedStage(
+    if (options.adopt && !this.removalFlags.removalIntended(entry) && current && spec) {
+      const match = await this.stages.boundedStage(
         () => this.deps.matcher.matches(device, spec),
         {
           label: `configuration for entry ${entry.id}`,
@@ -844,7 +643,7 @@ export class BindingJournal {
     signal?: AbortSignal,
   ): Promise<Extract<Step, { kind: "settled" }>> {
     const closed = await this.advanceStep(entry, { expectedPhase: entry.phase, phase }, signal);
-    this.removalIntents.delete(entry.id);
+    this.removalFlags.clear(entry.id);
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
   }
 
@@ -854,7 +653,7 @@ export class BindingJournal {
       result.kind === "journal_conflict" ||
       (result.kind === "advanced" && result.entry.target.removalRequested)
     ) {
-      this.removalIntents.delete(entry.id);
+      this.removalFlags.clear(entry.id);
     }
     return result;
   }
@@ -1005,7 +804,7 @@ export class BindingJournal {
     }
     const stableId = assignment.stableDeviceId;
     if (stableId) {
-      const free = await this.checkDeviceFree(entry, stableId, signal);
+      const free = await this.locator.checkDeviceFree(entry, stableId, signal);
       if (free.kind === "blocked") {
         return this.recordBlocked(entry, free.reason, free.message, undefined, signal);
       }
@@ -1029,153 +828,13 @@ export class BindingJournal {
     return { kind: "settled", entry: restored.entry };
   }
 
-  /** The released device must be listed and unclaimed, or proven absent, before reuse. */
-  private async checkDeviceFree(
-    entry: BindingJournalEntry,
-    stableId: string,
-    signal?: AbortSignal,
-  ): Promise<
-    { kind: "free" } | { kind: "blocked"; reason: BindingJournalBlockReason; message: string }
-  > {
-    const inventory = await this.listInventory(entry, entry.platform, signal);
-    if (!inventory) {
-      return {
-        kind: "blocked",
-        reason: "discovery_incomplete",
-        message: "Device discovery failed.",
-      };
-    }
-    const device = findByStableId(inventory, entry.platform, stableId);
-    if (!device) {
-      return inventory.complete
-        ? { kind: "free" }
-        : {
-            kind: "blocked",
-            reason: "discovery_incomplete",
-            message: `Device '${stableId}' was not listed and discovery was incomplete.`,
-          };
-    }
-    const claim = await this.describeClaim(entry, device, signal);
-    if (claim.kind === "free") {
-      return { kind: "free" };
-    }
-    return {
-      kind: "blocked",
-      reason: claim.kind === "held" ? "device_busy" : "discovery_incomplete",
-      message: `Device '${stableId}' is not free: ${claim.reason}`,
-    };
-  }
-
-  // --- deletion ------------------------------------------------------------------------------
-
-  private async locateForDeletion(
-    entry: BindingJournalEntry,
-    oldId: string,
-    signal?: AbortSignal,
-  ): Promise<
-    | { kind: "present"; device: DeviceInfo }
-    | { kind: "absent" }
-    | { kind: "blocked"; reason: BindingJournalBlockReason; message: string }
-  > {
-    const inventory = await this.listInventory(entry, entry.platform, signal);
-    if (!inventory) {
-      return {
-        kind: "blocked",
-        reason: "discovery_incomplete",
-        message: "Device discovery failed.",
-      };
-    }
-    const device = findByStableId(inventory, entry.platform, oldId);
-    if (!device) {
-      // Only complete discovery proves absence.
-      return inventory.complete
-        ? { kind: "absent" }
-        : {
-            kind: "blocked",
-            reason: "discovery_incomplete",
-            message: `Device '${oldId}' was not listed and discovery was incomplete.`,
-          };
-    }
-    const claim = await this.describeClaim(entry, device, signal);
-    if (claim.kind !== "free") {
-      return {
-        kind: "blocked",
-        reason: claim.kind === "held" ? "device_busy" : "discovery_incomplete",
-        message: `Device '${oldId}' cannot be deleted: ${claim.reason}`,
-      };
-    }
-    const holder = await this.deps.registry.findDeviceHolder(entry.platform, oldId);
-    checkCancellation(signal);
-    if (
-      holder?.kind !== "binding" ||
-      holder.assignment.scopeKey !== entry.scopeKey ||
-      holder.assignment.bindingIndex !== entry.bindingIndex ||
-      !sameBinding(holder.assignment, entry.binding)
-    ) {
-      return {
-        kind: "blocked",
-        reason: "reconcile_in_progress",
-        message: `Device '${oldId}' is no longer this binding's device.`,
-      };
-    }
-    return { kind: "present", device };
-  }
-
-  // --- creation ------------------------------------------------------------------------------
-
-  private async locateCreated(
-    entry: BindingJournalEntry,
-    signal?: AbortSignal,
-  ): Promise<
-    | { kind: "present"; device: DeviceInfo; stableId: string }
-    | { kind: "absent" }
-    | { kind: "blocked"; reason: BindingJournalBlockReason; message: string }
-  > {
-    const { newStableId, newName } = entry.target;
-    if (!newStableId && !newName) {
-      return { kind: "absent" };
-    }
-    const platform = journalCreationPlatform(entry);
-    const inventory = await this.listInventory(entry, platform, signal);
-    if (!inventory) {
-      return {
-        kind: "blocked",
-        reason: "discovery_incomplete",
-        message: "Device discovery failed.",
-      };
-    }
-    const candidates = inventory.devices.filter(
-      (device) =>
-        device.platform === platform &&
-        (newStableId ? deviceStableId(device) === newStableId : device.name === newName),
-    );
-    if (candidates.length === 0) {
-      return inventory.complete
-        ? { kind: "absent" }
-        : {
-            kind: "blocked",
-            reason: "discovery_incomplete",
-            message: `Created device '${newStableId ?? newName}' was not listed and discovery was incomplete.`,
-          };
-    }
-    const stableId = candidates.length === 1 ? deviceStableId(candidates[0]) : undefined;
-    if (!stableId) {
-      return {
-        kind: "blocked",
-        reason: "discovery_incomplete",
-        message: `Created device '${newName}' is ambiguous (${candidates.length} listed).`,
-      };
-    }
-    return { kind: "present", device: candidates[0], stableId };
-  }
-
   private async adoptCreated(
     entry: BindingJournalEntry,
     device: DeviceInfo,
     stableId: string,
     signal?: AbortSignal,
   ): Promise<Step> {
-    if (this.removalIntended(entry)) {
+    if (this.removalFlags.removalIntended(entry)) {
       return this.removeCreated(entry, device, stableId, undefined, signal);
     }
     // Readiness is unproven after an interruption: bind as `provisioning`; the acquisition's reuse
@@ -1234,7 +893,7 @@ export class BindingJournal {
         deadlineMs,
       );
       if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
-        this.removalIntents.delete(entry.id);
+        this.removalFlags.clear(entry.id);
       }
       if (recorded.kind !== "advanced") {
         return blocked(
@@ -1245,7 +904,7 @@ export class BindingJournal {
       }
       entry = recorded.entry;
     }
-    const claim = await this.describeClaim(entry, device, signal);
+    const claim = await this.stages.describeClaim(entry, device, signal);
     if (claim.kind !== "free") {
       return this.removalBlocked(
         entry,
@@ -1256,7 +915,7 @@ export class BindingJournal {
         deadlineMs,
       );
     }
-    const deletion = await this.deleteDevice(
+    const deletion = await this.stages.deleteDevice(
       {
         platform: journalCreationPlatform(entry),
         stableId,
@@ -1289,7 +948,7 @@ export class BindingJournal {
         ),
       deadlineMs,
     );
-    this.removalIntents.delete(entry.id);
+    this.removalFlags.clear(entry.id);
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
   }
 
@@ -1401,74 +1060,6 @@ export class BindingJournal {
     };
   }
 
-  private async boundedStage<T>(
-    operation: (signal: AbortSignal) => Promise<T>,
-    options: { label: string; timeoutMs: number; signal?: AbortSignal; cancel?: AbortSignal },
-    failure: (error: unknown) => T,
-  ): Promise<T> {
-    // Only journal-owned drives unwind; a public step records stage cancellation as failure.
-    checkCancellation(options.cancel);
-    const controller = new AbortController();
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, controller.signal])
-      : controller.signal;
-    const timeout = new Error(`${options.label} timed out after ${options.timeoutMs}ms`);
-    try {
-      const result = await raceWithDeadline(() => operation(signal), {
-        timer: this.deps.timer,
-        timeoutMs: Math.max(0, options.timeoutMs),
-        signal: options.signal,
-        label: options.label,
-        timeoutError: () => timeout,
-        onTimeout: () => controller.abort(timeout),
-      });
-      checkCancellation(options.cancel);
-      return result;
-    } catch (error) {
-      if (options.cancel?.aborted) {
-        controller.abort(options.cancel.reason);
-        throw new BindingJournalDriveCancelled(options.cancel.reason);
-      }
-      // Unreadable discovery and unverified deletion are conservative failures, never absence.
-      logger.warn(`[BindingJournal] ${options.label} failed: ${errorMessage(error)}`, error);
-      return failure(
-        options.signal?.aborted
-          ? new Error(`${options.label} cancelled: ${errorMessage(error)}`)
-          : error,
-      );
-    }
-  }
-
-  private listInventory(
-    entry: BindingJournalEntry,
-    platform: BindingJournalEntry["platform"] = entry.platform,
-    signal?: AbortSignal,
-  ): Promise<BindingInventorySnapshot | null> {
-    return this.boundedStage<BindingInventorySnapshot | null>(
-      (stageSignal) => this.deps.inventory.list(platform, { signal: stageSignal }),
-      {
-        label: `discovery for entry ${entry.id}`,
-        timeoutMs: this.budgets.discoveryMs,
-        signal,
-        cancel: signal,
-      },
-      () => null,
-    );
-  }
-
-  private describeClaim(entry: BindingJournalEntry, device: DeviceInfo, signal?: AbortSignal) {
-    return this.boundedStage<Awaited<ReturnType<BindingDeviceClaims["describe"]>>>(
-      () => this.deps.claims.describe(device),
-      {
-        label: `claim for entry ${entry.id}`,
-        timeoutMs: this.budgets.claimMs,
-        signal,
-        cancel: signal,
-      },
-      (error) => ({ kind: "unknown", reason: errorMessage(error) }),
-    );
-  }
-
   private pendingEntryRemoval(entry: BindingJournalEntry, fromPass = false) {
     const deleting = entry.phase === "deleting";
     const stableId = deleting ? entry.target.oldStableId : entry.target.newStableId;
@@ -1502,50 +1093,6 @@ export class BindingJournal {
     // even when the loop's phase and the timeout differ. Settled failures still back off.
     return blocked(entry, "cleanup_pending", `Removal of device '${stableId}' is still in flight.`);
   }
-
-  private async deleteDevice(
-    target: Parameters<BindingDeviceDeleter["deleteAndVerifyAbsence"]>[0],
-    cancel?: AbortSignal,
-    hardDeadlineMs?: number,
-  ): Promise<BindingDeletionResult & { nativeDeleteFailed?: boolean }> {
-    if (this.inFlight.removalBlocked(target.platform, target.stableId)) {
-      return {
-        kind: "failed",
-        message: `Removal of device '${target.stableId}' is still in flight.`,
-      };
-    }
-    let operation: Promise<BindingDeletionResult> | undefined;
-    try {
-      const result = await this.boundedStage<BindingDeletionResult>(
-        (signal) => {
-          operation = this.inFlight.trackRemoval(target.platform, target.stableId, () =>
-            this.deps.deleter.deleteAndVerifyAbsence({ ...target, signal }),
-          );
-          return operation;
-        },
-        {
-          label: `deleting '${target.stableId}'`,
-          timeoutMs: Math.max(
-            0,
-            Math.min(target.deadlineMs + this.budgets.deleteGraceMs, hardDeadlineMs ?? Infinity) -
-              this.deps.timer.now(),
-          ),
-          signal: target.signal,
-          cancel,
-        },
-        (error) => ({ kind: "failed", message: errorMessage(error) }),
-      );
-      return {
-        ...result,
-        nativeDeleteFailed:
-          operation !== undefined && result.kind === "failed" && !result.notAttempted,
-      };
-    } finally {
-      if (operation) {
-        this.inFlight.markRemovalOverdue(operation, this.deps.timer.now());
-      }
-    }
-  }
 }
 
 /** Why an acquisition waits on an entry another live driver holds. */
@@ -1554,16 +1101,6 @@ function skippedReason(entry: BindingJournalEntry): BindingJournalBlockReason {
     return "binding_settling";
   }
   return entry.phase === "deleting" ? "cleanup_pending" : "reconcile_in_progress";
-}
-
-function findByStableId(
-  inventory: BindingInventorySnapshot,
-  platform: BindingJournalEntry["platform"],
-  stableId: string,
-): DeviceInfo | undefined {
-  return inventory.devices.find(
-    (device) => device.platform === platform && deviceStableId(device) === stableId,
-  );
 }
 
 function emptyBindingCommit(requestedSpec: unknown): BindingBindingCommit {
@@ -1599,83 +1136,4 @@ function recordedSpec(entry: BindingJournalEntry): BindingRequestedSpec | undefi
     journalCreationPlatform(entry) === "android" ? androidBindingSpecSchema : iosBindingSpecSchema;
   const parsed = schema.safeParse(entry.target.requestedSpec);
   return parsed.success ? parsed.data : undefined;
-}
-
-/** How often the daemon's owner loop re-runs a redrive pass. */
-export const BINDING_JOURNAL_REDRIVE_INTERVAL_MS = 5_000;
-
-/**
- * The durable local owner of journal redrive: one pass at start (daemon startup), then one every
- * interval. Each pass drives every due entry once, so no entry starves and none is abandoned.
- */
-export class BindingJournalRedriveLoop {
-  private stopped = false;
-  private running: Promise<void> | undefined;
-  private stopping: Promise<"stopped" | "timed_out"> | undefined;
-  private readonly controller = new AbortController();
-  private cancelWait: (() => void) | undefined;
-
-  constructor(
-    private readonly journal: Pick<BindingJournal, "runPass">,
-    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
-    private readonly intervalMs: number = BINDING_JOURNAL_REDRIVE_INTERVAL_MS,
-  ) {}
-
-  start(): void {
-    if (!this.stopped) {
-      this.running ??= this.loop();
-    }
-  }
-
-  /** Prevent new work, interrupt waits, and join owned work within the shutdown budget. */
-  stop(budgetMs: number = BINDING_JOURNAL_STOP_BUDGET_MS): Promise<"stopped" | "timed_out"> {
-    this.stopped = true;
-    this.controller.abort();
-    this.cancelWait?.();
-    this.stopping ??= this.join(budgetMs);
-    return this.stopping;
-  }
-
-  private async join(budgetMs: number): Promise<"stopped" | "timed_out"> {
-    try {
-      await raceWithDeadline(this.running ?? Promise.resolve(), {
-        timer: this.timer,
-        timeoutMs: budgetMs,
-        label: "journal redrive stop",
-      });
-      return "stopped";
-    } catch (error) {
-      logger.warn(`[BindingJournal] redrive stop failed: ${errorMessage(error)}`, error);
-      return "timed_out";
-    }
-  }
-
-  private wait(): Promise<void> {
-    return new Promise((resolve) => {
-      const handle = this.timer.setTimeout(() => {
-        this.cancelWait = undefined;
-        resolve();
-      }, this.intervalMs);
-      this.cancelWait = () => {
-        this.timer.clearTimeout(handle);
-        this.cancelWait = undefined;
-        resolve();
-      };
-    });
-  }
-
-  private async loop(): Promise<void> {
-    while (!this.stopped) {
-      try {
-        await this.journal.runPass({ signal: this.controller.signal });
-      } catch (error) {
-        // The registry may be briefly unreadable; the next pass retries every open entry.
-        logger.warn(`[BindingJournal] redrive pass failed: ${errorMessage(error)}`, error);
-      }
-      if (this.stopped) {
-        return;
-      }
-      await this.wait();
-    }
-  }
 }

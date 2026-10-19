@@ -41,11 +41,12 @@ async function tapElement(hierarchy: ViewHierarchyResult, elementId: string) {
     },
   );
   const observation: ObserveResult = {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     observationId: "ios-overlay-window",
     updatedAt: 1,
     screenSize: { width: 402, height: 874 },
     viewHierarchy: hierarchy,
-    systemInsets: hierarchy.systemInsets,
+    systemInsets: hierarchy.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 },
   };
   const points: Array<{ x: number; y: number }> = [];
   tap.observedInteraction = async (action) => ({
@@ -53,15 +54,16 @@ async function tapElement(hierarchy: ViewHierarchyResult, elementId: string) {
     observation,
   });
   tap.refreshViewHierarchy = async () => hierarchy;
-  tap.executeiOSTap = async (_action, x, y) => {
+  tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
     points.push({ x, y });
-  };
+  });
   tap.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    effect: undefined,
     observation: current,
   });
   tap.prepareSelectionCapture = async () => null;
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({ elementId, action: "tap", searchUntil: { duration: 200 } });
   return { result, points };

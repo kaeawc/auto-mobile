@@ -26,7 +26,7 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import {
   resolveDirectSessionDevice,
   unregisterDirectSessionsForDevice,
-} from "./directSessionDeviceRegistry";
+} from "../utils/directSessionDeviceRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { DeviceShutdownService } from "../devices/deviceShutdownService";
@@ -61,16 +61,9 @@ import {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 export {
   DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
-  isShutdownTimeoutError,
   shutdownTimeoutError,
-  getShutdownInitiatingExecutionId,
-  DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
   retireShutdownOwnership,
   waitForDeviceShutdown,
-  type ShutdownDiscoveryContext,
-  stopVideoRecordingsBeforeShutdown,
-  type ShutdownDeadlineContext,
-  shouldClearIntentionalShutdownAfterFailure,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 
 const IOS_SHUTDOWN_CONFIRMATION_MIN_MS = 2_000;

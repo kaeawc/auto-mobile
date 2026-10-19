@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { OpenURL } from "../../../src/features/action/OpenURL";
@@ -15,19 +17,44 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
-const observeResultStub = {
+const observeResultStub = buildObserveResult({
   observationId: "open-url-stub",
   display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
   updatedAt: 0,
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
   viewHierarchy: { hierarchy: {} },
-} satisfies ObserveResult;
+}) satisfies ObserveResult;
 
 const SIMULATOR_UDID = "ABCDEF01-1234-1234-1234-1234567890AB";
 const PHYSICAL_UDID = "00008110-000A4D8E1234567E";
 
 describe("OpenURL Android command output", () => {
+  test("package openLink preserves the transport refusal instead of returning text", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      "emulator-5554",
+      new Error("device offline"),
+    );
+    const launch = spyOn(LaunchApp.prototype, "execute").mockRejectedValue(
+      new Error("launch failed", { cause: typed }),
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    try {
+      const openURL = new OpenURL(
+        { name: "pixel", platform: "android", deviceId: "emulator-5554" },
+        new FakeAdbExecutor(),
+        null,
+        null,
+        timer,
+      );
+      await expect(openURL.execute("package:com.example.app")).rejects.toBe(typed);
+    } finally {
+      launch.mockRestore();
+      timer.reset();
+    }
+  });
+
   test.each(["stdout", "stderr"] as const)(
     "returns failure when am start reports an unresolved intent on %s",
     async (stream) => {
@@ -48,14 +75,16 @@ describe("OpenURL Android command output", () => {
         timer,
       );
       const observeScreen = new FakeObserveScreen();
-      observeScreen.setObserveResult({
-        observationId: "open-url-test",
-        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
-        updatedAt: timer.now(),
-        screenSize: { width: 1080, height: 1920 },
-        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: {} },
-      });
+      observeScreen.setObserveResult(
+        buildObserveResult({
+          observationId: "open-url-test",
+          display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+          updatedAt: timer.now(),
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: { hierarchy: {} },
+        }),
+      );
       Object.assign(openURL, {
         observeScreen,
         window: new FakeWindow(),
@@ -96,14 +125,16 @@ describe("OpenURL Android command output", () => {
       timer,
     );
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult({
-      observationId: "open-url-test",
-      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
-      updatedAt: timer.now(),
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: {} },
-    });
+    observeScreen.setObserveResult(
+      buildObserveResult({
+        observationId: "open-url-test",
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+        updatedAt: timer.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: {} },
+      }),
+    );
     Object.assign(openURL, {
       observeScreen,
       window: new FakeWindow(),

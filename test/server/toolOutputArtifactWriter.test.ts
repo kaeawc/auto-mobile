@@ -6,11 +6,11 @@ import {
   buildToolOutputArtifactFilename,
   hasWriterIssuedFilenameShape,
 } from "../../src/server/toolOutputArtifactLedger";
+import { JsonToolOutputArtifactWriter } from "../../src/server/toolOutputArtifactWriter";
 import {
-  JsonToolOutputArtifactWriter,
   type ToolOutputArtifactDirectoryEntry,
   type ToolOutputArtifactFileSystem,
-} from "../../src/server/toolOutputArtifactWriter";
+} from "../../src/server/nodeToolOutputArtifactFileSystem";
 import { stringifyToolResponse } from "../../src/utils/toolUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

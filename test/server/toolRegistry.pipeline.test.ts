@@ -1,3 +1,5 @@
+import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
+import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -29,16 +31,16 @@ import {
   resetToolCallRecordingState,
   startToolCallRecording,
   stopToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,
 } from "../../src/server/stripToolResultStructuredContent";
 import {
   JsonToolOutputArtifactWriter,
-  type ToolOutputArtifactFileSystem,
   type ToolOutputArtifactRetention,
 } from "../../src/server/toolOutputArtifactWriter";
+import { type ToolOutputArtifactFileSystem } from "../../src/server/nodeToolOutputArtifactFileSystem";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
@@ -136,6 +138,38 @@ describe("ToolRegistry device-aware pipeline", () => {
     expect(tool.supportsProgress).toBe(true);
     expect(tool.debugOnly).toBe(true);
     expect(tool.outputSchema).toBeDefined();
+  });
+
+  test("registry unwraps a transport refusal before the actionable-error catch", async () => {
+    const typed = new AdbDeviceTransportUnavailableError(
+      device.deviceId,
+      new Error("device offline"),
+    );
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async (input) => ({
+          args: input.args,
+          device,
+          internalCall: false,
+          baseSessionUuid: undefined,
+          sessionUuid: undefined,
+          shouldResolveDevice: true,
+        }),
+      },
+      auditRunner: {
+        run: async () => {
+          throw new ActionableError("outer", { cause: typed });
+        },
+      },
+      planLifecycleManager: { afterExecution: async () => {} },
+    });
+    ToolRegistry.registerDeviceAware("transportProbe", "probe", z.object({}), async () => ({
+      success: true,
+    }));
+    await expect(ToolRegistry.getTool("transportProbe")!.handler({})).rejects.toBe(typed);
   });
 
   test("wrapped handler delegates to fakeable pipeline collaborators in order", async () => {
@@ -701,6 +735,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       await handler.handle({
         name: "tapOn",
         args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+        traits: PLAN_RELEVANT,
         device: undefined,
         internalCall: false,
         response: createStructuredToolResponse({ success: true }),

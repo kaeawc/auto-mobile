@@ -2,13 +2,11 @@ export {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   ProvisionDeviceError,
   type IosRuntimeIncompatibility,
-  type ProvisionDeviceCapacityDetails,
   type ProvisionDeviceFailureCode,
 } from "./ProvisionDeviceError";
 export { ProvisionDeviceCreateRejectedError } from "./ProvisionDeviceCreateRejectedError";
 export {
   FileAndroidAvdConfigWriter,
-  type AndroidAvdConfigWriteOptions,
   type AndroidAvdConfigWriter,
 } from "./FileAndroidAvdConfigWriter";
 import { ProvisionDeviceError, type IosRuntimeIncompatibility } from "./ProvisionDeviceError";

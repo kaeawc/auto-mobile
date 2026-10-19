@@ -29,7 +29,7 @@ import {
   TALKBACK_ACTIVATION_WARNING,
   TalkBackTapStrategy,
 } from "../../../src/features/talkback/TalkBackTapStrategy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 
 const device = {
   deviceId: "tap-display-verification",
@@ -181,8 +181,8 @@ function harness(
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const capability = spyOn(client, "supportsCommand").mockResolvedValue(ctrlProxy);
   const tap = spyOn(client, "requestTapCoordinates").mockImplementation(async (...args) => {
-    args[9]?.();
-    dispatches.push({ x: args[0], y: args[1], displayId: args[8] });
+    args[0].beforeSend?.();
+    dispatches.push({ x: args[0].x, y: args[0].y, displayId: args[0].displayId });
     onDispatch();
     return { success: true, totalTimeMs: 0 };
   });

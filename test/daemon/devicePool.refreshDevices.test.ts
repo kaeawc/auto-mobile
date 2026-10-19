@@ -5,6 +5,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -14,8 +15,7 @@ import { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -104,10 +104,10 @@ describe("DevicePool", () => {
     androidDevice: BootedDevice,
     fakeSimctl: ReturnType<typeof fakeDeviceManagerSimctl>,
   ): DevicePool => {
-    const fakeEmulator = {
+    const fakeEmulator = createFakeAndroidEmulator({
       getBootedDevices: async () => [androidDevice],
       getBootedDevicesChecked: async () => [androidDevice],
-    } as unknown as AndroidEmulatorClient;
+    });
     return makePool({
       deviceManager: new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator),
     });
@@ -546,14 +546,9 @@ describe("DevicePool", () => {
 
       function arrangedEach<T>(table: readonly T[]) {
         return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-          test.each(table)(
-            name,
-            async (row: T) => {
-              await arrangeHarness();
-              await fn(row);
-            },
-            timeout,
-          );
+          for (const row of table) {
+            arranged(name.replace("%s", String(row)), () => fn(row), timeout);
+          }
         };
       }
 
@@ -874,7 +869,7 @@ describe("DevicePool", () => {
           sourceImage,
         );
 
-        await sessionManager.releaseSession("owner-session", "test replacement exit");
+        await sessionManager.releaseSession("owner-session", "explicit-release");
         await devicePool.releaseDevice(replacement.deviceId, "owner-session");
         await devicePool.removeDevice(replacement.deviceId, false, handoff.replacementDevice);
         fakeDeviceManager.bootedDevices = [replacement];
@@ -1140,7 +1135,7 @@ describe("DevicePool", () => {
         platform: "android",
       });
       await replacementPublished.promise;
-      const replacementSession = sessionManager.getSession("owner-session");
+      const replacementSession = sessionManager.getSession("owner-session")!;
       expect(replacementSession).not.toBeNull();
       expect(replacementSession).not.toBe(originalSession);
 

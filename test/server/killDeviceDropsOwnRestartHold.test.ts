@@ -14,15 +14,14 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
     const replacement = { ...hold, stableDeviceId: "replacement-avd" };
     f.internals.rehydrationReservations.set(SIBLING, replacement);
     f.pool.getDevice(f.device.deviceId)!.name = "replacement-avd";
-    const cohort = Reflect.get(f.pool, "adbServerResetRecoveryReservations") as Map<
-      string,
-      {
-        deviceId: string;
-        image: { name: string };
-        cancelled?: boolean;
-      }
-    >;
-    const reset = { deviceId: f.device.deviceId, image: { name: f.device.name }, cancelled: false };
+    const cohort = f.pool.testHooks.adbServerResetRecoveryReservations;
+    const reset = {
+      deviceId: f.device.deviceId,
+      image: { name: f.device.name, platform: f.device.platform, isRunning: false },
+      cancelled: false,
+      settled: Promise.resolve(),
+      resolve: () => {},
+    };
     cohort.set("captured-reset", reset);
     const commit = f.pool.markIntentionalShutdown(f.device.deviceId, BASE);
     expect(reset.cancelled).toBe(true);

@@ -54,18 +54,13 @@ describe("screenshot encoding and truthful metadata", () => {
     }));
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
-      const shot = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(adb),
-        new FakeTimer(),
-        new CountingIdGenerator("shot"),
-        writer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const shot = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(adb),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("shot"),
+        fileWriter: writer,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       for (const options of [{}, { format: undefined }]) {
         const result = await shot.execute(options);
         expect(result.path).toEndWith(".jpg");
@@ -91,39 +86,29 @@ describe("screenshot encoding and truthful metadata", () => {
       const directAdb = new FakeAdbExecutor();
       directAdb.setDefaultResponse(createExecResult(png.toString("base64"), ""));
       const directWriter = new RecordingWriter();
-      const direct = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(directAdb),
-        new FakeTimer(),
-        new CountingIdGenerator("direct"),
-        directWriter,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const direct = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(directAdb),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("direct"),
+        fileWriter: directWriter,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       const directResult = await direct.execute({});
       expect(directResult.path).toEndWith(".png");
-      expect(directResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
+      expect<unknown>(directResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(directResult.screenshotFormat).toBe("png");
       expect(directResult.screenshotMimeType).toBe("image/png");
       expect(directWriter.files.get(directResult.path ?? "")).toEqual(png);
       expect(ctrlProxyCalls).toBe(1);
 
       const noArgWriter = new RecordingWriter();
-      const noArg = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(directAdb),
-        new FakeTimer(),
-        new CountingIdGenerator("noarg"),
-        noArgWriter,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const noArg = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(directAdb),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("noarg"),
+        fileWriter: noArgWriter,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       const noArgResult = await noArg.execute();
       expect(noArgResult.path).toEndWith(".png");
       expect(noArgResult.screenshotMimeType).toBe("image/png");
@@ -135,18 +120,15 @@ describe("screenshot encoding and truthful metadata", () => {
       pullAdb.setCommandResponse("AM_SCREENCAP_RC", createExecResult("AM_SCREENCAP_RC:0", ""));
       const fileSystem = new FakeFileSystem();
       const pullWriter = new RecordingWriter();
-      const pull = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(pullAdb),
-        new FakeTimer(),
-        new CountingIdGenerator("pull"),
-        pullWriter,
+      const pull = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(pullAdb),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("pull"),
+        fileWriter: pullWriter,
         fileSystem,
-        () => "/screenshots",
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+        cacheDirResolver: () => "/screenshots",
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       const expectedPath = path.join(
         path.dirname(pull.generateScreenshotPath(0, {})),
         screenshotFileName(0, mockDevice.deviceId, "pull-2", "png"),
@@ -154,7 +136,7 @@ describe("screenshot encoding and truthful metadata", () => {
       fileSystem.setBinaryFile(`${expectedPath}.temp`, png);
       const pullResult = await pull.execute({});
       expect(pullResult.path).toBe(expectedPath);
-      expect(pullResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
+      expect<unknown>(pullResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(pullResult.screenshotFormat).toBe("png");
       expect(pullResult.screenshotMimeType).toBe("image/png");
       expect(pullWriter.files.get(expectedPath)).toEqual(png);
@@ -167,27 +149,23 @@ describe("screenshot encoding and truthful metadata", () => {
   test("no options preserve raw iOS CtrlProxy PNG bytes", async () => {
     const writer = new RecordingWriter();
     const original = IOSCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
+      });
     try {
-      const shot = new TakeScreenshot(
-        iosDevice("ios-raw"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("shot"),
-        writer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const shot = new TakeScreenshot(iosDevice("ios-raw"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("shot"),
+        fileWriter: writer,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       for (const options of [undefined, {}]) {
         const result = await shot.execute(options);
         expect(result.path).toEndWith(".png");
-        expect(result.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
+        expect<unknown>(result.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
         expect(result.screenshotFormat).toBe("png");
         expect(result.screenshotMimeType).toBe("image/png");
         expect(writer.files.get(result.path ?? "")).toEqual(png);
@@ -199,18 +177,10 @@ describe("screenshot encoding and truthful metadata", () => {
 
   test("rejects contradictory options before any device request", async () => {
     const adb = new FakeAdbExecutor();
-    const shot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(adb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+    const shot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(adb),
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     const result = await shot.execute({ format: "webp", quality: 80, lossless: true });
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid screenshot options");
@@ -225,22 +195,17 @@ describe("screenshot encoding and truthful metadata", () => {
     spyOn(ctrlProxy, "requestScreenshot").mockImplementation(async () => ({ success: false }));
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
-      const shot = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(adb),
-        new FakeTimer(),
-        new CountingIdGenerator("shot"),
-        writer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const shot = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(adb),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("shot"),
+        fileWriter: writer,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       const result = await shot.execute({ format: "jpeg", quality: 70 });
       expect(result.success).toBe(true);
       expect(result.path).toEndWith(".jpg");
-      expect(result.screenshotImageSize).toEqual(
+      expect<unknown>(result.screenshotImageSize).toEqual(
         readImageHeaderDimensions(writer.files.get(result.path!)!),
       );
       expect(result.screenshotFormat).toBe("jpeg");
@@ -263,18 +228,13 @@ describe("screenshot encoding and truthful metadata", () => {
     }));
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
-      const shot = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("shot"),
-        writer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const shot = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("shot"),
+        fileWriter: writer,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       const result = await shot.execute({ format: "jpeg" });
       expect(result.path).toEndWith(".png");
       expect(result.screenshotFormat).toBe("png");
@@ -289,27 +249,23 @@ describe("screenshot encoding and truthful metadata", () => {
   test("iOS converts captured PNG to requested WebP and reports the saved format", async () => {
     const writer = new RecordingWriter();
     const original = IOSCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
+      });
     try {
-      const shot = new TakeScreenshot(
-        iosDevice("ios-encoding"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("shot"),
-        writer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const shot = new TakeScreenshot(iosDevice("ios-encoding"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("shot"),
+        fileWriter: writer,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       const result = await shot.execute({ format: "webp", lossless: true });
       expect(result.success).toBe(true);
       expect(result.path).toEndWith(".webp");
-      expect(result.screenshotImageSize).toEqual(
+      expect<unknown>(result.screenshotImageSize).toEqual(
         readImageHeaderDimensions(writer.files.get(result.path!)!),
       );
       expect(result.screenshotFormat).toBe("webp");
@@ -322,3 +278,19 @@ describe("screenshot encoding and truthful metadata", () => {
     }
   });
 });
+
+function screenshotClient(
+  stub: Pick<IOSCtrlProxyClient, "ensureConnected" | "requestScreenshot">,
+): IOSCtrlProxyClient {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
+    8765,
+    () => {
+      throw new Error("Unexpected socket connection");
+    },
+    new FakeTimer(),
+  );
+  spyOn(client, "ensureConnected").mockImplementation(stub.ensureConnected);
+  spyOn(client, "requestScreenshot").mockImplementation(stub.requestScreenshot);
+  return client;
+}

@@ -102,7 +102,7 @@ test("production factory uses the argv simctl seam and rejects an empty containe
 });
 
 for (const device of [
-  { ...DEVICE, platform: "android" },
+  { ...DEVICE, platform: "android" as const },
   { ...DEVICE, deviceId: "00008110-001A2B3C4D5E6F70" },
 ]) {
   test(`refuses non-simulator ${device.platform} ${device.deviceId}`, async () => {
@@ -208,7 +208,7 @@ test("failed in-flight attach is cleared for retry", async () => {
     return raw;
   });
   await expect(h.attacher.attach(DEVICE, BUNDLE)).rejects.toThrow(ActionableError);
-  expect(await h.attacher.attach(DEVICE, BUNDLE)).toBe(h.connections.get(DEVICE.deviceId));
+  expect<unknown>(await h.attacher.attach(DEVICE, BUNDLE)).toBe(h.connections.get(DEVICE.deviceId));
   expect(attempts).toBe(2);
 });
 

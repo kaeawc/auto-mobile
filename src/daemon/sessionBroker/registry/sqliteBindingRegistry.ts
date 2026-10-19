@@ -1,10 +1,10 @@
+import { createRegistryDatabase } from "./RegistryDatabase";
 import { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
-export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
-import { Kysely, type Generated, type Selectable, type Transaction, SqliteAdapter } from "kysely";
-import { BunSqliteDialect, type BunSqliteHandle } from "../../../db/bunSqliteDialect";
+import { Kysely, type Generated, type Selectable, type Transaction } from "kysely";
+import { type BunSqliteHandle } from "../../../db/bunSqliteDialect";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../../db/database";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -15,7 +15,7 @@ import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../.
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { SqliteSessionBrokerStore } from "../sqliteStore";
-import type { BrokerRequestsTable, BrokerResourcesTable } from "../store";
+import type { BrokerReceiptTables } from "../store";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
 import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
@@ -75,10 +75,14 @@ import {
   type UpdateBindingStateResult,
   assertPlatformChangeAllowed,
 } from "./bindingRegistry";
+import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
+
+export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
 
 /** Scope under the ADB-server coordination root: host-wide, independent of any one adb server. */
 
 export const BINDINGS_REGISTRY_SUBDIR = "registry";
+
 export const BINDINGS_REGISTRY_FILE = "slots.sqlite";
 
 /**
@@ -174,17 +178,18 @@ interface BindingJournalTable {
   updated_at_ms: number;
 }
 
-export interface BindingRegistryDatabase {
+export interface BindingRegistryDatabase extends BrokerReceiptTables {
   slot_scopes: BindingScopesTable;
   slot_assignments: BindingAssignmentsTable;
   slot_journal: BindingJournalTable;
-  session_broker_requests: BrokerRequestsTable;
-  session_broker_resources: BrokerResourcesTable;
 }
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;
+
 type ScopeRow = Selectable<BindingScopesTable>;
+
 type AssignmentRow = Selectable<BindingAssignmentsTable>;
+
 type JournalRow = Selectable<BindingJournalTable>;
 
 function toScope(row: ScopeRow): BindingScopeRecord {
@@ -408,23 +413,7 @@ export const BINDING_REGISTRY_BUSY_TIMEOUT_MS = Math.min(250, SQLITE_BUSY_TIMEOU
 type RegistrySqliteHandle = BunSqliteHandle;
 
 function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
-  // Resolved lazily, like database.ts, so importing this module never requires the Bun runtime.
-  const { Database } = require("bun:sqlite") as {
-    Database: new (path: string) => RegistrySqliteHandle;
-  };
-  // The shared driver still finalizes statements, rejects queued work and closes the handle.
-  // Only this registry handle skips its close-time maintenance: both PRAGMAs can each wait a
-  // fresh busy_timeout behind a peer writer, even after a failed open. SQLite's automatic WAL
-  // checkpoints and durable FULL-sync commits suffice; explicit shutdown truncation is optional.
-  class RegistryDatabase extends Database {
-    override exec(sql: string): void {
-      if (sql === "PRAGMA optimize;" || sql === "PRAGMA wal_checkpoint(TRUNCATE);") {
-        return;
-      }
-      super.exec(sql);
-    }
-  }
-  const sqliteDb = new RegistryDatabase(dbPath);
+  const sqliteDb = createRegistryDatabase(dbPath);
   try {
     sqliteDb.exec(`PRAGMA busy_timeout = ${BINDING_REGISTRY_BUSY_TIMEOUT_MS};`);
     sqliteDb.exec("PRAGMA journal_mode = WAL;");
@@ -436,21 +425,6 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
     throw error;
   }
   return sqliteDb;
-}
-
-// SQLite supports transactional DDL. Kysely's default SQLite adapter opts out; here a busy
-// migration must roll back its ALTERs AND migration records before a factory retries the open.
-// Kept registry-local so the per-daemon database retains its existing migration behavior.
-class RegistrySqliteAdapter extends SqliteAdapter {
-  override get supportsTransactionalDdl(): boolean {
-    return true;
-  }
-}
-
-class RegistrySqliteDialect extends BunSqliteDialect {
-  override createAdapter(): SqliteAdapter {
-    return new RegistrySqliteAdapter();
-  }
 }
 
 /**

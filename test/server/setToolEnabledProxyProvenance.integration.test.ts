@@ -20,9 +20,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import {
   PersistentToolSelectionProfileRegistry,
-  InMemoryToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "../../src/server/toolSelectionProfileRegistry";
+} from "../../src/daemon/toolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/daemon/InMemoryToolSelectionProfileRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -34,7 +34,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeToolSelectionProfileProvenanceStore } from "../fakes/FakeToolSelectionProfileProvenanceStore";
-import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
+import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/daemon/deviceSessionResult";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();

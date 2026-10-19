@@ -301,20 +301,17 @@ object PrototypeDetentSerializer :
 
 object PrototypePageTargetSerializer :
   PrototypeJsonValueSerializer<PrototypePageTarget>("PrototypePageTarget") {
+  private fun isPageIndex(number: Double): Boolean =
+    number.isFinite() && number in 0.0..Int.MAX_VALUE.toDouble() && number % 1.0 == 0.0
+
   override fun fromJson(value: JsonElement): PrototypePageTarget {
     if (value == JsonPrimitive("next")) return PrototypePageTarget.Next
     if (value == JsonPrimitive("prev")) return PrototypePageTarget.Prev
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Expected page index")
-    val number = primitive.takeIf { !it.isString }?.doubleOrNull
-    if (
-      number == null ||
-        !number.isFinite() ||
-        number < 0 ||
-        number > Int.MAX_VALUE ||
-        number % 1.0 != 0.0
-    ) {
-      throw SerializationException("Invalid page index")
-    }
+    val number =
+      primitive.takeIf { !it.isString }?.doubleOrNull
+        ?: throw SerializationException("Invalid page index")
+    if (!isPageIndex(number)) throw SerializationException("Invalid page index")
     return PrototypePageTarget.Index(number.toInt())
   }
 

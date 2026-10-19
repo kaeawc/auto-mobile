@@ -174,7 +174,9 @@ for (const { name, batch } of fixtures) {
     expect(await getNetworkEventById(row.id, db)).toEqual(row);
     const traffic = await ResourceRegistry.getResource("automobile:network/traffic")!.handler();
     const match = ResourceRegistry.matchTemplate(`automobile:network/request/${row.id}`)!;
-    const detail = await match.template.handler(match.params);
+    const detail = await ("handler" in match.template
+      ? match.template.handler(match.params)
+      : match.template.handlerWithReadContext(match.params, {}));
     const surfaces = [row, JSON.parse(detail.text!), pushed[0].data];
     const metricDuration = Number(
       (payload.metadata as Record<string, string> | undefined)?.duration_ms,
@@ -221,7 +223,7 @@ for (const { name, batch } of fixtures) {
         expect(summary[key]).toEqual(value);
       }
     }
-    expect(row.applicationId).toBe(batch.bundleId);
+    expect<unknown>(row.applicationId).toBe(batch.bundleId);
     expect(row.deviceId).toBe("fixture-device");
     if (name.startsWith("urlsession")) {
       expect(row.requestHeaders?.Authorization).toBe("<redacted>");

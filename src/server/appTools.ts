@@ -1,6 +1,10 @@
+import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { defineDeviceTool } from "./defineTool";
+import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import {
+  appLifecycleResultSchema,
+  crashAppResultSchema,
   getAppPermissionsResultSchema,
   inspectPackageSigningResultSchema,
   listAppsResultSchema,
@@ -76,7 +80,7 @@ import {
   type PrototypeAgentRegistry,
   type PreparedPrototypeLaunch,
 } from "../features/prototype/ios/prototypeAgentInjection";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -473,53 +477,6 @@ export const appLifecycleSchema = withAppIdAliases(
   ),
 );
 
-export const appLifecycleResultSchema = z.object({
-  message: z.string(),
-  success: z.boolean(),
-  supported: z.boolean(),
-  action: z.enum(["background", "killBackgrounded"]),
-  platform: z.enum(["android", "ios"]),
-  appId: z.string(),
-  mechanism: z.enum(["home", "am-kill", "unsupported"]),
-  userId: z.number().int().nonnegative().optional(),
-  pid: z.number().int().positive().optional(),
-  pidBefore: z.number().int().positive().optional(),
-  pidAfter: z.number().int().positive().nullable().optional(),
-  processReclaimed: z.boolean().optional(),
-  errorCode: z
-    .enum([
-      "app_not_running",
-      "app_in_foreground",
-      "background_not_verified",
-      "kill_failed",
-      "ambiguous_user",
-      "invalid_app_id",
-    ])
-    .optional(),
-  error: z.string().optional(),
-});
-
-export const crashAppResultSchema = z.object({
-  message: z.string(),
-  success: z.boolean(),
-  supported: z.boolean(),
-  platform: z.enum(["android", "ios"]),
-  appId: z.string(),
-  processId: z.number().int().positive().optional(),
-  mechanism: z.enum(["android_am_crash", "ios_simulator_sigabrt", "unsupported"]),
-  timestamp: z.number().int().nonnegative(),
-  wasRunning: z.boolean().optional(),
-  confirmed: z.boolean(),
-  evidence: z
-    .object({
-      source: z.enum(["android_logcat", "ios_unified_log"]),
-      summary: z.string(),
-    })
-    .optional(),
-  userId: z.number().int().nonnegative().optional(),
-  error: z.string().optional(),
-});
-
 export const launchAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
@@ -853,16 +810,6 @@ function prepareLaunchArguments(
   };
 }
 
-function redactLaunchMessage(message: string, token: string | undefined): string {
-  return token ? message.split(token).join("[REDACTED]") : message;
-}
-
-function redactLaunchError(error: unknown, token: string | undefined): unknown {
-  return token && String(error).includes(token)
-    ? new Error(redactLaunchMessage(String(error), token))
-    : error;
-}
-
 export type UninstallAppArgs = z.output<typeof uninstallAppSchema>;
 
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
@@ -1016,26 +963,6 @@ function executeLaunch(
     launchArguments,
     launchEnvironment: prototypeLaunch?.environment,
   });
-}
-
-/** Clears the launch's mutation token and returns the error to throw, token redacted. */
-function launchFailure(
-  error: unknown,
-  device: BootedDevice,
-  appId: string,
-  mutationToken: string | undefined,
-): unknown {
-  if (mutationToken) {
-    iosMutationTokens.clear(device.deviceId, appId, mutationToken);
-  }
-  const safeError = redactLaunchError(error, mutationToken);
-  // A typed launch failure (uninstalled package, foreground mismatch) is
-  // already an actionable error — surface it verbatim rather than re-wrapping
-  // it as "Failed to launch app: Error: ..." (#5868).
-  if (isDeviceLostError(error) || safeError instanceof ActionableError) {
-    return safeError;
-  }
-  return toActionableError(safeError, `Failed to launch app`);
 }
 
 // Launch app handler
@@ -1554,7 +1481,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. prototype:true (iOS simulators only) relaunches the app with the prototype agent injected, so its current state is lost.",
     launchAppSchema,
     launchAppHandler,
-    { defaultEnabled: true, transportRecovery: "connect", outputSchema: launchAppResultSchema },
+    {
+      defaultEnabled: true,
+      transportRecovery: "connect",
+      outputSchema: launchAppResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1562,7 +1494,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Terminate app by package name",
     terminateAppSchema,
     terminateAppHandler,
-    { defaultEnabled: true, outputSchema: terminateAppResultSchema, stopsApp: true },
+    {
+      defaultEnabled: true,
+      outputSchema: terminateAppResultSchema,
+      stopsApp: true,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1570,7 +1507,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Intentionally crash a running app through the platform crash path",
     crashAppSchema,
     crashAppHandler,
-    { defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
+    { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1578,7 +1515,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "State-preserving background-process kill for saved-state restoration tests.",
     appLifecycleSchema,
     appLifecycleHandler,
-    { defaultEnabled: true, outputSchema: appLifecycleResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: appLifecycleResultSchema },
   );
 
   installAppTool.register(ToolRegistry, installAppHandler);
@@ -1596,7 +1533,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1627,7 +1564,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     resetKeychainSchema,
     resetKeychainHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   listAppsTool.register(ToolRegistry, listAppsHandler);

@@ -12,6 +12,7 @@ import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import { assignBindingDevice } from "./bindingFixtures";
+import { expectFailed } from "../../../helpers/reconcileResult";
 import {
   FakeCapacity,
   FakeClaims,
@@ -154,7 +155,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     const h = await harness({}, true);
     h.inventory.complete = false;
     const listed = spyOn(h.inventory, "list");
-    const result = await h.acquire({ runtime: RUNTIME });
+    const result = expectFailed(await h.acquire({ runtime: RUNTIME }));
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "discovery_incomplete", retryable: true },
@@ -207,7 +208,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
   test("unknown explicit profile leaves the assigned AVD and its binding intact", async () => {
     const h = await harness();
-    const result = await h.acquire({ runtime: RUNTIME, deviceType: UNKNOWN });
+    const result = expectFailed(await h.acquire({ runtime: RUNTIME, deviceType: UNKNOWN }));
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "spec_unsupported", retryable: false },
@@ -222,7 +223,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     h.profiles.read = async () => {
       throw new Error("catalog read failed");
     };
-    const result = await h.acquire({ runtime: RUNTIME, deviceType: "pixel_9" });
+    const result = expectFailed(await h.acquire({ runtime: RUNTIME, deviceType: "pixel_9" }));
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "discovery_incomplete", retryable: true },
@@ -245,7 +246,7 @@ describe("Android creation profile is validated before binding mutation", () => 
       },
     );
     h.inventory.remove(OLD);
-    const result = await h.acquire({ runtime: RUNTIME });
+    const result = expectFailed(await h.acquire({ runtime: RUNTIME }));
     expect(result).toMatchObject({
       outcome: "failed",
       failure: { code: "spec_unsupported", retryable: false },
@@ -302,7 +303,7 @@ describe("Android creation profile is validated before binding mutation", () => 
 
     const unknown = await harness();
     const unknownClaims = spyOn(unknown.claims, "describe");
-    const refused = await unknown.acquire({ runtime: RUNTIME, deviceType: UNKNOWN });
+    const refused = expectFailed(await unknown.acquire({ runtime: RUNTIME, deviceType: UNKNOWN }));
     expect(refused.failure?.code).toBe("spec_unsupported");
     expect(unknown.profiles.calls).toHaveLength(1);
     expect(unknownClaims).not.toHaveBeenCalled();
@@ -345,7 +346,7 @@ describe("Android creation profile is validated before binding mutation", () => 
     "only exact profile IDs match, refusing %s",
     async (deviceType) => {
       const h = await harness();
-      const result = await h.acquire({ runtime: RUNTIME, deviceType });
+      const result = expectFailed(await h.acquire({ runtime: RUNTIME, deviceType }));
       expect(result.failure?.code).toBe("spec_unsupported");
       await h.expectIntact();
     },

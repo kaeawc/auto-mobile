@@ -22,7 +22,7 @@ import {
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   CLI_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
-import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/server/executionTracker";
+import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

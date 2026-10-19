@@ -1,5 +1,8 @@
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
-import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { SessionOutsideBoundSessionError } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
@@ -19,10 +22,7 @@ import {
   DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
-  DaemonBoundSessionLostError,
   DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";
@@ -31,6 +31,7 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
 } from "../../src/daemon/types";
+import { z } from "zod/v4";
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
@@ -51,9 +52,9 @@ import {
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -232,9 +233,15 @@ class ScriptedDaemonClient implements DaemonClientLike {
 
 describe("DaemonMcpProxy", () => {
   beforeEach(() => {
-    ToolRegistry.register("observe", "read-only observation", {}, async () => ({ content: [] }), {
-      transportRecovery: "replay",
-    });
+    ToolRegistry.register(
+      "observe",
+      "read-only observation",
+      z.object({}),
+      async () => ({ content: [] }),
+      {
+        transportRecovery: "replay",
+      },
+    );
   });
 
   afterEach(() => {
@@ -4450,7 +4457,7 @@ describe("DaemonMcpProxy", () => {
             content: refusal.content,
           });
           timer.advanceTime(5_000);
-          await drainMicrotasks();
+          await drainMicrotasks(32);
           await proxy.callTool("observe", {});
 
           expect(client.callToolCalls).toEqual([
@@ -4776,10 +4783,10 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         await proxy.callTool("observe", {
-          sessionUuid: null as unknown as string,
+          sessionUuid: null,
         });
         await proxy.callTool("observe", {
-          sessionUuid: 42 as unknown as string,
+          sessionUuid: 42,
         });
 
         expect(client.callToolCalls).toEqual([
@@ -7297,7 +7304,7 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "device-session-a" });
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([{ name: "setToolEnabled" }]);
 
         await proxy.callTool("setToolEnabled", {
           toolName: "openLink",
@@ -7305,7 +7312,10 @@ describe("DaemonMcpProxy", () => {
           sessionUuid: "device-session-a",
         });
 
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([
+          { name: "setToolEnabled" },
+          { name: "openLink" },
+        ]);
         expect(listChangedKinds).toEqual(["tools"]);
         expect(client.callDaemonMethodCalls.filter((call) => call.method === "tools/list")).toEqual(
           [
@@ -7361,7 +7371,10 @@ describe("DaemonMcpProxy", () => {
         firstClient.emitConnectionClosed();
         await Promise.resolve();
 
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([
+          { name: "setToolEnabled" },
+          { name: "openLink" },
+        ]);
         expect(replacementClient.callDaemonMethodCalls).toContainEqual({
           method: "tools/list",
           params: { sessionUuid: "device-session-a" },
@@ -7673,11 +7686,7 @@ describe("DaemonMcpProxy", () => {
     const releaseMapSizes = (
       proxy: DaemonMcpProxy,
     ): { epochs: number; reasons: number; references: number } => {
-      const internals = proxy as unknown as {
-        releasedSessionEpochs: Map<string, number>;
-        releasedSessionReasons: Map<string, string>;
-        activeReleaseEpochReferences: Map<string, number>;
-      };
+      const internals = proxy.getInternalsForTesting().releaseLedger;
       return {
         epochs: internals.releasedSessionEpochs.size,
         reasons: internals.releasedSessionReasons.size,
@@ -7723,11 +7732,7 @@ describe("DaemonMcpProxy", () => {
         autoStartDaemon: false,
       });
 
-      const internals = proxy as unknown as {
-        releasedSessionEpochs: Map<string, number>;
-        releasedSessionReasons: Map<string, string>;
-        activeReleaseEpochReferences: Map<string, number>;
-      };
+      const internals = proxy.getInternalsForTesting().releaseLedger;
       // Simulate a record that outlived its in-flight reference (e.g. a future
       // regression in the retain/release pairing). close() must still drain it so
       // the maps cannot accumulate across the proxy's lifetime.

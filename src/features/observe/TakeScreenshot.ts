@@ -11,12 +11,8 @@ import { Window } from "./Window";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import { ScreenshotResult } from "../../models/ScreenshotResult";
-import { Image } from "../../utils/image-utils";
 import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
-import {
-  validateScreenshotOptions,
-  type ScreenshotEncodingOptions,
-} from "./screenshot/screenshotOptions";
+import { encodeScreenshot, encodingOptions } from "./screenshot/screenshotEncoding";
 import { BootedDevice } from "../../models";
 import {
   ScreenshotJobHandle,
@@ -98,50 +94,6 @@ export interface ScreenshotOptions {
   hidePrototypes?: boolean;
 }
 
-async function encodeScreenshot(
-  source: Buffer,
-  options: ScreenshotEncodingOptions,
-): Promise<Buffer> {
-  const format = options.format ?? "png";
-  if (
-    detectImageMimeType(source) === `image/${format}` &&
-    options.quality === undefined &&
-    options.lossless !== true
-  ) {
-    return source;
-  }
-  if (!detectImageMimeType(source)) {
-    throw new Error("Screenshot has an unsupported image format");
-  }
-  const image = Image.fromBuffer(source);
-  let encoded: Buffer;
-  switch (format) {
-    case "png":
-      encoded = await image.png().toBuffer();
-      break;
-    case "jpeg":
-      encoded = await image.jpeg({ quality: options.quality }).toBuffer();
-      break;
-    case "webp":
-      encoded = await image
-        .webp(options.lossless ? { lossless: true } : { quality: options.quality ?? 75 })
-        .toBuffer();
-      break;
-  }
-  if (detectImageMimeType(encoded) !== `image/${format}`) {
-    throw new Error(`Screenshot encoder did not produce ${format} bytes`);
-  }
-  return encoded;
-}
-
-function encodingOptions(options: ScreenshotOptions): ScreenshotEncodingOptions {
-  return validateScreenshotOptions({
-    ...(options.format === undefined ? {} : { format: options.format }),
-    ...(options.quality === undefined ? {} : { quality: options.quality }),
-    ...(options.lossless === undefined ? {} : { lossless: options.lossless }),
-  });
-}
-
 function ctrlProxyScreenshotFormat(
   result: CtrlProxyScreenshotResult,
   imageBuffer: Buffer,
@@ -163,6 +115,19 @@ function resolveIosPrototypeHider(
   return hider ?? defaultIosCapturePrototypeHider;
 }
 
+export interface TakeScreenshotOptions {
+  adbFactory?: AdbClientFactory;
+  timer?: Timer;
+  idGenerator?: IdGenerator;
+  fileWriter?: ScreenshotFileWriter;
+  fileSystem?: FileSystem;
+  cacheDirResolver?: () => string;
+  physicalDisplayIdResolver?: PhysicalDisplayIdResolver;
+  cleanupOnCreate?: boolean;
+  pathProtection?: ScreenshotPathProtection;
+  iosPrototypeHider?: IosCapturePrototypeHiderResolver;
+}
+
 export class TakeScreenshot implements ScreenshotService {
   /** Typed unit-test view of the private capture paths. */
   readonly testHooks = {
@@ -175,17 +140,7 @@ export class TakeScreenshot implements ScreenshotService {
 
   /** Device reads may write one capture but must not evict another session's cache. */
   static forObservationRead(device: BootedDevice): TakeScreenshot {
-    return new TakeScreenshot(
-      device,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      false,
-    );
+    return new TakeScreenshot(device, { cleanupOnCreate: false });
   }
 
   /** Read a screenshot without changing an owner's client or starting a service. */
@@ -306,23 +261,17 @@ export class TakeScreenshot implements ScreenshotService {
    * @param device - Device to run ADB commands against
    * @param adbFactory - Factory for creating AdbClient instances
    */
-  constructor(
-    device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    timer: Timer = defaultTimer,
-    idGenerator: IdGenerator = defaultIdGenerator,
-    fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
-    fileSystem: FileSystem = new DefaultFileSystem(),
-    cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
-    physicalDisplayIdResolver: PhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({
-      timer,
-    }),
-    cleanupOnCreate = true,
-    options: {
-      pathProtection?: ScreenshotPathProtection;
-      iosPrototypeHider?: IosCapturePrototypeHiderResolver;
-    } = {},
-  ) {
+  constructor(device: BootedDevice, options: TakeScreenshotOptions = {}) {
+    const {
+      adbFactory = defaultAdbClientFactory,
+      timer = defaultTimer,
+      idGenerator = defaultIdGenerator,
+      fileWriter = defaultScreenshotFileWriter,
+      fileSystem = new DefaultFileSystem(),
+      cacheDirResolver = () => TakeScreenshot.getCacheDir(),
+      physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({ timer }),
+      cleanupOnCreate = true,
+    } = options;
     this.pathProtection = options.pathProtection ?? screenshotPathProtection;
     this.iosPrototypeHider = resolveIosPrototypeHider(options.iosPrototypeHider);
     this.device = device;

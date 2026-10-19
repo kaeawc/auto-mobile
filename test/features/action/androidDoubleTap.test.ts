@@ -1,3 +1,5 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import {
@@ -62,15 +64,9 @@ function timedClient(
     options?: AtomicDoubleTapRequestOptions;
   }> = [];
   const client = {
-    requestTapCoordinates: async (
-      _x: number,
-      _y: number,
-      _duration?: number,
-      _timeoutMs?: number,
-      _perf?: unknown,
-      _frameContext?: string,
-      onDispatch?: () => void,
-    ): Promise<TapResult> => {
+    requestTapCoordinates: async (request: TapCoordinatesRequest): Promise<TapResult> => {
+      const { onDispatch } = request;
+
       tapStarts.push(timer.now());
       onDispatch?.();
       await timer.sleep(options.roundTripMs);
@@ -150,7 +146,7 @@ describe("dispatchAndroidDoubleTap", () => {
       client,
       point,
       timer,
-      tap: () => client.requestTapCoordinates(10, 20, 10, undefined, undefined, undefined),
+      tap: () => client.requestTapCoordinates({ x: 10, y: 20, duration: 10 }),
     });
     expect(doubleRequests).toHaveLength(1);
     expect(tapStarts).toHaveLength(2);
@@ -252,7 +248,7 @@ describe("dispatchAndroidDoubleTap", () => {
     await dispatchAndroidDoubleTap({
       point,
       timer,
-      tap: () => client.requestTapCoordinates(10, 20),
+      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
     });
     expect(tapStarts[1] - tapStarts[0]).toBe(DOUBLE_TAP_GAP_MS);
     expect(timer.getSleepHistory()).toEqual([150, DOUBLE_TAP_GAP_MS - 150, 150]);
@@ -268,7 +264,7 @@ describe("dispatchAndroidDoubleTap", () => {
         point,
         timer,
         onWarning,
-        tap: () => client.requestTapCoordinates(10, 20),
+        tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
       });
       // No extra gap is added on top of the slow round trip.
       expect(tapStarts[1] - tapStarts[0]).toBe(SLOW_ROUND_TRIP_MS + 20);
@@ -289,7 +285,7 @@ describe("dispatchAndroidDoubleTap", () => {
       point,
       timer,
       onWarning,
-      tap: () => client.requestTapCoordinates(10, 20),
+      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
     });
     expect(onWarning).not.toHaveBeenCalled();
   });
@@ -302,7 +298,7 @@ describe("dispatchAndroidDoubleTap", () => {
       point,
       timer,
       signal: controller.signal,
-      tap: () => client.requestTapCoordinates(10, 20),
+      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
     });
     // Microtasks only: a real turn would let auto-advance finish the gap first.
     await drainUntil(() => tapStarts.length === 1, { description: "the first tap" });
@@ -323,7 +319,7 @@ describe("dispatchAndroidDoubleTap", () => {
           throw new ActionableError("Display changed");
         }
       },
-      tap: () => client.requestTapCoordinates(10, 20),
+      tap: () => client.requestTapCoordinates({ x: 10, y: 20 }),
     });
     // Microtasks only: a real turn would let auto-advance finish the gap first.
     await drainUntil(() => tapStarts.length === 1, { description: "the first tap" });
@@ -418,7 +414,7 @@ describe("explicit-display dispatcher (tapOn / tapAny display)", () => {
   test("a dispatched failure of the single gesture is indeterminate, not partial", async () => {
     const timer = newTimer();
     const adb = new FakeAdbExecutor();
-    const client: CoordinateTapClient<() => void> & {
+    const client: CoordinateTapClient & {
       requestDoubleTapCoordinates: (
         x: number,
         y: number,
@@ -634,13 +630,12 @@ describe("tapAny (Android default display)", () => {
       talkBackStrategy: new FakeTalkBackTapStrategy(),
       talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
     });
-    tapAny.observedInteraction = (action) =>
-      action(
-        recordObservationRead({
-          viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ marker: "before" }) } },
-          screenSize: { width: 500, height: 500 },
-        }),
-      );
+    tapAny.observedInteraction = runBlockWith(() =>
+      recordObservationRead({
+        viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ marker: "before" }) } },
+        screenSize: { width: 500, height: 500 },
+      }),
+    );
     tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     return tapAny;
   }

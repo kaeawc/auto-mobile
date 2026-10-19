@@ -72,22 +72,18 @@ describe("navigation recording source state and routing", () => {
 
   function record(recordedArgs = args) {
     // Exercise the actual default registry recorder without invoking a device handler.
-    const recorder: {
-      record: (
-        name: string,
-        args: Record<string, unknown>,
-        device: undefined,
-        session: undefined,
-        traits: { recordsNavigation: boolean },
-      ) => ReturnType<NavigationGraphManager["recordToolCall"]>;
-    } = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
+    const recorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const cache = spyOn(RealObserveScreen, "getRecentCachedResult").mockReturnValue(
       capture.structuredContent,
     );
     try {
-      return recorder.record("tapOn", recordedArgs, undefined, undefined, {
+      const handle = recorder.record("tapOn", recordedArgs, undefined, undefined, {
         recordsNavigation: true,
       });
+      if (!handle) {
+        throw new Error("Expected navigation recording handle");
+      }
+      return handle;
     } finally {
       cache.mockRestore();
     }

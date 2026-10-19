@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
   RestartAdmission,

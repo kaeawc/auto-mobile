@@ -1,3 +1,4 @@
+import { AdbDeviceTransportUnavailableError } from "../utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
 import {
   AndroidAvdIdentityUnresolvedError,
@@ -6,7 +7,7 @@ import {
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/TextIndeterminateError";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
@@ -26,17 +27,19 @@ import {
   recoveryIdentityLoss,
   recoveryIdentityLossPayload,
   sessionReleasedDuringCallPayload,
-} from "./deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import {
   DaemonRestartDeferredError,
-  DaemonRestartPendingError,
   daemonRestartDeferredPayload,
-  daemonRestartPendingPayload,
 } from "../daemon/daemonRestartAdmission";
+import {
+  DaemonRestartPendingError,
+  daemonRestartPendingPayload,
+} from "../daemon/daemonRestartPending";
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "./deviceOutsideBoundSessionRefusal";
+} from "../daemon/deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { SdkTooOldError } from "../models/SdkTooOldError";
@@ -164,6 +167,7 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | AdbDeviceTransportUnavailableError
   | AndroidAvdIdentityUnresolvedError
   | AndroidDeviceIdentityUnresolvedError
   | DeviceUnhealthyError
@@ -181,6 +185,7 @@ function hasSelfDescribedRefusalPayload(
   | BindingDiscoveryIncompleteError
   | BindingOwnershipUnconfirmedError {
   return [
+    AdbDeviceTransportUnavailableError,
     AndroidAvdIdentityUnresolvedError,
     AndroidDeviceIdentityUnresolvedError,
     DeviceUnhealthyError,

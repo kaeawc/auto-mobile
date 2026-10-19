@@ -2,6 +2,7 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
 import { logger } from "../../src/utils/logger";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
@@ -10,9 +11,9 @@ let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">
 
 beforeEach(() => {
   createdSocket = undefined;
-  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
     createdSocket = new FakeSocket();
-    queueMicrotask(onConnect!);
+    queueMicrotask(connectionListenerOf(args)!);
     return createdSocket;
   });
 });

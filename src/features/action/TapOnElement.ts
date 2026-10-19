@@ -46,7 +46,6 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { dispatchAndroidLongPress } from "./androidLongPress";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
-import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
   type DisplayFence,
   type DisplayFenceOption,
@@ -114,14 +113,16 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
-import { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
+import { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { boundsEqual } from "../../utils/bounds";
+import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
+import { TapPostTapEffectPhase } from "./tapPostTapEffectPhase";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { hasOwnPrototype, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
@@ -151,8 +152,6 @@ import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
-import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
-import { sequenceBackoff } from "../../utils/Backoff";
 import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
@@ -237,12 +236,6 @@ export interface TapOnElementDependencies extends DisplayFenceDependencies {
   tapStrategy?: TapStrategy;
 }
 
-const ENSURE_CHECKED_POLL_BACKOFF_MS = [50, 100, 200, 400] as const;
-const ensureCheckedPollBackoff = sequenceBackoff(ENSURE_CHECKED_POLL_BACKOFF_MS);
-const ENSURE_CHECKED_POLL_TIMEOUT_MS = ENSURE_CHECKED_POLL_BACKOFF_MS.reduce(
-  (total, delayMs) => total + delayMs,
-  0,
-);
 /** How long an iOS focus tap re-reads the screen for the field to report focus (#10266). */
 const IOS_FOCUS_SETTLE_TIMEOUT_MS = 1500;
 
@@ -315,6 +308,26 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     hashViewHierarchy: (hierarchy) => this.hashViewHierarchy(hierarchy),
     deriveTapEffect: (previous, current) => this.deriveTapEffect(previous, current),
     compareActiveWindow: (previous, current) => this.compareActiveWindow(previous, current),
+  });
+  private readonly postTapEffect = new TapPostTapEffectPhase({
+    applyRefreshedObservationRotation: (observation, rotation) =>
+      this.strategy.applyRefreshedObservationRotation(observation, rotation),
+    settlesPostTapChange: () => this.strategy.settlesPostTapChange,
+    settler: () => this.settler,
+    deriveTapEffect: (previous, current) => this.deriveTapEffect(previous, current),
+    getScreenSizeFromHierarchy: (hierarchy, options) =>
+      this.getScreenSizeFromHierarchy(hierarchy, options),
+  });
+  private readonly ensureChecked = new TapEnsureCheckedPhase({
+    timer: this.timer,
+    tapVerificationRefresh: (context) => this.tapVerificationRefresh(context),
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    withObservationScreenSize: (options, observation) =>
+      this.withObservationScreenSize(options, observation),
+    replaceObservationHierarchy: (observation, hierarchy, refreshed) =>
+      this.replaceObservationHierarchy(observation, hierarchy, refreshed),
+    elementAffordances: (element) => this.elementAffordances(element),
+    elementIdentity: (element) => this.elementIdentity(element),
   });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
@@ -438,6 +451,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hashViewHierarchy: this.hashViewHierarchy.bind(this),
       replaceObservationHierarchy: this.replaceObservationHierarchy.bind(this),
       verifyFocusedInputTarget: this.verifyFocusedInputTarget.bind(this),
+      handleElementNotFound: this.handleElementNotFound.bind(this),
       executeAndroidLongPress: this.executeAndroidLongPress.bind(this),
       executeiOSTap: this.executeiOSTap.bind(this),
       executeiOSTapWithCoordinates: this.executeiOSTapWithCoordinates.bind(this),
@@ -612,14 +626,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             "Container-scoped semantic link activation requires a stable native owner identity",
         };
       }
-      const result = await this.accessibilityService.requestActivateAccessibilityLink(
+      const result = await this.accessibilityService.requestActivateAccessibilityLink({
         text,
         occurrence,
         selector,
-        undefined,
-        undefined,
         signal,
-      );
+      });
       confirmActivation(result, () => {
         AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
       });
@@ -636,14 +648,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       const result = await IOSCtrlProxyClient.getInstance(
         this.device,
-      ).requestActivateAccessibilityLink(
+      ).requestActivateAccessibilityLink({
         text,
         occurrence,
-        ownerResourceId as string | undefined,
-        undefined,
-        undefined,
+        ownerResourceId: ownerResourceId as string | undefined,
         signal,
-      );
+      });
       confirmActivation(result, () => invalidateIosCacheOnSuccess(this.device, { success: true }));
       invalidateIosCacheOnSuccess(this.device, result);
       // The runner's "first of N candidate owners" note must reach the caller (#10082).
@@ -737,180 +747,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     currentObservation: ObserveResult,
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
-    const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
-    if (!this.strategy.settlesPostTapChange || !previousObservation) {
-      return { effect: immediateEffect, observation: currentObservation };
-    }
-
-    if (immediateEffect?.screenChanged !== true) {
-      // A stable source tree can arrive before Android begins the activity
-      // transition. Keep the full detection window before concluding no change;
-      // a quiet source screen is not proof that the tap had no effect.
-      return this.settler.waitForPostTapChange(previousObservation, currentObservation, signal);
-    }
-
-    if (immediateEffect.basis !== "viewHierarchy changed") {
-      // A `screenIdentity`/`activeWindow` change is authoritative on its own —
-      // it names a real destination window, so trust it immediately.
-      return { effect: immediateEffect, observation: currentObservation };
-    }
-
-    // Issue #6284: a hierarchy-ONLY change (activeWindow unchanged) is not, by
-    // itself, proof of the DESTINATION screen. The first post-tap observation
-    // uses `changeExpected: false`, so a transient intermediate mutation (a
-    // focused/selected/checked flip, or a partial hierarchy update before a
-    // delayed dialog/navigation) can look identical to a real change on the
-    // very first frame. Settle it across a real stability interval before
-    // trusting it as terminal, so a transient A isn't returned in place of the
-    // actual destination B (`baseline → A → A → B` must reach B).
-    return this.settler.settleHierarchyOnlyChange(previousObservation, currentObservation, signal);
+    return this.postTapEffect.deriveEffectAfterPostTapObservation(
+      previousObservation,
+      currentObservation,
+      signal,
+    );
   }
 
-  /**
-   * Guard against a self-contradicting response (issue #6219): `effect` says the
-   * screen already changed (`screenChanged: true`), but the observation attached
-   * to the SAME payload predates that transition and still stamps
-   * `freshness.verified/isFresh: true` — a client sees a stale, pre-tap tree
-   * asserted as trustworthy in the very response that also reports the window
-   * changed. Re-derives the comparison against `result.observation` as it
-   * stands right before it is returned (after any downstream mutation, e.g.
-   * `selectionStateTracker.finalize`), rather than trusting whichever
-   * intermediate observation `effect` was originally computed from, so a later
-   * mutation cannot leave the two fields disagreeing in the response.
-   *
-   * Only ever retracts freshness — never invents a `screenChanged: true` an
-   * observation didn't earn — and only when `effect` itself claims a change.
-   */
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   enforceFreshnessConsistencyWithEffect(
     previousObservation: ObserveResult | null,
     result: { effect?: TapOnElementResult["effect"]; observation?: ObserveResult },
   ): void {
-    if (!previousObservation || !result.observation || result.effect?.screenChanged !== true) {
-      return;
-    }
-    if (result.observation.wakefulness === "Asleep") {
-      // Issue #6284: a definitive screen-off terminal legitimately carries no
-      // viewHierarchy, so a re-derivation against it cannot reproduce the
-      // `screenChanged: true` (there is nothing to diff). This is NOT a stale
-      // pre-tap tree the client should re-observe past — it is the real
-      // post-tap state (the screen went off). Retracting freshness here would
-      // stamp the wrong warning ("predates the detected transition") over a
-      // faithful terminal capture, so leave it intact.
-      return;
-    }
-    const reDerived = this.deriveTapEffect(previousObservation, result.observation);
-    if (reDerived?.screenChanged === true) {
-      // The observation being returned is itself consistent with the detected
-      // transition — nothing to correct.
-      return;
-    }
-    const existing = result.observation.freshness;
-    result.observation.freshness = {
-      ...(existing ?? { isFresh: true }),
-      verified: false,
-      isFresh: false,
-      category: "effect_inconsistent",
-      warning:
-        "effect.screenChanged is true, but this observation's own capture still matches the " +
-        "pre-action screen — it predates the detected transition. Call observe again for the " +
-        "current, post-action state.",
-    };
+    this.postTapEffect.enforceFreshnessConsistency(previousObservation, result);
   }
 
-  /**
-   * The ONLY sanctioned way to swap an observation's `viewHierarchy` for one
-   * captured later in `execute` (issue #6284). Folding "replace hierarchy" and
-   * "refresh freshness" into one helper means no call site can do the first
-   * without the second: replacing a cached observation's hierarchy with a
-   * freshly-captured one while leaving its OLD `freshness` (e.g. `isFresh:
-   * false` from the pre-tap cache) stamped on the new, just-verified tree would
-   * surface fresh data labelled stale in the response.
-   *
-   * Pass `refreshedFromDevice: true` only when `viewHierarchy` was just captured
-   * from the device on this call (a genuine live re-capture) — that is the case
-   * whose freshness must be realigned. A replacement with data already in hand
-   * (the caller's own hierarchy returned unchanged) leaves freshness untouched.
-   */
   private replaceObservationHierarchy(
     observeResult: ObserveResult,
     viewHierarchy: ViewHierarchyResult,
     refreshedFromDevice: boolean,
   ): void {
-    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
-      observationScreenSize: observeResult.screenSize,
-      display: observeResult.viewHierarchy,
-    });
-    observeResult.viewHierarchy = viewHierarchy;
-    // The replacement is device-authored; keep the enclosing observation in
-    // that same clock domain so later freshness floors never compare it with
-    // the host time from the cached observation it replaced.
-    const updatedAt = hierarchyUpdatedAtToMillis(viewHierarchy);
-    if (updatedAt !== undefined) {
-      observeResult.updatedAt = updatedAt;
-    }
-    if (screenSize) {
-      observeResult.screenSize = screenSize;
-    } else if (observeResult.screenSize) {
-      observeResult.screenSize = { width: 0, height: 0 };
-    }
-    if (this.device.platform === "ios") {
-      observeResult.rotation = resolveIosObserveRotation(
-        viewHierarchy.rotation,
-        observeResult.screenSize,
-      );
-    }
-    if (refreshedFromDevice) {
-      this.markObservationFreshAfterSyncRefresh(observeResult);
-    }
-  }
-
-  /**
-   * Realign a cached observation's freshness verdict to the live re-capture that
-   * just replaced its hierarchy (issue #6284). The refresh verified the tree
-   * against the device on THIS call, so a lingering pre-refresh `isFresh: false`
-   * verdict no longer describes the attached data.
-   *
-   * Promote ONLY a `cache_age` failure — a stale/unverified/over-budget cache
-   * entry, which is exactly what swapping in a freshly-captured hierarchy
-   * resolves. A `window_identity` failure (wrong-window, status-bar-only,
-   * activity-attribution mismatch, incomplete capture, missing foreground
-   * window — issue #6284 P1) describes WHICH window/app the tree belongs to; the
-   * refresh replaced only `viewHierarchy` and did not recollect or reconcile
-   * `activeWindow`/attribution, and the re-capture may itself be from the wrong
-   * window, so clearing that warning would make an internally-inconsistent
-   * result look trustworthy. A verdict that was already fresh (or absent), or
-   * failed for any other reason, is left untouched. Called exclusively from
-   * {@link replaceObservationHierarchy}.
-   */
-  private markObservationFreshAfterSyncRefresh(observeResult: ObserveResult): void {
-    const freshness = observeResult.freshness;
-    const hierarchy = observeResult.viewHierarchy;
-    const actualTimestamp = hierarchyUpdatedAtToMillis(hierarchy);
-    const hasCompleteLiveHierarchy =
-      hierarchy !== undefined &&
-      typeof hierarchy.hierarchy === "object" &&
-      hierarchy.hierarchy !== null &&
-      !("error" in hierarchy.hierarchy) &&
-      hierarchy.ctrlProxyIncomplete !== true &&
-      hierarchy.fresh !== false &&
-      actualTimestamp !== undefined;
-    if (
-      hasCompleteLiveHierarchy &&
-      freshness?.isFresh === false &&
-      freshness.category === "cache_age"
-    ) {
-      observeResult.freshness = {
-        ...freshness,
-        isFresh: true,
-        verified: true,
-        actualTimestamp,
-        ageMs: 0,
-        staleDurationMs: undefined,
-        warning: undefined,
-        category: undefined,
-      };
-    }
+    this.postTapEffect.replaceObservationHierarchy(
+      observeResult,
+      viewHierarchy,
+      refreshedFromDevice,
+    );
   }
 
   private logClickableParentSelection(usedParent: boolean): void {
@@ -1033,7 +894,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return true;
     }
     const initial = result.observation;
-    if (this.device.platform !== "ios" || !initial) {
+    if (!this.strategy.settlesFocusChangeAfterTap || !initial) {
       return false;
     }
     const deadline = this.timer.now() + IOS_FOCUS_SETTLE_TIMEOUT_MS;
@@ -1647,141 +1508,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     selectedElement: TapOnSelectedElement | undefined,
     searchUntil: SearchUntilStats,
   ): TapOnElementResult | undefined {
-    if (options.ensureChecked === undefined) {
-      return undefined;
-    }
-    if (!isTruthyFlag(element.checkable)) {
-      const affordances = this.elementAffordances(element);
-      throw new ActionableError(
-        `tapOn ensureChecked requires a toggle element; ${this.elementIdentity(element)} has affordances: ${affordances.join(", ") || "none"}`,
-      );
-    }
-    if (isTruthyFlag(element.checked) !== options.ensureChecked) {
-      return undefined;
-    }
-    return {
-      success: true,
-      action: options.action,
-      element,
-      selectedElement,
-      searchUntil,
-      skipped: "already-checked",
-    };
+    return this.ensureChecked.beforeTap(options, element, selectedElement, searchUntil);
   }
 
-  private async refreshEnsureCheckedSelection(
+  private refreshEnsureCheckedSelection(
     options: TapVerificationOptions,
     observation: ObserveResult,
     selection: ElementSelectionResult,
     signal?: AbortSignal,
   ): Promise<{ selection: ElementSelectionResult; viewHierarchy: ViewHierarchyResult }> {
-    if (options.ensureChecked === undefined) {
-      return { selection, viewHierarchy: observation.viewHierarchy as ViewHierarchyResult };
-    }
-    const freshHierarchy = await this.tapVerificationRefresh({
-      refresh: options.verification?.refresh,
-      screenSize: observation.screenSize,
-      signal,
-    })(POST_TAP_REFRESH_TIMEOUT_MS);
-    if (!freshHierarchy) {
-      throw new ActionableError("tapOn ensureChecked: unable to refresh toggle before tapping");
-    }
-    const refound = this.findElementInHierarchy(
-      this.withObservationScreenSize(options, observation),
-      freshHierarchy,
-    ).selection;
-    if (!refound.element) {
-      throw new ActionableError("tapOn ensureChecked: toggle not found in fresh hierarchy");
-    }
-    this.replaceObservationHierarchy(observation, freshHierarchy, true);
-    return { selection: refound, viewHierarchy: freshHierarchy };
+    return this.ensureChecked.refreshSelection(options, observation, selection, signal);
   }
 
-  private async ensureCheckedAfterTap(
-    options: TapVerificationOptions,
-    observation: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<string | undefined> {
-    if (options.ensureChecked === undefined) {
-      return undefined;
-    }
-    const readChecked = (): boolean | "not found" => {
-      const refound = observation.viewHierarchy
-        ? this.findElementInHierarchy(
-            this.withObservationScreenSize(options, observation),
-            observation.viewHierarchy,
-          ).selection.element
-        : undefined;
-      return refound ? isTruthyFlag(refound.checked) : "not found";
-    };
-    let observed: boolean | "not found" = readChecked();
-    if (observed !== options.ensureChecked) {
-      observed = await this.pollEnsureCheckedAfterTap(
-        readChecked,
-        options.ensureChecked,
-        observation,
-        { signal, refresh: options.verification?.refresh },
-      );
-    }
-    return observed === options.ensureChecked
-      ? undefined
-      : `tapOn ensureChecked: tapped element but checked is now ${observed} (expected ${options.ensureChecked})`;
-  }
-
-  private async applyEnsureCheckedResult(
+  private applyEnsureCheckedResult(
     result: TapOnElementResult,
     options: TapVerificationOptions,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (options.ensureChecked === undefined) {
-      return;
-    }
-    const observation = result.observation;
-    if (observation === undefined) {
-      return;
-    }
-    const ensureCheckedError = await this.ensureCheckedAfterTap(options, observation, signal);
-    if (ensureCheckedError !== undefined) {
-      result.success = false;
-      result.error = ensureCheckedError;
-    }
-  }
-
-  private async pollEnsureCheckedAfterTap(
-    readChecked: () => boolean | "not found",
-    expected: boolean,
-    observation: ObserveResult,
-    context: { signal?: AbortSignal; refresh?: AndroidTapVerification["refresh"] } = {},
-  ): Promise<boolean | "not found"> {
-    const { signal } = context;
-    const deadline = this.timer.now() + ENSURE_CHECKED_POLL_TIMEOUT_MS;
-    let observed = readChecked();
-    for (let attempt = 1; this.timer.now() < deadline; attempt++) {
-      throwIfAborted(signal);
-      const delayMs = Math.min(
-        ensureCheckedPollBackoff.delayForAttempt(attempt),
-        deadline - this.timer.now(),
-      );
-      await this.timer.sleep(delayMs);
-      const remainingMs = deadline - this.timer.now();
-      if (remainingMs <= 0) {
-        break;
-      }
-      const freshHierarchy = await this.tapVerificationRefresh({
-        refresh: context.refresh,
-        screenSize: observation.screenSize,
-        signal,
-      })(Math.min(POST_TAP_REFRESH_TIMEOUT_MS, remainingMs));
-      if (!freshHierarchy) {
-        continue;
-      }
-      this.replaceObservationHierarchy(observation, freshHierarchy, true);
-      observed = readChecked();
-      if (observed === expected) {
-        return observed;
-      }
-    }
-    return observed;
+    return this.ensureChecked.applyResult(result, options, signal);
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
@@ -2323,7 +2067,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): void {
     if (
       recovery?.throwOnKeyboardOcclusion &&
-      this.device.platform === "android" &&
+      this.strategy.rethrowsKeyboardOcclusion &&
       action === "focus" &&
       error instanceof KeyboardOcclusionError
     ) {

@@ -25,8 +25,11 @@ function captureOneRequest(state: NetworkState, timer: FakeTimer): void {
 }
 
 describe("NetworkState default notifier", () => {
+  // The server registers its notifier once at module load; later tests in this process need it.
+  const registered = setDefaultResourceNotifier(undefined);
+  setDefaultResourceNotifier(registered);
   afterEach(() => {
-    setDefaultResourceNotifier(undefined);
+    setDefaultResourceNotifier(registered);
   });
 
   it("is wired to the server ResourceRegistry when that module is loaded", () => {

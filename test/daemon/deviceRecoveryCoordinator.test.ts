@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { recoveryCoordinatorHarness as harness } from "../helpers/recoveryCoordinatorHarness";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
+import type { PooledDevice } from "../../src/daemon/devicePool";
 
 const flushMicrotasks = async (): Promise<void> => {
   for (let i = 0; i < 5; i++) {

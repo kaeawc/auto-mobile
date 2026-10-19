@@ -8,7 +8,7 @@ import {
   startToolCallRecording,
   stopToolCallRecording,
   getToolCallRecordingStatus,
-} from "./toolCallRecordingManager";
+} from "../daemon/toolCallRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 

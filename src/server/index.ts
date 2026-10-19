@@ -16,18 +16,22 @@ import {
   createReleaseSubscribedBindingStore,
   daemonSessionToolBindingStore,
 } from "./daemonSessionToolBindingStore";
-import { dropToolCallRecording } from "./toolCallRecordingManager";
+import { dropToolCallRecording } from "../daemon/toolCallRecordingManager";
 
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
-import { daemonTaskManager } from "./tasks/daemonTaskManager";
+import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
-import type { TaskManager } from "./tasks/TaskManager";
-import type { TaskLeaseKeepalive } from "./tasks/taskLeaseKeepalive";
-import { createTaskAwareToolCallExecutor, TASK_ELIGIBLE_TOOLS } from "./tasks/toolCallTasks";
+import type { TaskManager } from "../daemon/tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
+import {
+  createTaskAwareToolCallExecutor,
+  TASK_ELIGIBILITY,
+  type TaskEligibility,
+} from "./tasks/toolCallTasks";
 import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 
 // Import the tool registry
@@ -85,7 +89,7 @@ import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
-} from "./toolSelectionProfileRegistry";
+} from "../daemon/toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
   iosDependencies?: IosDoctorDependencies;
@@ -151,7 +155,7 @@ export interface McpServerOptions {
    * reconnects (a socket session id does not).
    */
   taskOwnerKey?: string;
-  taskEligibleTools?: ReadonlySet<string>;
+  taskEligibleTools?: TaskEligibility;
   taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
@@ -287,7 +291,7 @@ function installTasks(
     execute,
     taskManager,
     ownerKey,
-    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBLE_TOOLS,
+    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBILITY,
     ...(options.taskLeaseKeepalive && { keepalive: options.taskLeaseKeepalive }),
   });
 }

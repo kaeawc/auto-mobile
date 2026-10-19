@@ -8,14 +8,8 @@
     <ID>CyclomaticComplexMethod:KotlinSourceScan.kt:KotlinSourceScan$fun maskLiteralsAndComments: String</ID>
     <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun blankNestedGroups: String</ID>
     <ID>CyclomaticComplexMethod:LaunchCancellationRethrowTest.kt:LaunchCancellationScanner$private fun swallowingCatchOffsets: List&lt;Int&gt;</ID>
-    <ID>EmptyFunctionBlock:CtrlProxyActionsFakes.kt:NoOpCtrlProxyActions${}</ID>
-    <ID>EmptyFunctionBlock:SdkAnrBroadcastHandlerTest.kt:SdkAnrBroadcastHandlerTest.Fixture.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:CtrlProxyEventBatchReceiverTest.&lt;no name provided&gt;${}</ID>
-    <ID>EmptyFunctionBlock:SdkEventBatchBroadcastHandlerTest.kt:SdkEventBatchBroadcastHandlerExtraTest.&lt;no name provided&gt;${}</ID>
-    <ID>InjectDispatcher:CtrlProxyGestureServiceFixture.kt:CtrlProxyGestureServiceFixture$Unconfined</ID>
-    <ID>InjectDispatcher:CtrlProxyObserverGateTest.kt:CtrlProxyObserverGateTest$Unconfined</ID>
-    <ID>InjectDispatcher:GestureControllerTest.kt:GestureControllerTest$Unconfined</ID>
-    <ID>InjectDispatcher:HierarchyDebouncerErrorEmitTest.kt:HierarchyDebouncerErrorEmitTest$Unconfined</ID>
+    <ID>CyclomaticComplexMethod:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `commit text and cancel ime commit frames match the hand-built bytes`</ID>
+    <ID>CyclomaticComplexMethod:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `screenshot error and display transition frames match the hand-built bytes`</ID>
     <ID>InjectDispatcher:PrototypeAnchorWindowTest.kt:PrototypeAnchorWindowTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeDetachedWindowTest.kt:PrototypeDetachedWindowTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeHideForCaptureTest.kt:PrototypeHideForCaptureTest$Unconfined</ID>
@@ -23,8 +17,6 @@
     <ID>InjectDispatcher:PrototypeImeLiftTest.kt:PrototypeImeLiftTest$Unconfined</ID>
     <ID>InjectDispatcher:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$Unconfined</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityTest.kt:SavedPrototypeActivityTest$Unconfined</ID>
-    <ID>InjectDispatcher:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest$IO</ID>
-    <ID>InjectDispatcher:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$Default</ID>
     <ID>LargeClass:BroadcastGuardAdoptionTest.kt:BroadcastGuardAdoptionTest</ID>
     <ID>LargeClass:CtrlProxyMessageHandlerTest.kt:CtrlProxyMessageHandlerTest</ID>
     <ID>LargeClass:GestureStreamSessionTest.kt:GestureStreamSessionTest</ID>
@@ -70,6 +62,7 @@
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `observerSessionGeneration is stable within a session and advances after it empties`</ID>
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `raw async response drops later orphaned correlated frames`</ID>
     <ID>LongMethod:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$@Test fun `typed async response drops later orphaned correlated frames`</ID>
+    <ID>LongParameterList:PackageEventWireTest.kt:PackageEventWireTest$private fun packageEvent: JsonObject</ID>
     <ID>LongParameterList:PrototypeScreenshotComparator.kt:PrototypeScreenshotComparator$fun compare: Result</ID>
     <ID>LongParameterList:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$private fun legacyGesture</ID>
     <ID>LongParameterList:RetrofitPrototypeHttpClientTest.kt:RetrofitPrototypeHttpClientTest$private fun request</ID>
@@ -78,21 +71,5 @@
     <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun elementWithBounds: UIElementInfo</ID>
     <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeNode: android.view.accessibility.AccessibilityNodeInfo</ID>
     <ID>LongParameterList:ViewHierarchyExtractorTest.kt:ViewHierarchyExtractorTest$private fun fakeWindow: AccessibilityWindowInfo</ID>
-    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `insert text body matches the hand-built content in every optional combination`</ID>
-    <ID>NestedBlockDepth:ResultFramesGoldenTest.kt:ResultFramesGoldenTest$@Test fun `swipe drag and pinch frames match the hand-built bytes`</ID>
-    <ID>SwallowedException:ResultBroadcasterTest.kt:ResultBroadcasterTest$e: CancellationException</ID>
-    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("boom")</ID>
-    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("original failure")</ID>
-    <ID>TooGenericExceptionThrown:AsyncActionRunnerTest.kt:AsyncActionRunnerTest$throw RuntimeException("socket closed")</ID>
-    <ID>TooGenericExceptionThrown:DeliverHierarchyFrameTest.kt:DeliverHierarchyFrameTest$throw RuntimeException("Infinity")</ID>
-    <ID>TooGenericExceptionThrown:GestureDispatchLifecycleTest.kt:GestureDispatchLifecycleTest$throw RuntimeException("result failed")</ID>
-    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("original broadcast failure")</ID>
-    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("socket closed")</ID>
-    <ID>TooGenericExceptionThrown:ResultBroadcasterTest.kt:ResultBroadcasterTest$throw RuntimeException("socket still closed")</ID>
-    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("boom")</ID>
-    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("original failure")</ID>
-    <ID>TooGenericExceptionThrown:ServiceScopeGuardTest.kt:ServiceScopeGuardTest$throw RuntimeException("socket closed")</ID>
-    <ID>TooGenericExceptionThrown:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest.&lt;no name provided&gt;$throw RuntimeException("async boom")</ID>
-    <ID>TooGenericExceptionThrown:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest.&lt;no name provided&gt;$throw RuntimeException("kaboom")</ID>
   </CurrentIssues>
 </SmellBaseline>

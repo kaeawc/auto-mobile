@@ -8,9 +8,9 @@ import {
   sessionUuidFromArgs,
 } from "../../../src/daemon/proxy/SessionBinding";
 import { ProxySessionState } from "../../../src/daemon/proxy/ProxySessionState";
-import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/daemonErrors";
-import type { ListChangedKind } from "../../../src/server/listChangedBroadcast";
-import { withRoutedSessionMeta } from "../../../src/server/routedSessionMeta";
+import { DaemonBoundSessionExpiredError } from "../../../src/daemon/proxy/DaemonBoundSessionExpiredError";
+import type { ListChangedKind } from "../../../src/daemon/listChangedBroadcast";
+import { withRoutedSessionMeta } from "../../../src/daemon/routedSessionMeta";
 import { FakeDaemonManager } from "../../fakes/FakeDaemonManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

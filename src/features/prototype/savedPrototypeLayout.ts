@@ -16,7 +16,6 @@ import {
   MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
 } from "./prototypeAssets";
 import { NodeSavedPrototypeLayoutFileSystem } from "./NodeSavedPrototypeLayoutFileSystem";
-export { NodeSavedPrototypeLayoutFileSystem } from "./NodeSavedPrototypeLayoutFileSystem";
 
 // Simulator and prototype container paths are POSIX on every host OS.
 const { dirname, join } = posix;

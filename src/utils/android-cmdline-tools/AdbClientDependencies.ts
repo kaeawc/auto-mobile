@@ -1,3 +1,4 @@
+import type { BackoffPolicy } from "../Backoff";
 import type { AndroidTransportRouting } from "../androidSerial";
 import {
   defaultDiscoveryObservationSequence,
@@ -16,6 +17,7 @@ export interface AdbClientDependencies {
   spawnFn?: SpawnFn | null;
   retryExecutor?: RetryExecutor;
   timer?: Timer;
+  transportBackoff?: BackoffPolicy;
   systemDetectionFactory?: () => SystemDetection;
   /** Monotonic discovery ordering source. */
   observationSequence?: DiscoveryObservationSequence;

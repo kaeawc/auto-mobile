@@ -3,14 +3,13 @@ import { AndroidSdkScreenIdentityStore } from "../../../../src/features/observe/
 import type { ScreenIdentity } from "../../../../src/models/ObserveResult";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-const identity = (route: string): ScreenIdentity =>
-  ({
-    platform: "android",
-    source: "sdk_navigation",
-    confidence: "high",
-    key: route,
-    components: { navigationRoute: route },
-  }) as ScreenIdentity;
+const identity = (route: string): ScreenIdentity => ({
+  platform: "android",
+  source: "sdk",
+  confidence: "high",
+  key: route,
+  components: { navigationRoute: route },
+});
 
 describe("AndroidSdkScreenIdentityStore", () => {
   test("records the newest route and exposes its host receive time", () => {

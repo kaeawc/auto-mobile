@@ -97,7 +97,13 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "DaemonMcpProxy.recordBoundSessionHeartbeatSuccess",
     "DaemonMcpProxy.heartbeatHeldSession",
   ],
+  // Terminal fencing moved behind the proxy port; the walker cannot follow the collaborator.
+  "src/daemon/proxy/BoundSessionFenceGate.ts": [
+    "BoundSessionFenceGate.fenceBoundSessionUuid",
+    "BoundSessionFenceGate.idleSessionReleaseReason",
+  ],
   "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.heartbeatHeldSession"],
+  "src/daemon/proxy/ConnectionRecovery.ts": ["ConnectionRecovery.withRecoverableReconnect"],
   // The proxy's forwarders hand held-session heartbeat answers to this object, which the walker
   // cannot follow through `this.heartbeatOutcomes`, so its entry points are roots themselves.
   "src/daemon/proxy/HeldSessionHeartbeatOutcomes.ts": [
@@ -146,9 +152,9 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
   // #11558: the one idle deadline the scan, a late call's admission and `idleReleaseAt` share.
   "src/daemon/sessionClocks.ts": ["sessionIdleDeadline", "effectiveLastToolActivity"],
-  "src/daemon/daemonMcpProxy.ts": [
+  "src/daemon/proxy/BoundSessionFenceGate.ts": [
     // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
-    "DaemonMcpProxy.isBoundSessionReplayExpired",
+    "BoundSessionFenceGate.isBoundSessionReplayExpired",
   ],
   "src/daemon/proxy/HeartbeatKeeper.ts": ["HeartbeatKeeper.evictAbandonedHeldSessions"],
 };

@@ -134,9 +134,9 @@ describe("direct frames from a managed connection outside its slots", () => {
       createAndroidTestClient(slotDevice, {
         getScreenScaleMetadata: () => null,
         requestTapCoordinates: async (...args) => {
-          args[6]?.();
+          args[0].onDispatch?.();
           taps++;
-          return { success: true };
+          return { success: true, totalTimeMs: 0 };
         },
         setPreference: async (...args) => {
           if (typeof args[5] === "object") {

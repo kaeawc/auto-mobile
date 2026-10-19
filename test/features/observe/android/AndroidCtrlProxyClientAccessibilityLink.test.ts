@@ -13,7 +13,7 @@ describe("Android semantic link activation outcomes", () => {
     adb.setScreenState(true);
     let socket!: FakeWebSocket;
     const client = AndroidCtrlProxyClient.createForTesting(
-      { deviceId: "semantic-link", platform: "android", name: "Test Device", isEmulator: true },
+      { deviceId: "semantic-link", platform: "android", name: "Test Device" },
       adb,
       {
         webSocketFactory: (url) => (socket = new FakeWebSocket(url, "none", 0, timer)),
@@ -51,22 +51,20 @@ describe("Android semantic link activation outcomes", () => {
     });
     let dispatchCount = 0;
     try {
-      const pending = client.requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-        () => {
+      const pending = client.requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+        onDispatch: () => {
           dispatchCount++;
         },
-      );
+      });
       await written;
       if (mode === "timeout") {
         timer.advanceTime(5000);
       } else if (mode === "transport") {
-        client["requestManager"].cancelAll("WebSocket connection closed");
+        socket.terminate();
       } else if (mode === "abort after dispatch") {
         controller.abort(new Error("cancelled"));
         for (let i = 0; i < 30; i++) {
@@ -115,14 +113,12 @@ describe("Android semantic link activation outcomes", () => {
     });
     const send = spyOn(socket, "send");
     try {
-      const pending = client.requestActivateAccessibilityLink(
-        "Terms",
-        0,
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-      );
+      const pending = client.requestActivateAccessibilityLink({
+        text: "Terms",
+        occurrence: 0,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       for (let i = 0; i < 30; i++) {
         await Promise.resolve();
       }

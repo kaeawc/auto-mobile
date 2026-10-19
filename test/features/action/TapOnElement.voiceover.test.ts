@@ -146,8 +146,8 @@ describe("TapOnElement VoiceOver mode", () => {
         expect(request.mock.calls).toHaveLength(action === "doubleTap" ? 0 : 1);
         expect(double).toHaveBeenCalledTimes(action === "doubleTap" ? 1 : 0);
         for (const call of request.mock.calls) {
-          expect(call[2]).toBe(action === "longPress" ? 500 : 50);
-          expect(call[3]).toBe(
+          expect(call[0].duration).toBe(action === "longPress" ? 500 : 50);
+          expect(call[0].timeoutMs).toBe(
             action === "longPress" ? DEFAULT_GESTURE_REQUEST_TIMEOUT_MS : undefined,
           );
         }
@@ -206,7 +206,7 @@ describe("TapOnElement VoiceOver mode", () => {
 
       await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, true);
 
-      expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+      expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
         { label: "Settings", action: "activate", bounds: element.bounds, duration: undefined },
       ]);
       expect(fakeIosClient.getTapHistory()).toHaveLength(0);
@@ -297,8 +297,12 @@ describe("TapOnElement VoiceOver mode", () => {
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history).toHaveLength(1);
       expect(history[0].action).toBe("long_press");
-      expect(history[0].bounds).toEqual(element.bounds);
-      expect(history[0].duration).toBe(1000);
+      expect<unknown>(history[0]).toEqual({
+        label: element["ios-accessibility-label"],
+        action: "long_press",
+        bounds: element.bounds,
+        duration: 1000,
+      });
 
       getInstanceSpy.mockRestore();
     });

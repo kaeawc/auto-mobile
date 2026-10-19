@@ -1,6 +1,6 @@
 import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { createMcpServer } from "../../src/server/index";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 
 /*
  * A raw JSON-RPC wire to one of our MCP servers for the Tasks extension (#4668) contract tests:

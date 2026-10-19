@@ -337,34 +337,42 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       // The enclosing plan is still using these sessions and devices.
       return;
     }
-    const {
-      name,
-      args,
-      baseSessionUuid,
-      cleanupService,
-      device,
-      sessionUuid,
-      shouldResolveDevice,
-      sessionBindingReleaseHandler,
-      sessionToolSelectionService,
-    } = input;
+    const { baseSessionUuid, sessionUuid } = input;
     const lifecycleSessionUuid = baseSessionUuid ?? sessionUuid;
-    const wantsPoolSession =
-      shouldResolveDevice &&
-      sessionUuid !== undefined &&
-      lifecycleSessionUuid !== undefined &&
-      name === "executePlan";
-    const poolSessionManager = wantsPoolSession ? defaultDaemonContext.sessionManager() : undefined;
+    const { wantsPoolSession, poolSessionManager } = planPoolSession(input, lifecycleSessionUuid);
     const ownsPoolSession = wantsPoolSession && poolSessionManager !== undefined;
     const heldForRecovery =
-      ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid);
+      ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid!);
     // A cleanup deferred by an earlier failed run on this session (#11139) is superseded once
     // this run's own lifecycle cleans and releases it.
     const deferredCleanup =
       ownsPoolSession && poolSessionManager && !heldForRecovery
-        ? takeHeldPlanAppCleanup(poolSessionManager, lifecycleSessionUuid)
+        ? takeHeldPlanAppCleanup(poolSessionManager, lifecycleSessionUuid!)
         : undefined;
 
+    await this.cleanupAfterPlan(input, {
+      lifecycleSessionUuid,
+      poolSessionManager,
+      heldForRecovery,
+      deferredCleanup,
+    });
+
+    if (ownsPoolSession && poolSessionManager && !heldForRecovery) {
+      await this.releasePlanSessions(input, poolSessionManager, lifecycleSessionUuid!);
+    }
+  }
+
+  private async cleanupAfterPlan(
+    input: PlanLifecycleInput,
+    state: {
+      lifecycleSessionUuid: string | undefined;
+      poolSessionManager: SessionManager | undefined;
+      heldForRecovery: boolean;
+      deferredCleanup: (() => Promise<unknown>) | undefined;
+    },
+  ): Promise<void> {
+    const { device, name, args, cleanupService } = input;
+    const { lifecycleSessionUuid, poolSessionManager, heldForRecovery, deferredCleanup } = state;
     if (device && name === "executePlan" && args?.cleanupAppId) {
       // Resolved under the request signal: a device-loss abort names the lost device
       // to skip. A deadline or client cancel aborts it too but names no device, so
@@ -385,10 +393,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         );
         // The held session may be rebound before its release and its old device acquired by
         // another session (#11164): skip, at run time, any device now owned outside this plan.
-        const planSessions = this.planSessionFamily(lifecycleSessionUuid);
+        const planSessions = this.planSessionFamily(lifecycleSessionUuid!);
         deferHeldPlanAppCleanup(
           poolSessionManager,
-          lifecycleSessionUuid,
+          lifecycleSessionUuid!,
           () => runCleanup(this.devicesNotOwnedByOtherSessions(devices, planSessions)),
           PLAN_APP_CLEANUP_CAP_MS,
         );
@@ -398,47 +406,50 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     } else if (deferredCleanup) {
       await deferredCleanup();
     }
+  }
 
-    if (ownsPoolSession && poolSessionManager && !heldForRecovery) {
-      const sessionManager = poolSessionManager;
-      const devicePool = defaultDaemonContext.requireDevicePoolWrites();
-      const releaseSessionUuid = lifecycleSessionUuid;
-      // Track exactly which sessions this release actually frees so the
-      // server-side transport binding is torn down for each (issue #4611 Gap
-      // D) — coupled to the REAL release, never cleared optimistically. Each
-      // derived session and the base are released independently, so one failed
-      // release cannot leave the others holding their devices (#11091).
-      const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
-      // A plan run owns the derived label sessions it created and its base session, with one
-      // exception: a managed connection's binding session belongs to the connection for its
-      // lifetime (#11421). Its broker grant is fixed and a `plan-auto-release` UUID is not reusable,
-      // so releasing it would strand the connection. A generic connection's base session is
-      // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
-      if (defaultDaemonContext.brokerConnectionScopes()?.forGrantedSession(releaseSessionUuid)) {
-        logger.info(
-          `[PlanLifecycle] Keeping binding session ${releaseSessionUuid} and its device ` +
-            "after executePlan: it belongs to its connection",
+  private async releasePlanSessions(
+    input: PlanLifecycleInput,
+    poolSessionManager: SessionManager,
+    lifecycleSessionUuid: string,
+  ): Promise<void> {
+    const { sessionBindingReleaseHandler, sessionToolSelectionService } = input;
+    const sessionManager = poolSessionManager;
+    const devicePool = defaultDaemonContext.requireDevicePoolWrites();
+    const releaseSessionUuid = lifecycleSessionUuid;
+    // Track exactly which sessions this release actually frees so the
+    // server-side transport binding is torn down for each (issue #4611 Gap
+    // D) — coupled to the REAL release, never cleared optimistically. Each
+    // derived session and the base are released independently, so one failed
+    // release cannot leave the others holding their devices (#11091).
+    const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
+    // A plan run owns the derived label sessions it created and its base session, with one
+    // exception: a managed connection's binding session belongs to the connection for its
+    // lifetime (#11421). Its broker grant is fixed and a `plan-auto-release` UUID is not reusable,
+    // so releasing it would strand the connection. A generic connection's base session is
+    // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
+    if (defaultDaemonContext.brokerConnectionScopes()?.forGrantedSession(releaseSessionUuid)) {
+      logger.info(
+        `[PlanLifecycle] Keeping binding session ${releaseSessionUuid} and its device ` +
+          "after executePlan: it belongs to its connection",
+      );
+    } else if (await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)) {
+      releasedSessionUuids.push(releaseSessionUuid);
+    }
+
+    // Clear the per-transport SessionToolBinding for every freed session so a
+    // later sessionless tools/list or tools/call stops enforcing a released
+    // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
+    // failures, but the release itself has already succeeded regardless.
+    for (const releasedUuid of releasedSessionUuids) {
+      try {
+        sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
+        await sessionToolSelectionService?.deleteSession?.(releasedUuid);
+      } catch (bindingError) {
+        logger.warn(
+          `[PlanLifecycle] Failed to clear the tool binding of released session ${releasedUuid}`,
+          bindingError,
         );
-      } else if (
-        await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)
-      ) {
-        releasedSessionUuids.push(releaseSessionUuid);
-      }
-
-      // Clear the per-transport SessionToolBinding for every freed session so a
-      // later sessionless tools/list or tools/call stops enforcing a released
-      // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
-      // failures, but the release itself has already succeeded regardless.
-      for (const releasedUuid of releasedSessionUuids) {
-        try {
-          sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
-          await sessionToolSelectionService?.deleteSession?.(releasedUuid);
-        } catch (bindingError) {
-          logger.warn(
-            `[PlanLifecycle] Failed to clear the tool binding of released session ${releasedUuid}`,
-            bindingError,
-          );
-        }
       }
     }
   }
@@ -484,4 +495,15 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     RealObserveScreen.clearCache(deviceId);
     return true;
   }
+}
+
+function planPoolSession(input: PlanLifecycleInput, lifecycleSessionUuid: string | undefined) {
+  const { name, sessionUuid, shouldResolveDevice } = input;
+  const wantsPoolSession =
+    shouldResolveDevice &&
+    sessionUuid !== undefined &&
+    lifecycleSessionUuid !== undefined &&
+    name === "executePlan";
+  const poolSessionManager = wantsPoolSession ? defaultDaemonContext.sessionManager() : undefined;
+  return { wantsPoolSession, poolSessionManager };
 }

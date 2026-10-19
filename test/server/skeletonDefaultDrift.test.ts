@@ -1,6 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import generatedDefinitions from "../../schemas/tool-definitions.json";
-import { SKELETON_DEFAULT_ACTION_TOOLS } from "../../src/server/finalizeToolResponse";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { skeletonDefaultActionTools } from "../helpers/skeletonDefaultTools";
+
+isolateToolRegistry();
+
+let SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string>;
+beforeAll(() => {
+  SKELETON_DEFAULT_ACTION_TOOLS = skeletonDefaultActionTools();
+});
 
 // Import the generated contract directly: no registry, DB, daemon or device setup.
 const definitions: readonly {
@@ -24,6 +32,21 @@ describe("skeleton default schema drift", () => {
     expect(definition).toBeDefined();
     expect(definition!.inputSchema.properties).not.toHaveProperty("raw");
     expect(definition!.inputSchema.properties).not.toHaveProperty("project");
+    expect(definition!.inputSchema.properties).not.toHaveProperty("includeExtras");
+  });
+
+  test("only hierarchy-producing tools advertise includeExtras", () => {
+    const names = definitions
+      .filter(({ inputSchema }) => Object.hasOwn(inputSchema.properties ?? {}, "includeExtras"))
+      .map(({ name }) => name)
+      .sort();
+    expect(names).toEqual(["observe", ...SKELETON_DEFAULT_ACTION_TOOLS].sort());
+    for (const name of names) {
+      const field = definitions.find((definition) => definition.name === name)!.inputSchema
+        .properties!.includeExtras;
+      expect(field?.type).toBe("boolean");
+      expect(field?.description).toContain("structuredContent only");
+    }
   });
 
   test("observation control properties match the action set regardless of descriptions", () => {

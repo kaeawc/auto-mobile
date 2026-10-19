@@ -10,7 +10,6 @@ export type { SnapshotGeometry } from "./snapshotRasterGeometry";
 export type { SnapshotCropResult };
 
 /** Pure geometry plus an injected image backend; the caller owns capture and persistence. */
-// oxlint-disable-next-line complexity -- validation, clipping, and raster bounds form one atomic crop mapping.
 export async function cropSnapshot(
   source: Buffer,
   requestedBounds: ElementBounds,
@@ -18,26 +17,8 @@ export async function cropSnapshot(
   backend: ImageBackend,
   label: string = "snapshotOf",
 ): Promise<SnapshotCropResult> {
-  const { width, height } = geometry.screenSize;
-  const { left, top, right, bottom } = requestedBounds;
-  if (
-    ![width, height, left, top, right, bottom].every(Number.isFinite) ||
-    width <= 0 ||
-    height <= 0 ||
-    right <= left ||
-    bottom <= top
-  ) {
-    throw new ActionableError(`${label} requires finite, nonempty bounds and screen dimensions`);
-  }
-  const clippedBounds = {
-    left: Math.max(0, left),
-    top: Math.max(0, top),
-    right: Math.min(width, right),
-    bottom: Math.min(height, bottom),
-  };
-  if (clippedBounds.right <= clippedBounds.left || clippedBounds.bottom <= clippedBounds.top) {
-    throw new ActionableError(`${label} rectangle is outside the visible screen`);
-  }
+  const clippedBounds = clipSnapshotBounds(requestedBounds, geometry, label);
+  const clipped = boundsWereClipped(requestedBounds, clippedBounds);
   const metadata = await backend.metadata(source);
   const { quarterTurn, halfTurn, pixelsPerNativeUnit, scaleProvenance } = snapshotRasterGeometry(
     metadata,
@@ -80,12 +61,45 @@ export async function cropSnapshot(
     imageSize,
     pixelsPerNativeUnit,
     scaleProvenance,
-    clipped:
-      left !== clippedBounds.left ||
-      top !== clippedBounds.top ||
-      right !== clippedBounds.right ||
-      bottom !== clippedBounds.bottom,
+    clipped,
     rasterBounds,
     screenshotOrientation: "display",
   };
+}
+
+function clipSnapshotBounds(
+  requestedBounds: ElementBounds,
+  geometry: SnapshotGeometry,
+  label: string,
+): ElementBounds {
+  const { width, height } = geometry.screenSize;
+  const { left, top, right, bottom } = requestedBounds;
+  if (
+    ![width, height, left, top, right, bottom].every(Number.isFinite) ||
+    width <= 0 ||
+    height <= 0 ||
+    right <= left ||
+    bottom <= top
+  ) {
+    throw new ActionableError(`${label} requires finite, nonempty bounds and screen dimensions`);
+  }
+  const clippedBounds = {
+    left: Math.max(0, left),
+    top: Math.max(0, top),
+    right: Math.min(width, right),
+    bottom: Math.min(height, bottom),
+  };
+  if (clippedBounds.right <= clippedBounds.left || clippedBounds.bottom <= clippedBounds.top) {
+    throw new ActionableError(`${label} rectangle is outside the visible screen`);
+  }
+  return clippedBounds;
+}
+
+function boundsWereClipped(requested: ElementBounds, clipped: ElementBounds): boolean {
+  return (
+    requested.left !== clipped.left ||
+    requested.top !== clipped.top ||
+    requested.right !== clipped.right ||
+    requested.bottom !== clipped.bottom
+  );
 }

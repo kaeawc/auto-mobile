@@ -122,7 +122,7 @@ describe("AdbClient.getAndroidApiLevel timeout caching", () => {
 
     expect(await client.getAndroidApiLevel(5000)).toBeNull();
     expect(await client.getAndroidApiLevel(5000)).toBeNull();
-    // API-level reads explicitly use noRetry and cache the first device failure.
-    expect(calls).toBe(1);
+    // noRetry still waits for refused transport commands before caching the failure.
+    expect(calls).toBe(5);
   });
 });

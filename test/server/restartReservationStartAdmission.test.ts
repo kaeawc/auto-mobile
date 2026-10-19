@@ -1,14 +1,12 @@
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { McpSessionRecoveryInProgressError } from "../../src/daemon/deviceAutolockManager";
+import { McpSessionRecoveryInProgressError } from "../../src/daemon/McpSessionRecoveryInProgressError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -42,17 +40,6 @@ isolateEmptyToolRegistry();
 
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";
-interface Internals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    id: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<string, { restartHandoff?: boolean; scheduledDeadlineMs?: number }>;
-  intentionalShutdowns: Map<string, number>;
-  restartReadiness: ReadonlySet<unknown>;
-}
-
 class RestartDeviceManager extends FakeDeviceUtils {
   beforeReady?: () => Promise<void>;
   override async waitForDeviceReady(...args: Parameters<FakeDeviceUtils["waitForDeviceReady"]>) {
@@ -208,7 +195,7 @@ describe("start admission and owner resume for restart reservations", () => {
         await sessions.claimLivenessOwnership(options.label ? HOLDER : holder, options.ownerToken),
       ).toBe("claimed");
     }
-    const internals = pool as unknown as Internals;
+    const internals = pool.testHooks;
     if (options.serialReuse) {
       const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
       manager.setBootedDevices(platform, [replacement]);
@@ -1099,7 +1086,7 @@ describe("start admission and owner resume for restart reservations", () => {
 
   test("token restore waiting for assignment cannot record a connection that closed", async () => {
     const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
-    const mutex = poolInternals(f.pool).assignmentMutex;
+    const mutex = f.pool.testHooks.assignmentMutex;
     const gate = Promise.withResolvers<void>();
     const blocked = mutex.runExclusive(() => gate.promise);
     const restore = f.pool.restoreOwnedDeviceSessionsForMcpSession(

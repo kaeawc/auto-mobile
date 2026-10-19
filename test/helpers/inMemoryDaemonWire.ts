@@ -1,3 +1,4 @@
+import { isCallToolResult } from "@modelcontextprotocol/client";
 import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import type { Socket } from "node:net";
@@ -186,7 +187,7 @@ class SocketEnd extends FakeSocket {
 }
 
 /** The client's end of a connection to the in-memory control socket. */
-export type InMemoryClientSocket = Pick<SocketEnd, "destroyed" | "write" | "destroy" | "on">;
+export type InMemoryClientSocket = SocketEnd;
 
 /** What a killed process takes with it. Teardown only, never wiring. */
 /** The ids of the connections the server accepts next, in order. */
@@ -453,10 +454,17 @@ export function loopbackMcpClientFactory(
         };
       });
       try {
-        return await Promise.race([callTool(params.name, args, request.signal), gaveUp]);
+        const result = await Promise.race([callTool(params.name, args, request.signal), gaveUp]);
+        if (!isCallToolResult(result)) {
+          throw new Error(`loopback tool ${params.name} did not answer with a CallToolResult`);
+        }
+        return result;
       } finally {
         stop();
       }
+    },
+    request: async () => {
+      throw new Error("the loopback MCP hop does not carry raw MCP requests");
     },
     listTools: async () => ({ tools: [] }),
     listResources: async () => ({ resources: [] }),

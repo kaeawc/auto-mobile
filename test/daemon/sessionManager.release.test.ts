@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { describe, expect, test } from "bun:test";
@@ -571,7 +572,7 @@ describe("SessionManager", () => {
       const { mgr, barrier, activity } = makeDrainableManager();
 
       await mgr.createSession("s1", "emulator-5554", "android");
-      mgr.recordHeartbeat("s1");
+      await deliverDaemonHeartbeat(mgr, "s1");
       await Promise.resolve(); // let the void-tracked write run
       expect(activity).toContain("s1");
       // Exactly one barrier-tracked write: a single recordHeartbeat drives one
@@ -586,7 +587,7 @@ describe("SessionManager", () => {
 
       await mgr.createSession("s1", "emulator-5554", "android");
       barrier.beginDrain();
-      mgr.recordHeartbeat("s1");
+      await deliverDaemonHeartbeat(mgr, "s1");
       await Promise.resolve();
       // The heartbeat's activity write was short-circuited by the drain.
       expect(activity).toHaveLength(0);

@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -107,7 +108,7 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
       });
-      sessionManager.recordHeartbeat("slow");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "slow");
       await sessionManager.createSession("later", "emulator-5556", "android", {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
@@ -132,7 +133,7 @@ describe("SessionHeartbeatMonitor", () => {
       expect(reaped.map((r) => r.sessionId)).toEqual(["slow"]);
 
       // "later" heartbeats now and lapses while "slow" is still tearing down.
-      sessionManager.recordHeartbeat("later");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "later");
       const lapsesAt = timer.now() + 1_000 + SUSPECT_GRACE_MS;
       timer.advanceTime(1_000 + SUSPECT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
       await drainMicrotasks(10);
@@ -150,7 +151,7 @@ describe("SessionHeartbeatMonitor", () => {
   describe("tick reaping decision", () => {
     it("reaps a heartbeating default session only after the default timeout boundary", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", { timeoutMs: 60_000 });
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -187,7 +188,7 @@ describe("SessionHeartbeatMonitor", () => {
       });
       expect(session.heartbeatTimeoutSource).toBe("default");
       expect(session.heartbeatTimeoutMs).toBe(timeoutMs);
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -319,7 +320,7 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
       });
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -342,7 +343,9 @@ describe("SessionHeartbeatMonitor", () => {
         heartbeatTimeoutMs: 1_000,
       });
       expect(await sessionManager.claimLivenessOwnership("s1", "owner-token")).toBe("claimed");
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1", {
+        livenessOwnerToken: "owner-token",
+      });
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -373,7 +376,7 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 1_000,
       });
-      sessionManager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "s1");
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,
@@ -570,13 +573,13 @@ describe("SessionHeartbeatMonitor", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 100,
       });
-      sessionManager.recordHeartbeat("stale");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "stale");
       timer.advanceTime(50);
       await sessionManager.createSession("newly-stale", "emulator-5556", "android", {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 100,
       });
-      sessionManager.recordHeartbeat("newly-stale");
+      await deliverDaemonHeartbeatIfKnown(sessionManager, "newly-stale");
       timer.advanceTime(51 + SUSPECT_GRACE_MS);
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
@@ -704,7 +707,7 @@ describe("SessionHeartbeatMonitor", () => {
         for (let elapsed = 0; elapsed < ms && sessionManager.getSession(sessionId!);) {
           timer.advanceTime(2_000);
           elapsed += 2_000;
-          sessionManager.recordHeartbeat(sessionId!);
+          await deliverDaemonHeartbeatIfKnown(sessionManager, sessionId!);
           await monitor.tick();
         }
       };

@@ -208,7 +208,9 @@ export class NonThrowingFakeSocket extends FakeSocket {
   public throwOnWriteAfterDestroy = false;
 }
 
+type FakeListeningNetServerContract = Pick<NetServer, "listening">;
+
 /** A net.Server that reports listening without binding a port, for socket-server subclasses under test. */
-export class FakeListeningNetServer extends NetServer {
+export class FakeListeningNetServer extends NetServer implements FakeListeningNetServerContract {
   override listening = true;
 }

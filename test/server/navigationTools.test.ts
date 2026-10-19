@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { readToolResponse, schemaPropertyDescription, toolJson } from "../helpers/toolResponse";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -34,6 +35,30 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
+
+/** A complete real exploration result for fakes that only care that exploration ran. */
+const emptyExploreResult = () =>
+  ({
+    success: true,
+    cancelled: false,
+    interactionsPerformed: 0,
+    screensDiscovered: 0,
+    edgesAdded: 0,
+    navigationGraph: { nodes: [], edges: [], appId: "com.test.app", currentScreen: null },
+    explorationPath: [],
+    elementSelections: [],
+    coverage: { totalScreens: 0, exploredScreens: 0, percentage: 0 },
+    durationMs: 0,
+  }) satisfies Awaited<ReturnType<Explore["execute"]>>;
+
+const navigationEvent = (destination: string, timestamp: number, sequenceNumber: number) => ({
+  destination,
+  source: "",
+  arguments: {},
+  metadata: {},
+  timestamp,
+  sequenceNumber,
+});
 
 /** The private collaborators the NavigateTo/Explore spies read off the instance they replace. */
 interface ExecuteReceiver {
@@ -220,8 +245,8 @@ describe("navigation tool session graph selection", () => {
           { ...device, platform: "android" },
           { packageName: "com.test.app" },
         );
-        expect(response.isError).toBeUndefined();
-        expect(JSON.parse(response.content[0].text)).toMatchObject(result);
+        expect(readToolResponse(response).isError).toBeUndefined();
+        expect(toolJson(response)).toMatchObject(result);
         expect(execute).toHaveBeenCalledTimes(1);
       } finally {
         execute.mockRestore();
@@ -272,13 +297,13 @@ describe("navigation tool session graph selection", () => {
       try {
         const handler = ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!;
         const response = await handler({ ...device, platform }, { packageName: " com.test.app " });
-        expect(response.isError).toBeUndefined();
-        expect(JSON.parse(response.content[0].text)).toMatchObject(normal);
+        expect(readToolResponse(response).isError).toBeUndefined();
+        expect(toolJson(response)).toMatchObject(normal);
         expect(listings).toBe(1);
         execute.mockResolvedValue({ ...normal, stopReason: "Exploration completed successfully" });
         const completed = await handler({ ...device, platform }, {});
-        expect(completed.isError).toBeUndefined();
-        expect(JSON.parse(completed.content[0].text).success).toBe(true);
+        expect(readToolResponse(completed).isError).toBeUndefined();
+        expect(toolJson(completed).success).toBe(true);
         expect(listings).toBe(1);
         const dryRun = {
           success: true as const,
@@ -298,8 +323,8 @@ describe("navigation tool session graph selection", () => {
           { ...device, platform },
           { packageName: "com.nope.missing", dryRun: true },
         );
-        expect(dryResponse.isError).toBeUndefined();
-        expect(JSON.parse(dryResponse.content[0].text)).toMatchObject(dryRun);
+        expect(readToolResponse(dryResponse).isError).toBeUndefined();
+        expect(toolJson(dryResponse)).toMatchObject(dryRun);
         expect(listings).toBe(1);
       } finally {
         execute.mockRestore();
@@ -317,19 +342,20 @@ describe("navigation tool session graph selection", () => {
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 2,
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1,
     });
-    for (const [destination, timestamp] of [
+    const replayedEvents: Array<[destination: string, timestamp: number]> = [
       ["Home", 100],
       ["Settings", 200],
       ["Home", 300],
-    ] as const) {
-      await graph.recordNavigationEvent({ destination, timestamp });
+    ];
+    for (const [index, [destination, timestamp]] of replayedEvents.entries()) {
+      await graph.recordNavigationEvent(navigationEvent(destination, timestamp, index));
     }
     ToolRegistry.register(
       "budgetReplay",
       "Fake replay",
       z.object({ text: z.string() }),
       async () => {
-        await graph.recordNavigationEvent({ destination: "Settings", timestamp: timer.now() });
+        await graph.recordNavigationEvent(navigationEvent("Settings", timer.now(), 3));
         return { success: true };
       },
     );
@@ -351,7 +377,7 @@ describe("navigation tool session graph selection", () => {
         [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
       });
       const response = await navigateToHandler(device, args);
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
       expect(call).toHaveBeenCalledTimes(1);
       expect(call.mock.calls[0]).toEqual([
         "budgetReplay",
@@ -379,6 +405,7 @@ describe("navigation tool session graph selection", () => {
           return {
             success: true,
             targetScreen: options.targetScreen,
+            currentScreen: null,
             stepsExecuted: 0,
             durationMs: 0,
           };
@@ -393,7 +420,7 @@ describe("navigation tool session graph selection", () => {
       },
     ]) {
       const response = await navigateToHandler(device, { targetScreen: "Settings", ...budget });
-      expect(response.isError).toBeUndefined();
+      expect(readToolResponse(response).isError).toBeUndefined();
     }
   });
 
@@ -447,7 +474,7 @@ describe("navigation tool session graph selection", () => {
   test("explore advertises the pinned runtime default of 200 interactions", () => {
     const schema = z.toJSONSchema(exploreSchema);
     expect(DEFAULT_MAX_INTERACTIONS).toBe(200);
-    expect(schema.properties?.maxInteractions.description).toBe(
+    expect(schemaPropertyDescription(schema.properties, "maxInteractions")).toBe(
       `Max interactions (default: ${DEFAULT_MAX_INTERACTIONS})`,
     );
   });
@@ -497,12 +524,7 @@ describe("navigation tool session graph selection", () => {
       exportGraphForApp: async () => ({ nodes: [], edges: [] }),
     });
     activeGraph = graph;
-    const exploreSpy = spyOn(Explore.prototype, "execute").mockResolvedValue({
-      success: true,
-      interactionsPerformed: 0,
-      screensDiscovered: 0,
-      coverage: { explored: 0, total: 0, percentage: 0 },
-    } as Awaited<ReturnType<Explore["execute"]>>);
+    const exploreSpy = spyOn(Explore.prototype, "execute").mockResolvedValue(emptyExploreResult());
     registerNavigationTools({
       navigationManagerFactory,
       navigateToFactory: () => ({
@@ -565,12 +587,7 @@ describe("navigation tool session graph selection", () => {
       async function (this: ExecuteReceiver) {
         usedManagers.push(this.navigationManager);
         usedSessions.push(this.sessionUuid);
-        return {
-          success: true,
-          interactionsPerformed: 0,
-          screensDiscovered: 0,
-          coverage: { explored: 0, total: 0, percentage: 0 },
-        };
+        return emptyExploreResult();
       },
     );
 
@@ -665,7 +682,7 @@ describe("navigation tool session graph selection", () => {
 
       const response = await handler!(device, { platform: "ios" });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
       expect(result.message).toBe("Navigation graph for app: com.apple.Preferences");
       expect(result).toMatchObject({
         currentScreen: null,
@@ -746,7 +763,7 @@ describe("navigation tool session graph selection", () => {
         appId: "com.apple.reminders",
       });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
       // Failures identify the queried app and the current app (diagnostics).
       expect(result.message).toBe("Navigation graph for app: com.apple.reminders");
       expect(result.requestedAppId).toBe("com.apple.reminders");
@@ -804,7 +821,7 @@ describe("navigation tool session graph selection", () => {
 
       const response = await handler!(device, { platform: "ios" });
 
-      expect(JSON.parse(response.content[0].text)).toEqual({
+      expect(toolJson(response)).toEqual({
         message: "Navigation graph for app: none",
         requestedAppId: null,
         observedAppId: null,
@@ -866,7 +883,7 @@ describe("navigation tool session graph selection", () => {
 
       const response = await handler!(device, { platform: "ios" });
 
-      expect(JSON.parse(response.content[0].text)).toMatchObject({
+      expect(toolJson(response)).toMatchObject({
         message: "Navigation graph for app: com.apple.Preferences",
         currentScreen: "iOS Settings",
         nodeCount: 1,
@@ -919,7 +936,7 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
 
       const response = await handler(device, { platform: "android", appId: APP });
 
-      const result = JSON.parse(response.content[0].text);
+      const result = toolJson(response);
       expect(result).toMatchObject({ edgeCount: 1, knownEdges: 1, unknownEdges: 0 });
       expect(result.transitions).toEqual([
         { from: "Home", to: "Settings", type: "tool", tool: "tapOn", args: { text: "Settings" } },

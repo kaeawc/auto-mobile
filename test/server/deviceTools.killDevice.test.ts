@@ -49,7 +49,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
-import { ForcedRestartBudget } from "../../src/ctrlProxy/ForcedRestartBudget";
+import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import { executionTracker } from "../../src/daemon/executionTracker";
@@ -3736,8 +3736,7 @@ describe("killDevice handler", () => {
       timer,
     });
     let socketCreations = 0;
-    let restarts = 0;
-    const restartBudget = new ForcedRestartBudget(timer);
+    const iosManager = new FakeIOSCtrlProxyManager(timer);
     const client = IOSCtrlProxyClient.createForTesting(
       device,
       8765,
@@ -3746,13 +3745,9 @@ describe("killDevice handler", () => {
         return new FakeWebSocket(url, "none", 0, timer);
       },
       timer,
-      () =>
-        ({
-          getForcedRestartBudget: () => restartBudget,
-          forceRestart: async () => {
-            restarts++;
-          },
-        }) as never,
+      {
+        serviceManagerFactory: () => iosManager,
+      },
     );
     IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
@@ -3803,7 +3798,7 @@ describe("killDevice handler", () => {
       expect(await postKillClient.ensureConnected()).toBe(false);
       expect(await postKillClient.connectWithoutSetup()).toBe(false);
       expect(socketCreations).toBe(1);
-      expect(restarts).toBe(0);
+      expect(iosManager.getCallCount("forceRestart")).toBe(0);
     } finally {
       restorePipelineOverrides();
       managerSpy.mockRestore();

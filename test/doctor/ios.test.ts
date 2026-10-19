@@ -1784,7 +1784,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     try {
@@ -1878,7 +1878,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     const hooks = {
@@ -1949,7 +1949,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
     const runner = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), {
@@ -1983,7 +1983,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       expect(restart).not.toHaveBeenCalled();
       expect(spawn).not.toHaveBeenCalled();
       expect(client["consecutiveConnectionFailures"]).toBe(0);
-      expect(client["restartRearmTimeout"]).toBeNull();
+      expect(client.getRunnerRecoveryTestHooks().diagnostics().restartRearmTimeout).toBeNull();
     } finally {
       await client.close();
       spawn.mockRestore();

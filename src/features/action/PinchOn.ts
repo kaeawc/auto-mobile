@@ -457,17 +457,17 @@ export class PinchOn extends BaseVisualChange {
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
           const result = await awaitWhileRequestIsLive(
-            IOSCtrlProxyClient.getInstance(this.device).requestPinch(
-              centerX,
-              centerY,
-              distanceStart,
-              distanceEnd,
-              rotationDegrees,
-              duration,
-              resolveGestureCtrlProxyTimeoutMs(duration),
-              perf,
-              signal,
-            ),
+            IOSCtrlProxyClient.getInstance(this.device).requestPinch({
+              centerX: centerX,
+              centerY: centerY,
+              distanceStart: distanceStart,
+              distanceEnd: distanceEnd,
+              rotationDegrees: rotationDegrees,
+              duration: duration,
+              timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration),
+              perf: perf,
+              signal: signal,
+            }),
             signal,
           );
           throwIfAborted(signal);

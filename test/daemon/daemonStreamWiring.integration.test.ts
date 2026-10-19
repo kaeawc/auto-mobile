@@ -369,11 +369,10 @@ describe("Daemon stream wiring", () => {
       apply: async (daemon, pool) => {
         await pool.removeDevice("emulator-5554");
         const stream = daemon.testHooks.deviceDataStreamServer();
-        expect(
-          (
-            stream as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
-          ).liveFrameGenerations.has("emulator-5554"),
-        ).toBe(false);
+        // A removed device no longer has its own generation: it reads like a never-tracked one.
+        expect(stream.getLiveFrameGeneration("emulator-5554")).toBe(
+          stream.getLiveFrameGeneration("never-tracked-device"),
+        );
         await pool.addDevice({ deviceId: "emulator-5554", name: "Pixel", platform: "android" });
       },
     },
@@ -476,13 +475,7 @@ describe("Daemon stream wiring", () => {
             createFakeDaemonState(),
             timer,
           );
-          const input = inputServer as unknown as {
-            requireCurrentFrameContext(
-              deviceId: string,
-              frameContext: string,
-              action: string,
-            ): void;
-          };
+          const input = inputServer.testHooks;
           installDeviceDataStreamSocketServerForTesting(stream);
           const coordinator = new DefaultObservationInitialFrameCoordinator(
             timer,

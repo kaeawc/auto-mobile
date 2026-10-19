@@ -7344,10 +7344,9 @@ export class UnixSocketServer {
     return {
       restoreSelectorSessions: (args, id) => this.restoreSelectorSessions(args, id),
       getMcpForwardRoute: (request, id) => this.getMcpForwardRoute(request, id),
-      withSocketSessionAutolockKey: (args, id, timeoutMs) =>
-        this.withSocketSessionAutolockKey(args, id, timeoutMs),
-      recordBoundMcpClientKey: (request, id, route, active, response) =>
-        this.recordBoundMcpClientKey(request, id, route, active, response),
+      withSocketSessionAutolockKey: (...args) => this.withSocketSessionAutolockKey(...args),
+      recordBoundMcpClientKey: (...args) => this.recordBoundMcpClientKey(...args),
+      requireCurrentFrameContext: (...args) => this.requireCurrentFrameContext(...args),
     };
   }
 

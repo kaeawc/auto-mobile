@@ -20,14 +20,10 @@ import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
-import {
-  createServer as createHttpServer,
-  Server as HttpServer,
-  type IncomingMessage,
-} from "node:http";
+import { createServer as createHttpServer, type IncomingMessage } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { DaemonHttpIngress } from "./daemonHttpIngress";
+import { DaemonHttpIngress, type HttpListener } from "./daemonHttpIngress";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
@@ -563,7 +559,7 @@ export async function findAvailableDaemonPort(
 }
 
 export class Daemon {
-  private readonly httpServerFactory: () => HttpServer;
+  private readonly httpServerFactory: () => HttpListener;
   private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider;
   private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
@@ -656,7 +652,7 @@ export class Daemon {
   private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
   private sessionBrokerService: SessionBrokerService | undefined;
   private sessionBrokerConfig: SessionBrokerHostConfig | undefined;
-  private readonly sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
+  private sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
     ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
     : undefined;
   private bindingExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
@@ -3621,6 +3617,34 @@ export class Daemon {
       },
       startHealthCheckTimer: (): void => this.startHealthCheckTimer(),
       stopHealthCheckTimer: (): Promise<void> => this.stopHealthCheckTimer(),
+      daemonSessionId: (): string => this.daemonSessionId,
+      options: (): DaemonOptions => this.options,
+      port: (): number => this.port,
+      processStartHost: (): DaemonStartHost => this.processStartHost(),
+      setStartHost: (host: DaemonStartHost): void => {
+        this.startHost = host;
+      },
+      setSessionBrokerConfigPath: (path: string | undefined): void => {
+        this.sessionBrokerConfigPath = path;
+      },
+      setSocketBindCommitted: (committed: boolean): void => {
+        this.socketBindCommitted = committed;
+      },
+      openBindingRegistry: (signal?: AbortSignal): Promise<SqliteBindingRegistry> =>
+        this.openBindingRegistry(signal),
+      startThroughSocketBind: (): Promise<void> => this.startThroughSocketBind(),
+      closeManagedExecutionRelease: (): Promise<void> => this.closeManagedExecutionRelease(),
+      stopSessionTimers: (): void => this.stopSessionTimers(),
+      /** Replaces start-sequence steps with doubles on this instance. */
+      overrideStartSteps: (steps: {
+        startThroughSocketBind?: () => Promise<void>;
+        openBindingRegistry?: (signal?: AbortSignal) => Promise<SqliteBindingRegistry>;
+        setupShutdownHandlers?: () => void;
+      }): void => {
+        this.startThroughSocketBind = steps.startThroughSocketBind ?? this.startThroughSocketBind;
+        this.openBindingRegistry = steps.openBindingRegistry ?? this.openBindingRegistry;
+        this.setupShutdownHandlers = steps.setupShutdownHandlers ?? this.setupShutdownHandlers;
+      },
     } as const;
   }
 

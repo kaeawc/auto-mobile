@@ -20,4 +20,5 @@ export interface UnixSocketServerTestHooks {
     sessionWasActiveBeforeForward: boolean,
     response: unknown,
   ): void;
+  requireCurrentFrameContext(deviceId: string, frameContext: string, action: string): void;
 }

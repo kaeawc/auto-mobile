@@ -1,4 +1,4 @@
-import { Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -37,9 +37,21 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 
 type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
 
+/** The listener surface ingress uses. `node:http`'s `Server` satisfies it. */
+export interface HttpListener {
+  readonly listening: boolean;
+  requestTimeout: number;
+  headersTimeout: number;
+  timeout: number;
+  listen(port: number, host: string, callback: () => void): unknown;
+  close(callback: (error?: Error) => void): unknown;
+  on(event: "request", listener: (req: IncomingMessage, res: ServerResponse) => void): unknown;
+  on(event: "error", listener: (error: NodeJS.ErrnoException) => void): unknown;
+}
+
 /** What the daemon's HTTP listener needs from the daemon; everything is read lazily. */
 export interface DaemonHttpIngressDeps {
-  httpServerFactory: () => HttpServer;
+  httpServerFactory: () => HttpListener;
   timer: () => Timer;
   idGenerator: () => IdGenerator;
   /** Current bind address; the port is only final after port selection. */
@@ -62,7 +74,7 @@ export interface DaemonHttpIngressDeps {
  * admission, body reading and the stateless per-request MCP endpoint.
  */
 export class DaemonHttpIngress {
-  private httpServer: HttpServer | null = null;
+  private httpServer: HttpListener | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   /**
    * Aborted when shutdown closes ingress, so an HTTP MCP request still waiting
@@ -117,7 +129,7 @@ export class DaemonHttpIngress {
   constructor(private readonly deps: DaemonHttpIngressDeps) {}
 
   /** The listener, once started; the health check reads `listening` off it. */
-  get server(): HttpServer | null {
+  get server(): HttpListener | null {
     return this.httpServer;
   }
 
@@ -138,9 +150,11 @@ export class DaemonHttpIngress {
   /** @internal Typed view of private state for unit tests; not part of the public API. */
   get testHooks() {
     return {
-      setHttpServer: (server: HttpServer | null): void => {
+      setHttpServer: (server: HttpListener | null): void => {
         this.httpServer = server;
       },
+      start: (): Promise<void> => this.start(),
+      closeListener: (): Promise<void> => this.closeListener(),
     };
   }
 

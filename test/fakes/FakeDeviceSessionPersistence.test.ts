@@ -15,6 +15,9 @@ async function seeded(
     lastUsedAtMs: 10,
     expiresAtMs,
     daemonSessionId,
+    sessionTimeoutMs: 1_000,
+    heartbeatTimeoutMs: 1_000,
+    hasReceivedHeartbeat: false,
   });
 }
 

@@ -425,7 +425,9 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       expect(timer.now() - start).toBeGreaterThanOrEqual(CAP_MS + 5 * SLOW_POLL_MS);
       expect(polls.filter((ms) => ms === SLOW_POLL_MS).length).toBeGreaterThanOrEqual(4);
       expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("did not settle")),
+        warn.mock.calls.filter(([message]: unknown[]) =>
+          String(message).includes("did not settle"),
+        ),
       ).toHaveLength(1);
     });
 

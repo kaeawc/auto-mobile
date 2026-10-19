@@ -1,3 +1,4 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -16,7 +17,7 @@ class ParkingBootDeviceManager extends FakeDeviceManager {
   parkRecoveryStart = false;
   parkedRecoveryStarts: Array<{ resolve: () => void }> = [];
 
-  override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
+  override async startDevice(device: DeviceInfo): Promise<ChildProcess | null> {
     if (this.parkRecoveryStart) {
       this.parkRecoveryStart = false;
       await new Promise<void>((resolve) => this.parkedRecoveryStarts.push({ resolve }));
@@ -166,7 +167,7 @@ describe("DevicePool disconnect of an assigned device", () => {
         finishCleanup = resolve;
       });
       const cleanupSpy = spyOn(sessionManager, "getPendingDeviceCleanup").mockImplementation(
-        (deviceId) => (deviceId === handset.deviceId ? cleanup : undefined),
+        (deviceId) => (deviceId === handset.deviceId ? cleanup : null),
       );
       const warnSpy = spyOn(logger, "warn");
       try {
@@ -182,7 +183,7 @@ describe("DevicePool disconnect of an assigned device", () => {
         expect(messages.some((m) => m.includes("Retaining disconnected device"))).toBe(true);
         expect(messages.some((m) => m.includes("Cannot remove device"))).toBe(false);
 
-        cleanupSpy.mockImplementation(() => undefined);
+        cleanupSpy.mockImplementation(() => null);
         finishCleanup();
         await flushMicrotasks();
         expect(pool.getDevice(handset.deviceId)?.sessionId).toBeNull();
@@ -230,7 +231,7 @@ describe("DevicePool exhausted session release ownership", () => {
           if (attempts === 1 && scenario !== "present") {
             await sessions.releaseSession("session", "daemon-shutdown");
             if (scenario === "new-owner") {
-              device.sessionId = "other-session";
+              patchDeviceBinding(device, { sessionId: "other-session" });
             }
             if (scenario === "new-assignment") {
               device.assignmentCount++;

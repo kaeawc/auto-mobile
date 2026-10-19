@@ -3,11 +3,11 @@ import { Database as Sqlite } from "bun:sqlite";
 import { Kysely, sql, type Generated } from "kysely";
 import { Migrator } from "kysely/migration";
 import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
-import * as brokerExports010 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_19_010_session_broker_exports";
 import * as freeStop003 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_10_003_free_device_stop_state";
 import * as freeDeletion004 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_12_004_free_device_deletion";
 import * as bindingRegistry000 from "../../../../src/daemon/sessionBroker/registry/migrations/2026_10_09_000_binding_registry";
 import {
+  BINDING_REGISTRY_MIGRATIONS,
   migrateBindingRegistry,
   bindingRegistryMigrationProvider,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
@@ -115,7 +115,7 @@ describe("binding registry migrations", () => {
           })
           .execute(),
       ).rejects.toThrow("UNIQUE");
-      await brokerExports010.down(db);
+      await BINDING_REGISTRY_MIGRATIONS["2026_10_19_010_session_broker_exports"]?.down?.(db);
       expect(
         (await db.introspection.getTables()).some(
           (table) => table.name === "session_broker_exports",

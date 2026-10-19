@@ -1,7 +1,7 @@
 import { bindDevice, holderOf, isIdle } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type Platform } from "../models";
-import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
+import { runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import type { TTLCache } from "../utils/cache/Cache";
 import type { SingleFlight } from "../utils/cache/SingleFlight";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
@@ -163,8 +163,9 @@ export class DeviceAllocation {
     sessionId: string,
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
+    signal?: AbortSignal,
   ): Promise<string> {
-    const assignmentSignal = recoveryTarget ? getAbortSignal() : undefined;
+    const assignmentSignal = recoveryTarget ? signal : undefined;
     const recoveryDeadline = recoveryTarget?.restartRecoveryDeadlineMs;
     const timeoutMs =
       recoveryDeadline === undefined
@@ -198,6 +199,7 @@ export class DeviceAllocation {
           platform,
           recoveryTarget,
           lossIncident !== undefined,
+          signal,
         );
         if (assignResult.refreshCompleted) {
           refreshFailure = assignResult.refreshFailure;
@@ -423,6 +425,7 @@ export class DeviceAllocation {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
     settledRecoveryLoss = false,
+    signal?: AbortSignal,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -439,7 +442,7 @@ export class DeviceAllocation {
       await this.port.bindingExclusion.refresh({ requireCurrent: true });
     }
     if (!recoveryTarget && this.port.tracksForeignOwnership(platform)) {
-      return this.tryAssignUnclaimedDevice(sessionId, platform);
+      return this.tryAssignUnclaimedDevice(sessionId, platform, signal);
     }
     if (!recoveryTarget) {
       // A pool built without ownership tracking (tests) publishes no claims.
@@ -448,6 +451,8 @@ export class DeviceAllocation {
         () => this.port.getGenericallyAllocatableDevices(platform),
         "platform pool empty",
         () => this.port.hasPendingAndroidRecovery(platform),
+        undefined,
+        { signal },
       );
     }
     const ownership = this.port.foreignOwnershipFor(recoveryTarget.platform);
@@ -460,7 +465,7 @@ export class DeviceAllocation {
       "recovery target pool empty",
       () => this.port.hasPendingAndroidRecovery(platform),
       recoveryTarget,
-      settledRecoveryLoss,
+      { settledRecoveryLoss, signal },
     );
     if (ownership && result.success && result.deviceId !== undefined && result.session) {
       await this.claimRecoveredDevice(
@@ -531,9 +536,10 @@ export class DeviceAllocation {
   private async tryAssignUnclaimedDevice(
     sessionId: string,
     platform?: Platform,
+    signal?: AbortSignal,
   ): ReturnType<DeviceAllocation["tryAssignDevice"]> {
     await this.port.refreshForeignOwnership();
-    const result = await this.tryAssignUnownedDevice(sessionId, platform);
+    const result = await this.tryAssignUnownedDevice(sessionId, platform, signal);
     if (
       !result.success &&
       !result.shouldWait &&
@@ -549,6 +555,7 @@ export class DeviceAllocation {
   async tryAssignUnownedDevice(
     sessionId: string,
     platform?: Platform,
+    signal?: AbortSignal,
   ): ReturnType<DeviceAllocation["tryAssignDevice"]> {
     return this.claimAssignedDevice(
       sessionId,
@@ -560,6 +567,8 @@ export class DeviceAllocation {
             .filter((device) => !this.port.isDrivenByForeignDaemon(device)),
         "platform pool empty",
         () => this.port.hasPendingAndroidRecovery(platform),
+        undefined,
+        { signal },
       ),
     );
   }
@@ -612,6 +621,7 @@ export class DeviceAllocation {
   async tryAssignDeviceWithCriteria(
     sessionId: string,
     criteria?: DeviceAllocationCriteria,
+    signal?: AbortSignal,
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -630,6 +640,8 @@ export class DeviceAllocation {
         () => this.port.getUnownedDevicesMatchingCriteria(criteria),
         "criteria pool empty",
         () => this.port.hasPendingAndroidRecoveryMatching(criteria),
+        undefined,
+        { signal },
       ),
     );
   }
@@ -651,7 +663,10 @@ export class DeviceAllocation {
     emptyCandidatePoolReason: string,
     hasPendingRecovery: () => boolean,
     recoveryTarget?: SessionRecoveryTarget,
-    settledRecoveryLoss = false,
+    {
+      settledRecoveryLoss = false,
+      signal,
+    }: { settledRecoveryLoss?: boolean; signal?: AbortSignal } = {},
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -689,7 +704,7 @@ export class DeviceAllocation {
               ? this.port.takeFreshPresenceDiscovery("android")
               : undefined,
           ]),
-        { timer: this.port.timer, signal: getAbortSignal(), label: "Device allocation discovery" },
+        { timer: this.port.timer, signal, label: "Device allocation discovery" },
       );
       const snapshots = { capturedEntries, iosLiveness, androidPresence };
 
@@ -723,6 +738,7 @@ export class DeviceAllocation {
             sessionId,
             device,
             recoveryTarget,
+            signal,
           );
           logger.info(`Assigned device ${device.id} to session ${sessionId}`);
           return {
@@ -772,7 +788,7 @@ export class DeviceAllocation {
         const refreshResult = await this.port.allocationRefresh.run(
           "allocation",
           () => this.refreshForAllocation(recoveryTarget, settledRecoveryLoss),
-          getAbortSignal(),
+          signal,
         );
         refreshCompleteness = refreshResult.completeness;
         refreshFailure = refreshResult.failure;
@@ -929,6 +945,7 @@ export class DeviceAllocation {
     sessionId: string,
     device: PooledDevice,
     recoveryTarget?: SessionRecoveryTarget,
+    signal?: AbortSignal,
   ): Promise<{ deviceId: string; session?: Session }> {
     // Recovery deadline cancellation must fence the claim's synchronous field writes.
     if (recoveryTarget) {
@@ -953,6 +970,7 @@ export class DeviceAllocation {
         stableDeviceId: this.port.stableDeviceIdFor(device),
         recoveredLiveness: recoveryTarget?.liveness,
         initialOwnership: recoveryTarget?.initialOwnership,
+        signal,
       }),
     );
     if (session.assignedDevice !== device.id) {

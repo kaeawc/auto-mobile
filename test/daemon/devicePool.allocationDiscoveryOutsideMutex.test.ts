@@ -1,3 +1,4 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
@@ -472,8 +473,8 @@ describe("allocation discovery outside assignmentMutex", () => {
       ): Promise<boolean> {
         const present = await super.ensurePooledDevicePresent(...args);
         if (args[0].id === android[0].deviceId) {
-          args[0].status = "busy";
-          args[0].sessionId = "concurrent-owner";
+          patchDeviceBinding(args[0], { status: "busy" });
+          patchDeviceBinding(args[0], { sessionId: "concurrent-owner" });
         }
         return present;
       }

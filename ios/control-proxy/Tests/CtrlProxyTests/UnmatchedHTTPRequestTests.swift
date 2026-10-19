@@ -21,7 +21,7 @@ final class UnmatchedHTTPRequestTests: XCTestCase {
         queue.sync {}
 
         XCTAssertEqual(channel.sends.count, 1)
-        let response = String(decoding: channel.sends[0], as: UTF8.self)
+        let response = (String(data: channel.sends[0], encoding: .utf8) ?? "")
         XCTAssertTrue(response.hasPrefix("HTTP/1.1 404 Not Found\r\n"))
         XCTAssertTrue(response.contains("Content-Length: 0\r\n"))
         XCTAssertTrue(response.contains("Connection: close\r\n"))
@@ -37,7 +37,7 @@ final class UnmatchedHTTPRequestTests: XCTestCase {
         )
 
         XCTAssertEqual(recorder.sends.count, 1)
-        XCTAssertTrue(String(decoding: recorder.sends[0], as: UTF8.self).contains("HTTP/1.1 200 OK"))
+        XCTAssertTrue((String(data: recorder.sends[0], encoding: .utf8) ?? "").contains("HTTP/1.1 200 OK"))
     }
 
     func testWebSocketUpgradeSendsExpectedAcceptKey() {
@@ -54,7 +54,7 @@ final class UnmatchedHTTPRequestTests: XCTestCase {
         let recorder = ConnectionDriver.run(inbound: Data(request.utf8))
 
         XCTAssertFalse(recorder.sends.isEmpty)
-        let response = String(decoding: recorder.sends[0], as: UTF8.self)
+        let response = (String(data: recorder.sends[0], encoding: .utf8) ?? "")
         XCTAssertTrue(response.contains("HTTP/1.1 101"))
         XCTAssertTrue(response.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="))
     }

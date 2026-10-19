@@ -971,25 +971,22 @@ export async function bindBootedDeviceSession(
 
   const sessionId = resumeSessionId ?? getDeviceToolsDependencies().idGenerator.next();
   const bind = (recoveryTarget?: SessionRecoveryTarget) =>
-    daemonState
-      .getDevicePool()
-      .bindOrReuseDeviceSession(
-        sessionId,
-        device.deviceId,
-        device.platform,
-        sourceImage,
-        childProcess,
-        device,
-        false,
-        readinessReservationOwners,
-        verifiedAndroidAvdIdentity,
-        undefined,
-        args.__mcpSessionId,
-        args.__oneShotCli === true,
-        receipt,
-        false,
-        recoveryTarget,
-      );
+    daemonState.getDevicePool().bindOrReuseDeviceSession({
+      sessionId,
+      deviceId: device.deviceId,
+      platform: device.platform,
+      sourceImage,
+      childProcess,
+      expectedIdentity: device,
+      allowSessionRebind: false,
+      readinessReservationOwners,
+      verifiedAndroidAvdIdentity,
+      mcpSessionId: args.__mcpSessionId,
+      oneShotCli: args.__oneShotCli === true,
+      receipt,
+      refusePreparedForOtherRequest: false,
+      recoveryTarget,
+    });
   if (resumeSessionId) {
     return await resumePreparedDeviceSession(
       device,

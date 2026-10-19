@@ -182,19 +182,13 @@ describe("restart reservation owner reconnect through the real stdio proxy", () 
     const manager = s.daemon.manager;
     async function allocateLabel(owner: string, id: string, deviceId: string) {
       await asPlanAllocation(manager, owner, [id], () =>
-        s.daemon.pool.bindOrReuseDeviceSession(
-          id,
+        s.daemon.pool.bindOrReuseDeviceSession({
+          sessionId: id,
           deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          connection,
-        ),
+          platform: "android",
+          allowSessionRebind: false,
+          mcpSessionId: connection,
+        }),
       );
       manager.setDeviceLabels(owner, { ...manager.getDeviceLabels(owner), [id]: id });
     }

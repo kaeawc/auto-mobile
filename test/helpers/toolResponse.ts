@@ -51,3 +51,19 @@ export function toolStructured(response: unknown): Record<string, unknown> {
 export function toolIsError(response: unknown): boolean {
   return readToolResponse(response).isError === true;
 }
+
+/**
+ * One own field of the response's `structuredContent`, or `undefined` when the
+ * payload is absent or does not carry that key. Mirrors `getStructuredField`
+ * for handler results, which resolve to `unknown` and so cannot be passed to it.
+ */
+export function toolField(response: unknown, key: string): unknown {
+  if (!isRecord(response)) {
+    return undefined;
+  }
+  const structured = response.structuredContent;
+  if (!isRecord(structured) || !Object.hasOwn(structured, key)) {
+    return undefined;
+  }
+  return structured[key];
+}

@@ -2450,18 +2450,18 @@ describe("ToolExecutionContext", () => {
       fakeDeviceManager.bootedDevices = [first, second];
       await devicePool.addDevice(first, image(first));
       await devicePool.addDevice(second, image(second));
-      await devicePool.bindOrReuseDeviceSession(
-        "reset-session-1",
-        first.deviceId,
-        "android",
-        image(first),
-      );
-      await devicePool.bindOrReuseDeviceSession(
-        "reset-session-2",
-        second.deviceId,
-        "android",
-        image(second),
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "reset-session-1",
+        deviceId: first.deviceId,
+        platform: "android",
+        sourceImage: image(first),
+      });
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "reset-session-2",
+        deviceId: second.deviceId,
+        platform: "android",
+        sourceImage: image(second),
+      });
       const detached = await devicePool.detachAdbServerResetCohort([
         devicePool.getDevice(first.deviceId)!,
         devicePool.getDevice(second.deviceId)!,

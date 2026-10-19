@@ -126,19 +126,13 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     const devicePool = daemon.getDevicePool();
     stubPoolDiscovery(devicePool);
     await devicePool.initializeWithDevices([DEVICE]);
-    await devicePool.bindOrReuseDeviceSession(
-      SESSION,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER_CONNECTION,
-    );
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER_CONNECTION,
+    });
     beforeDisconnect?.();
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
     return devicePool;
@@ -283,21 +277,19 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       deviceManager.bootedDevices = [DEVICE, DERIVED_DEVICE];
       Object.assign(devicePool, { deviceManager });
       await devicePool.initializeWithDevices([DEVICE, DERIVED_DEVICE]);
-      await devicePool.bindOrReuseDeviceSession(
-        BASE,
-        DEVICE.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        OWNER_CONNECTION,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: BASE,
+        deviceId: DEVICE.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: OWNER_CONNECTION,
+      });
       await asPlanAllocation(sessionManager, BASE, [DERIVED], () =>
-        devicePool.bindOrReuseDeviceSession(DERIVED, DERIVED_DEVICE.deviceId, "android"),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: DERIVED,
+          deviceId: DERIVED_DEVICE.deviceId,
+          platform: "android",
+        }),
       );
       sessionManager.setDeviceLabels(BASE, { A: BASE, B: DERIVED });
       sessionManager.recordHeartbeat(BASE);

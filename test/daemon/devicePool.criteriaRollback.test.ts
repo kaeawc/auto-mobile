@@ -78,7 +78,11 @@ describe("criteria allocation rollback on thrown errors", () => {
   };
 
   arranged("third label abort releases partial allocations before rejection", async () => {
-    await pool.bindOrReuseDeviceSession("other-owner", "device-c", "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "other-owner",
+      deviceId: "device-c",
+      platform: "android",
+    });
     const controller = new AbortController();
     const originalError = new Error("client cancelled criteria allocation");
     const allocation = runWithAbortSignal(controller.signal, () =>
@@ -234,7 +238,11 @@ describe("criteria allocation rollback on thrown errors", () => {
     arrangedCancelling(
       "a single-device bind still cancels as soon as its create commits",
       async () => {
-        await pool.bindOrReuseDeviceSession("solo", "device-a", "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "solo",
+          deviceId: "device-a",
+          platform: "android",
+        });
         expect(cancelled).toEqual([["device-a", "solo"]]);
       },
     );
@@ -243,7 +251,11 @@ describe("criteria allocation rollback on thrown errors", () => {
   arranged(
     "a live session whose held device misses its criteria fails fast and is preserved",
     async () => {
-      await pool.bindOrReuseDeviceSession("plan:a", "device-a", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "plan:a",
+        deviceId: "device-a",
+        platform: "android",
+      });
       const heldSession = manager.getSession("plan:a");
       // plan:a holds device-a but asks for device-b. It must not be moved to (or
       // reused through) idle b (#10153); the allocation fails before any claim.

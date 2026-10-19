@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
+import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 import { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import {
@@ -77,10 +79,9 @@ test("test construction preserves injected dependencies and defaults undefined f
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
-// These nominal class dependencies are identity-only sentinels. With no prototype,
-// accidental method use fails instead of reaching a builder or a real device.
-function builderStub(): IosCtrlProxyBuilder {
-  return Object.create(null);
+// An identity-only sentinel: every builder member throws if the constructor uses it.
+function builderStub(): IosCtrlProxyBuilderSurface {
+  return fakeIosCtrlProxyBuilder({});
 }
 
 test("test construction preserves every injected dependency", () => {

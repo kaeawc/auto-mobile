@@ -1151,27 +1151,17 @@ test("omitted display preserves main's routing order without accessing the inven
     }
     return originalGetSession(id);
   });
-  const bind = spyOn(pool, "bindOrReuseDeviceSession").mockImplementation(async (...args) => {
+  const bind = spyOn(pool, "bindOrReuseDeviceSession").mockImplementation(async (request) => {
     steps.push("bind");
     // The receipt records cancellation undo (#11593); the final flag refuses live preparation (#11651).
-    expect(args.slice(0, 7)).toEqual([
-      "one",
-      "other",
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      true,
-    ]);
-    expect(args.slice(7)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {},
-      true,
-    ]);
+    expect(request).toEqual({
+      sessionId: "one",
+      deviceId: "other",
+      platform: "android",
+      allowSessionRebind: true,
+      receipt: {},
+      refusePreparedForOtherRequest: true,
+    });
     return "one";
   });
   const readiness = spyOn(sessions, "setDeviceReadiness").mockImplementation(() => {

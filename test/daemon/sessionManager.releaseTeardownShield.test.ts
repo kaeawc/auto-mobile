@@ -109,7 +109,11 @@ async function harness() {
 type Harness = Awaited<ReturnType<typeof harness>>;
 
 async function ownDevice(h: Harness, kinds: readonly RestoreKind[]): Promise<void> {
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   if (kinds.includes("keep-awake")) {
     h.manager.setKeepScreenAwake("old", { applied: true });
   }
@@ -329,15 +333,12 @@ describe("session release teardown is shielded from the caller's signal (#10198)
     expect(h.pool.getDevice(device.deviceId)?.status).toBe("busy");
     expect(h.pool.getStats().idle).toBe(0);
     await expect(
-      h.pool.bindOrReuseDeviceSession(
-        "next",
-        device.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      ),
+      h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: device.deviceId,
+        platform: "android",
+        allowSessionRebind: true,
+      }),
     ).rejects.toThrow("cleanup");
 
     gate.resolve();

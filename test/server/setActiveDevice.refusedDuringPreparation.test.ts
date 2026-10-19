@@ -597,22 +597,14 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
         const h = await arrange(platform);
         const reservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device);
         try {
-          const pending = h.pool.bindOrReuseDeviceSession(
-            "other-session",
-            h.device.deviceId,
+          const pending = h.pool.bindOrReuseDeviceSession({
+            sessionId: "other-session",
+            deviceId: h.device.deviceId,
             platform,
-            undefined,
-            undefined,
-            undefined,
-            true,
-            own ? new Set([reservation.owner]) : undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            flag,
-          );
+            allowSessionRebind: true,
+            readinessReservationOwners: own ? new Set([reservation.owner]) : undefined,
+            refusePreparedForOtherRequest: flag,
+          });
           if (flag && !own) {
             expectPreparationRefusal(await refusal(pending), h.device.deviceId);
             expect(h.manager.getSession("other-session")).toBeNull();

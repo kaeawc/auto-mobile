@@ -13,7 +13,6 @@
  * bounds outside the image are not evaluated, #10220.)
  */
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "fs";
 import path from "path";
 import {
   AccessibilityAuditor,
@@ -25,6 +24,7 @@ import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker
 import { ContrastChecker } from "../../../../src/features/accessibility/ContrastChecker";
 import { FakeImageBackend } from "../../../fakes/FakeImageBackend";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { readCapturedHierarchy, readCapturedObservation } from "../../../fixtures/capturedFixtures";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../../src/models";
 import type {
   AccessibilityAuditConfig,
@@ -40,17 +40,11 @@ const config: AccessibilityAuditConfig = {
   useBaseline: false,
 };
 
-function readFixture<T>(relativePath: string): T {
-  return JSON.parse(readFileSync(path.join(fixtures, relativePath), "utf8")) as T;
-}
-
 let gboardHierarchy: ViewHierarchyResult;
 let imageBackend: FakeImageBackend;
 
 beforeAll(async () => {
-  gboardHierarchy = readFixture<ViewHierarchyResult>(
-    "android-ime-window/playground-gboard-api36.json",
-  );
+  gboardHierarchy = readCapturedHierarchy("android-ime-window/playground-gboard-api36.json");
   // Three copies are needed to exceed the cap only when contrast is included.
   gboardHierarchy.density = 1600;
   const nodes = gboardHierarchy.hierarchy.node ?? [];
@@ -80,7 +74,7 @@ function gboardObservation(observationId: string): ObserveResult {
 
 /** The captured Playground screen whose buttons are labelled only by child text. */
 function playgroundButtonsObservation(density?: number): ObserveResult {
-  const observation = readFixture<ObserveResult>(
+  const observation = readCapturedObservation(
     "android-enabled/playground-disabled-control-api36.json",
   );
   if (density !== undefined) {

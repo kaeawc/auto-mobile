@@ -202,32 +202,20 @@ describe("ownerless recording acquisition adoption", () => {
   arranged("two pool acquisitions race: only the committed winner adopts", async () => {
     const recording = await startVideoRecording({ device });
     const results = await Promise.allSettled([
-      pool.bindOrReuseDeviceSession(
-        "first",
-        device.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        "connection-first",
-      ),
-      pool.bindOrReuseDeviceSession(
-        "second",
-        device.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        "connection-second",
-      ),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "first",
+        deviceId: device.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: "connection-first",
+      }),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "second",
+        deviceId: device.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: "connection-second",
+      }),
     ]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     const holder = manager.getSessionForDevice(device.deviceId)!;
@@ -368,32 +356,20 @@ describe("ownerless recording acquisition adoption", () => {
     "a nested bare start resolves the real pool's acquiring connection for every held target",
     async () => {
       const connection = "nested-connection";
-      const owner = await pool.bindOrReuseDeviceSession(
-        "holder",
-        device.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        connection,
-      );
-      const otherOwner = await pool.bindOrReuseDeviceSession(
-        "second-holder",
-        free.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        connection,
-      );
+      const owner = await pool.bindOrReuseDeviceSession({
+        sessionId: "holder",
+        deviceId: device.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: connection,
+      });
+      const otherOwner = await pool.bindOrReuseDeviceSession({
+        sessionId: "second-holder",
+        deviceId: free.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: connection,
+      });
       videoRecording.configure({
         requesterResolver: {
           baseSessionUuid: (id) => id,
@@ -522,7 +498,11 @@ describe("ownerless recording acquisition adoption", () => {
     async () => {
       const recording = await startVideoRecording({ device });
       const execution = "managed-execution:slot-0";
-      await pool.bindOrReuseDeviceSession(execution, device.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: execution,
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       await manager.adoptManagedExecutionLivenessPolicy(execution);
       expect(acquisitions).toEqual([execution]);
       expect(listActiveVideoRecordingIdsForOwner(execution, device.deviceId)).toEqual([

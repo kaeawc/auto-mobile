@@ -126,7 +126,11 @@ async function createContext(autolock: boolean): Promise<PredicateContext> {
     timeoutMs: 1_000,
     heartbeatTimeoutMs: 1_000,
   });
-  await pool.bindOrReuseDeviceSession(session.sessionId, booted.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: session.sessionId,
+    deviceId: booted.deviceId,
+    platform: "android",
+  });
   manager.stopCleanupTimer();
   const device = pool.getDevice(booted.deviceId)!;
   device.autolockSessionId = autolock ? session.sessionId : undefined;

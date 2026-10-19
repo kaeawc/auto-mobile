@@ -79,7 +79,7 @@ async function run(seed: number): Promise<string[]> {
           timeoutMs: TTL_MS,
           heartbeatTimeoutMs: TTL_MS,
         });
-        await pool.bindOrReuseDeviceSession(sessionId, deviceId, "android");
+        await pool.bindOrReuseDeviceSession({ sessionId, deviceId, platform: "android" });
         live.push(sessionId);
       } else if (op === "release" && live.includes(sessionId)) {
         live.splice(live.indexOf(sessionId), 1);
@@ -93,15 +93,12 @@ async function run(seed: number): Promise<string[]> {
         manager.cleanupExpiredSessions();
         live.length = 0;
       } else if (op === "rebind" && free && manager.getSession(sessionId)) {
-        await pool.bindOrReuseDeviceSession(
+        await pool.bindOrReuseDeviceSession({
           sessionId,
           deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
+          platform: "android",
+          allowSessionRebind: true,
+        });
       }
     } catch (error) {
       // Refused operations (device held by another session) are legal outcomes; the invariant

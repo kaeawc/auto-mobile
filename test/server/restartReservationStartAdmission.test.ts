@@ -184,19 +184,14 @@ describe("start admission and owner resume for restart reservations", () => {
         ),
       ).toBe(holder);
     } else {
-      await pool.bindOrReuseDeviceSession(
-        holder,
-        device.deviceId,
+      await pool.bindOrReuseDeviceSession({
+        sessionId: holder,
+        deviceId: device.deviceId,
         platform,
-        undefined,
-        undefined,
-        device,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        options.connection,
-      );
+        expectedIdentity: device,
+        allowSessionRebind: false,
+        mcpSessionId: options.connection,
+      });
     }
     // Keep idle expiry beyond the fixed restart window, so the retry pin measures that window.
     const live = sessions.getSession(holder)!;
@@ -864,15 +859,13 @@ describe("start admission and owner resume for restart reservations", () => {
       await f.pool.initializeWithDevices([f.device, spare]);
       f.manager.setBootedDevices("android", [f.device, spare]);
       await f.call("restartControl", { sessionUuid: HOLDER });
-      await f.pool.bindOrReuseDeviceSession(
-        HOLDER,
-        spare.deviceId,
-        "android",
-        undefined,
-        undefined,
-        spare,
-        true,
-      );
+      await f.pool.bindOrReuseDeviceSession({
+        sessionId: HOLDER,
+        deviceId: spare.deviceId,
+        platform: "android",
+        expectedIdentity: spare,
+        allowSessionRebind: true,
+      });
     };
     await expect(f.start(undefined, HOLDER)).rejects.toThrow(
       "already assigned to a different device",

@@ -104,19 +104,13 @@ describe("owner-disconnect release re-arm (#10663)", () => {
       devicePool.sessionExecutionsEnded(sessionUuids),
     );
     await devicePool.initializeWithDevices([DEVICE]);
-    await devicePool.bindOrReuseDeviceSession(
-      OWNER_SESSION,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER_CONNECTION,
-    );
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: OWNER_SESSION,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER_CONNECTION,
+    });
   });
 
   afterEach(() => {

@@ -79,14 +79,12 @@ describe("a session waiting in flight for its restarting device", () => {
       }),
     );
     await pool.initializeWithDevices([SIMULATOR]);
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      SIMULATOR.deviceId,
-      "ios",
-      undefined,
-      undefined,
-      SIMULATOR,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: SIMULATOR.deviceId,
+      platform: "ios",
+      expectedIdentity: SIMULATOR,
+    });
     const held = pool.getDevice(SIMULATOR.deviceId);
     if (!held) {
       throw new Error("expected the simulator to be pooled");

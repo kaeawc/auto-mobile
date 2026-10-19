@@ -142,19 +142,13 @@ describe("a nested plain control call naming a session another connection owns (
     await pool.initializeWithDevices([held, free]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     // OWNER's connection acquires the session that holds the device.
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "ios",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "ios",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     registerDeviceTools();
     probeRuns = [];
     const probeSchema = z.object({ sessionUuid: z.string().optional() }).strict();

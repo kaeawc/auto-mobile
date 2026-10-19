@@ -276,19 +276,13 @@ describe("device gesture recording start holder admission (#11665)", () => {
 
   arranged("the acquiring connection starts under the session it acquired", async () => {
     await manager.releaseSession("holder");
-    const acquired = await pool.bindOrReuseDeviceSession(
-      "connection-holder",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "acquiring-connection",
-    );
+    const acquired = await pool.bindOrReuseDeviceSession({
+      sessionId: "connection-holder",
+      deviceId: device.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "acquiring-connection",
+    });
     expect(
       pool.resolveOwnedDeviceSessionForMcpSession("acquiring-connection", device.deviceId),
     ).toBe(acquired);

@@ -85,7 +85,11 @@ describe("DevicePool", () => {
         session.assignedDevice === "emulator-5554" ? "emulator-5556" : "emulator-5554";
 
       await expect(
-        devicePool.bindOrReuseDeviceSession("shared-session", otherDeviceId, "android"),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "shared-session",
+          deviceId: otherDeviceId,
+          platform: "android",
+        }),
       ).rejects.toThrow(
         `Session 'shared-session' is already assigned to device '${session.assignedDevice}'.`,
       );
@@ -103,11 +107,11 @@ describe("DevicePool", () => {
         createBootedDevice("emulator-5556"),
       ]);
 
-      const explicitBinding = devicePool.bindOrReuseDeviceSession(
-        "shared-session",
-        "emulator-5556",
-        "android",
-      );
+      const explicitBinding = devicePool.bindOrReuseDeviceSession({
+        sessionId: "shared-session",
+        deviceId: "emulator-5556",
+        platform: "android",
+      });
       const automaticCreation = sessionManager.getOrCreateSession("shared-session", devicePool);
       const [boundSession, session] = await Promise.all([explicitBinding, automaticCreation]);
 

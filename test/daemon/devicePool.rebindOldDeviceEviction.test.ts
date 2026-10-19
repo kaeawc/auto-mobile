@@ -53,28 +53,20 @@ describe("losing the old device during a deferred rebind cleanup", () => {
     devices.bootedDevices = booted;
     pool = makePool(sessions, "rebind-eviction-daemon", { timer, deviceManager: devices });
     await pool.initializeWithDevices(booted);
-    await pool.bindOrReuseDeviceSession("s1", OLD, "android");
+    await pool.bindOrReuseDeviceSession({ sessionId: "s1", deviceId: OLD, platform: "android" });
     sessions.updateSessionCache("s1", {
       keepScreenAwake: { applied: true, method: "svc", svcWasEnabled: false },
     });
     // setActiveDevice's shape (src/server/setActiveDevice.ts): receipt, refuse=true, then commit.
     const receipt: AcquisitionReceipt = {};
-    await pool.bindOrReuseDeviceSession(
-      "s1",
-      NEW,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "s1",
+      deviceId: NEW,
+      platform: "android",
+      allowSessionRebind: true,
       receipt,
-      true,
-    );
+      refusePreparedForOtherRequest: true,
+    });
     commitAcquisition(receipt);
     await spin();
     expect(sessions.getSession("s1")?.assignedDevice).toBe(NEW);

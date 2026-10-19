@@ -67,14 +67,13 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
   try {
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const captured = pool.getDevice(original.deviceId)!;
 
     // AutoMobile launched this emulator; its tracked child has since exited.
@@ -131,14 +130,13 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
   try {
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
-    await pool.bindOrReuseDeviceSession(
-      "session",
-      original.deviceId,
-      "android",
-      image,
-      undefined,
-      original,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "session",
+      deviceId: original.deviceId,
+      platform: "android",
+      sourceImage: image,
+      expectedIdentity: original,
+    });
     const captured = pool.getDevice(original.deviceId)!;
     const exitedProcess = {
       pid: 42,

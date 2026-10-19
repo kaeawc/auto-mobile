@@ -2658,10 +2658,15 @@ describe("killDevice handler", () => {
       });
     }
     for (const [index, peer] of peers.entries()) {
-      await pool.bindOrReuseDeviceSession(`peer-session-${index}`, peer.deviceId, "android", {
+      await pool.bindOrReuseDeviceSession({
+        sessionId: `peer-session-${index}`,
+        deviceId: peer.deviceId,
         platform: "android",
-        name: peer.name,
-        isRunning: true,
+        sourceImage: {
+          platform: "android",
+          name: peer.name,
+          isRunning: true,
+        },
       });
     }
     const tool = ToolRegistry.getTool("killDevice");
@@ -2905,7 +2910,11 @@ describe("killDevice handler", () => {
       const activePool = DaemonState.getInstance().getDevicePool();
       await activePool.releaseDevice(image.deviceId!);
       try {
-        await activePool.bindOrReuseDeviceSession("racing-session", image.deviceId!, "android");
+        await activePool.bindOrReuseDeviceSession({
+          sessionId: "racing-session",
+          deviceId: image.deviceId!,
+          platform: "android",
+        });
       } catch (error) {
         bindingError = error;
       }

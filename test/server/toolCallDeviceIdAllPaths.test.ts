@@ -175,19 +175,13 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
     if (!options.held || sessions.getSessionForDevice(options.held) === HOLDER) {
       return;
     }
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      options.held,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: options.held,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: HOLDER_CONNECTION,
+    });
     sessions.setDeviceReadiness(HOLDER, "automationReady");
     // Keep-awake is device work behind its own adb seam; mark it settled for this session.
     sessions.getSession(HOLDER)!.cacheData.keepScreenAwake = {

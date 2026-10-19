@@ -90,12 +90,12 @@ describe("DevicePool", () => {
       const recovered = { ...device, observedAt: 4 };
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
       const pooled = devicePool.getDevice(device.deviceId);
       const incarnation = pooled?.incarnation;
       const assignmentCount = pooled?.assignmentCount;
@@ -151,12 +151,12 @@ describe("DevicePool", () => {
       const different = poolDevice(device.deviceId, "Pixel_7_API_34");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
       fakeDeviceManager.bootedDevices = [different];
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
@@ -183,12 +183,12 @@ describe("DevicePool", () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
       const enteredA = Promise.withResolvers<void>();
       const enteredB = Promise.withResolvers<void>();
       const releaseA = Promise.withResolvers<void>();
@@ -237,12 +237,12 @@ describe("DevicePool", () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
       const controller = new AbortController();
       let calls = 0;
       fakeDeviceManager.getBootedDevicesDetailed = async () => {
@@ -265,12 +265,12 @@ describe("DevicePool", () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
       fakeDeviceManager.bootedDevices = [unresolved(device.deviceId)];
       const getBootedDevicesDetailed =
         fakeDeviceManager.getBootedDevicesDetailed.bind(fakeDeviceManager);
@@ -376,7 +376,12 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
 
       await expect(
-        devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android", androidImage),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: "emulator-5554",
+          platform: "android",
+          sourceImage: androidImage,
+        }),
       ).rejects.toThrow(/emulator-5554[\s\S]*identity is unresolved/);
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();
     });
@@ -406,12 +411,12 @@ describe("DevicePool", () => {
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        "emulator-5554",
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: androidImage,
+      });
       expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
 
       await refreshWith([unresolved("emulator-5554")]);
@@ -500,12 +505,12 @@ describe("DevicePool", () => {
       });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        "emulator-5554",
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: androidImage,
+      });
       const incarnation = devicePool.getDevice("emulator-5554")!.incarnation;
 
       await refreshWith([unresolved("emulator-5554")]);
@@ -551,17 +556,17 @@ describe("DevicePool", () => {
         processedDevices++;
         if (processedDevices === 1) {
           controller.abort();
-          await devicePool.bindOrReuseDeviceSession(
-            "unrelated-live-session",
-            second.deviceId,
-            "android",
-            {
+          await devicePool.bindOrReuseDeviceSession({
+            sessionId: "unrelated-live-session",
+            deviceId: second.deviceId,
+            platform: "android",
+            sourceImage: {
               name: second.name,
               platform: "android",
               isRunning: false,
               source: "local",
             },
-          );
+          });
         }
       };
 
@@ -592,12 +597,12 @@ describe("DevicePool", () => {
       });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        "emulator-5554",
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: androidImage,
+      });
 
       const discovered = {
         ...unresolved("emulator-5554"),
@@ -661,12 +666,12 @@ describe("DevicePool", () => {
         },
       });
       await initializeLiveDevices([poolDevice("emulator-5554", "Pixel_8_API_35")]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        "emulator-5554",
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: androidImage,
+      });
       fakeDeviceManager.bootedDevices = [unresolved("emulator-5554")];
 
       await devicePool.reconcileDiscoveryObservation([unresolved("emulator-5554")], "test:kill", {
@@ -689,12 +694,12 @@ describe("DevicePool", () => {
       });
       const device = poolDevice("emulator-5554", "Pixel_8_API_35");
       await initializeLiveDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        "emulator-5554",
-        "android",
-        androidImage,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: androidImage,
+      });
 
       await devicePool.reconcileDiscoveryObservation(
         [unresolved("emulator-5554")],
@@ -820,7 +825,11 @@ describe("DevicePool", () => {
       // started earlier and only completed after the funnel had confirmed A.
       fakeDeviceManager.bootedDevices = [stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 9)];
 
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
 
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
         name: "Pixel_8_API_35",
@@ -964,7 +973,11 @@ describe("DevicePool", () => {
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
@@ -1036,7 +1049,11 @@ describe("DevicePool", () => {
       });
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       try {
@@ -1068,7 +1085,11 @@ describe("DevicePool", () => {
       const setupFinished = Promise.withResolvers<void>();
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const pooled = devicePool.getDevice(device.deviceId);
       const session = sessionManager.getSession("owner-session");
       if (!pooled || !session) {
@@ -1467,7 +1488,11 @@ describe("DevicePool", () => {
         stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 10),
       ];
 
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
 
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
         name: "Pixel_7_API_34",

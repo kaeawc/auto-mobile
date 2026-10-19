@@ -53,7 +53,11 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     await pool.initializeWithDevices(deviceManager.bootedDevices);
     sessionId = autolock
       ? (await pool.autolockDevice(deviceId, "android", "client"))!
-      : await pool.bindOrReuseDeviceSession(explicitSessionId, deviceId, "android");
+      : await pool.bindOrReuseDeviceSession({
+          sessionId: explicitSessionId,
+          deviceId,
+          platform: "android",
+        });
     state = {
       isInitialized: () => true,
       getSessionManager: () => manager,

@@ -2261,19 +2261,13 @@ test("a connected suspect holder has a truthful bind retry that disappears after
   const remaining = state.getSessionManager().getOwnerLeaseHold(holder)!.remainingMs;
   const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
   const bind = () =>
-    pool.bindOrReuseDeviceSession(
-      "rival",
-      DEVICE_A,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "rival-connection",
-    );
+    pool.bindOrReuseDeviceSession({
+      sessionId: "rival",
+      deviceId: DEVICE_A,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: "rival-connection",
+    });
   const refused = await bind().catch((error: unknown) => error);
   expect(refused).toBeInstanceOf(InputDeviceOwnedError);
   if (!(refused instanceof InputDeviceOwnedError)) {

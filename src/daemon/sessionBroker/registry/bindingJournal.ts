@@ -1,9 +1,6 @@
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import type { DeviceInfo } from "../../../models/index";
-import {
-  androidBindingSpecSchema,
-  iosBindingSpecSchema,
-} from "../../../server/provisionDeviceSpecSchemas";
+import { androidBindingSpecSchema, iosBindingSpecSchema } from "../../provisionDeviceSpecSchemas";
 import {
   exponentialBackoff,
   normalizeBackoff,

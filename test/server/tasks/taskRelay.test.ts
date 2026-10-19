@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { McpError } from "../../../src/server/mcpError";
+import { McpError } from "../../../src/daemon/mcpError";
 import { missingTasksCapabilityError } from "../../../src/server/tasks/mcpTasksExtension";
 import {
   parseTaskRelayFrame,

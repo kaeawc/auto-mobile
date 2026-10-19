@@ -1,7 +1,7 @@
 import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
 import type { SessionManager } from "../../../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
-import { SessionReleaseBroadcaster } from "../../sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../../daemon/sessionReleaseBroadcast";
 import {
   getActiveDeviceSelectionFromResult,
   isDeviceSessionAcquisitionTool,

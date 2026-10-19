@@ -30,7 +30,7 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";

@@ -23,7 +23,7 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import { setElementProvenance } from "../../src/features/observe/output/elementProvenance";
 import { logger } from "../../src/utils/logger";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
-import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
 import {
   RESOURCE_URIS as OBSERVATION_RESOURCE_URIS,
   registerObservationResources,

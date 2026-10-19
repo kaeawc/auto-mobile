@@ -1,4 +1,4 @@
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { AndroidAvdIdentityUnresolvedError } from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";

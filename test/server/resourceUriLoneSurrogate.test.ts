@@ -1,11 +1,11 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
 import { parseGuardSource } from "../lint/astGuard";
 import { collectSourceFacts } from "../lint/sourceFacts";
 import { buildAppFileResourceUri } from "../../src/server/appFileContract";
-import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { buildObservationScreenshotUri } from "../../src/daemon/observationResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { encodeUriSegment } from "../../src/utils/encodeUriSegment";
 import { buildNavigationNodeScreenshotUri } from "../../src/utils/navigationResourceUri";

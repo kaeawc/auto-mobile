@@ -226,7 +226,7 @@ import { DeviceTeardownService } from "../../devices/deviceTeardownService";
 import {
   androidProvisionDeviceSpecSchema,
   iosProvisionDeviceSpecSchema,
-} from "../../server/provisionDeviceSpecSchemas";
+} from "../../daemon/provisionDeviceSpecSchemas";
 import { mergeDeviceToolsDependencies } from "./deviceLifecycleDependencyOverrides";
 export {
   provisionDeviceDependencyOverrides,

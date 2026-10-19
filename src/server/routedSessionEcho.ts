@@ -1,7 +1,7 @@
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { executionTracker } from "./executionTracker";
-import { withRoutedSessionMeta } from "./routedSessionMeta";
+import { withRoutedSessionMeta } from "../daemon/routedSessionMeta";
 
 /**
  * Echo in a daemon tool result the session its execution was admitted under and used (#10974),

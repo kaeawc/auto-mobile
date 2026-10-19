@@ -1,4 +1,4 @@
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { SessionToolBindingStore } from "./sessionToolBindingStore";
 import { ToolRegistry } from "./toolRegistry";
 

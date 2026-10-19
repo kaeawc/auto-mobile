@@ -8,7 +8,7 @@ import {
   type Server,
   type ServerCapabilities,
 } from "@modelcontextprotocol/server";
-import { ErrorCode, McpError } from "./mcpError";
+import { ErrorCode, McpError } from "../daemon/mcpError";
 import { isCreateTaskResult } from "./tasks/mcpTasksExtension";
 
 type WrapHandler = Server["_wrapHandler"];

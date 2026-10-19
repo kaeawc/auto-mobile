@@ -19,7 +19,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ExecutionTrackerPlanExecutionLock } from "../../src/server/PlanExecutionLock";
 import { executionTracker } from "../../src/server/executionTracker";
-import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
+import { routedSessionUuidFromResult } from "../../src/daemon/routedSessionMeta";
 import { SessionReleasedDuringCreationError } from "../../src/models/deviceAcquisitionRefusals";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";

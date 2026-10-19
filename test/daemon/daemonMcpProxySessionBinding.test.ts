@@ -7,7 +7,7 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
-import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
+import { withRoutedSessionMeta } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";

@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger";
-import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
+import type { SessionReleaseSnapshot } from "./sessionManager";
 
 /**
  * MCP-style wire method for the daemon's "a session was released" push

@@ -178,7 +178,7 @@ impossible. [doc]
 
 The Playground **Pointer Probe** screen (#13096) is the probe view for experiments 2, 3, 4 and 6.
 Open it from Home > Demos > Pointer Probe, or with
-`adb shell am start -a android.intent.action.VIEW -d automobile:playground/demos/input/pointer_probe`
+`adb shell am start -a android.intent.action.VIEW -d automobile://playground/demos/input/pointer_probe`
 (the app must be onboarded and logged in). A custom View receives every `MotionEvent` through
 `onTouchEvent`, `onHoverEvent` and `onGenericMotionEvent` and logs one line per event: the callback
 (`touch`/`hover`/`generic`), action (DOWN/MOVE/UP, HOVER_ENTER/MOVE/EXIT, ...), `deviceId`,

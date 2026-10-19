@@ -440,7 +440,6 @@ export class SwipeOn extends BaseVisualChange {
     return this.autoTargeting.withAutoTargetDecision({ result, decision });
   }
 
-  // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
   private async executeLegacy(
     options: SwipeOnOptions,
     progress?: ProgressCallback,

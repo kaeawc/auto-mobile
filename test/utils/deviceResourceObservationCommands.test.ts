@@ -28,6 +28,9 @@ test("a full Android observation dispatches each distinct package read once per 
   adb.commands = [];
   adb.packages.set("com.google.android.gms", "3");
   const fresh = await observer.observeResources(request);
+  if (fresh.platform !== "android") {
+    throw new Error(`expected an Android snapshot, got ${fresh.platform}`);
+  }
   expect(fresh.resources.googlePlayServices?.state).toBe("disabled");
   expect(adb.commands.filter((args) => args[0] === "pm")).toHaveLength(1);
 });

@@ -82,12 +82,13 @@ async function flushUntilExit(fakeProcess: FakeProcess): Promise<void> {
 }
 
 describe("synchronous stdio client-gone callbacks", () => {
-  const cases = ["stdin end", "stdin close", "stdin error", "stdout error"] as const;
+  type StdioEvent = "stdin end" | "stdin close" | "stdin error" | "stdout error";
+  const cases: StdioEvent[] = ["stdin end", "stdin close", "stdin error", "stdout error"];
 
   function installCallback(
     lifecycle: ProcessLifecycleHandlers,
     source: FakeStdin,
-    event: (typeof cases)[number],
+    event: StdioEvent,
     callback?: () => void,
   ): void {
     if (event === "stdout error") {
@@ -97,7 +98,7 @@ describe("synchronous stdio client-gone callbacks", () => {
     }
   }
 
-  function emit(source: FakeStdin, event: (typeof cases)[number]): void {
+  function emit(source: FakeStdin, event: StdioEvent): void {
     if (event.endsWith("error")) {
       source.emit("error", new Error("stream failed"));
     } else if (event === "stdin end") {
@@ -591,7 +592,7 @@ describe("process lifecycle handlers", () => {
       lifecycle.installStdinShutdownHandlers(fakeStdin);
       lifecycle.setShutdownHandler(
         async () => await new Promise<void>(() => {}),
-        async () => await new Promise<void>(() => {}),
+        async () => await new Promise<undefined>(() => {}),
       );
 
       fakeStdin.emit("close");

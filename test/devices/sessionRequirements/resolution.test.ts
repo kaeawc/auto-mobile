@@ -19,6 +19,22 @@ import {
   unwrapError,
 } from "./fixtures";
 
+function resolveIos(...args: Parameters<typeof resolveSessionDeviceProfile>) {
+  const resolved = unwrap(resolveSessionDeviceProfile(...args));
+  if (resolved.platform !== "ios") {
+    throw new Error(`expected an iOS resolution, got ${resolved.platform}`);
+  }
+  return resolved;
+}
+
+function resolveAndroid(...args: Parameters<typeof resolveSessionDeviceProfile>) {
+  const resolved = unwrap(resolveSessionDeviceProfile(...args));
+  if (resolved.platform !== "android") {
+    throw new Error(`expected an Android resolution, got ${resolved.platform}`);
+  }
+  return resolved;
+}
+
 function normalizeIos(
   request: IosSessionDeviceRequirement,
   defaults = iosDefaults(),
@@ -112,7 +128,7 @@ describe("normalization and hardware defaults", () => {
       defaults,
       catalog,
     );
-    const resolved = unwrap(resolveSessionDeviceProfile(normalized, defaults, catalog));
+    const resolved = resolveIos(normalized, defaults, catalog);
 
     expect(resolved.profile.simulatorDeviceTypeIdentifier).toBe(
       IOS_PRO.simulatorDeviceTypeIdentifier,
@@ -148,7 +164,7 @@ describe("normalization and hardware defaults", () => {
       defaults,
       catalog,
     );
-    const resolved = unwrap(resolveSessionDeviceProfile(normalized, defaults, catalog));
+    const resolved = resolveIos(normalized, defaults, catalog);
 
     expect(resolved.profile.simulatorDeviceTypeIdentifier).toBe(
       IOS_PRO.simulatorDeviceTypeIdentifier,
@@ -553,7 +569,7 @@ describe("iOS catalog and OS resolution", () => {
     const defaults = iosDefaults();
     const catalog = iosCatalog();
     const normalized = normalizeIos(request, defaults, catalog);
-    const resolved = unwrap(resolveSessionDeviceProfile(normalized, defaults, catalog));
+    const resolved = resolveIos(normalized, defaults, catalog);
 
     expect(resolved.provenance.original).toEqual(request);
     expect(resolved.provenance.effective).toEqual(normalized.effective);
@@ -642,7 +658,7 @@ describe("Android catalog and default resolution", () => {
     const packages = [base.releases, [...base.releases].reverse()].map((releases) => {
       const catalog = androidCatalog({ releases });
       const normalized = normalizeAndroid(request, defaults, catalog);
-      return unwrap(resolveSessionDeviceProfile(normalized, defaults, catalog)).profile;
+      return resolveAndroid(normalized, defaults, catalog).profile;
     });
 
     expect(packages[0].systemImagePackage).toBe("system-images;android-35.1;google_apis;arm64-v8a");

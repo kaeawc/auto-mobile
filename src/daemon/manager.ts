@@ -1,4 +1,3 @@
-import { DaemonGenerationExitedBeforeSignalError } from "./DaemonGenerationExitedBeforeSignalError";
 import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
 import {
   isCompleteRecoveryRecord,

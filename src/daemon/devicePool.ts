@@ -8702,6 +8702,8 @@ export class DevicePool {
       reserveShutdownSessionIdentity: (deviceId: string) =>
         this.reserveShutdownSessionIdentity(deviceId),
       restartReadiness: this.deviceReservations.restartReadiness,
+      foreignDeviceOwnership: this.foreignDeviceOwnership,
+      refreshForeignOwnership: this.refreshForeignOwnership.bind(this),
       cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
         () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),
         (replacement) => {

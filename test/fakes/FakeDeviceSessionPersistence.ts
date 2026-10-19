@@ -1,3 +1,4 @@
+import type { DaemonDeviceSessionStore } from "../../src/daemon/daemonDependencies";
 import type { FaultPlan } from "./FaultPlan";
 import { ignoresManagedExecutionIdleDeadline } from "../../src/models/managedExecutionLiveness";
 import {
@@ -14,7 +15,6 @@ import {
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,
-  type DeviceSessionPersistence,
   type DeviceSessionRecord,
   type MarkReleasedOptions,
   persistedSessionExpiryReason,
@@ -25,7 +25,7 @@ import {
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 
-export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
+export class FakeDeviceSessionPersistence implements DaemonDeviceSessionStore {
   faultPlan?: FaultPlan;
   failure: "create" | "release" | null = null;
   createFailureOnAttempt: number | null = null;
@@ -355,6 +355,71 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       }
     } finally {
       this.faultPlan?.finish(fault);
+    }
+  }
+
+  /** Mirrors the repository: only a live row is updated, and a newer activity snapshot wins. */
+  async markAutolockSession(
+    sessionUuid: string,
+    input: {
+      mcpSessionId?: string | null;
+      daemonSessionId?: string | null;
+      lastUsedAtMs: number;
+      activitySeq?: number;
+      expiresAtMs: number;
+    },
+  ): Promise<void> {
+    const row = this.rows.get(sessionUuid);
+    if (!row || row.status !== "active") {
+      return;
+    }
+    const seq = input.activitySeq ?? input.lastUsedAtMs;
+    const stale = (row.activity_seq ?? 0) > seq;
+    Object.assign(row, {
+      source: "autolock",
+      autolock_enabled: 1,
+      mcp_session_id: input.mcpSessionId ?? null,
+      daemon_session_id: input.daemonSessionId ?? null,
+      activity_seq: Math.max(row.activity_seq ?? 0, seq),
+      last_used_at_ms: stale ? row.last_used_at_ms : input.lastUsedAtMs,
+      expires_at_ms: stale ? row.expires_at_ms : input.expiresAtMs,
+      released_at_ms: null,
+      release_reason: null,
+    });
+  }
+
+  /**
+   * Mirrors the repository's expiry of active rows a daemon no longer owns: rows of a different,
+   * dead daemon, and ownerless legacy rows (spared while a peer is live and their lease is
+   * unexpired, or they hold a managed-execution policy).
+   */
+  async markStaleActiveSessionsExpired(
+    currentDaemonSessionId: string,
+    releasedAtMs: number,
+    reason: string = "daemon-restart",
+    liveDaemonSessionIds: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
+    const hasLivePeer = [...liveDaemonSessionIds].some((id) => id !== currentDaemonSessionId);
+    for (const row of this.rows.values()) {
+      const owner = row.daemon_session_id ?? null;
+      const deadOwner =
+        owner !== null &&
+        owner !== currentDaemonSessionId &&
+        (liveDaemonSessionIds.size === 0 || !liveDaemonSessionIds.has(owner));
+      const reclaimableNullOwner =
+        owner === null &&
+        (!hasLivePeer ||
+          (!ignoresManagedExecutionIdleDeadline(row.liveness_policy) &&
+            row.expires_at_ms <= releasedAtMs));
+      if (row.status !== "active" || !(deadOwner || reclaimableNullOwner)) {
+        continue;
+      }
+      row.status = "expired";
+      row.released_at_ms = releasedAtMs;
+      row.release_reason = reason;
+      if (!isRecoverableDaemonReleaseReason(reason)) {
+        row.liveness_owner_token = null;
+      }
     }
   }
 

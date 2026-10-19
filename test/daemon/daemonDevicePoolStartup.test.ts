@@ -15,7 +15,6 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import { logger } from "../../src/utils/logger";
 
@@ -230,7 +229,7 @@ describe("Daemon startup device discovery", () => {
     const pool = daemon.testHooks.devicePool;
     const manager = new FakeIOSCtrlProxyManager(timer);
     const managerLookup = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(
-      manager as unknown as IOSCtrlProxyManager,
+      manager,
     );
     const device: BootedDevice = {
       deviceId: "00000000-0000-0000-0000-000000007676",
@@ -457,7 +456,7 @@ describe("Daemon startup device discovery", () => {
         installedAppsRepository: new FakeInstalledAppsRepository(),
         timer,
         iosDeviceVerifier: iosVerifier,
-        deviceSessionRepository: persistence as unknown as DeviceSessionRepository,
+        deviceSessionRepository: persistence,
         idGenerator: new CountingIdGenerator("daemon-session"),
         databaseInitializer: new FakeDatabaseInitializer(),
         startupFailureTracker: new FakeStartupFailureTracker(),

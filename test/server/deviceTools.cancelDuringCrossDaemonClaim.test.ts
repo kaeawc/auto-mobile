@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   registerDeviceTools,
@@ -26,6 +24,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 isolateToolRegistry();
@@ -64,13 +63,8 @@ const ANDROID_SPEC = {
 };
 
 /** The boot's process handle: `kill` is what shuts the cold-booted device down. */
-class RecordingBootHandle extends EventEmitter {
-  readonly pid = 4242;
-  exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
-  killed = false;
-
-  kill(): boolean {
+class RecordingBootHandle extends FakeChildProcess {
+  override kill(): boolean {
     this.killed = true;
     this.exitCode = 0;
     queueMicrotask(() => this.emit("exit", 0, null));
@@ -141,8 +135,8 @@ describe.each([
       devices.setDeviceImages("android", [avd]);
       devices.setDeviceImages("ios", [simulator]);
       bootHandle = new RecordingBootHandle();
-      devices.setMockChildProcess(avd.name, bootHandle as unknown as ChildProcess);
-      devices.setMockChildProcess(simulator.name, bootHandle as unknown as ChildProcess);
+      devices.setMockChildProcess(avd.name, bootHandle);
+      devices.setMockChildProcess(simulator.name, bootHandle);
       ownership = new GatedClaimOwnership();
       const idGenerator = new CountingIdGenerator("cancel-claim");
       const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };

@@ -52,7 +52,7 @@ async function harness() {
     idGenerator: ids,
   });
   await Promise.resolve();
-  client["ws"] = socket;
+  client.connectionTestHooks.socket = socket;
   const requestIds = new CountingIdGenerator("wire");
   const manager = client["requestManager"];
   manager.generateId = (prefix) => `${prefix}_${requestIds.next()}`;
@@ -226,7 +226,7 @@ for (const method of methods) {
 
     test("returns the original disconnected shape without connecting or registering", async () => {
       const h = await harness();
-      h.client["ws"] = null;
+      h.client.connectionTestHooks.socket = null;
       expect(await method.invoke(h.client)).toEqual(failure("WebSocket not connected"));
       expect(h.connects()).toBe(0);
       expect(h.cancels()).toBe(0);

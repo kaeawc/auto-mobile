@@ -41,7 +41,7 @@ async function harness() {
     },
   );
   await Promise.resolve();
-  client["ws"] = socket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "request_activate_accessibility_link",
     "discover_keystore",

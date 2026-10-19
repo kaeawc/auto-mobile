@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -18,7 +19,7 @@ describe("CaptureSnapshot settings characterization", () => {
     "preserves namespace order and exact settings for %s",
     async (mode) => {
       const adb = new FakeAdbExecutor();
-      adb.setDefaultResponse({ stdout: "key=value=tail\n blank= \ninvalid\n", stderr: "" });
+      adb.setDefaultResponse(createExecResult("key=value=tail\n blank= \ninvalid\n", ""));
       if (mode === "adb-failure") {
         adb.setCommandError("secure", new Error("secure unavailable"));
       }

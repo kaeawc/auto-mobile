@@ -2342,7 +2342,7 @@ function adoptReportedPrototypes(
       events.adopt(scope, entry.id, source, [], entry.lastSequence);
     }
     if (!events.isDismissed(scope, entry.id)) {
-      store.adopt(scope, entry);
+      store.adopt(scope, { ...entry, storage: parsePrototypeStorageReport(entry.storage) });
     }
   }
 }

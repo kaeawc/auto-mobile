@@ -1,3 +1,4 @@
+import { IntentChooserHandler } from "../../../src/features/utility/IntentChooserHandler";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { describe, expect, spyOn, test } from "bun:test";
@@ -1256,7 +1257,7 @@ test("keeps a repeated chooser target ambiguous when anchor deltas disagree", as
   );
   const result = await manager.handleIntentChooser(first, "custom", target);
   expect(
-    manager["getObservedChooserDisplacement"](first, second, "s2-bbbbbbbbbbbbbbbb"),
+    new IntentChooserHandler().getObservedChooserDisplacement(first, second, "s2-bbbbbbbbbbbbbbbb"),
   ).toBeUndefined();
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
@@ -1279,10 +1280,7 @@ test("excludes duplicate chooser anchor IDs from displacement evidence", () => {
       ],
       updatedAt,
     );
-  const manager = new DeepLinkManager(
-    { platform: "android", deviceId: "fake", name: "fake" },
-    new FakeAdbExecutor(),
-  );
+  const analysis = new IntentChooserHandler();
   for (const [beforeTops, afterTops] of [
     [[80, 120], [40]],
     [[80], [40, 80]],
@@ -1291,8 +1289,8 @@ test("excludes duplicate chooser anchor IDs from displacement evidence", () => {
     const before = makePage(beforeTops, 140, 100);
     const after = makePage(afterTops, 100, 101);
     const duplicated = beforeTops.length > 1 ? before : after;
-    expect(manager["getChooserAnchorRows"](duplicated).has(anchorId)).toBe(false);
-    expect(manager["getObservedChooserDisplacement"](before, after, targetId)).toBeUndefined();
+    expect(analysis.getChooserAnchorRows(duplicated).has(anchorId)).toBe(false);
+    expect(analysis.getObservedChooserDisplacement(before, after, targetId)).toBeUndefined();
   }
 });
 
@@ -1322,7 +1320,9 @@ test("rejects opposite-direction chooser anchors as scroll evidence", async () =
       },
     },
   );
-  expect(manager["getObservedChooserDisplacement"](first, second, targetId)).toBeUndefined();
+  expect(
+    new IntentChooserHandler().getObservedChooserDisplacement(first, second, targetId),
+  ).toBeUndefined();
   const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
@@ -1386,7 +1386,7 @@ test("keeps a repeated stable target ambiguous when only its clickable child ove
   const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
-    manager["getObservedChooserDisplacement"](first, second, "s2-bbbbbbbbbbbbbbbb"),
+    new IntentChooserHandler().getObservedChooserDisplacement(first, second, "s2-bbbbbbbbbbbbbbbb"),
   ).toBeUndefined();
   expect(
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),

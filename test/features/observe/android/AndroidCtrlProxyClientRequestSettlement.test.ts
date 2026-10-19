@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { AndroidCtrlProxyDelegatingFacade } from "../../../../src/features/observe/android/AndroidCtrlProxyDelegatingFacade";
@@ -89,7 +90,7 @@ async function harness() {
   client["cancelScreenshotBackoff"] = () => {};
   // A lost connection otherwise arms a reconnect timer, which is not a request leak.
   client["autoReconnectEnabled"] = false;
-  adb.setCommandResponse("pidof", { stdout: "1234", stderr: "" });
+  adb.setCommandResponse("pidof", createExecResult("1234", ""));
   return { client, timer, socket, manager: client["requestManager"] };
 }
 type Harness = Awaited<ReturnType<typeof harness>>;

@@ -48,7 +48,6 @@ test("registered openLink retries a multi-panel first observation without hierar
     [displayInventoryOutcome]: { kind: "multi" },
   };
   const timer = new FakeTimer();
-  timer.enableAutoAdvance();
   const screen = new FakeObserveScreen();
   screen.setObserveSequence([
     {
@@ -67,7 +66,7 @@ test("registered openLink retries a multi-panel first observation without hierar
   const observeSpy = spyOn(RealObserveScreen.prototype, "execute").mockImplementation((options) =>
     screen.execute(options),
   );
-  const sleepSpy = spyOn(defaultTimer, "sleep").mockImplementation((ms) => timer.sleep(ms));
+  const wait = spyOn(defaultTimer, "sleep").mockImplementation(async (ms) => timer.advanceTime(ms));
   const nowSpy = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
   try {
     registerInteractionTools(interactionDeps);
@@ -84,7 +83,7 @@ test("registered openLink retries a multi-panel first observation without hierar
   } finally {
     openSpy.mockRestore();
     observeSpy.mockRestore();
-    sleepSpy.mockRestore();
+    wait.mockRestore();
     nowSpy.mockRestore();
     ToolRegistry.clearTools();
   }

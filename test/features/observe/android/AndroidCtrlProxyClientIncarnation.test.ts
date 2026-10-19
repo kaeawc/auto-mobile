@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -132,7 +133,7 @@ describe("Android CtrlProxy singleton incarnation", () => {
     adb.execute = async (args, options) => {
       const command = args.join(" ");
       if (command === "forward --list") {
-        adb.setCommandResponse(command, { stdout: [...forwards.values()].join("\n"), stderr: "" });
+        adb.setCommandResponse(command, createExecResult([...forwards.values()].join("\n"), ""));
       } else if (args[0] === "forward" && args[1] === "--remove") {
         forwards.delete(Number(args[2]?.slice(4)));
       } else if (args[0] === "forward" && args[1]?.startsWith("tcp:")) {

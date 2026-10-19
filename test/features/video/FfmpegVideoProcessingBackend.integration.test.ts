@@ -4,9 +4,10 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  FfmpegVideoProcessingBackend,
   buildFfmpegArgs,
+  defaultRecordingFileProbe,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
+import { assertFfmpegOutputReady } from "../../../src/features/video/ffmpegDiagnostics";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -114,18 +115,28 @@ describe("FfmpegVideoProcessingBackend host integration", () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
     const missingPath = path.join(tempDir, "missing.mp4");
     const emptyPath = path.join(tempDir, "empty.mp4");
-    const backend = new FfmpegVideoProcessingBackend();
-    const assertOutputReady = Reflect.get(backend, "assertFfmpegOutputReady");
     const tracker = { exitState: { exitCode: 0, signal: null }, stderr: [] };
 
     try {
       await expect(
-        assertOutputReady.call(backend, missingPath, ["-i", "raw.mov", missingPath], tracker),
+        assertFfmpegOutputReady(
+          missingPath,
+          ["-i", "raw.mov", missingPath],
+          tracker,
+          defaultRecordingFileProbe,
+          "ffmpeg",
+        ),
       ).rejects.toThrow(/FFmpeg output file missing/);
 
       await fs.writeFile(emptyPath, "");
       await expect(
-        assertOutputReady.call(backend, emptyPath, ["-i", "raw.mov", emptyPath], tracker),
+        assertFfmpegOutputReady(
+          emptyPath,
+          ["-i", "raw.mov", emptyPath],
+          tracker,
+          defaultRecordingFileProbe,
+          "ffmpeg",
+        ),
       ).rejects.toThrow(/FFmpeg output file is empty/);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });

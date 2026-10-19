@@ -28,7 +28,7 @@ export function screenshotMimeType(path: string, imageBuffer: Buffer): string {
 export async function readRetainedScreenshot(options: {
   path: string;
   fileSystem?: ScreenshotFileSystem;
-  protection?: ScreenshotPathProtection;
+  protection?: Pick<ScreenshotPathProtection, "protect">;
 }): Promise<{ data: string; mimeType: string; expiresAt: number }> {
   const { path, fileSystem = realFs, protection = screenshotPathProtection } = options;
   const expiresAt = await protection.protect(path);

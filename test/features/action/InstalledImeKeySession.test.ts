@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, spyOn, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { ImeSessionFocusLostError } from "../../../src/features/action/ImeSessionFocusLostError";
@@ -883,12 +884,12 @@ test("persistent selection waits for the session's subtype restore under the sam
   await selectionReached;
 
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("shell ime list -a -s", { stdout: `${original}\n`, stderr: "" });
-  adb.setCommandResponse("shell ime list -s", { stdout: `${original}\n`, stderr: "" });
-  adb.setCommandResponse("shell settings get secure default_input_method", {
-    stdout: original,
-    stderr: "",
-  });
+  adb.setCommandResponse("shell ime list -a -s", createExecResult(`${original}\n`, ""));
+  adb.setCommandResponse("shell ime list -s", createExecResult(`${original}\n`, ""));
+  adb.setCommandResponse(
+    "shell settings get secure default_input_method",
+    createExecResult(original, ""),
+  );
   const catalog = new AndroidImeCatalog(
     {
       execute: async (args) => {

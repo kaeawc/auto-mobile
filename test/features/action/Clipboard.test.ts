@@ -633,7 +633,7 @@ describe("Clipboard Android", () => {
   ])("paste delivery: %s", async (reason) => {
     const adb = new FakeAdbExecutor();
     const factory = new FakeAdbClientFactory(adb);
-    adb.setCommandResponse("shell cmd clipboard get", { stdout: "hello", stderr: "" });
+    adb.setCommandResponse("shell cmd clipboard get", createExecResult("hello", ""));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const undelivered = reason === "WebSocket not connected" || reason === "send failed";

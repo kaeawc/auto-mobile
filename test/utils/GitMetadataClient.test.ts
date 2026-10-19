@@ -1,3 +1,4 @@
+import { describe, expect, test } from "bun:test";
 import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils/GitMetadataClient";
 
 const OWN = "@kaeawc/auto-mobile";

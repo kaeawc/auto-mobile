@@ -8,6 +8,7 @@ import {
   DeviceBootTimeoutError,
   enrichBootedDevicesFromImages,
   getInFlightAndroidColdBootReader,
+  type DeviceBootRequest,
   type DeviceBootServiceDependencies,
   type DeviceBootProgress,
 } from "../../src/devices/deviceBootService";

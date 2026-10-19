@@ -1,7 +1,4 @@
-export {
-  DefaultNetworkFilterCommandRunner,
-  COMMAND_NOT_STARTED_EXIT_CODE,
-} from "./DefaultNetworkFilterCommandRunner";
+export { DefaultNetworkFilterCommandRunner } from "./DefaultNetworkFilterCommandRunner";
 export { NodeNetworkFilterFileSystem } from "./NodeNetworkFilterFileSystem";
 
 /**

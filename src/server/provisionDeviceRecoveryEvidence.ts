@@ -8,7 +8,6 @@ import type {
 
 export type {
   ProvisionDeviceFailureBoundary,
-  ProvisionDeviceRecoveryAction,
   ProvisionDeviceRecoveryEvidence,
 } from "../devices/provisionDeviceRecoveryEvidenceTypes";
 

@@ -38,6 +38,11 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
+import {
+  confirmPinDialog,
+  type PinConfirmationDriver,
+  type PinConfirmationOutcome,
+} from "../features/prototype/pinConfirmation";
 
 export type PrototypeSavedAction = "save" | "listSaved" | "deleteSaved";
 export type PrototypeSavedErrorCode =
@@ -73,6 +78,8 @@ export interface PrototypeSavedDependencies {
   >;
   /** Host-side adb for `removeIcon`; absent means the icon cannot be cleared from the host. */
   adb?: AdbExecutor;
+  /** Accepts the launcher's pin dialog for `autoConfirm`; absent means it cannot be driven. */
+  pinConfirmation?: PinConfirmationDriver;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -241,6 +248,72 @@ async function saveAndroidPrototype(
   };
 }
 
+const PIN_PENDING_WARNING =
+  "The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.";
+const PIN_VERIFY_ATTEMPTS = 5;
+const PIN_VERIFY_POLL_MS = 400;
+
+function autoConfirmReason(outcome: PinConfirmationOutcome | undefined): string {
+  switch (outcome?.status) {
+    case "unrecognized":
+      return `confirmation_unrecognized: no known accept button in the launcher dialog (buttons seen: ${outcome.visibleButtons.join(", ") || "none"}); accept it on the device.`;
+    case "timeout":
+      return "The launcher's confirmation dialog did not appear in time; accept it on the device if it is open.";
+    case "tap_failed":
+      return `Tapping the accept button failed (${outcome.error}); accept it on the device.`;
+    case "tapped":
+      return `Tapped "${outcome.label}" but the shortcut was not reported pinned yet.`;
+    default:
+      return "autoConfirm needs a driveable device; accept the launcher dialog on the device.";
+  }
+}
+
+/** Taps the launcher's accept button, then reports pinned only once listSaved says so. */
+async function autoConfirmPin(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedInput,
+  id: string,
+): Promise<Partial<PrototypeSavedOutput>> {
+  const driver = deps.pinConfirmation;
+  const pending = (outcome?: PinConfirmationOutcome) => ({
+    pinned: "pending" as const,
+    warning: `${PIN_PENDING_WARNING} autoConfirm: ${autoConfirmReason(outcome)}`,
+  });
+  if (!driver) {
+    return pending();
+  }
+  const outcome = await confirmPinDialog(driver, { signal: deps.signal });
+  if (outcome.status !== "tapped") {
+    return pending(outcome);
+  }
+  for (let attempt = 0; attempt < PIN_VERIFY_ATTEMPTS; attempt++) {
+    deps.signal?.throwIfAborted();
+    if (await isPinnedOnDevice(deps, id, args.timeoutMs)) {
+      return { pinned: "pinned" };
+    }
+    await driver.timer.sleep(PIN_VERIFY_POLL_MS);
+  }
+  return pending(outcome);
+}
+
+async function isPinnedOnDevice(
+  deps: PrototypeSavedDependencies,
+  id: string,
+  timeoutMs: number | undefined,
+): Promise<boolean> {
+  try {
+    const listed = await deps.client.listSaved(timeoutMs);
+    return listed.savedPrototypes?.some((entry) => entry.id === id && entry.pinned) === true;
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // A failed verification read only leaves the pin pending, which is reported to the caller.
+    logger.warn(`[prototype] pin verification failed: ${errorMessage(error)}`, error);
+    return false;
+  }
+}
+
 /**
  * The save already succeeded, so a pin problem never drops `saved`: the pin outcome rides beside
  * it. Declining the launcher dialog sends no callback, so a requested pin stays `pending`.
@@ -261,17 +334,14 @@ async function pinSavedPrototype(
     logger.warn(`[prototype] pin request failed: ${errorMessage(error)}`, error);
     return { success: false, error: `Saved, but pinning failed. ${errorMessage(error)}` };
   }
-  const autoConfirm = args.autoConfirm
-    ? " autoConfirm is not implemented yet (#12266): accept the launcher's Add to home screen dialog on the device."
-    : "";
   if (reply.success && reply.pin?.status === "already_pinned") {
     return { pinned: "pinned" };
   }
+  if (reply.success && args.autoConfirm) {
+    return await autoConfirmPin(deps, args, id);
+  }
   if (reply.success) {
-    return {
-      pinned: "pending",
-      warning: `The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.${autoConfirm}`,
-    };
+    return { pinned: "pending", warning: PIN_PENDING_WARNING };
   }
   const failure = savedPrototypeFailure(reply);
   if (reply.errorCode === "pin_unsupported") {

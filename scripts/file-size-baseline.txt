@@ -80,7 +80,7 @@
 1661	src/server/finalizeToolResponse.ts
 3061	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
-2851	src/server/prototypeTools.ts
+2852	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 1143	src/server/toolRegistry.ts
 1028	src/server/utilityTools.ts

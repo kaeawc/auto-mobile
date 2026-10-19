@@ -20,11 +20,16 @@ import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
-import { createServer as createHttpServer, type IncomingMessage } from "node:http";
+import { createServer as createHttpServer } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import {
+  drainShutdownDatabaseWrites,
+  interruptProvisioningForShutdown,
+  settleShutdownMigrations,
+} from "./shutdownSteps";
 import { DaemonHttpIngress, type HttpListener } from "./daemonHttpIngress";
-import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
+import type { McpHttpRequestLike, StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
   buildMcpRequestContext,
@@ -191,11 +196,9 @@ import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownR
 import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
-  awaitInFlightMigrations,
   closeDatabase,
   getDatabase,
   getDatabasePath,
-  getDbWriteBarrier,
   refusedDatabaseAccessCountAfterShutdownClose,
 } from "../db";
 import { NavigationRetention } from "../db/navigationRetention";
@@ -1865,7 +1868,7 @@ export class Daemon {
 
   /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
-    req: IncomingMessage,
+    req: McpHttpRequestLike,
     scope: StatelessMcpRequestScope,
   ): ReturnType<typeof createStatelessMcpServer> {
     return createStatelessMcpServer(
@@ -3615,6 +3618,26 @@ export class Daemon {
       ): void => {
         this.attemptRecovery = recover;
       },
+      replaceSessionManager: (manager: SessionManager): void => {
+        this.sessionManager = manager;
+      },
+      replaceObserverSessionRegistry: (registry: ObserverSessionRegistry): void => {
+        this.observerSessionRegistry = registry;
+      },
+      resolveStartupCompletion: (): void => this.resolveStartupCompletion(),
+      rejectStartupCompletion: (reason: unknown): void => this.rejectStartupCompletion(reason),
+      startUntilReady: (): Promise<void> => this.startUntilReady(),
+      /** Replaces the startup stages the post-bind failure path runs, keeping the others. */
+      overrideStartupStages: (stages: {
+        startThroughSocketBind?: () => Promise<void>;
+        startAfterSocketBind?: () => Promise<void>;
+        stopAfterFailedStartup?: () => Promise<void>;
+      }): void => {
+        this.startThroughSocketBind = stages.startThroughSocketBind ?? this.startThroughSocketBind;
+        this.startAfterSocketBind = stages.startAfterSocketBind ?? this.startAfterSocketBind;
+        this.stopAfterFailedStartup = stages.stopAfterFailedStartup ?? this.stopAfterFailedStartup;
+      },
+      quiesceProvisioningIngress: (): Promise<void> => this.quiesceProvisioningIngress(),
       startHealthCheckTimer: (): void => this.startHealthCheckTimer(),
       stopHealthCheckTimer: (): Promise<void> => this.stopHealthCheckTimer(),
       daemonSessionId: (): string => this.daemonSessionId,
@@ -3693,7 +3716,7 @@ export class Daemon {
         "provisioning interruption",
         "interrupted provisionDevice calls persisting their handoff",
         (stage) =>
-          this.interruptProvisioningForShutdown(
+          interruptProvisioningForShutdown(
             boundWithinStage(stage, DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS),
           ),
       ),
@@ -3877,7 +3900,7 @@ export class Daemon {
       // The shutdown close: late work is refused from here on instead of reopening it.
       closeDatabase: () => closeDatabase({ forShutdown: true }),
       refusedAccessCount: () => refusedDatabaseAccessCountAfterShutdownClose(),
-      drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
+      drainWrites: (timeoutMs) => drainShutdownDatabaseWrites(timeoutMs),
       keepOpenReason: () =>
         this.shutdownSessionReleasesDrained
           ? undefined
@@ -3937,10 +3960,10 @@ export class Daemon {
         (stage) => databaseTail.settle(stage),
       ),
       shutdownStage("database write drain", "in-flight best-effort database writes", (stage) =>
-        this.drainShutdownDatabaseWrites(boundWithinStage(stage, DB_WRITE_DRAIN_TIMEOUT_MS)),
+        drainShutdownDatabaseWrites(boundWithinStage(stage, DB_WRITE_DRAIN_TIMEOUT_MS)),
       ),
       shutdownStage("in-flight migrations", "a cold-start migration still running", (stage) =>
-        this.settleShutdownMigrations(boundWithinStage(stage, MIGRATION_SETTLE_TIMEOUT_MS)),
+        settleShutdownMigrations(boundWithinStage(stage, MIGRATION_SETTLE_TIMEOUT_MS)),
       ),
       shutdownStage("database", "the database connection closing", (stage) =>
         databaseTail.close(stage),
@@ -4007,34 +4030,6 @@ export class Daemon {
     this.httpIngress.clearSessions();
   }
 
-  private async drainShutdownDatabaseWrites(timeoutMs: number): Promise<void> {
-    // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
-    // background retention cleanup) BEFORE closing the connection, so a query
-    // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
-    // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
-    const drained = await getDbWriteBarrier().drain(timeoutMs);
-    if (!drained) {
-      logger.warn(
-        `Timed out after ${timeoutMs}ms draining in-flight DB writes; closing database anyway`,
-      );
-    }
-  }
-
-  private async settleShutdownMigrations(timeoutMs: number): Promise<void> {
-    // If a SIGTERM arrived mid cold-start migration, the detached migration
-    // connection is still open and writing on its own connection (its writes are
-    // NOT tracked by the write barrier drained above). Let it settle before
-    // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
-    // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
-    // Bounded so a wedged migration cannot itself hang shutdown.
-    const migrationsSettled = await awaitInFlightMigrations(timeoutMs);
-    if (!migrationsSettled) {
-      logger.warn(
-        `Timed out after ${timeoutMs}ms awaiting in-flight startup migration; closing database anyway`,
-      );
-    }
-  }
-
   private async drainShutdownMonitors(
     navigationRetentionMonitor: typeof this.navigationRetentionMonitor,
     heartbeatMonitor: typeof this.heartbeatMonitor,
@@ -4095,23 +4090,6 @@ export class Daemon {
     const quiescing = this.socketServer?.quiesce();
     this.sessionManager.stopAcceptingSessionCreations();
     await quiescing;
-  }
-
-  private async interruptProvisioningForShutdown(drainTimeoutMs: number): Promise<void> {
-    const reason = new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE);
-    const cancelled = await executionTracker.cancelToolExecutions("provisionDevice", reason);
-    if (cancelled === 0) {
-      return;
-    }
-    const drained = await executionTracker.waitForToolExecutionsToEnd(
-      "provisionDevice",
-      drainTimeoutMs,
-    );
-    if (!drained) {
-      logger.warn(
-        `Timed out after ${drainTimeoutMs}ms persisting ${cancelled} interrupted provisionDevice operation(s) before daemon shutdown`,
-      );
-    }
   }
 
   private async releaseActiveSessionsForShutdown(drainTimeoutMs: number): Promise<void> {

@@ -9,6 +9,9 @@ import {
   capturedPrototypeHierarchy,
   capturedTwoWindowHierarchy,
 } from "../helpers/prototypeWindowCapture";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Captured Recents overview with its floating window relabelled as the CtrlProxy
 // prototype; see test/helpers/prototypeWindowCapture.ts.

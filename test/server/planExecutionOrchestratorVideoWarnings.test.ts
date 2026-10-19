@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { BootedDevice, PlanExecutionResult, VideoRecordingMetadata } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
   PlanExecutionOrchestrator,
@@ -76,8 +76,9 @@ describe("plan video warnings and completed recording recovery", () => {
   >;
   let archive: string;
 
+  const scratch = useScratchRoot("plan-video-warnings-");
   beforeEach(async () => {
-    archive = await fs.mkdtemp(path.join(os.tmpdir(), "plan-video-warnings-"));
+    archive = scratch.next();
     execute = spyOn(planUtils, "executePlan").mockResolvedValue(success);
     // Keep the session boundary real while injecting finalized data; never resolve the real DB.
     start = spyOn(
@@ -90,7 +91,6 @@ describe("plan video warnings and completed recording recovery", () => {
     execute.mockRestore();
     start.mockRestore();
     finalize.mockRestore();
-    await fs.rm(archive, { recursive: true, force: true });
   });
 
   test("Android preserves session and segment warnings, panels and transitions in the manifest", async () => {

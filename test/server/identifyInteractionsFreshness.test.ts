@@ -8,6 +8,9 @@ import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = {
   deviceId: "interactions-freshness",

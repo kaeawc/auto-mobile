@@ -57,7 +57,11 @@ export async function createIdentityQuarantinePool(
   );
   DaemonState.getInstance().initialize(manager, pool);
   await pool.initializeWithDevices([pooled]);
-  await pool.bindOrReuseDeviceSession("owning-session", pooled.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "owning-session",
+    deviceId: pooled.deviceId,
+    platform: "android",
+  });
   return {
     pool,
     timer,

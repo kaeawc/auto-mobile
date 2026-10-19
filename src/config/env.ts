@@ -199,9 +199,144 @@ export const ENV = {
     default: "unset",
     doc: "Select settled screenshot mode with true or 1.",
   },
+  EMULATOR_AUDIO: {
+    name: "AUTOMOBILE_EMULATOR_AUDIO",
+    kind: "string",
+    default: "audio on",
+    doc: "Exact false adds -no-audio to emulator launches; other values keep audio.",
+  },
+  DB_PATH: {
+    name: "AUTOMOBILE_DB_PATH",
+    legacyName: "AUTO_MOBILE_DB_PATH",
+    kind: "path",
+    default: "~/.auto-mobile/auto-mobile.db",
+    doc: "Exact SQLite database file; takes precedence over the DB directory. `:memory:` is test-only.",
+  },
+  DB_DIR: {
+    name: "AUTOMOBILE_DB_DIR",
+    legacyName: "AUTO_MOBILE_DB_DIR",
+    kind: "path",
+    default: "~/.auto-mobile",
+    doc: "Directory containing auto-mobile.db.",
+  },
+  MIGRATIONS_DIR: {
+    name: "AUTOMOBILE_MIGRATIONS_DIR",
+    legacyName: "AUTO_MOBILE_MIGRATIONS_DIR",
+    kind: "path",
+    default: "bundled static migrations",
+    doc: "Directory of migration modules loaded instead of the bundled static migrations.",
+  },
+  MIGRATION_RECOVERY: {
+    name: "AUTOMOBILE_MIGRATION_RECOVERY",
+    legacyName: "AUTO_MOBILE_MIGRATION_RECOVERY",
+    kind: "string",
+    default: "safe recovery on; destructive reset off",
+    doc: "Safe recovery is on unless 0/false/no/off; only exact 1 permits the destructive reset.",
+  },
+  MIGRATION_LOCK_TIMEOUT_MS: {
+    name: "AUTOMOBILE_MIGRATION_LOCK_TIMEOUT_MS",
+    legacyName: "AUTO_MOBILE_MIGRATION_LOCK_TIMEOUT_MS",
+    kind: "int",
+    default: "60000",
+    min: 1,
+    doc: "File-scoped migration lock wait; positive base-10 integer milliseconds.",
+  },
+  ALLOW_IN_MEMORY_DB: {
+    name: "AUTOMOBILE_ALLOW_IN_MEMORY_DB",
+    kind: "bool",
+    default: "unset",
+    doc: "Test-only opt-in (1/true/yes) permitting the `:memory:` database path.",
+  },
+  NAV_RETENTION_SCREENSHOT_TTL_MS: {
+    name: "AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS",
+    kind: "int",
+    default: "604800000",
+    min: 1,
+    doc: "Screenshot retention TTL; positive safe integer milliseconds.",
+  },
+  NAV_RETENTION_STRUCTURE_TTL_MS: {
+    name: "AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS",
+    kind: "int",
+    default: "7776000000",
+    min: 1,
+    doc: "Structure retention TTL; positive safe integer milliseconds.",
+  },
+  NAV_RETENTION_PER_APP_MAX_OBSERVATIONS: {
+    name: "AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS",
+    kind: "int",
+    default: "50000",
+    min: 1,
+    doc: "Per-app observation cap; positive safe integer.",
+  },
+  NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS: {
+    name: "AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS",
+    kind: "int",
+    default: "500000",
+    min: 1,
+    doc: "Global observation cap; positive safe integer.",
+  },
+  NAV_RETENTION_EVICTION_CHUNK_SIZE: {
+    name: "AUTOMOBILE_NAV_RETENTION_EVICTION_CHUNK_SIZE",
+    kind: "int",
+    default: "5000",
+    min: 1,
+    doc: "Rows per eviction batch; positive safe integer clamped to 10000.",
+  },
+  NAV_RETENTION_INTERVAL_MS: {
+    name: "AUTOMOBILE_NAV_RETENTION_INTERVAL_MS",
+    kind: "int",
+    default: "21600000",
+    min: 1,
+    doc: "Retention sweep cadence; positive safe integer milliseconds at most 2147483647.",
+  },
+} as const satisfies Record<string, EnvVarSpec>;
+
+/**
+ * Ambient variables owned by the OS or the Android toolchain, not by AutoMobile. They are
+ * declared and read through the same readers, but kept apart from {@link ENV} because the
+ * product-variable conformance checks (AUTOMOBILE_ prefix, path classification) do not apply.
+ */
+export const AMBIENT_ENV = {
+  ANDROID_HOME: {
+    name: "ANDROID_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android SDK root; ambient Android toolchain variable, read for emulator resolution.",
+  },
+  ANDROID_SDK_ROOT: {
+    name: "ANDROID_SDK_ROOT",
+    kind: "path",
+    default: "unset",
+    doc: "Android SDK root (deprecated by Google); ambient, read for emulator resolution.",
+  },
+  ANDROID_SDK_HOME: {
+    name: "ANDROID_SDK_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android user-data home; ambient, reported in emulator-not-found diagnostics.",
+  },
+  HOME: {
+    name: "HOME",
+    kind: "path",
+    default: "unset",
+    doc: "POSIX home directory; ambient, used to probe the default Android SDK locations.",
+  },
+  USERPROFILE: {
+    name: "USERPROFILE",
+    kind: "path",
+    default: "unset",
+    doc: "Windows home directory; ambient, fallback when HOME is unset or empty.",
+  },
+  PATH: {
+    name: "PATH",
+    kind: "string",
+    default: "unset",
+    doc: "Executable search path; ambient, reported in emulator-not-found diagnostics.",
+  },
 } as const satisfies Record<string, EnvVarSpec>;
 
 export const ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(ENV);
+export const AMBIENT_ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(AMBIENT_ENV);
 
 /**
  * Raw value of a variable: the canonical name wins whenever it is set (even to

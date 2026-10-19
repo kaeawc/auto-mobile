@@ -56,18 +56,18 @@ describe("PlanValidator", () => {
     });
 
     test("throws with a name message on non-string name", () => {
-      const plan = { name: 123 as unknown as string, steps: [] } as Plan;
-      expect(() => PlanValidator.validate(plan)).toThrow("Plan must have a valid name");
+      const plan = { name: 123, steps: [] };
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow("Plan must have a valid name");
     });
 
     test("throws with a steps message on missing steps", () => {
-      const plan = { name: "Test", steps: null as unknown as Plan["steps"] } as Plan;
-      expect(() => PlanValidator.validate(plan)).toThrow("Plan must have a steps array");
+      const plan = { name: "Test", steps: null };
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow("Plan must have a steps array");
     });
 
     test("throws with a steps message on non-array steps", () => {
-      const plan = { name: "Test", steps: "not-an-array" as unknown as Plan["steps"] } as Plan;
-      expect(() => PlanValidator.validate(plan)).toThrow("Plan must have a steps array");
+      const plan = { name: "Test", steps: "not-an-array" };
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow("Plan must have a steps array");
     });
 
     test("throws with an empty-devices message on empty devices array", () => {
@@ -104,12 +104,12 @@ describe("PlanValidator", () => {
     });
 
     test("throws with a platform message on invalid device platform", () => {
-      const plan: Plan = {
+      const plan = {
         name: "Test",
-        devices: [{ label: "phone", platform: "windows" as unknown as "android" }],
+        devices: [{ label: "phone", platform: "windows" }],
         steps: [],
       };
-      expect(() => PlanValidator.validate(plan)).toThrow("Invalid device platform");
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow("Invalid device platform");
     });
 
     test("throws with a non-empty-string message on empty device label in definition", () => {
@@ -1177,8 +1177,8 @@ describe("PlanValidator validation ordering", () => {
     ],
   ] as const) {
     test(`rejects malformed devices: ${JSON.stringify(devices)}`, () => {
-      const plan = { name: "validation", devices, steps: [] } as unknown as Plan;
-      expect(() => PlanValidator.validate(plan)).toThrow(message);
+      const plan = { name: "validation", devices, steps: [] };
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow(message);
     });
   }
   test("reports all label categories in stable order and ignores non-object substeps", () => {
@@ -1204,8 +1204,8 @@ describe("PlanValidator validation ordering", () => {
         },
         { tool: "criticalSection", params: { device: "phone", steps: "not an array" } },
       ],
-    } as unknown as Plan;
-    expect(() => PlanValidator.validate(plan)).toThrow(
+    };
+    expect(() => PlanValidator.validateUntrusted(plan)).toThrow(
       [
         "Plan declares 'devices' field but the following steps are missing 'device' parameter: step 0 (observe)",
         'Plan declares devices [phone] but the following steps use invalid device labels: step 1 (tapOn): device="42"',

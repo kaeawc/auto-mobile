@@ -14,16 +14,7 @@ import { Clipboard } from "../../src/features/action/Clipboard";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
-import {
-  setShakeFactory,
-  resetShakeFactory,
-  setRecentAppsFactory,
-  resetRecentAppsFactory,
-  setClipboardFactory,
-  resetClipboardFactory,
-  setWakeAndUnlockFactory,
-  resetWakeAndUnlockFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -32,11 +23,15 @@ import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
 
+const interactionDeps: InteractionToolDependencies = {};
 const devices: BootedDevice[] = [
   { name: "Android", platform: "android", deviceId: "emulator-5554" },
   { name: "iOS", platform: "ios", deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" },
 ];
-const handler = cancellationHandlers(["shake", "recentApps", "clipboard", "wakeAndUnlock"]);
+const handler = cancellationHandlers(
+  ["shake", "recentApps", "clipboard", "wakeAndUnlock"],
+  interactionDeps,
+);
 function observed(command: Shake | RecentApps) {
   const screen = new FakeObserveScreen();
   screen.setObserveResult({
@@ -52,16 +47,16 @@ function observed(command: Shake | RecentApps) {
 
 describe("slice 2 registered handler cancellation", () => {
   const test = cancellationTests(() => {
-    resetShakeFactory();
-    resetRecentAppsFactory();
-    resetClipboardFactory();
-    resetWakeAndUnlockFactory();
+    delete interactionDeps.shakeFactory;
+    delete interactionDeps.recentAppsFactory;
+    delete interactionDeps.clipboardFactory;
+    delete interactionDeps.wakeAndUnlockFactory;
     ToolRegistry.clearTools();
   });
 
   test("wakeAndUnlock includes recovery warning in its payload and message", async () => {
     const warning = "iOS runner had not finished recovering; next observe may need a moment";
-    setWakeAndUnlockFactory(() => ({
+    interactionDeps.wakeAndUnlockFactory = () => ({
       execute: async () => ({
         success: true,
         platform: "ios",
@@ -70,7 +65,7 @@ describe("slice 2 registered handler cancellation", () => {
         unlocked: true,
         warning,
       }),
-    }));
+    });
     const response = await handler("wakeAndUnlock")(devices[1]!, {});
     expect(getStructuredPayload(response)).toMatchObject({
       warning,
@@ -103,21 +98,19 @@ describe("slice 2 registered handler cancellation", () => {
         const recent = new RecentApps(device, adb, timer);
         observed(shake);
         observed(recent);
-        setShakeFactory(() => shake);
-        setRecentAppsFactory(() => recent);
-        setWakeAndUnlockFactory(
-          () =>
-            new WakeAndUnlock(device, adb, {
-              timer,
-              iosLockStateProbe: probe,
-              iosUnlocker: {
-                wakeAndDismiss: async () => {
-                  reads++;
-                  return { success: true };
-                },
+        interactionDeps.shakeFactory = () => shake;
+        interactionDeps.recentAppsFactory = () => recent;
+        interactionDeps.wakeAndUnlockFactory = () =>
+          new WakeAndUnlock(device, adb, {
+            timer,
+            iosLockStateProbe: probe,
+            iosUnlocker: {
+              wakeAndDismiss: async () => {
+                reads++;
+                return { success: true };
               },
-            }),
-        );
+            },
+          });
         const controller = new AbortController();
         controller.abort();
         try {
@@ -138,15 +131,13 @@ describe("slice 2 registered handler cancellation", () => {
       async (action) => {
         const adb = new FakeAdbExecutor();
         let dispatches = 0;
-        setClipboardFactory(
-          () =>
-            new Clipboard(device, { create: () => adb }, () => ({
-              requestClipboard: async () => {
-                dispatches++;
-                return { success: true, totalTimeMs: 0 };
-              },
-            })),
-        );
+        interactionDeps.clipboardFactory = () =>
+          new Clipboard(device, { create: () => adb }, () => ({
+            requestClipboard: async () => {
+              dispatches++;
+              return { success: true, totalTimeMs: 0 };
+            },
+          }));
         const controller = new AbortController();
         controller.abort();
         await expect(
@@ -164,15 +155,13 @@ describe("slice 2 registered handler cancellation", () => {
         const timer = new FakeTimer();
         const controller = new AbortController();
         const { started, sleep } = pausedSleep(timer);
-        setClipboardFactory(
-          () =>
-            new Clipboard(device, { create: () => adb }, () => ({
-              requestClipboard: async () => {
-                await timer.sleep(1000);
-                return { success: false, totalTimeMs: 0 };
-              },
-            })),
-        );
+        interactionDeps.clipboardFactory = () =>
+          new Clipboard(device, { create: () => adb }, () => ({
+            requestClipboard: async () => {
+              await timer.sleep(1000);
+              return { success: false, totalTimeMs: 0 };
+            },
+          }));
         try {
           const pending = handler("clipboard")(
             device,
@@ -201,15 +190,13 @@ describe("slice 2 registered handler cancellation", () => {
     async (action) => {
       const adb = new FakeAdbExecutor();
       const controller = new AbortController();
-      setClipboardFactory(
-        () =>
-          new Clipboard(devices[0]!, { create: () => adb }, () => ({
-            requestClipboard: async () => {
-              controller.abort();
-              return { success: false, totalTimeMs: 0 };
-            },
-          })),
-      );
+      interactionDeps.clipboardFactory = () =>
+        new Clipboard(devices[0]!, { create: () => adb }, () => ({
+          requestClipboard: async () => {
+            controller.abort();
+            return { success: false, totalTimeMs: 0 };
+          },
+        }));
       await expect(
         handler("clipboard")(devices[0]!, { action, text: "hello" }, undefined, controller.signal),
       ).rejects.toThrow("cancelled");
@@ -230,12 +217,10 @@ describe("slice 2 registered handler cancellation", () => {
         toString: () => "hello",
       };
     });
-    setClipboardFactory(
-      () =>
-        new Clipboard(devices[0]!, { create: () => adb }, () => ({
-          requestClipboard: async () => ({ success: false, totalTimeMs: 0 }),
-        })),
-    );
+    interactionDeps.clipboardFactory = () =>
+      new Clipboard(devices[0]!, { create: () => adb }, () => ({
+        requestClipboard: async () => ({ success: false, totalTimeMs: 0 }),
+      }));
     try {
       await expect(
         handler("clipboard")(devices[0]!, { action: "paste" }, undefined, controller.signal),
@@ -257,7 +242,7 @@ describe("slice 2 registered handler cancellation", () => {
       );
       adb.setDeviceLock({ locked: true, keyguardShowing: true, secure: phase === "bouncer" });
       const { started, sleep } = pausedSleep(timer);
-      setWakeAndUnlockFactory(() => new WakeAndUnlock(devices[0]!, adb, { timer }));
+      interactionDeps.wakeAndUnlockFactory = () => new WakeAndUnlock(devices[0]!, adb, { timer });
       try {
         const pending = handler("wakeAndUnlock")(
           devices[0]!,
@@ -303,14 +288,12 @@ describe("slice 2 registered handler cancellation", () => {
       },
       timer,
     );
-    setWakeAndUnlockFactory(
-      () =>
-        new WakeAndUnlock(device, adb, {
-          timer,
-          iosUnlocker: unlocker,
-          iosLockStateProbe: { read: async () => ({ locked: true, keyguardShowing: true }) },
-        }),
-    );
+    interactionDeps.wakeAndUnlockFactory = () =>
+      new WakeAndUnlock(device, adb, {
+        timer,
+        iosUnlocker: unlocker,
+        iosLockStateProbe: { read: async () => ({ locked: true, keyguardShowing: true }) },
+      });
     try {
       const pending = handler("wakeAndUnlock")(device, {}, undefined, controller.signal);
       await started;
@@ -335,7 +318,7 @@ describe("slice 2 registered handler cancellation", () => {
     const shake = new Shake(devices[0]!, adb, timer);
     observed(shake);
     const { started, sleep } = pausedSleep(timer);
-    setShakeFactory(() => shake);
+    interactionDeps.shakeFactory = () => shake;
     try {
       const pending = handler("shake")(
         devices[0]!,
@@ -366,7 +349,7 @@ describe("slice 2 registered handler cancellation", () => {
     adb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
     adb.setAndroidApiLevel(29);
     adb.abortAfterCommand("KEYCODE_1", controller);
-    setWakeAndUnlockFactory(() => new WakeAndUnlock(devices[0]!, adb, { timer }));
+    interactionDeps.wakeAndUnlockFactory = () => new WakeAndUnlock(devices[0]!, adb, { timer });
     await expect(
       handler("wakeAndUnlock")(devices[0]!, { pin: "1" }, undefined, controller.signal),
     ).rejects.toThrow("cancelled");
@@ -382,7 +365,7 @@ describe("slice 2 registered handler cancellation", () => {
     const controller = new AbortController();
     adb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
     adb.abortAfterApiLevel(controller);
-    setWakeAndUnlockFactory(() => new WakeAndUnlock(devices[0]!, adb, { timer }));
+    interactionDeps.wakeAndUnlockFactory = () => new WakeAndUnlock(devices[0]!, adb, { timer });
     await expect(
       handler("wakeAndUnlock")(devices[0]!, { pin: "1" }, undefined, controller.signal),
     ).rejects.toThrow("cancelled");
@@ -418,7 +401,7 @@ describe("slice 2 registered handler cancellation", () => {
       };
     });
     const { started, sleep } = pausedSleep(timer);
-    setShakeFactory(() => shake);
+    interactionDeps.shakeFactory = () => shake;
     try {
       const pending = runWithAbortSignal(controller.signal, () =>
         handler("shake")(devices[0]!, { duration: 10000 }, undefined, controller.signal),
@@ -460,18 +443,16 @@ describe("slice 2 registered handler cancellation", () => {
         },
         cancelScreenshotBackoff: () => {},
       });
-      setClipboardFactory(
-        () =>
-          new Clipboard(devices[1]!, { create: () => adb }, () => ({
-            requestClipboard: async (...args) => {
-              try {
-                return await proxy.requestClipboard(...args);
-              } finally {
-                finished();
-              }
-            },
-          })),
-      );
+      interactionDeps.clipboardFactory = () =>
+        new Clipboard(devices[1]!, { create: () => adb }, () => ({
+          requestClipboard: async (...args) => {
+            try {
+              return await proxy.requestClipboard(...args);
+            } finally {
+              finished();
+            }
+          },
+        }));
       try {
         const pending = handler("clipboard")(
           devices[1]!,

@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { z } from "zod/v4";
@@ -17,7 +17,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
  * timer is always cancelled, on both the resolve and reject paths.
  */
 describe("PlanExecutor — captureFailureObservation timer cancellation", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let fakeTimer: FakeTimer;
 
   const deviceSchema = z.object({
@@ -32,7 +32,7 @@ describe("PlanExecutor — captureFailureObservation timer cancellation", () => 
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    planExecutor = new DefaultPlanExecutor(fakeTimer);
+    planExecutor = createDefaultPlanExecutor(fakeTimer);
 
     ToolRegistry.register(
       "captureTimerFailStep",

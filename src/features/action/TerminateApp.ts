@@ -6,7 +6,11 @@ import { packageListingContains } from "../../utils/android-cmdline-tools/shellO
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { ActionableError, BootedDevice, ObserveResult, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
@@ -112,7 +116,7 @@ export interface TerminateAppCall extends ActionCall {
   userId?: number;
 }
 
-export interface TerminateAppOptions {
+export interface TerminateAppOptions extends DisplayFenceDependencies {
   simctl?: SimCtlClient;
   timer?: Timer;
   deviceTerminator?: DeviceAppTerminator;
@@ -135,7 +139,7 @@ export class TerminateApp extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     options: TerminateAppOptions = {},
   ) {
-    super(device, adb, options.timer ?? defaultTimer);
+    super(device, adb, options.timer ?? defaultTimer, undefined, options);
     this.device = device;
     this.simctl = options.simctl ?? new SimCtlClient(device);
     this.deviceTerminator = options.deviceTerminator ?? new DeviceAppManager();

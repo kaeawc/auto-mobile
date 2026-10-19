@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
-import { IosRunnerStalledError } from "../../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerStalledError } from "../../../../src/features/observe/ios/IosRunnerStalledError";
 import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { BootedDevice } from "../../../../src/models";
 import { freshnessSchema } from "../../../../src/server/toolOutputSchemas";

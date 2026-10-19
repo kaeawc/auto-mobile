@@ -258,8 +258,8 @@ describe("structural repository characterization", () => {
     const barrier = new FakeDbWriteBarrier();
     barrier.beginDrain();
     const repo = new FailureAnalyticsRepository(
-      timer,
       db,
+      timer,
       () => barrier,
       new FakeIdGenerator(["o1", "g1", "o2", "g2", "capture"]),
     );

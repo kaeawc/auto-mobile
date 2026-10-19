@@ -66,7 +66,11 @@ describe("sessionless identity quarantine", () => {
         new FakeIdGenerator(["ambient", "explicit", "other", "session-only"]),
       );
       const h = await setup(tracker, { drain: true });
-      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const ambient = tracker.startExecution("setActiveDevice", undefined, "owner");
       const chosen = tracker.startExecution("killDevice", undefined, "owner");
       const other = tracker.startExecution("takeScreenshot");
@@ -198,7 +202,11 @@ describe("sessionless identity quarantine", () => {
   test("quarantine also cancels work indexed only under the bound session", async () => {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["session-work"]));
     const h = await setup(tracker);
-    await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "owner",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     const work = tracker.startExecution("takeScreenshot", undefined, "owner");
     await h.quarantine();
     expect(h.canceller.devices).toEqual([device.deviceId]);
@@ -295,7 +303,11 @@ describe("sessionless identity quarantine", () => {
 
     test("is refused instead of running as an unowned call", async () => {
       const h = await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
-      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const server = newServer();
       server["captureInputTargetOwner"](device);
 
@@ -315,7 +327,11 @@ describe("sessionless identity quarantine", () => {
 
     test("still runs while the resolving session owns the device", async () => {
       const h = await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
-      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      await h.pool.bindOrReuseDeviceSession({
+        sessionId: "owner",
+        deviceId: device.deviceId,
+        platform: "android",
+      });
       const server = newServer();
       server["captureInputTargetOwner"](device);
 

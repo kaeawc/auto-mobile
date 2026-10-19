@@ -86,19 +86,13 @@ describe("base call ends retry deferred release and all orders finish with nothi
     deviceManager.bootedDevices = [PRIMARY, LABELLED];
     Object.assign(pool, { deviceManager });
     await pool.initializeWithDevices([PRIMARY, LABELLED]);
-    await pool.bindOrReuseDeviceSession(
-      BASE,
-      PRIMARY.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: BASE,
+      deviceId: PRIMARY.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
     // A label session is minted only by its base's plan allocation (#11602).
     await asPlanAllocation(manager, BASE, [DERIVED], () =>

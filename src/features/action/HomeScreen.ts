@@ -40,6 +40,7 @@ import {
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // Overlay ids come from the Pixel Launcher captures under test/fixtures/android-launcher/.
 const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
@@ -109,7 +110,7 @@ export class HomeScreen extends BaseVisualChange {
       changeExpected: true,
       foregroundAppMayChange: true,
       usesObservationForResolution: false,
-      timeoutMs: 5000,
+      timeoutMs: SETTLE_BUDGET_MS.lifecycle,
       progress,
       perf,
       signal,
@@ -268,6 +269,11 @@ export class HomeScreen extends BaseVisualChange {
     // Preserve already-home handling for launchers with a different vocabulary.
     // An existing but hidden workspace still requires a visual change (#9762).
     return workspace === undefined;
+  }
+
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return { executeAndroidHome: this.executeAndroidHome.bind(this) };
   }
 
   private async executeAndroidHome(requestSignal?: AbortSignal): Promise<string | undefined> {

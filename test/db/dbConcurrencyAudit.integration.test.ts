@@ -79,7 +79,7 @@ describe("DB concurrency RMW audit", () => {
 
     const timer = new FakeTimer();
     timer.setCurrentTime(3000);
-    const failures = new FailureAnalyticsRepository(timer, db);
+    const failures = new FailureAnalyticsRepository(db, timer);
     await runConcurrentSameKeyStress({
       count: N,
       act: (index) =>

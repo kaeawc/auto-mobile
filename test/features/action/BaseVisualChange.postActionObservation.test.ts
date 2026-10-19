@@ -9,13 +9,16 @@ import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayErr
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   BaseVisualChange,
+  type DisplayFenceDependencies,
   FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS,
   FINAL_OBSERVATION_RETRY_BACKOFF_MS,
 } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult } from "../../../src/models";
+import type { DisplayRef } from "../../../src/models/DisplayPanel";
 import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -41,16 +44,25 @@ describe("BaseVisualChange post-action observation", () => {
   let fakeWindow: FakeWindow;
   let originalActionScreenshotPolicy: string | undefined;
 
-  const makeObserve = (overrides: Record<string, unknown> = {}): ObserveResult =>
-    ({
+  const makeObserve = (
+    overrides: Omit<Partial<ObserveResult>, "display"> & { display?: Partial<DisplayRef> } = {},
+  ): ObserveResult => {
+    const { display, ...rest } = overrides;
+    return {
+      observationId: "test-observation",
       updatedAt: Date.now(),
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0, ...display },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: {} },
-      ...overrides,
-    }) as unknown as ObserveResult;
+      ...rest,
+    };
+  };
 
   class TerminalVisualChange extends BaseVisualChange {
+    recordDeferred(result: unknown, observation: ObserveResult) {
+      return this.recordDeferredPredictionOutcome(result, observation);
+    }
     captureTerminal(observation: ObserveResult) {
       return this.captureTerminalObservationScreenshot(observation);
     }
@@ -59,17 +71,15 @@ describe("BaseVisualChange post-action observation", () => {
   function createVisualChange(
     platform: "android" | "ios" = "ios",
     renderedDisplayRevision?: () => number | undefined,
+    extraDeps: Pick<DisplayFenceDependencies, "predictionAnalyzer"> = {},
   ): TerminalVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new TerminalVisualChange(
-      device,
-      fakeAdb as unknown as any,
-      fakeTimer,
-      renderedDisplayRevision,
-    );
-    (instance as any).awaitIdle = fakeAwaitIdle;
-    (instance as any).observeScreen = fakeObserveScreen;
-    (instance as any).window = fakeWindow;
+    const instance = new TerminalVisualChange(device, fakeAdb, fakeTimer, renderedDisplayRevision, {
+      awaitIdle: fakeAwaitIdle,
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+      ...extraDeps,
+    });
     return instance;
   }
 
@@ -914,22 +924,21 @@ describe("BaseVisualChange post-action observation", () => {
   });
 
   test("records a deferred prediction outcome against the final observation once", async () => {
-    const instance = createVisualChange("ios");
     const initialObservation = makeObserve({ updatedAt: 1 });
     const finalObservation = makeObserve({ updatedAt: 2 });
     const recordedObservations: ObserveResult[] = [];
-    fakeObserveScreen.setObserveResult(initialObservation);
-    (instance as any).buildPredictionContext = () => ({
-      appId: "com.example.app",
-      fromScreen: "Home",
-      toolName: "tapOn",
-      toolArgs: { text: "Continue" },
-    });
-    (instance as any).predictionAnalyzer = {
-      recordOutcomeForAction: async (_previous: ObserveResult | null, actual: ObserveResult) => {
-        recordedObservations.push(actual);
+    const graph = new FakeNavigationGraphManager();
+    graph.setCurrentAppId("com.example.app");
+    graph.setCurrentScreenValue("Home");
+    const instance = createVisualChange("ios", undefined, {
+      predictionAnalyzer: {
+        recordOutcomeForAction: async (_previous: ObserveResult | null, actual: ObserveResult) => {
+          recordedObservations.push(actual);
+        },
       },
-    };
+    });
+    instance.navigationGraphResolver = () => graph;
+    fakeObserveScreen.setObserveResult(initialObservation);
 
     const result = await instance.observedInteraction(async () => ({ success: true }), {
       changeExpected: false,
@@ -939,8 +948,8 @@ describe("BaseVisualChange post-action observation", () => {
     });
 
     expect(recordedObservations).toEqual([]);
-    await (instance as any).recordDeferredPredictionOutcome(result, finalObservation);
-    await (instance as any).recordDeferredPredictionOutcome(result, initialObservation);
+    await instance.recordDeferred(result, finalObservation);
+    await instance.recordDeferred(result, initialObservation);
     expect(recordedObservations).toEqual([finalObservation]);
   });
 

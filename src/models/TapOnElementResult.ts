@@ -4,7 +4,7 @@ import { ElementBounds } from "./ElementBounds";
 import { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 import { BaseActionResult } from "./BaseActionResult";
 import { ToolDebugInfo } from "./ToolDebugInfo";
-import type { ScreenReaderNavigationResult } from "../features/talkback/TalkBackTapStrategy";
+import type { ScreenReaderNavigationResult } from "./ScreenReaderNavigationResult";
 
 export type TapEffectBasis =
   | "screenIdentity changed"

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DaemonHandoffInterruptionError,
@@ -84,14 +84,23 @@ function harness(options: { serverScope?: AsyncScope } = {}) {
 }
 
 describe("InProcessMcpDispatcher (#11820)", () => {
+  // The SDK client and server build their handlers and validators on first use. That one-time
+  // cost belongs to the process, not to whichever test runs first (or alone, in the budget's
+  // isolated re-run), so drive one connect, call and close before the timed tests.
+  beforeAll(async () => {
+    const client = await harness().dispatcher.connect({ sessionKey: "warm-up" });
+    await client.callTool({ name: "echo", arguments: {} });
+    await client.close();
+  });
+
   test("each forward gets its own server with the forward's context and session key", async () => {
     const h = harness();
     const first = await h.dispatcher.connect({ boundSessionUuid: "bound", sessionKey: "socket-1" });
     const second = await h.dispatcher.connect({ releasedSessionUuid: "released" });
 
     expect(h.built.map((record) => record.scope)).toEqual([
-      { requestScopeId: "scope-1", requestMcpSessionId: "socket-1" },
-      { requestScopeId: "scope-2", requestMcpSessionId: undefined },
+      { requestScopeId: "scope-1", requestMcpSessionId: "socket-1", trustedForwarder: true },
+      { requestScopeId: "scope-2", requestMcpSessionId: undefined, trustedForwarder: true },
     ]);
     expect(h.built[0].context).toEqual({ initialSessionToolBinding: "bound" });
     expect(h.built[1].context).toEqual({ initialReleasedSession: "released" });

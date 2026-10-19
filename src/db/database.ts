@@ -20,6 +20,7 @@ import {
   IN_MEMORY_DB_OPT_IN_ENV,
   selectMigrationLock,
 } from "./migrationLock";
+import { ENV, readEnvRaw } from "../config/env";
 import { logger } from "../utils/logger";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../utils/bunTestRunnerProcess";
 import { ActionableError, toActionableError } from "../models/ActionableError";
@@ -149,7 +150,7 @@ export function resolveDatabasePathFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   defaultDbDir: string = DEFAULT_DB_DIR,
 ): string {
-  const envDbPath = env.AUTOMOBILE_DB_PATH ?? env.AUTO_MOBILE_DB_PATH;
+  const envDbPath = readEnvRaw(ENV.DB_PATH, env);
   if (envDbPath) {
     // The `:memory:` sentinel is not a filesystem path: routing it through the
     // daemon-launch-cwd resolver would `path.resolve(":memory:")` into a bogus
@@ -178,7 +179,7 @@ export function resolveDatabasePathFromEnvironment(
     return resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
   }
 
-  const envDbDir = env.AUTOMOBILE_DB_DIR ?? env.AUTO_MOBILE_DB_DIR;
+  const envDbDir = readEnvRaw(ENV.DB_DIR, env);
   const dbDir = envDbDir ? resolvePathFromDaemonLaunchWorkingDirectory(envDbDir) : defaultDbDir;
   return path.join(dbDir, "auto-mobile.db");
 }
@@ -199,10 +200,10 @@ function isUnitTestDbGuardArmed(env: NodeJS.ProcessEnv): boolean {
 // location. A test that sets any of these has explicitly opted into a real
 // file-backed (or `:memory:`) DB it controls, so the guard leaves it alone.
 export const DB_PATH_OVERRIDE_ENV_KEYS = [
-  "AUTOMOBILE_DB_PATH",
-  "AUTO_MOBILE_DB_PATH",
-  "AUTOMOBILE_DB_DIR",
-  "AUTO_MOBILE_DB_DIR",
+  ENV.DB_PATH.name,
+  ENV.DB_PATH.legacyName,
+  ENV.DB_DIR.name,
+  ENV.DB_DIR.legacyName,
 ] as const;
 
 function hasExplicitDbPathOverride(env: NodeJS.ProcessEnv): boolean {

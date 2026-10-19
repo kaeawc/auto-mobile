@@ -1,4 +1,4 @@
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { McpTaskRepository } from "../../db/mcpTaskRepository";
 import { logger } from "../../utils/logger";
 import { DefaultTaskManager, type TaskManager } from "./TaskManager";
@@ -23,17 +23,19 @@ export function daemonTaskManager(): TaskManager {
  */
 export function daemonTaskLeaseKeepalive(): HeartbeatTaskLeaseKeepalive {
   keepaliveInstance ??= new HeartbeatTaskLeaseKeepalive({
-    sessions: () => {
-      const state = DaemonState.getInstance();
-      return state.isInitialized() ? state.getSessionManager() : undefined;
-    },
+    sessions: () => defaultDaemonContext.sessionManager(),
   });
   return keepaliveInstance;
 }
 
-/** Daemon shutdown: stop renewing the leases running tasks hold. */
+/**
+ * Daemon shutdown: stop renewing the leases running tasks hold. The closed keeper is dropped,
+ * so a daemon started later in the same process gets a fresh one rather than a keeper that
+ * refuses every hold.
+ */
 export function releaseDaemonTaskLeases(): number {
   const released = keepaliveInstance?.releaseAll() ?? 0;
+  keepaliveInstance = undefined;
   if (released > 0) {
     logger.info(`[TASKS] Released ${released} task-held session lease(s) for shutdown`);
   }

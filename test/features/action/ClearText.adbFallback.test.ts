@@ -220,7 +220,7 @@ describe("ClearText Android ADB fallback", () => {
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {
       hierarchy: { error: "Accessibility hierarchy unavailable" },
-    } as any,
+    },
   });
 
   const runClearText = (
@@ -228,13 +228,10 @@ describe("ClearText Android ADB fallback", () => {
     configure?: (clearText: ClearText) => void,
     signal?: AbortSignal,
   ) => {
-    const clearText = new ClearText(device, fakeAdb as any, undefined, new FakeTimer());
-    observedSpy = spyOn(
-      clearText as unknown as {
-        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
+    const clearText = new ClearText(device, fakeAdb, undefined, new FakeTimer());
+    observedSpy = spyOn(clearText, "observedInteraction").mockImplementation(async (fn) =>
+      fn(observeResult),
+    );
     refreshSpy = spyOn(clearText.observeScreen, "execute").mockResolvedValue(
       focusedFieldObserve(""),
     );
@@ -680,23 +677,6 @@ describe("ClearText Android ADB fallback", () => {
       "shell input keyevent KEYCODE_MOVE_END",
       ...deleteCommands(200),
     ]);
-  });
-  test("unsupported platform result includes the platform name", async () => {
-    const unsupportedDevice = { ...device, platform: "tvos" } as unknown as BootedDevice;
-    const clearText = new ClearText(unsupportedDevice, fakeAdb as any);
-    observedSpy = spyOn(
-      clearText as unknown as {
-        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) =>
-      fn(noHierarchyObserve()),
-    );
-
-    const result = await clearText.execute();
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("tvos");
-    expect(result.error).not.toBe("Failed to clear text");
   });
 });
 

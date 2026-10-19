@@ -51,6 +51,14 @@ interface CriticalSectionOccurrence {
 }
 
 /**
+ * Envelope-only narrowing for input that has not been validated yet. It claims nothing
+ * about nested fields: {@link PlanValidator.validate} re-checks every field at runtime.
+ */
+function isUnvalidatedPlan(raw: unknown): raw is Plan {
+  return typeof raw === "object" && raw !== null;
+}
+
+/**
  * Validates a plan structure and enforces multi-device rules.
  */
 export class PlanValidator {
@@ -87,6 +95,18 @@ export class PlanValidator {
     // even when devices aren't declared so callers get a useful error rather
     // than a deadlock at runtime.
     this.validateCoordinationLocks(plan);
+  }
+
+  /**
+   * Validates input from a parse boundary (YAML, JSON, tool arguments) whose shape is not
+   * yet known. Same checks and messages as {@link validate}.
+   * @throws ActionableError if validation fails
+   */
+  static validateUntrusted(raw: unknown): void {
+    if (!isUnvalidatedPlan(raw)) {
+      throw new ActionableError("Plan must have a valid name");
+    }
+    this.validate(raw);
   }
 
   /**

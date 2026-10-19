@@ -42,7 +42,7 @@ import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
 import type { AccessibilityDetector } from "../features/accessibility/interfaces/AccessibilityDetector";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
 import { observeCropSchema } from "../features/observe/screenshot/observeCrop";
@@ -429,10 +429,10 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       if (!deviceRead) {
         await invalidateReadinessForDisabledAccessibility(device, result, args.sessionUuid, {
           resetSetupState: () => AndroidCtrlProxyManager.getInstance(device).resetSetupState(),
-          isDaemonInitialized: () => DaemonState.getInstance().isInitialized(),
+          isDaemonInitialized: () => defaultDaemonContext.isInitialized(),
           invalidateAutomationReadiness: (sessionUuid, reason) =>
-            DaemonState.getInstance()
-              .getSessionManager()
+            defaultDaemonContext
+              .requireSessionManager()
               .invalidateAutomationReadiness(sessionUuid, reason),
         });
       }

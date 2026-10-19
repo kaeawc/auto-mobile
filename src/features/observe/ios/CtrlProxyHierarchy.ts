@@ -1,10 +1,9 @@
+import type { CtrlSocket } from "../shared/types";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
-import { iosHierarchyAcquisition } from "./types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
  *
- * This delegate handles hierarchy retrieval, caching, and conversion
- * via the iOS CtrlProxy iOS WebSocket API.
+ * Handles hierarchy retrieval, caching, and conversion via the iOS CtrlProxy WebSocket API.
  */
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
@@ -19,17 +18,20 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
+import { readNodeField } from "./readNodeField";
 import { IOS_WINDOW_LAYER_EXTRA } from "./iosWindowLayer";
 import { maxObservationAgeMs } from "../observationFreshness";
 import { assignIosStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
-import type {
-  HierarchyDelegateContext,
-  CtrlProxyNode,
-  XCTestHierarchy,
-  CtrlProxyHierarchyResponse,
-  CtrlProxySyncedHierarchy,
-  CtrlProxyPerfTiming,
-  CachedHierarchy,
+import {
+  iosHierarchyAcquisition,
+  type HierarchyDelegateContext,
+  type ConvertibleHierarchy,
+  type ConvertibleNode,
+  type XCTestHierarchy,
+  type CtrlProxyHierarchyResponse,
+  type CtrlProxySyncedHierarchy,
+  type CtrlProxyPerfTiming,
+  type CachedHierarchy,
 } from "./types";
 import {
   resolveAccessibilityHierarchyArgs,
@@ -37,7 +39,7 @@ import {
 } from "../hierarchyReadArgs";
 
 /** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
-interface ConvertedNode {
+export interface ConvertedNode {
   $: Record<string, unknown>;
   extras?: Record<string, string>;
   node?: ConvertedNode[];
@@ -55,11 +57,14 @@ export const IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000;
 
 type HierarchyRequestFailure = { reason: IosHierarchyUnavailableReason; detail?: string };
 
-/**
- * Delegate class for handling hierarchy operations.
- */
+/** Delegate class for handling hierarchy operations. */
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
+
+  /** Typed unit-test view of the node filter. */
+  readonly testHooks = {
+    filterHierarchyNode: (node: ConvertedNode) => this.filterHierarchyNode(node, true),
+  };
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
@@ -747,7 +752,7 @@ export class CtrlProxyHierarchy {
     });
   }
 
-  private sendHierarchyRequest(ws: WebSocket | null, requestId: string, payload: string): void {
+  private sendHierarchyRequest(ws: CtrlSocket | null, requestId: string, payload: string): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       this.context.requestManager.reject(
         requestId,
@@ -829,7 +834,7 @@ export class CtrlProxyHierarchy {
   /**
    * Convert XCTestHierarchy to ViewHierarchyResult format.
    */
-  convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult {
+  convertToViewHierarchyResult(hierarchy: ConvertibleHierarchy): ViewHierarchyResult {
     // Convert to Android-compatible format
     const convertedNode = this.convertNode(hierarchy.hierarchy);
 
@@ -875,7 +880,7 @@ export class CtrlProxyHierarchy {
   // Private helper methods
   // ===========================================================================
 
-  private convertNode(node: CtrlProxyNode): ConvertedNode {
+  private convertNode(node: ConvertibleNode): ConvertedNode {
     const attrs: Record<string, unknown> = {};
 
     if (node.text) {
@@ -904,29 +909,21 @@ export class CtrlProxyHierarchy {
     return result;
   }
 
-  private readConversionFields(node: CtrlProxyNode) {
-    const contentDesc = this.readNodeField<string>(node, "contentDesc", "content-desc");
-    const resourceId = this.readNodeField<string>(node, "resourceId", "resource-id");
-    const testTag = this.readNodeField<string>(node, "testTag", "test-tag");
-    const accessibilityFocused = this.readNodeField<string>(
+  private readConversionFields(node: ConvertibleNode) {
+    const contentDesc = readNodeField<string>(node, "contentDesc", "content-desc");
+    const resourceId = readNodeField<string>(node, "resourceId", "resource-id");
+    const testTag = readNodeField<string>(node, "testTag", "test-tag");
+    const accessibilityFocused = readNodeField<string>(
       node,
       "accessibilityFocused",
       "accessibility-focused",
     );
-    const longClickable = this.readNodeField<string>(node, "longClickable", "long-clickable");
-    const semanticLinks = this.readNodeField<SemanticLink[]>(
-      node,
-      "semanticLinks",
-      "semantic-links",
-    );
-    const stateDescription = this.readNodeField<string>(
-      node,
-      "stateDescription",
-      "state-description",
-    );
-    const errorMessage = this.readNodeField<string>(node, "errorMessage", "error-message");
-    const hintText = this.readNodeField<string>(node, "hintText", "hint-text");
-    const viewId = this.readNodeField<string>(node, "viewId", "view-id");
+    const longClickable = readNodeField<string>(node, "longClickable", "long-clickable");
+    const semanticLinks = readNodeField<SemanticLink[]>(node, "semanticLinks", "semantic-links");
+    const stateDescription = readNodeField<string>(node, "stateDescription", "state-description");
+    const errorMessage = readNodeField<string>(node, "errorMessage", "error-message");
+    const hintText = readNodeField<string>(node, "hintText", "hint-text");
+    const viewId = readNodeField<string>(node, "viewId", "view-id");
 
     return {
       contentDesc,
@@ -943,7 +940,7 @@ export class CtrlProxyHierarchy {
   }
 
   private assignContentAttributes(
-    node: CtrlProxyNode,
+    node: ConvertibleNode,
     attrs: Record<string, unknown>,
     fields: ReturnType<CtrlProxyHierarchy["readConversionFields"]>,
   ): void {
@@ -975,7 +972,7 @@ export class CtrlProxyHierarchy {
   }
 
   private assignInteractionAttributes(
-    node: CtrlProxyNode,
+    node: ConvertibleNode,
     attrs: Record<string, unknown>,
     fields: ReturnType<CtrlProxyHierarchy["readConversionFields"]>,
   ): void {
@@ -1007,7 +1004,7 @@ export class CtrlProxyHierarchy {
   }
 
   private assignSemanticAttributes(
-    node: CtrlProxyNode,
+    node: ConvertibleNode,
     attrs: Record<string, unknown>,
     fields: ReturnType<CtrlProxyHierarchy["readConversionFields"]>,
   ): void {
@@ -1035,21 +1032,6 @@ export class CtrlProxyHierarchy {
     if (node.actions && node.actions.length > 0) {
       attrs["actions"] = node.actions;
     }
-  }
-
-  private readNodeField<T>(
-    node: CtrlProxyNode,
-    camelKey: keyof CtrlProxyNode,
-    dashedKey?: string,
-  ): T | undefined {
-    const record = node as Record<string, unknown>;
-    if (record[camelKey as string] !== undefined) {
-      return record[camelKey as string] as T;
-    }
-    if (dashedKey && record[dashedKey] !== undefined) {
-      return record[dashedKey] as T;
-    }
-    return undefined;
   }
 
   /**
@@ -1095,9 +1077,7 @@ export class CtrlProxyHierarchy {
     return isContainerClass && hasChildren;
   }
 
-  /**
-   * Clean node attributes by removing false booleans and empty values
-   */
+  /** Clean node attributes by removing false booleans and empty values */
   private cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
     const cleaned: Record<string, unknown> = {};
     const booleanFields = [

@@ -1,6 +1,3 @@
-import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { BootedDevice } from "../../models";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type {
@@ -18,7 +15,6 @@ import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLim
 import {
   ApkSigningParseError,
   readApkSigningSchemes,
-  type ApkByteSource,
   type ApkSignatureScheme,
   type ApkSignerCertificate,
   type ApkSigningSchemes,
@@ -31,65 +27,10 @@ import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { AdbPullApkFetcher, type ApkFetcher } from "./AdbPullApkFetcher";
 
 const INSPECT_COMMAND_TIMEOUT_MS = 15_000;
-const APK_PULL_TIMEOUT_MS = 120_000;
 const PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$/;
-
-/** Gives access to the bytes of one on-device APK. */
-export interface ApkFetcher {
-  open(
-    adb: AdbExecutor,
-    remotePath: string,
-    signal?: AbortSignal,
-  ): Promise<{ source: ApkByteSource; dispose(): Promise<void> }>;
-}
-
-/** Pulls the APK to a temp file with `adb pull` and reads it with random access. */
-export class AdbPullApkFetcher implements ApkFetcher {
-  async open(adb: AdbExecutor, remotePath: string, signal?: AbortSignal) {
-    const workDir = await fs.mkdtemp(join(tmpdir(), "automobile-signing-"));
-    const localPath = join(workDir, "base.apk");
-    const dispose = async () => {
-      await fs.rm(workDir, { recursive: true, force: true });
-    };
-    try {
-      await adb.executeCommand(`pull ${shellQuote(remotePath)} ${shellQuote(localPath)}`, {
-        timeoutMs: APK_PULL_TIMEOUT_MS,
-        noRetry: true,
-        signal,
-      });
-      const handle = await fs.open(localPath, "r");
-      let size: number;
-      try {
-        size = (await handle.stat()).size;
-      } catch (error) {
-        // The caller only ever gets `dispose` on success: close the handle here (#11058).
-        await handle.close().catch((closeError: unknown) => {
-          logger.warn(`Failed to close pulled APK ${localPath}: ${errorMessage(closeError)}`);
-        });
-        throw error;
-      }
-      return {
-        source: {
-          size,
-          read: async (offset: number, length: number) => {
-            const buffer = Buffer.alloc(length);
-            const { bytesRead } = await handle.read(buffer, 0, length, offset);
-            return buffer.subarray(0, bytesRead);
-          },
-        },
-        dispose: async () => {
-          await handle.close();
-          await dispose();
-        },
-      };
-    } catch (error) {
-      await dispose();
-      throw error;
-    }
-  }
-}
 
 export interface InspectPackageSigningOptions {
   userId?: number;

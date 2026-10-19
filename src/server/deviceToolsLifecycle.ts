@@ -1,6 +1,6 @@
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
-import { DaemonState } from "../daemon/daemonState";
+import type { DaemonStateLike } from "../daemon/daemonState";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -26,10 +26,12 @@ import {
   assertLifecycleTargetNotHeldByOtherDaemon,
   LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
   assertLifecycleCallerNotOnForeignBinding,
-  lifecycleRequester,
   resolveRestartStopIdentity,
-  type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import {
+  lifecycleRequester,
+  type LifecycleRequester,
+} from "../features/deviceLifecycle/lifecycleRequester";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import {
   commitStoppedRestartHold,
@@ -355,9 +357,9 @@ async function resolveTeardownStopIdentity(
 function captureStoppedImageRestartHold(
   args: TeardownDeviceArgs,
   requester: LifecycleRequester | undefined,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
   stopIdentity?: RestartStopIdentity,
 ): (() => void | Promise<void>) | undefined {
-  const daemonState = DaemonState.getInstance();
   if (!requester || !daemonState.isInitialized()) {
     return undefined;
   }
@@ -390,6 +392,7 @@ async function destroyDeleteDeviceTarget(
     state.commitRestartHoldStop = captureStoppedImageRestartHold(
       args,
       requester,
+      context.dependencies.daemonState,
       state.stopIdentity,
     );
   }
@@ -612,7 +615,7 @@ export function createLifecycleHandlers() {
     const requestAbortSignal = abortSignal ?? getAbortSignal();
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
     const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
-    const daemonState = DaemonState.getInstance();
+    const { daemonState } = deps;
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
     // Preflight: if this target's AVD name comes from the pool rather than from
     // the runtime, pin the label to its epoch. The runtime is made to confirm it

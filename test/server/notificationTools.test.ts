@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -6,6 +7,9 @@ import {
   registerNotificationTools,
 } from "../../src/server/notificationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("notification tools", () => {
   beforeEach(() => {
@@ -104,13 +108,13 @@ describe("notification tools", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
     // #6154: platform now comes from the shared `platformSchema` (android, ios)
     // instead of a per-branch literal union, so the enum order flipped.
-    expect(schema.properties.platform.enum).toEqual(["android", "ios"]);
-    expect(schema.properties.appId.description).toContain(
+    expect(schema.properties?.platform?.enum).toEqual(["android", "ios"]);
+    expect(schema.properties?.appId?.description).toContain(
       "Android defaults to the live foreground app",
     );
     expect(schema.anyOf).toBeUndefined();
@@ -124,7 +128,7 @@ describe("notification tools", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     // #6154: platform is optional wherever deviceId/session resolves it.
     expect(schema.required).toEqual(["title", "body"]);
     expect(schema.if).toBeUndefined();
@@ -186,7 +190,9 @@ for (const name of ["getNotificationPolicy", "setNotificationPolicy"] as const) 
           : result.error;
         expect(response).toEqual({
           content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
-          ...(success ? {} : { isError: true }),
+          structuredContent: { message, ...result },
+          success: result.success,
+          ...(success ? {} : { error: result.error, isError: true }),
         });
       } finally {
         policy.mockRestore();

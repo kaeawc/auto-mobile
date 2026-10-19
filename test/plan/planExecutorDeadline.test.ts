@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createSetUIStateHandler } from "../../src/server/formTools";
@@ -58,7 +58,7 @@ describe("plan internal request inheritance", () => {
         },
       },
       () =>
-        new DefaultPlanExecutor(timer).executePlan(
+        createDefaultPlanExecutor(timer).executePlan(
           {
             name: "deadline",
             mcpVersion: "1.0",
@@ -98,7 +98,7 @@ describe("plan internal request inheritance", () => {
     await runWithToolSelectionContext(
       { planRequest: { deadlineMs: 80_000, liveDeadlineKey: "plan-deadline", progress } },
       () =>
-        new DefaultPlanExecutor(new FakeTimer()).executePlan(
+        createDefaultPlanExecutor(new FakeTimer()).executePlan(
           { name: "form", mcpVersion: "1.0", steps: [{ tool: "deadlineForm", params: {} }] },
           0,
         ),
@@ -113,7 +113,7 @@ describe("plan internal request inheritance", () => {
       return { success: true };
     });
     await runWithToolSelectionContext({ planRequest: { deadlineMs: 42 } }, () =>
-      new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      createDefaultPlanExecutor(new FakeTimer()).executePlan(
         {
           name: "spoof",
           mcpVersion: "1.0",

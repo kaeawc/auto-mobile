@@ -1,13 +1,12 @@
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
-import {
-  AndroidDisplayReadError,
-  ObservedAndroidDisplayCache,
-} from "../../../src/features/observe/ObservationDisplay";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, ObservationInsets, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -829,6 +828,7 @@ describe("display read routing", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const getInstance = spyOnIosClientInstance({
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
     });
     const iosDevice: BootedDevice = { ...device, platform: "ios", deviceId: "ios-panel-test" };
@@ -893,11 +893,13 @@ describe("display read routing", () => {
     const raw = {
       updatedAt: 1,
       packageName: "com.test.app",
+      nativeScale: 1,
       pixelWidth: 2007,
       pixelHeight: 2853,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 2007, bottom: 2853 } },
     };
     const getInstance = spyOnIosClientInstance({
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
     });
     try {
@@ -1171,7 +1173,7 @@ describe("all-display captures", () => {
     scriptPanelApps(h);
     const collect = h.screen.collectAllData.bind(h.screen);
     h.screen.collectAllData = async (...args) => {
-      if (args[10] === 0) {
+      if (args[1]?.displayId === 0) {
         throw error;
       }
       return collect(...args);

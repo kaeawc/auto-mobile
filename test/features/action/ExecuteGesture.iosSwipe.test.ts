@@ -193,8 +193,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       3,
       4,
       { duration: 100 },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
 
     expect(result.success).toBe(true);
@@ -209,7 +208,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
     controller.abort(new ActionableError("caller cancelled"));
 
     await expect(
-      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, undefined, controller.signal),
+      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(client.calls).toBe(0);
   });
@@ -278,8 +277,7 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
         3,
         4,
         {},
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       await flush();
       expect(h.sentMessages).toHaveLength(1);
@@ -330,5 +328,48 @@ describe("ExecuteGesture iOS XCUICoordinate velocity clamp (#12987)", () => {
     const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 300 });
     expect(result.effectiveDurationMs).toBeUndefined();
     expect(result.warnings).toBeUndefined();
+  });
+});
+
+describe("ExecuteGesture iOS swipe reports the dispatch route that ran (#13145)", () => {
+  function usingReply(reply: Record<string, unknown>): void {
+    const client = new FakeIOSCtrlProxy();
+    client.setSwipeResult({ success: true, totalTimeMs: 5, ...reply });
+    use(client);
+  }
+
+  test("unpinned synthesis below 50 ms reports the runner's 50 ms floor, not the XCUICoordinate clamp", async () => {
+    usingReply({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 });
+    const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 10 });
+    expect(result).toMatchObject({
+      success: true,
+      duration: 10,
+      effectiveDurationMs: 50,
+      dispatchRoute: "unpinnedSynthesized",
+    });
+    expect(result.warnings?.[0]).toContain("unpinnedSynthesized");
+  });
+
+  test("a synthesized route is not clamped to 100-10000 pt/s", async () => {
+    // 100 pt in 3000 ms would be clamped to 1000 ms on XCUICoordinate; synthesis honours 3000.
+    usingReply({ swipeRoute: "lockScreenSynthesized", effectiveDurationMs: 3000 });
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result.effectiveDurationMs).toBeUndefined();
+    expect(result.warnings).toBeUndefined();
+    expect(result.dispatchRoute).toBe("lockScreenSynthesized");
+  });
+
+  test("the XCUICoordinate route reports the duration the runner computed", async () => {
+    usingReply({ swipeRoute: "xcuiCoordinate", effectiveDurationMs: 1000 });
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result).toMatchObject({ effectiveDurationMs: 1000, dispatchRoute: "xcuiCoordinate" });
+    expect(result.warnings?.[0]).toContain("clamped");
+  });
+
+  test("an older runner that reports no route keeps the XCUICoordinate assumption", async () => {
+    usingReply({});
+    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    expect(result).toMatchObject({ effectiveDurationMs: 1000 });
+    expect(result.dispatchRoute).toBeUndefined();
   });
 });

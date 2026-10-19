@@ -13,7 +13,6 @@ import {
   removeDaemonExitRecord,
   resolveDaemonExitOptions,
   DAEMON_EXIT_RECORD_TTL_MS,
-  mergeDaemonStartupOptions,
   type DaemonExitRecordFileSystem,
 } from "./daemonExitRecord";
 import { getCurrentBuildIdentity } from "./buildIdentity";
@@ -78,28 +77,26 @@ import {
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_COMPLETE_MAINTENANCE_METHOD,
   DAEMON_PREPARE_RESTART_METHOD,
-  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
   type AcceptanceSessionRestartScope,
-  type DaemonAcceptanceRestartCommit,
-  type DaemonAcceptanceSessionRestart,
   DaemonRestartDeferredError,
   type DaemonAdmittedRestart,
   type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
 import {
-  createDaemonLiveAcceptanceScopedCapability,
-  daemonGenerationIdentityFromStatus,
-  daemonLiveAcceptanceStartupSecret,
-} from "./liveAcceptanceCapability";
-import type { DaemonGenerationIdentity } from "./liveAcceptanceCapability";
+  mergeRestartOptions,
+  restartAcceptanceSession as restartAcceptanceSessionDaemon,
+  restartAdmitted as restartAdmittedDaemon,
+  restartDaemon,
+  restartResultFromStart,
+  type DaemonRestartHost,
+  type DaemonRestartResult,
+} from "./daemonRestart";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
-import { DaemonState, type DaemonStateLike } from "./daemonState";
+import { type DaemonStateLike, daemonStateLikeFrom, defaultDaemonContext } from "./daemonContext";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { sequenceBackoff } from "../utils/Backoff";
 import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryExecutor";
@@ -412,14 +409,6 @@ interface StartupLockHolder {
 
 export type DaemonStartResult = "started" | "joined" | "replaced";
 
-function restartResultFromStart(result: DaemonStartResult): DaemonRestartResult {
-  return result === "joined" ? "joined" : "restarted";
-}
-
-function mergeRestartOptions(running: DaemonOptions, requested: DaemonOptions): DaemonOptions {
-  return { ...mergeDaemonStartupOptions(running, requested), strictPort: true };
-}
-
 /**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
@@ -466,14 +455,7 @@ export interface DaemonManagerLike {
   waitForLockHolderReadiness(timeoutMs: number): Promise<boolean>;
 }
 
-/**
- * The outcome of a daemon restart attempt.
- *
- * A conditional restart can join a successor selected by another client instead
- * of replacing it. Callers must re-read that successor before declaring their
- * startup options incompatible.
- */
-export type DaemonRestartResult = "restarted" | "joined";
+export type { DaemonRestartResult };
 
 const DAEMON_ADMITTED_RESTART_REASONS: ReadonlySet<string> = new Set([
   "active_operations",
@@ -571,7 +553,7 @@ export class DaemonManager implements DaemonManagerLike {
   constructor(options: DaemonManagerOptions = {}) {
     const {
       clientFactory,
-      stateProvider = () => DaemonState.getInstance(),
+      stateProvider = () => daemonStateLikeFrom(defaultDaemonContext),
       timer = defaultTimer,
       lockFilePath = LOCK_FILE_PATH,
       pidFilePath = PID_FILE_PATH,
@@ -1891,7 +1873,7 @@ export class DaemonManager implements DaemonManagerLike {
    * Reuses the injected liveness checker and the shared lock format so there is one
    * canonical primitive per concern rather than a second PID reader (issue #5878).
    */
-  private readStartupLockHolder(): StartupLockHolder {
+  protected readStartupLockHolder(): StartupLockHolder {
     let content: string;
     try {
       content = readFileSync(this.lockFilePath, "utf-8").trim();
@@ -3012,191 +2994,18 @@ export class DaemonManager implements DaemonManagerLike {
     options: DaemonOptions = {},
     expectedDaemon?: DaemonStatus,
   ): Promise<DaemonRestartResult> {
-    stderrLog("Restarting daemon...");
-    // A bare `--daemon restart` has no CLI options, but it is commonly used to
-    // replace a stale checkout. Preserve the daemon's PID-recorded options so
-    // that replacement cannot silently discard configuration such as debug,
-    // output, or accessibility flags.
-    const recovering = expectedDaemon !== undefined && expectedDaemon === this.recoveryOwner;
-    const status = recovering
-      ? await this.identityRecoveryIO.probe()
-      : await this.lifecycleStatus();
-    if (recovering && !this.isRecoveryOwner(status)) {
-      throw new DaemonRestartDeferredError("Provider identity changed before replacement");
-    }
-    if (recovering && this.hasPublishedRecoveryIdentity(status)) {
-      return "joined";
-    }
-    const runningOptions = daemonProcessOptions({
-      ...status.options,
-      ...(status.port === undefined ? {} : { port: status.port }),
-    });
-    const requestedOptions = daemonProcessOptions(
-      Object.fromEntries(
-        Object.entries(options).filter(([, value]) => value !== undefined),
-      ) as DaemonOptions,
-    );
-    // Force the authoritative bind-or-fail guard (issue #6260, PRRT ft82d):
-    // the preflight check in assertNoSurvivingDaemonBeforeRestart below is
-    // fast feedback only — it releases its probe socket before this sleep and
-    // before the child actually binds, so a competitor can still win the
-    // canonical port in that window. strictPort makes the child's own
-    // listen() call the atomic guard, failing loudly instead of silently
-    // falling back to a higher port in the range and recreating the split-brain.
-    const restartOptions = mergeRestartOptions(runningOptions, requestedOptions);
-    if (expectedDaemon && !this.isSameDaemonGeneration(status, expectedDaemon)) {
-      stderrLog("Daemon generation changed before restart; joining the current generation");
-      return "joined";
-    }
-
-    if (expectedDaemon) {
-      return this.restartExpectedGeneration(status, expectedDaemon, restartOptions, recovering);
-    }
-
-    return this.restartNamespace(status, restartOptions);
-  }
-
-  private async restartNamespace(
-    status: DaemonStatus,
-    options: DaemonOptions,
-  ): Promise<DaemonRestartResult> {
-    // Stop only this namespace's observed generation and attributable orphans.
-    // Keep the bounded graceful + forced-stop cleanup window.
-    await this.awaitRestartCleanup([
-      () => (status.running ? this.stop(DAEMON_SHUTDOWN_TIMEOUT_MS, status) : undefined),
-      () => this.stopNamespaceOrphansForExplicitRestart(status.pid),
-    ]);
-    // Confirm the previous daemon(s) are actually gone before starting a
-    // replacement (issue #6260). `awaitRestartCleanup` above only rejects when a
-    // DISCOVERED candidate refused to stop; it cannot catch a candidate that
-    // process-table discovery never found in the first place — the exact split-
-    // brain #6260 reports, where `--daemon restart` printed no stop line at all,
-    // then silently started a second daemon on a fallback port and reported
-    // unqualified success while the old one kept CtrlProxy forwarding ownership.
-    // Failing loudly here, naming the orphan, is strictly better than that.
-    if (status.pid !== undefined && this.isProcessRunning(status.pid)) {
-      throw new ActionableError(
-        "Restart could not confirm the namespace's previous daemon exited; refusing to start a replacement.",
-      );
-    }
-    await this.assertNoSurvivingDaemonBeforeRestart(options);
-    // Wait a bit before starting
-    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    const startResult = status.running
-      ? await this.startWithRunningOptions(options)
-      : await this.start(options);
-    const successor = this.recordedStatus();
-    if (
-      status.running &&
-      successor.pid === status.pid &&
-      !this.isConfirmedDifferentDaemonGeneration(
-        this.daemonProcessRecordFromStatus(status),
-        this.daemonProcessRecordFromStatus(successor),
-      )
-    ) {
-      throw new ActionableError(
-        "Restart did not replace the namespace's previous daemon generation.",
-      );
-    }
-    return restartResultFromStart(startResult);
-  }
-
-  private async restartExpectedGeneration(
-    status: DaemonStatus,
-    expected: DaemonStatus,
-    options: DaemonOptions,
-    recovering: boolean,
-  ): Promise<DaemonRestartResult> {
-    const preparation = recovering
-      ? await this.prepareIdentityRecoveryRestart(expected)
-      : await this.prepareDaemonForConditionalRestart(expected);
-    if (!preparation.accepted) {
-      if (preparation.reason === "generation_changed" || preparation.reason === "restart_pending") {
-        stderrLog("Daemon restart is already in progress; joining its successor");
-        return "joined";
-      }
-      if (preparation.reason === "active_operations") {
-        throw new DaemonRestartDeferredError("a device operation is active");
-      }
-      if (preparation.reason === "shutdown_unavailable") {
-        throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
-      }
-      throw new DaemonRestartDeferredError(
-        "the daemon returned an unrecognized safe-restart admission result",
-      );
-    }
-    if (status.running) {
-      // Atomic admission asks the daemon to initiate its own shutdown before
-      // acknowledging. Waiting without a second SIGTERM prevents a delayed
-      // manager from acting on stale admission state.
-      await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
-    }
-    // Another automatic client may win the shared startup lock during this
-    // handoff. Ordinary start() joins that winner instead of terminating it.
-    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    // Recovery already owns the startup lock; do not recursively acquire it.
-    const startResult = recovering
-      ? await this.startUnlocked(options, undefined, !status.running)
-      : status.running
-        ? await this.startWithRunningOptions(options)
-        : await this.start(options);
-    return restartResultFromStart(startResult);
+    return restartDaemon(this.restartHost(), options, expectedDaemon);
   }
 
   /**
    * Complete a host-maintenance restart only after the generation that minted
-   * its opaque maintenance token accepts it. This RPC is intentionally the
-   * first lifecycle action: a successor that replaced the admitted daemon
-   * cannot present the old token, so no stop, process-table scan, socket
-   * cleanup, or replacement launch can follow a stale admission.
+   * its opaque maintenance token accepts it. See {@link restartAdmitted}.
    */
   async restartAdmitted(
     options: DaemonOptions,
     maintenanceToken: string,
   ): Promise<DaemonRestartResult> {
-    if (!maintenanceToken) {
-      throw new ActionableError("restart-admitted requires a maintenance admission token.");
-    }
-    if (!this.acquireLock()) {
-      throw new DaemonRestartDeferredError("another daemon lifecycle transition is in progress");
-    }
-    try {
-      return await this.restartAdmittedWhileLocked(options, maintenanceToken);
-    } finally {
-      this.releaseLock();
-    }
-  }
-
-  private async restartAdmittedWhileLocked(
-    options: DaemonOptions,
-    maintenanceToken: string,
-  ): Promise<DaemonRestartResult> {
-    const status = await this.lifecycleStatus();
-    if (!status.running) {
-      throw new ActionableError(
-        "restart-admitted requires the daemon generation that admitted maintenance to still be running.",
-      );
-    }
-
-    const admission = await this.admitMaintenanceRestart(status, maintenanceToken);
-    if (!admission.accepted) {
-      throw new DaemonRestartDeferredError(
-        `maintenance admission is no longer valid (${admission.reason ?? "unknown"})`,
-      );
-    }
-
-    const restartOptions = mergeRestartOptions(
-      daemonProcessOptions(status.options),
-      daemonProcessOptions(
-        Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)),
-      ),
-    );
-    // The admitted daemon has already initiated its own SIGTERM before it
-    // acknowledges. Preserve the exact pre-admission status through the wait;
-    // a later status read could name its replacement instead.
-    await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
-    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    return restartResultFromStart(await this.startUnlocked(restartOptions, undefined, false));
+    return restartAdmittedDaemon(this.restartHost(), options, maintenanceToken);
   }
 
   private isSameDaemonGeneration(current: DaemonStatus, expected: DaemonStatus): boolean {
@@ -3219,102 +3028,57 @@ export class DaemonManager implements DaemonManagerLike {
 
   /**
    * Crash and replace one verified live-acceptance daemon generation without a
-   * graceful shutdown. This preserves precisely one authenticated persisted
-   * session row for recovery testing; the admission RPC rejects unrelated
-   * sessions and active operations before this manager signals the process.
+   * graceful shutdown. See {@link restartAcceptanceSession}.
    */
   async restartAcceptanceSession(
     scope: AcceptanceSessionRestartScope,
   ): Promise<DaemonRestartResult> {
-    const startupSecret = daemonLiveAcceptanceStartupSecret();
-    if (!startupSecret) {
-      throw new ActionableError(
-        "restart-acceptance-session requires a live-acceptance daemon startup capability.",
-      );
-    }
-    if (!this.acquireLock()) {
-      throw new ActionableError(
-        "restart-acceptance-session could not acquire the daemon startup lock.",
-      );
-    }
-    try {
-      return await this.restartAcceptanceSessionWhileLocked(scope, startupSecret);
-    } finally {
-      this.releaseLock();
-    }
+    return restartAcceptanceSessionDaemon(this.restartHost(), scope);
   }
 
-  private async restartAcceptanceSessionWhileLocked(
-    scope: AcceptanceSessionRestartScope,
-    startupSecret: string,
-  ): Promise<DaemonRestartResult> {
-    const status = await this.lifecycleStatus();
-    if (!status.running) {
-      throw new ActionableError(
-        "restart-acceptance-session requires the admitted daemon generation to be running.",
-      );
-    }
-    const generation = daemonGenerationIdentityFromStatus(status);
-    if (!generation) {
-      throw new ActionableError(
-        "restart-acceptance-session requires the admitted daemon generation identity.",
-      );
-    }
-    const client = this.createClient({ clientIdentity: null });
-    let restartToken: string | undefined;
-    let signalSent = false;
-    let primaryError: unknown;
-    let replacedByOtherGeneration = false;
-    try {
-      await client.connect();
-      restartToken = await this.requestAcceptanceRestartAdmission(
-        client,
-        status,
-        generation,
-        scope,
-        startupSecret,
-      );
-      await this.commitAcceptanceRestartAdmission(client, status, restartToken);
-      if (await this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
-        this.processSignaler.signal(status.pid!, "SIGKILL");
-        signalSent = true;
-        const expected: DaemonProcessRecord = {
-          pid: status.pid!,
-          ppid: 0,
-          command: status.entryScript ?? "",
-          startedAt: status.processStartedAt ?? status.startedAt,
-          processGenerationToken: recordedProcessGenerationToken(status),
-        };
-        const waitResult = await this.waitForStop(
-          status.pid!,
-          DAEMON_FORCED_STOP_TIMEOUT_MS,
-          expected,
-        );
-        replacedByOtherGeneration = waitResult.replacedByOtherGeneration;
-        if (!waitResult.stopped) {
-          throw new ActionableError(
-            `Acceptance-session restart daemon process ${status.pid} did not exit after SIGKILL.`,
-          );
-        }
-      }
-    } catch (error) {
-      primaryError = error;
-      if (restartToken && !signalSent) {
-        await this.rollbackAcceptanceRestartAdmission(client, status, restartToken);
-      }
-      throw error;
-    } finally {
-      await this.closeAcceptanceRestartClient(client, primaryError);
-    }
-    await this.cleanupAcceptanceRestartFiles(status, replacedByOtherGeneration);
-    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    return restartResultFromStart(
-      await this.startUnlocked(
-        { ...daemonProcessOptions(status.options), strictPort: true },
-        undefined,
-        false,
-      ),
-    );
+  /** Adapter exposing the lifecycle primitives {@link daemonRestart} sequences. */
+  private restartHost(): DaemonRestartHost {
+    return {
+      log: (message) => stderrLog(message),
+      sleep: (ms) => this.timer.sleep(ms),
+      acquireLock: () => this.acquireLock(),
+      releaseLock: () => this.releaseLock(),
+      createClient: (options) => this.createClient(options),
+      lifecycleStatus: () => this.lifecycleStatus(),
+      recordedStatus: () => this.recordedStatus(),
+      probeRecoveryOwner: () => this.identityRecoveryIO.probe(),
+      isRecoveryOwnerReference: (expected) => expected === this.recoveryOwner,
+      isRecoveryOwner: (owner) => this.isRecoveryOwner(owner),
+      hasPublishedRecoveryIdentity: (owner) => this.hasPublishedRecoveryIdentity(owner),
+      isSameDaemonGeneration: (current, expected) => this.isSameDaemonGeneration(current, expected),
+      isConfirmedDifferentDaemonGeneration: (expected, candidate) =>
+        this.isConfirmedDifferentDaemonGeneration(expected, candidate),
+      daemonProcessRecordFromStatus: (status) => this.daemonProcessRecordFromStatus(status),
+      isProcessRunning: (pid) => this.isProcessRunning(pid),
+      signalProcess: (pid, signal) => this.processSignaler.signal(pid, signal),
+      stop: (timeout, expected) => this.stop(timeout, expected),
+      stopRunningDaemon: (status, timeout, signalFirst) =>
+        this.stopRunningDaemon(status, timeout, signalFirst),
+      stopNamespaceOrphansForExplicitRestart: (recordedPid) =>
+        this.stopNamespaceOrphansForExplicitRestart(recordedPid),
+      awaitRestartCleanup: (operations) => this.awaitRestartCleanup(operations),
+      waitForStop: (pid, timeout, expectedGeneration) =>
+        this.waitForStop(pid, timeout, expectedGeneration),
+      assertNoSurvivingDaemonBeforeRestart: (options) =>
+        this.assertNoSurvivingDaemonBeforeRestart(options),
+      cleanupAcceptanceRestartFiles: (status, replaced) =>
+        this.cleanupAcceptanceRestartFiles(status, replaced),
+      verifyDaemonGenerationBeforeSignal: (expected, deadline, context) =>
+        this.verifyDaemonGenerationBeforeSignal(expected, deadline, context),
+      prepareDaemonForConditionalRestart: (expected) =>
+        this.prepareDaemonForConditionalRestart(expected),
+      prepareIdentityRecoveryRestart: (expected) => this.prepareIdentityRecoveryRestart(expected),
+      admitMaintenanceRestart: (expected, token) => this.admitMaintenanceRestart(expected, token),
+      start: (options) => this.start(options),
+      startWithRunningOptions: (options) => this.startWithRunningOptions(options),
+      startUnlocked: (options, signal, inheritExitRecord) =>
+        this.startUnlocked(options, signal, inheritExitRecord),
+    };
   }
 
   private async cleanupAcceptanceRestartFiles(
@@ -3329,110 +3093,6 @@ export class DaemonManager implements DaemonManagerLike {
       socketPaths: this.cleanupSocketPaths(status.socketPath),
       expectedPid: status.pid!,
     });
-  }
-
-  private async requestAcceptanceRestartAdmission(
-    client: DaemonClientLike,
-    status: DaemonStatus,
-    generation: DaemonGenerationIdentity,
-    scope: AcceptanceSessionRestartScope,
-    startupSecret: string,
-  ): Promise<string> {
-    const result: unknown = await client.callDaemonMethod(
-      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
-      {
-        ...status,
-        scope,
-        acceptanceCapability: createDaemonLiveAcceptanceScopedCapability(
-          startupSecret,
-          generation,
-          scope,
-        ),
-      },
-    );
-    const admission = result as Partial<DaemonAcceptanceSessionRestart> | null;
-    if (admission?.accepted !== true) {
-      throw new ActionableError(
-        `Daemon declined the acceptance-session restart (${admission?.reason ?? "unknown"}).`,
-      );
-    }
-    if (!admission.restartToken) {
-      throw new ActionableError(
-        "Daemon accepted the acceptance-session restart without a rollback token.",
-      );
-    }
-    return admission.restartToken;
-  }
-
-  private async commitAcceptanceRestartAdmission(
-    client: DaemonClientLike,
-    status: DaemonStatus,
-    restartToken: string,
-  ): Promise<void> {
-    const result: unknown = await client.callDaemonMethod(DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD, {
-      ...status,
-      restartToken,
-    });
-    if ((result as Partial<DaemonAcceptanceRestartCommit> | null)?.committed !== true) {
-      throw new ActionableError(
-        "Daemon acceptance-session restart admission expired before it could be committed.",
-      );
-    }
-  }
-
-  private async rollbackAcceptanceRestartAdmission(
-    client: DaemonClientLike,
-    status: DaemonStatus,
-    restartToken: string,
-  ): Promise<void> {
-    try {
-      await client.callDaemonMethod(DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD, {
-        ...status,
-        restartToken,
-      });
-    } catch (rollbackError) {
-      logger.warn(
-        `Failed to explicitly roll back acceptance restart admission: ${errorMessage(rollbackError)}`,
-      );
-    }
-  }
-
-  private async closeAcceptanceRestartClient(
-    client: DaemonClientLike,
-    primaryError: unknown,
-  ): Promise<void> {
-    try {
-      await client.close();
-    } catch (closeError) {
-      if (primaryError === undefined) {
-        throw closeError;
-      }
-      logger.warn(
-        `Failed to close acceptance restart control client after primary failure: ${errorMessage(closeError)}`,
-      );
-    }
-  }
-
-  /**
-   * Revalidate the OS process generation immediately before an acceptance-only
-   * SIGKILL. Admission authenticates the daemon that handled the RPC, but that
-   * generation may exit before this manager signals its formerly owned PID.
-   */
-  private async verifyAcceptanceGenerationBeforeSignal(
-    status: DaemonStatus,
-    generation: DaemonGenerationIdentity,
-  ): Promise<boolean> {
-    return this.verifyDaemonGenerationBeforeSignal(
-      {
-        pid: generation.pid,
-        ppid: 0,
-        command: "",
-        startedAt: status.processStartedAt ?? generation.startedAt,
-        processGenerationToken: generation.processGenerationToken,
-      },
-      undefined,
-      "Live acceptance",
-    );
   }
 
   /** Admit or refuse a conditional restart of the running daemon. Public so tests can stub admission. */

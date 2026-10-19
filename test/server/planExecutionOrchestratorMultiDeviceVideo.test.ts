@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { BootedDevice, PlanExecutionResult, VideoRecordingMetadata } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import {
   PlanExecutionOrchestrator,
@@ -121,8 +121,9 @@ describe("multi-device Android plan video rotation (#10026)", () => {
     });
   }
 
+  const scratch = useScratchRoot("plan-multi-device-video-");
   beforeEach(async () => {
-    archive = await fs.mkdtemp(path.join(os.tmpdir(), "plan-multi-device-video-"));
+    archive = scratch.next();
     for (const id of ["rec-0", "rec-1", "rec-2", "rec-3"]) {
       await fs.mkdir(path.join(archive, id));
     }
@@ -135,7 +136,6 @@ describe("multi-device Android plan video rotation (#10026)", () => {
   afterEach(async () => {
     proto["allocateDevices"] = originalAllocate;
     execute.mockRestore();
-    await fs.rm(archive, { recursive: true, force: true });
   });
 
   test("a plan longer than two segments records to the end with an ordered manifest", async () => {

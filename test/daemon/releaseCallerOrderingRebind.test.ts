@@ -44,7 +44,11 @@ describe("explicit rebind release caller ordering", () => {
     const restores: Array<() => void> = [];
     try {
       await pool.initializeWithDevices(devices);
-      await pool.bindOrReuseDeviceSession("s1", "old", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: "old",
+        platform: "android",
+      });
       const rebind = sessions.rebindSession.bind(sessions);
       const rebound = spyOn(sessions, "rebindSession").mockImplementation(async (...args) => {
         events.push(["session.rebindSession", ...args]);
@@ -68,15 +72,12 @@ describe("explicit rebind release caller ordering", () => {
         }
       });
       restores.push(() => freed.mockRestore());
-      const binding = pool.bindOrReuseDeviceSession(
-        "s1",
-        "new",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
+      const binding = pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: "new",
+        platform: "android",
+        allowSessionRebind: true,
+      });
       if (rejectPool) {
         await expect(binding).rejects.toBe(failure);
       } else {

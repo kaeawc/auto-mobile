@@ -64,19 +64,13 @@ async function createPoolWorld(): Promise<PoolWorld> {
 }
 
 function bindForConnection(pool: DevicePool, sessionId: string, connection: string) {
-  return pool.bindOrReuseDeviceSession(
+  return pool.bindOrReuseDeviceSession({
     sessionId,
-    DEVICE.deviceId,
-    "android",
-    undefined,
-    undefined,
-    undefined,
-    false,
-    undefined,
-    undefined,
-    undefined,
-    connection,
-  );
+    deviceId: DEVICE.deviceId,
+    platform: "android",
+    allowSessionRebind: false,
+    mcpSessionId: connection,
+  });
 }
 
 afterEach(() => {

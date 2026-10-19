@@ -33,7 +33,7 @@ import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -47,6 +47,9 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const devices: BootedDevice[] = [
   { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
@@ -62,15 +65,15 @@ let previousAutolock: string | undefined;
 let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
-let originalDeviceSessionManager: unknown;
+let originalCollaborators: ToolRegistryCollaborators;
 let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
-  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   deviceSessionManager = new FakeDeviceSessionManager();
   deviceSessionManager.setConnectedDevices(devices);
-  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -123,7 +126,7 @@ afterEach(async () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
   } finally {
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
   }
 });
 
@@ -196,8 +199,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
     const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
-    await (socket as any).restoreSelectorSessions(args, socketSessionId);
-    const route = (socket as any).getMcpForwardRoute(request, socketSessionId);
+    await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
+    const route = socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
@@ -280,9 +283,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         },
       );
     }
-    const forwarded = (socket as any).withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
     const result = await fixture.client.callTool({ name, arguments: forwarded });
-    (socket as any).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };
   const daemon = new FakeDaemonManager();
@@ -374,7 +377,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     ]);
     const apple = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios")!;
     const pinned = new DaemonMcpProxy({
-      clientFactory: () => client,
+      // Each proxy owns its client: closing the pinned one must not drop the default proxy's handlers.
+      clientFactory: () => new FakeDaemonClient({ toolResultFor: dispatch }),
       daemonManager: daemon,
       autoStartDaemon: false,
       timer,

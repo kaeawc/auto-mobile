@@ -1,4 +1,5 @@
 import { IOSCtrlProxy } from "../../src/features/observe/ios";
+import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
@@ -160,7 +161,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private voiceOverState: boolean = false;
   private voiceOverActivateResult: CtrlProxyActionResult | null = null;
   private setVoiceOverEnabledResult: CtrlProxyActionResult | null = null;
-  private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
+  private multiFingerSwipeResult: IOSDispatchResult<CtrlProxySwipeResult> | null = null;
   private pressButtonResult: IOSDispatchResult<CtrlProxyPressButtonResult> | null = null;
   private pressKeyResult: IOSDispatchResult<CtrlProxyPressKeyResult> | null = null;
   private requestLog: Array<{ type: string } & Record<string, unknown>> = [];
@@ -362,7 +363,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Configure multi-finger swipe result (null = default success)
    */
-  setMultiFingerSwipeResult(result: CtrlProxySwipeResult | null): void {
+  setMultiFingerSwipeResult(result: IOSDispatchResult<CtrlProxySwipeResult> | null): void {
     this.multiFingerSwipeResult = result;
   }
 
@@ -774,17 +775,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
-    return {
-      hierarchy: {
-        node: {
-          $: {
-            text: "Fake Hierarchy",
-          },
-        },
-      },
-      packageName: hierarchy.packageName,
-      updatedAt: hierarchy.updatedAt,
-    };
+    return convertIosHierarchy(hierarchy);
   }
 
   readonly doubleTapHistory: Array<{ x: number; y: number }> = [];
@@ -1354,25 +1345,31 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y2: number,
     fingerCount: number,
     duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
+    _timeoutMs: number = 5000,
+    _perf?: PerformanceTracker,
     fingerSpacing?: number,
-  ): Promise<CtrlProxySwipeResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+    beforeSend?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    // Mirrors `sendIOSPressCommand`: an expired deadline never reaches the device, and the
+    // synchronous display fence runs immediately before the socket write.
+    signal?.throwIfAborted();
     await this.applyDelay("multiFingerSwipe");
     this.checkFailure("multiFingerSwipe");
+    beforeSend?.();
 
     this.multiFingerSwipeHistory.push({ x1, y1, x2, y2, fingerCount, duration, fingerSpacing });
 
-    if (this.multiFingerSwipeResult) {
-      return this.multiFingerSwipeResult;
-    }
-
-    return {
-      success: true,
-      totalTimeMs: duration,
-      gestureTimeMs: duration,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return this.settleDispatch<CtrlProxySwipeResult>(
+      this.multiFingerSwipeResult ?? {
+        success: true,
+        totalTimeMs: duration,
+        gestureTimeMs: duration,
+      },
+      onDispatch,
+      signal,
+    );
   }
 
   private pathGestureHistory: Array<{

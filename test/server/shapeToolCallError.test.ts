@@ -3,7 +3,7 @@ import { AndroidAvdIdentityUnresolvedError } from "../../src/devices/deviceBootS
 import { ActionableError } from "../../src/models/ActionableError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
-import { TextIndeterminateError } from "../../src/features/action/textTransportTimeout";
+import { TextIndeterminateError } from "../../src/features/action/TextIndeterminateError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";

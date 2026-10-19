@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { describe, expect, test, spyOn } from "bun:test";
 import { getDefaultSessionHeartbeatTimeoutMs } from "../../src/daemon/sessionManager";
@@ -330,7 +331,7 @@ describe("SessionManager", () => {
       fakeTimer.advanceTime(100);
       manager.setDeviceLabels("session-1", labels);
       fakeTimer.advanceTime(50);
-      manager.recordHeartbeat("session-1");
+      await deliverDaemonHeartbeat(manager, "session-1");
       repository.finishUpsert();
 
       // Neither the label write at 100 (cache data, #10703) nor the heartbeat at 150 (liveness,

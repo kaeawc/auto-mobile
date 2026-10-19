@@ -36,7 +36,7 @@ function createTap(
   const selector = new FakeElementSelector(initial);
   const tap = new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     { timer, elementSelector: selector },
   );
   (tap as any).adb.isScreenOn = async () => true;
@@ -45,16 +45,16 @@ function createTap(
     isAccessibilityServiceEnabled: async () => false,
     shouldRunPreTapStability: () => false,
   };
-  (tap as any).executeAndroidTap = async () => {
+  tap.executeAndroidTap = async () => {
     tapCalls++;
     selector.setNextElement(afterTap);
   };
-  (tap as any).prepareSelectionCapture = async () => null;
-  (tap as any).refreshViewHierarchy = async () => capture;
+  tap.prepareSelectionCapture = async () => null;
+  tap.refreshViewHierarchy = async () => capture;
   (tap as any).captureTerminalObservationScreenshot = async () => {};
   (tap as any).recordDeferredPredictionOutcome = async () => {};
   (tap as any).selectionStateTracker.finalize = async () => [];
-  (tap as any).deriveTapEffectAfterPostTapObservation = async (
+  tap.deriveTapEffectAfterPostTapObservation = async (
     _previous: ObserveResult | null,
     current: ObserveResult,
   ) => ({
@@ -137,7 +137,7 @@ describe("tapOn ensureChecked", () => {
   test("refreshes and re-resolves a cached checked toggle before deciding to skip", async () => {
     const { tap, calls, setNextElement } = createTap(toggle("true"), toggle("true"));
     let refreshes = 0;
-    (tap as any).refreshViewHierarchy = async () => {
+    tap.refreshViewHierarchy = async () => {
       refreshes++;
       setNextElement(toggle("false"));
       return hierarchy;
@@ -153,7 +153,7 @@ describe("tapOn ensureChecked", () => {
 
   test("skips a cached unchecked toggle that is checked in the fresh hierarchy", async () => {
     const { tap, calls, setNextElement } = createTap(toggle("false"));
-    (tap as any).refreshViewHierarchy = async () => {
+    tap.refreshViewHierarchy = async () => {
       setNextElement(toggle("true"));
       return hierarchy;
     };
@@ -221,7 +221,7 @@ describe("tapOn ensureChecked", () => {
     const { tap, setNextElement } = createTap(toggle("false"));
     let taps = 0;
     (tap as any).strategy.retryTapIfNoChange = true;
-    (tap as any).executeAndroidTap = async () => {
+    tap.executeAndroidTap = async () => {
       taps++;
       setNextElement(toggle(taps % 2 === 1));
     };

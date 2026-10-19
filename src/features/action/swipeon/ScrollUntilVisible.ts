@@ -92,12 +92,15 @@ import type {
 } from "../observedInteractionTypes";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
+/** Backoff bounds for re-reading the hierarchy when the scroll container is not yet resolvable. */
+const CONTAINER_RETRY_INITIAL_DELAY_MS = 10;
+const CONTAINER_RETRY_MAX_DELAY_MS = 1_000;
 
 interface ScrollUntilVisibleDependencies {
   device: BootedDevice;
   resolver?: Pick<ElementResolver, "resolve">;
   geometry: ElementGeometry;
-  observeScreen: ObserveScreen;
+  observeScreen: Pick<ObserveScreen, "execute">;
   accessibilityService: ScrollAccessibilityService;
   accessibilityDetector: AccessibilityDetector;
   adb: AdbExecutor;
@@ -1163,8 +1166,8 @@ export class ScrollUntilVisible {
     // Retry logic similar to TapOnElement
     if (!element && attempt < ScrollUntilVisible.MAX_ATTEMPTS) {
       const delayNextAttempt = exponentialBackoff({
-        initialDelayMs: 10,
-        maxDelayMs: 1000,
+        initialDelayMs: CONTAINER_RETRY_INITIAL_DELAY_MS,
+        maxDelayMs: CONTAINER_RETRY_MAX_DELAY_MS,
       }).delayForAttempt(attempt + 1);
       await this.deps.timer.sleep(delayNextAttempt);
       throwIfAborted(signal);

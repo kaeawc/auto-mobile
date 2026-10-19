@@ -85,7 +85,11 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
 
     let bindSettled = false;
     const bind = pool
-      .bindOrReuseDeviceSession("unrelated", handset.deviceId, "android")
+      .bindOrReuseDeviceSession({
+        sessionId: "unrelated",
+        deviceId: handset.deviceId,
+        platform: "android",
+      })
       .then(async (sessionId) => {
         bindSettled = true;
         await pool.releaseDevice(handset.deviceId, sessionId);
@@ -139,7 +143,11 @@ describe("DevicePool disconnect of an assigned device", () => {
     });
     try {
       await pool.initializeWithDevices([handset]);
-      const sessionId = await pool.bindOrReuseDeviceSession("s1", handset.deviceId, "android");
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "s1",
+        deviceId: handset.deviceId,
+        platform: "android",
+      });
 
       let finishCleanup!: () => void;
       const cleanup = new Promise<void>((resolve) => {

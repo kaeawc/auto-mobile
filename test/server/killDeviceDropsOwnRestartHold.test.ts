@@ -155,14 +155,12 @@ describe("lifecycle stops drop the confirmed device-restart hold", () => {
           }),
         ).toMatchObject({ owned: false, restartHandoff: true });
         await expect(
-          f.pool.bindOrReuseDeviceSession(
-            "rival",
-            f.device.deviceId,
+          f.pool.bindOrReuseDeviceSession({
+            sessionId: "rival",
+            deviceId: f.device.deviceId,
             platform,
-            undefined,
-            undefined,
-            f.device,
-          ),
+            expectedIdentity: f.device,
+          }),
         ).rejects.toThrow();
       };
       await f.call("killDevice", BASE, false, "owner-conn");

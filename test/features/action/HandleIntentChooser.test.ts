@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
 import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionTools";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -74,16 +74,17 @@ describe("HandleIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create HandleIntentChooser instance
-    handleIntentChooser = new HandleIntentChooser(testDevice, null, () => fakeDeepLinkManager);
-
-    // Replace the internal managers with our fakes
-    (handleIntentChooser as any).observeScreen = fakeObserveScreen;
-    (handleIntentChooser as any).window = fakeWindow;
-    (handleIntentChooser as any).awaitIdle = fakeAwaitIdle;
+    handleIntentChooser = new HandleIntentChooser(
+      testDevice,
+      null,
+      () => fakeDeepLinkManager,
+      undefined,
+      { observeScreen: fakeObserveScreen, window: fakeWindow, awaitIdle: fakeAwaitIdle },
+    );
     // These cases exercise chooser routing. BaseVisualChange's observation and
     // settle contract is covered independently, so invoke the feature block
     // directly with the configured fake observation.
-    (handleIntentChooser as any).observedInteraction = async (block: any) =>
+    handleIntentChooser.observedInteraction = async (block) =>
       block(await fakeObserveScreen.getMostRecentCachedObserveResult());
   });
 
@@ -186,10 +187,10 @@ describe("HandleIntentChooser", () => {
 
     test("passes the opened URL to DeepLinkManager", async () => {
       const calls: unknown[][] = [];
-      (fakeDeepLinkManager as any).handleIntentChooser = async (...args: unknown[]) => {
+      spyOn(fakeDeepLinkManager, "handleIntentChooser").mockImplementation(async (...args) => {
         calls.push(args);
         return { success: true, detected: true, action: "custom" };
-      };
+      });
 
       await handleIntentChooser.execute("custom", "com.example.customapp", "example://item");
 

@@ -44,12 +44,6 @@ export function runScreenshotPathProtectionContract(
 
   // Lets every already-queued promise continuation run without involving a timer.
   const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
-  // The real implementation reads its inventory through async stores before the write starts.
-  const until = async (condition: () => boolean): Promise<void> => {
-    for (let i = 0; i < 1000 && !condition(); i += 1) {
-      await tick();
-    }
-  };
 
   describe(`ScreenshotPathProtection contract: ${name}`, () => {
     test("protect leases a path for the minimum lifetime and returns the deadline", () =>
@@ -59,6 +53,42 @@ export function runScreenshotPathProtectionContract(
         expect(deadline).toBe(timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS);
         expect(protection.isProtected(PATH)).toBe(true);
         expect(protection.isProtected(`${DIRECTORY}/screenshot_b.png`)).toBe(false);
+      }));
+
+    test("equivalent spellings of one path share a lease", () =>
+      withProtection(async (protection) => {
+        await protection.protect(`${DIRECTORY}/./screenshot_a.png`);
+        expect(protection.isProtected(PATH)).toBe(true);
+        expect(protection.isProtected(`${DIRECTORY}/sub/../screenshot_a.png`)).toBe(true);
+        let removed = false;
+        const result = await protection.removeIfUnprotected(
+          `${DIRECTORY}//screenshot_a.png`,
+          async () => {
+            removed = true;
+            return true;
+          },
+        );
+        expect(result).toBe(false);
+        expect(removed).toBe(false);
+      }));
+
+    test("a protect on another spelling waits for a pending removal", () =>
+      withProtection(async (protection) => {
+        const gate = deferred();
+        const order: string[] = [];
+        const removal = protection.removeIfUnprotected(PATH, async () => {
+          await gate.promise;
+          order.push("removed");
+          return true;
+        });
+        const leased = protection.protect(`${DIRECTORY}/./screenshot_a.png`).then(() => {
+          order.push("protected");
+        });
+        await tick();
+        expect(order).toEqual([]);
+        gate.resolve();
+        await Promise.all([removal, leased]);
+        expect(order).toEqual(["removed", "protected"]);
       }));
 
     test("the lease ends exactly at its deadline", () =>
@@ -181,10 +211,14 @@ export function runScreenshotPathProtectionContract(
       withProtection(async (protection, _timer, fileSystem) => {
         const order: string[] = [];
         const gate = deferred();
+        // The real implementation reads its inventory through async stores before the write
+        // starts; await the write's own start signal instead of polling for it.
+        const firstStarted = deferred();
         const first = protection.write(PATH, {
           size: 10,
           write: async () => {
             order.push("first:start");
+            firstStarted.resolve();
             await gate.promise;
             order.push("first:end");
           },
@@ -199,7 +233,9 @@ export function runScreenshotPathProtectionContract(
           remove: async () => {},
           fileSystem,
         });
-        await until(() => order.length > 0);
+        // Race the start signal against the write itself so a write that rejects before
+        // `operation.write()` fails the test instead of hanging it.
+        await Promise.race([firstStarted.promise, first]);
         await tick();
         expect(order).toEqual(["first:start"]);
         gate.resolve();

@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 function setup(limit = 256) {
   const timer = new FakeTimer();
@@ -18,15 +19,15 @@ function setup(limit = 256) {
     "/fake/socket",
     1000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(["p"]),
     "darwin",
     limit,
   );
-  client.attachSocketForTesting(socket);
+  client.testHooks.attachSocket(socket);
   const feed = (frame: unknown) =>
-    client.simulateIncomingDataForTesting(Buffer.from(JSON.stringify(frame) + "\n"));
+    client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(frame) + "\n"));
   const request = (signal?: AbortSignal) =>
     client.callTool("tapOn", {}, undefined, undefined, signal).catch((error: unknown) => error);
   return { client, timer, socket, feed, request };
@@ -43,7 +44,7 @@ for (const newline of [false, true]) {
     const first = request(controller.signal);
     const second = request();
     try {
-      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(65) + (newline ? "\n" : "")));
+      client.testHooks.simulateIncomingData(Buffer.from("x".repeat(65) + (newline ? "\n" : "")));
       expect(socket.destroyed).toBe(true);
       const error = await first;
       expect(error.cause).toBeInstanceOf(ActionableError);
@@ -56,7 +57,7 @@ for (const newline of [false, true]) {
       expect(remove).toHaveBeenCalled();
       expect((client as unknown as { connected: boolean }).connected).toBe(false);
       expect(closes).toBe(1);
-      client.simulateIncomingDataForTesting(Buffer.from("null\n" + "x".repeat(65)));
+      client.testHooks.simulateIncomingData(Buffer.from("null\n" + "x".repeat(65)));
       expect(warn).toHaveBeenCalledTimes(1);
       expect(closes).toBe(1);
     } finally {
@@ -76,7 +77,7 @@ for (const extraByte of [false, true]) {
     const { client, socket, request } = setup(Buffer.byteLength(serialized));
     const result = request();
     try {
-      client.simulateIncomingDataForTesting(
+      client.testHooks.simulateIncomingData(
         Buffer.from(serialized + (extraByte ? " " : "") + "\n"),
       );
       if (extraByte) {
@@ -115,7 +116,7 @@ for (const [index, shape] of wrongShapes.entries()) {
     const result = request();
     try {
       feed(shape);
-      expect(client.hasPendingRequestForTesting("p")).toBe(true);
+      expect(client.testHooks.hasPendingRequest("p")).toBe(true);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(errors).not.toHaveBeenCalled();
       expect(receiver).not.toHaveBeenCalled();
@@ -126,7 +127,7 @@ for (const [index, shape] of wrongShapes.entries()) {
       });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(JSON.stringify(warn.mock.calls)).not.toContain("PRIVATE_TOOL_OUTPUT");
-      expect(client.hasPendingRequestForTesting("p")).toBe(true);
+      expect(client.testHooks.hasPendingRequest("p")).toBe(true);
       expect(receiver).not.toHaveBeenCalled();
       feed({ id: "p", type: "mcp_response", success: true, result: "ok" });
       expect(await result).toBe("ok");
@@ -191,15 +192,15 @@ test("notification preserves extras and split UTF-8, and a replacement connectio
   const bytes = Buffer.from(JSON.stringify(frame) + "\n");
   const split = bytes.indexOf(Buffer.from("😀")) + 1;
   try {
-    client.simulateIncomingDataForTesting(bytes.subarray(0, split));
-    client.simulateIncomingDataForTesting(bytes.subarray(split));
+    client.testHooks.simulateIncomingData(bytes.subarray(0, split));
+    client.testHooks.simulateIncomingData(bytes.subarray(split));
     expect(received).toEqual([frame]);
-    client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+    client.testHooks.simulateIncomingData(Buffer.from("x".repeat(129)));
     expect(socket.destroyed).toBe(true);
     const replacement = new FakeSocket();
-    client.attachSocketForTesting(replacement);
+    client.testHooks.attachSocket(replacement);
     await client.connect();
-    client.simulateIncomingDataForTesting(bytes);
+    client.testHooks.simulateIncomingData(bytes);
     expect(received).toEqual([frame, frame]);
   } finally {
     await client.close();
@@ -227,7 +228,7 @@ async function withSocketConnection(
     "/fake/socket",
     1000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(["p", "q"]),
     "win32",
@@ -263,19 +264,19 @@ test("overflow preserves the frame error when a connection-closed handler closes
       .catch((error: unknown) => error);
     const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
     try {
-      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+      client.testHooks.simulateIncomingData(Buffer.from("x".repeat(129)));
       const error = await first;
       expect(error).toBeInstanceOf(DaemonUnavailableError);
       expect(error.cause).toBeInstanceOf(DaemonFrameTooLargeError);
       expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
-      expect(client.hasPendingRequestForTesting("p")).toBe(false);
-      expect(client.hasPendingRequestForTesting("q")).toBe(false);
+      expect(client.testHooks.hasPendingRequest("p")).toBe(false);
+      expect(client.testHooks.hasPendingRequest("q")).toBe(false);
       expect(socket.destroyed).toBe(true);
       expect(closed).toBe(1);
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
       socket.emit("close");
-      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+      client.testHooks.simulateIncomingData(Buffer.from("x".repeat(129)));
       expect(closed).toBe(1);
     } finally {
       remove.mockRestore();
@@ -298,7 +299,7 @@ test("overflow destroys the socket and rejects requests even when a connection-c
     const first = client.callTool("tapOn", {}).catch((error: unknown) => error);
     const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
     try {
-      expect(() => client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)))).toThrow(
+      expect(() => client.testHooks.simulateIncomingData(Buffer.from("x".repeat(129)))).toThrow(
         handlerError,
       );
       expect(socket.destroyed).toBe(true);
@@ -306,12 +307,12 @@ test("overflow destroys the socket and rejects requests even when a connection-c
       expect(error).toBeInstanceOf(DaemonUnavailableError);
       expect(error.cause).toBeInstanceOf(DaemonFrameTooLargeError);
       expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
-      expect(client.hasPendingRequestForTesting("p")).toBe(false);
-      expect(client.hasPendingRequestForTesting("q")).toBe(false);
+      expect(client.testHooks.hasPendingRequest("p")).toBe(false);
+      expect(client.testHooks.hasPendingRequest("q")).toBe(false);
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(closed).toBe(1);
       socket.emit("close");
-      client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
+      client.testHooks.simulateIncomingData(Buffer.from("x".repeat(129)));
       expect(closed).toBe(1);
     } finally {
       unsubscribe();
@@ -321,10 +322,16 @@ test("overflow destroys the socket and rejects requests even when a connection-c
 
 test("test socket attachment adds no listeners", async () => {
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {}, null);
+  const client = new DaemonClient(
+    "/fake/socket",
+    1000,
+    new FakeTimer(),
+    ISOLATED_DAEMON_RECOVERY,
+    null,
+  );
   const listeners = socket.eventNames().map((event) => [event, socket.listeners(event)]);
   try {
-    client.attachSocketForTesting(socket);
+    client.testHooks.attachSocket(socket);
     expect(socket.eventNames().map((event) => [event, socket.listeners(event)])).toEqual(listeners);
   } finally {
     await client.close();
@@ -415,7 +422,7 @@ for (const reconnectBeforeClose of [false, true]) {
       const unsubscribe = client.onConnectionClosed(() => {
         closed++;
         expect(socket.destroyed).toBe(false);
-        expect(client.hasPendingRequestForTesting("p")).toBe(false);
+        expect(client.testHooks.hasPendingRequest("p")).toBe(false);
       });
       const otherData = () => {};
       socket.on("data", otherData);
@@ -445,7 +452,7 @@ for (const reconnectBeforeClose of [false, true]) {
         if (reconnectBeforeClose) {
           socket.emit("close");
         }
-        expect(client.hasPendingRequestForTesting("q")).toBe(true);
+        expect(client.testHooks.hasPendingRequest("q")).toBe(true);
         expect(closed).toBe(1);
         sockets[1]!.feed(bytes.subarray(split));
         expect(await result).toBe("😀");
@@ -476,8 +483,8 @@ for (const pendingCount of [1, 2]) {
       const second = pendingCount === 2 ? request() : undefined;
       try {
         // Split the id itself across chunks, as a socket read may do.
-        client.simulateIncomingDataForTesting(Buffer.from(head.slice(0, 5)));
-        client.simulateIncomingDataForTesting(Buffer.from(head.slice(5) + "x".repeat(129)));
+        client.testHooks.simulateIncomingData(Buffer.from(head.slice(0, 5)));
+        client.testHooks.simulateIncomingData(Buffer.from(head.slice(5) + "x".repeat(129)));
         const firstAnswer = await first;
         if (pendingCount === 1) {
           const unreadable = [
@@ -525,7 +532,7 @@ test("one pending call keeps the frame error for an unattributed overflow", asyn
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const result = request();
   try {
-    client.simulateIncomingDataForTesting(Buffer.from("x".repeat(65)));
+    client.testHooks.simulateIncomingData(Buffer.from("x".repeat(65)));
     expect(await result).toBeInstanceOf(DaemonFrameTooLargeError);
   } finally {
     await client.close();

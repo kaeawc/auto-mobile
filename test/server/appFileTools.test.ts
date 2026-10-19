@@ -12,6 +12,9 @@ import type {
 } from "../../src/server/sharedStorageService";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("App file tools", () => {
   beforeEach(() => {

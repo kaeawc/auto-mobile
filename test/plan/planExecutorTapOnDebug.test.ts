@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -7,7 +7,7 @@ import { z } from "zod/v4";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 
 describe("PlanExecutor — tapOn tapDebug in debug.steps", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
 
   const tapOnSchema = z.object({
     text: z.string(),
@@ -28,7 +28,7 @@ describe("PlanExecutor — tapOn tapDebug in debug.steps", () => {
   };
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     const tapOnHandler = mock(async () =>
       createStructuredToolResponse({
         success: true,

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { useScratchRoot } from "../helpers/scratchRoot";
+
 import { createServer, type Server } from "node:net";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import {
   DEVICE_LEASE_RELINQUISH_TIMEOUT_MS,
@@ -41,16 +42,13 @@ const status = {
 };
 
 describe("DaemonDeviceLeaseOwnerProbe (#10497)", () => {
+  const scratch = useScratchRoot("lease-q-");
   let dir: string | undefined;
   let server: Server | undefined;
 
   afterEach(async () => {
     await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
     server = undefined;
-    if (dir) {
-      rmSync(dir, { recursive: true, force: true });
-      dir = undefined;
-    }
   });
 
   test("sends one daemon request and maps a status answer", async () => {
@@ -126,7 +124,7 @@ describe("DaemonDeviceLeaseOwnerProbe (#10497)", () => {
   });
 
   test("the raw exchange reports a missing socket as a connect failure", async () => {
-    dir = mkdtempSync(join(tmpdir(), "lease-q-"));
+    dir = scratch.next();
     const outcome = await rawDaemonSocketExchange(
       join(dir, "none.sock"),
       "{}\n",
@@ -137,7 +135,7 @@ describe("DaemonDeviceLeaseOwnerProbe (#10497)", () => {
   });
 
   test("the raw exchange returns the first response line", async () => {
-    dir = mkdtempSync(join(tmpdir(), "lease-q-"));
+    dir = scratch.next();
     const socketPath = join(dir, "d.sock");
     server = createServer((socket) => {
       socket.once("data", () => socket.write('{"success":true}\n{"ignored":true}\n'));

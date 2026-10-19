@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
 import { ObserveResult } from "../../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
+import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
@@ -43,14 +44,14 @@ describe("SwipeOn autoTarget", () => {
   });
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbExecutor(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 

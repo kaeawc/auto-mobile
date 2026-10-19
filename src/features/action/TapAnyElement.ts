@@ -102,7 +102,7 @@ import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierarchy";
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
@@ -148,7 +148,7 @@ interface TapAnyElementDependencies extends DisplayFenceDependencies {
   timer?: Timer;
   elementSelector?: ElementSelector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetector;
   talkBackStrategy?: Pick<
     TalkBackTapStrategy,
@@ -411,7 +411,7 @@ export class TapAnyElement extends BaseVisualChange {
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;
-  private featureFlags: FeatureFlagService;
+  private featureFlags: FeatureFlagReader;
   private accessibilityDetector: AccessibilityDetector;
   private talkBackStrategy: Pick<
     TalkBackTapStrategy,
@@ -504,21 +504,23 @@ export class TapAnyElement extends BaseVisualChange {
       new TalkBackTapStrategy({ timer: this.timer, driverFactory: this.talkBackDriverFactory });
   }
 
-  /** Test-only seam for supplying the post-gesture hierarchy probe result. */
-  setRefreshViewHierarchyForTesting(
-    refresh: (
-      defaultRefresh: RefreshViewHierarchy,
-      timeoutMs: number,
-      screenSize?: ObserveResult["screenSize"],
-      signal?: AbortSignal,
-    ) => Promise<ViewHierarchyResult | null>,
-  ): void {
-    this.refreshViewHierarchyOverrideForTesting = refresh;
-  }
-
-  /** Test-only seam for observing when Android gesture dispatch begins. */
-  setBeforeAndroidTapForTesting(callback: () => void): void {
-    this.beforeAndroidTapForTesting = callback;
+  /** @internal Typed view of private seams for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      findClickableElement: this.findClickableElement.bind(this),
+      refreshViewHierarchy: this.refreshViewHierarchy.bind(this),
+      readFreshHierarchy: this.readFreshHierarchy.bind(this),
+      /** Supplies the post-gesture hierarchy probe result. */
+      setRefreshViewHierarchy: (
+        refresh: NonNullable<typeof this.refreshViewHierarchyOverrideForTesting>,
+      ): void => {
+        this.refreshViewHierarchyOverrideForTesting = refresh;
+      },
+      /** Observes when Android gesture dispatch begins. */
+      setBeforeAndroidTap: (callback: () => void): void => {
+        this.beforeAndroidTapForTesting = callback;
+      },
+    };
   }
 
   private async executeAndroidTap(
@@ -879,10 +881,6 @@ export class TapAnyElement extends BaseVisualChange {
     return failedTapResult(action, error);
   }
 
-  private validateOptions(options: TapAnyElementOptions): string | null {
-    return containerSelectorError(options.container, "tapAny");
-  }
-
   private getSearchUntilDuration(options: TapAnyElementOptions): number {
     return resolveSearchUntilDuration(options.searchUntil?.duration, {
       defaultMs: TapAnyElement.SEARCH_UNTIL_DEFAULT_MS,
@@ -911,13 +909,17 @@ export class TapAnyElement extends BaseVisualChange {
       iosMultiPanel: this.iosMultiPanel,
     };
     const effectiveScreenSize = screenSizeForOffscreenCheck(viewHierarchy, screenSizeOptions);
-    const selection = this.elementSelector.selectClickable(viewHierarchy, {
-      screenSizeOptions,
-      container: options.container,
-      strategy: options.selectionStrategy,
-      intentAction: options.action === "longPress" ? "long-press" : "tap",
-      scrollableContainer: options.scrollableContainer,
-    });
+    const selection = this.elementSelector.select(
+      viewHierarchy,
+      {},
+      {
+        screenSizeOptions,
+        container: options.container,
+        strategy: options.selectionStrategy,
+        intentAction: options.action === "longPress" ? "long-press" : "tap",
+        scrollableContainer: options.scrollableContainer,
+      },
+    );
     if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
       return { element: null, containerFound };
     }
@@ -1017,13 +1019,8 @@ export class TapAnyElement extends BaseVisualChange {
   ): Promise<ViewHierarchyResult | null> {
     if (this.refreshViewHierarchyOverrideForTesting) {
       return this.refreshViewHierarchyOverrideForTesting(
-        (defaultTimeoutMs, screenSize, defaultSignal) =>
-          this.refreshViewHierarchyDefault(
-            defaultTimeoutMs,
-            screenSize,
-            defaultSignal,
-            forceCapture,
-          ),
+        (timeout, size, abort) =>
+          this.refreshViewHierarchyDefault(timeout, size, abort, forceCapture),
         timeoutMs,
         _screenSize,
         signal,
@@ -1830,7 +1827,7 @@ export class TapAnyElement extends BaseVisualChange {
       return this.createErrorResult(options.action, "tap action is required");
     }
 
-    const validationError = this.validateOptions(options);
+    const validationError = containerSelectorError(options.container, "tapAny");
     if (validationError) {
       return this.createErrorResult(options.action, validationError);
     }
@@ -1853,9 +1850,11 @@ export class TapAnyElement extends BaseVisualChange {
               options.display,
               this.observeScreen,
               this.adb,
-              this.lastRenderedObservation,
-              signal,
-              this.displayTransitionReader,
+              {
+                lastRenderedObservation: this.lastRenderedObservation,
+                signal,
+                transitions: this.displayTransitionReader,
+              },
             );
       const refresh: RefreshViewHierarchy =
         targetDisplay && this.device.platform === "android"

@@ -4,6 +4,7 @@ import { Migrator, FileMigrationProvider, DEFAULT_MIGRATION_TABLE } from "kysely
 import { existsSync, promises as fs } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { ENV, readEnvRaw } from "../config/env";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -49,7 +50,7 @@ export interface RunMigrationsOptions {
 
 export function resolveMigrationFolder(env: NodeJS.ProcessEnv = process.env): string {
   // @deprecated AUTO_MOBILE_MIGRATIONS_DIR - use AUTOMOBILE_MIGRATIONS_DIR instead
-  const envPath = env.AUTOMOBILE_MIGRATIONS_DIR ?? env.AUTO_MOBILE_MIGRATIONS_DIR;
+  const envPath = readEnvRaw(ENV.MIGRATIONS_DIR, env);
   if (envPath) {
     return resolvePathFromDaemonLaunchWorkingDirectory(envPath, env);
   }
@@ -67,7 +68,7 @@ export function resolveMigrationFolder(env: NodeJS.ProcessEnv = process.env): st
 }
 
 function readRecoveryEnv(env: NodeJS.ProcessEnv): string | undefined {
-  return (env.AUTOMOBILE_MIGRATION_RECOVERY ?? env.AUTO_MOBILE_MIGRATION_RECOVERY)?.trim();
+  return readEnvRaw(ENV.MIGRATION_RECOVERY, env)?.trim();
 }
 
 function isMigrationRecoveryEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -510,7 +511,7 @@ export async function runMigrations(
       provider:
         options.provider ??
         // Static imports keep bundled builds independent of the on-disk folder.
-        ((env.AUTOMOBILE_MIGRATIONS_DIR ?? env.AUTO_MOBILE_MIGRATIONS_DIR)
+        (readEnvRaw(ENV.MIGRATIONS_DIR, env)
           ? new FileMigrationProvider({
               fs,
               path,

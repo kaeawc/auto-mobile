@@ -1,5 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { clampedIosCoordinateSwipeDuration } from "../../../../src/features/action/swipeon/swipeDurationReport";
+import {
+  clampedIosCoordinateSwipeDuration,
+  iosSwipeDurationReport,
+  withSwipeOnVelocity,
+} from "../../../../src/features/action/swipeon/swipeDurationReport";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import type { BootedDevice, Element } from "../../../../src/models";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
@@ -69,6 +73,8 @@ describe("TalkBack semantic scroll route reports an ignored duration (#12987)", 
     );
     expect(result.durationIgnored).toBe(true);
     expect(result.warnings?.[0]).toContain("TalkBack semantic scroll");
+    // #12968: the nominal duration must not become a fabricated velocity.
+    expect(withSwipeOnVelocity(result, {}).velocityPxPerSecond).toBeUndefined();
   });
 
   test("a speed preset stays quiet but still marks the duration nominal", async () => {
@@ -84,5 +90,55 @@ describe("TalkBack semantic scroll route reports an ignored duration (#12987)", 
     );
     expect(result.durationIgnored).toBe(true);
     expect(result.warnings).toBeUndefined();
+  });
+});
+
+describe("withSwipeOnVelocity (#12968)", () => {
+  const base = { success: true, x1: 0, y1: 0, x2: 300, y2: 400, duration: 500 };
+
+  test("a dispatched swipe reports distance over duration, same as swipeAt", () => {
+    expect(withSwipeOnVelocity(base, {}).velocityPxPerSecond).toBe(1000);
+  });
+
+  test("the iOS clamp's effectiveDurationMs replaces the requested duration", () => {
+    const clamped = { ...base, duration: 100, effectiveDurationMs: 250 };
+    expect(withSwipeOnVelocity(clamped, {}).velocityPxPerSecond).toBe(2000);
+  });
+
+  test("the TalkBack semantic scroll (durationIgnored) omits velocity", () => {
+    const result = withSwipeOnVelocity({ ...base, durationIgnored: true }, {});
+    expect(result.velocityPxPerSecond).toBeUndefined();
+  });
+
+  test("boomerang, lookFor and failures omit velocity", () => {
+    expect(withSwipeOnVelocity(base, { boomerang: {} }).velocityPxPerSecond).toBeUndefined();
+    expect(withSwipeOnVelocity(base, { lookFor: {} }).velocityPxPerSecond).toBeUndefined();
+    expect(
+      withSwipeOnVelocity({ ...base, success: false }, {}).velocityPxPerSecond,
+    ).toBeUndefined();
+  });
+});
+
+describe("iosSwipeDurationReport (#13145)", () => {
+  test("a reported synthesized floor drives the velocity, not the requested duration", () => {
+    const report = iosSwipeDurationReport(500, 10, {
+      swipeRoute: "unpinnedSynthesized",
+      effectiveDurationMs: 50,
+    });
+    expect(report.effectiveDurationMs).toBe(50);
+    const swipe = { success: true, x1: 0, y1: 0, x2: 500, y2: 0, duration: 10, ...report };
+    // 500 pt over the dispatched 50 ms, not the requested 10 ms (50000 px/s).
+    expect(withSwipeOnVelocity(swipe, {}).velocityPxPerSecond).toBe(10_000);
+  });
+
+  test("without a report it falls back to the XCUICoordinate assumption", () => {
+    expect(iosSwipeDurationReport(100, 3000, {})).toMatchObject({ effectiveDurationMs: 1000 });
+    expect(iosSwipeDurationReport(300, 300, {})).toEqual({});
+  });
+
+  test("a route with no route name is treated as unreported even if a duration is present", () => {
+    expect(iosSwipeDurationReport(100, 3000, { effectiveDurationMs: 3000 })).toMatchObject({
+      effectiveDurationMs: 1000,
+    });
   });
 });

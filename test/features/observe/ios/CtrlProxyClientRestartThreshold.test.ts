@@ -10,10 +10,8 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
-import {
-  RealCtrlProxyWebSocketInTestError,
-  defaultWebSocketFactory,
-} from "../../../../src/features/observe/DeviceServiceClient";
+import { defaultWebSocketFactory } from "../../../../src/features/observe/DeviceServiceClient";
+import { RealCtrlProxyWebSocketInTestError } from "../../../../src/features/observe/RealCtrlProxyWebSocketInTestError";
 import { fixedBackoff } from "../../../../src/utils/Backoff";
 import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { ActionableError } from "../../../../src/models/ActionableError";

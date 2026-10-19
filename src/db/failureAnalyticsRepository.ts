@@ -1,3 +1,4 @@
+import { deleteOrphanFailureGroups } from "./failureGroupRetention";
 import { errorMessage } from "../utils/describeUnknownError";
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
@@ -175,24 +176,29 @@ interface FailuresStreamResponse {
 const STREAM_LIMIT_MAX = 500;
 
 export class FailureAnalyticsRepository {
-  private timer: Timer;
   private db: Kysely<Database> | null;
+  private timer: Timer;
   private getBarrier: () => DbWriteBarrier;
   private idGenerator: IdGenerator;
 
   constructor(
-    timer: Timer = defaultTimer,
     db?: Kysely<Database>,
+    timer: Timer = defaultTimer,
     // Resolve the shared barrier per write, not once at construction, so a
     // same-process DB reopen (resetDbWriteBarrier swaps in a fresh barrier) is
     // seen instead of a pinned drained instance (issue #2912).
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     idGenerator: IdGenerator = defaultIdGenerator,
   ) {
-    this.timer = timer;
     this.db = db ?? null;
+    this.timer = timer;
     this.getBarrier = getBarrier;
     this.idGenerator = idGenerator;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
   }
 
   private getDb(): Kysely<Database> {
@@ -1179,19 +1185,7 @@ export class FailureAnalyticsRepository {
       // use a correlated NOT EXISTS (index-served, early-exit) rather than
       // materializing the full DISTINCT set for a NOT IN scan.
       if (deleted > 0) {
-        await db
-          .deleteFrom("failure_groups")
-          .where((eb) =>
-            eb.not(
-              eb.exists(
-                eb
-                  .selectFrom("failure_occurrences")
-                  .select(sql`1`.as("one"))
-                  .whereRef("failure_occurrences.group_id", "=", "failure_groups.id"),
-              ),
-            ),
-          )
-          .execute();
+        await deleteOrphanFailureGroups(db);
       }
     } catch (error) {
       logger.warn(`[FailureAnalyticsRepository] Retention cleanup failed: ${error}`);

@@ -9,6 +9,7 @@ type ObservedState = Pick<
   | "collectActiveWindow"
   | "collectForegroundIdentity"
   | "collectForegroundSnapshot"
+  | "collectFocusedSystemUiSurface"
 >;
 
 /** Keeps the older observe fixture's array-shaped back stack unchanged. */
@@ -36,6 +37,10 @@ export class FakeDeviceStateCollector implements ObservedState {
     options: { displayId?: number } = {},
   ): ReturnType<DeviceStateCollector["collectForegroundSnapshot"]> {
     return this.foregroundSnapshots.get(options.displayId ?? 0) ?? null;
+  }
+
+  async collectFocusedSystemUiSurface(): Promise<boolean> {
+    return false;
   }
 
   async collectBackStack(result: ObserveResult): Promise<void> {

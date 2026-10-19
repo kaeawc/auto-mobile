@@ -142,7 +142,12 @@ find_simulator() {
     echo "${available_sim}"
 }
 
-SIMULATOR_ID=$(find_simulator)
+# Capture via a temp file rather than $(find_simulator): a function inside a
+# command substitution runs with errexit silently disabled (SC2311).
+simulator_id_file=$(mktemp)
+find_simulator > "${simulator_id_file}"
+SIMULATOR_ID=$(<"${simulator_id_file}")
+rm -f "${simulator_id_file}"
 if [ -z "${SIMULATOR_ID}" ]; then
     echo -e "${YELLOW}Warning: No iOS simulator available. Xcode tests will be skipped.${NC}"
     echo -e "${YELLOW}To run tests, create a simulator: xcrun simctl create 'iPhone 16' 'iPhone 16'${NC}"

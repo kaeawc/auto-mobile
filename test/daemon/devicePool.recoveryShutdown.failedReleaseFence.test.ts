@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { expect, spyOn, test } from "bun:test";
@@ -84,7 +85,7 @@ test("failed-release reaper retries back off exponentially and stop at five minu
 test("a live heartbeat leaves a due failed-release fence untouched", async () => {
   const { pool, sessions, timer, monitor, releases, record } = await setupFailedReleaseFence();
   timer.advanceTime(20_001);
-  sessions.recordHeartbeat("session");
+  await deliverDaemonHeartbeat(sessions, "session");
   const before = { ...record, reservations: new Set(record.reservations) };
   await monitor.tick();
   expect(releases).toEqual([]);

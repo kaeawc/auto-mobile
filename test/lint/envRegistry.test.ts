@@ -2,7 +2,13 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Visitor, type Expression } from "oxc-parser";
-import { ENV_REGISTRY, readEnvRaw, readEnvTrimmed, ENV } from "../../src/config/env";
+import {
+  AMBIENT_ENV_REGISTRY,
+  ENV_REGISTRY,
+  readEnvRaw,
+  readEnvTrimmed,
+  ENV,
+} from "../../src/config/env";
 import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
 
 /**
@@ -97,8 +103,66 @@ function findEnvNames(file: string, source: string): Set<string> {
   return names;
 }
 
+function isProcessEnv(node: Expression): boolean {
+  return (
+    node.type === "MemberExpression" &&
+    !node.computed &&
+    node.object.type === "Identifier" &&
+    node.object.name === "process" &&
+    node.property.type === "Identifier" &&
+    node.property.name === "env"
+  );
+}
+
+/** Registered names read straight off `process.env` instead of through readEnvRaw/readEnvTrimmed. */
+function rawProcessEnvReads(file: string, source: string, registered: Set<string>): string[] {
+  const hits: string[] = [];
+  new Visitor({
+    VariableDeclarator(node) {
+      // `const { HOME } = process.env` is a raw read exactly like `process.env.HOME`.
+      if (node.id.type !== "ObjectPattern" || !node.init || !isProcessEnv(node.init)) {
+        return;
+      }
+      for (const property of node.id.properties) {
+        if (property.type !== "Property" || property.computed) {
+          continue;
+        }
+        const key = property.key;
+        const name =
+          key.type === "Identifier"
+            ? key.name
+            : key.type === "Literal" && typeof key.value === "string"
+              ? key.value
+              : undefined;
+        if (name && registered.has(name)) {
+          hits.push(`${file}\t${name}`);
+        }
+      }
+    },
+    MemberExpression(node) {
+      if (!isProcessEnv(node.object)) {
+        return;
+      }
+      const name = node.computed
+        ? staticName(node.property as Expression)
+        : node.property.type === "Identifier"
+          ? node.property.name
+          : undefined;
+      if (name && registered.has(name)) {
+        hits.push(`${file}\t${name}`);
+      }
+    },
+  }).visit(parseGuardSource(file, source));
+  return hits;
+}
+
 function registeredNames(): Set<string> {
-  return new Set(ENV_REGISTRY.flatMap((spec) => [spec.name, spec.legacyName ?? spec.name]));
+  return new Set(
+    [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY].flatMap((spec) => [
+      spec.name,
+      spec.legacyName ?? spec.name,
+    ]),
+  );
 }
 
 function readBaseline(): string[] {
@@ -121,13 +185,18 @@ function unregisteredReads(files: Map<string, string>): string[] {
 
 describe("environment variable registry", () => {
   let found: string[];
+  let rawReads: string[];
   // The AST scan of src/ runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
-    found = unregisteredReads(
-      new Map(
-        typeScriptFiles(SRC).map((file) => [relativePosix(ROOT, file), readFileSync(file, "utf8")]),
-      ),
+    const files = new Map(
+      typeScriptFiles(SRC).map((file) => [relativePosix(ROOT, file), readFileSync(file, "utf8")]),
     );
+    found = unregisteredReads(files);
+    const registered = registeredNames();
+    rawReads = [...files]
+      .filter(([relative]) => relative !== REGISTRY_FILE)
+      .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, registered))
+      .sort();
   }, 60_000);
 
   test("every env read in src/ is registered or on the shrink-only baseline", () => {
@@ -149,6 +218,35 @@ describe("environment variable registry", () => {
       [...baseline].filter((entry) => !found.includes(entry)),
       "Stale baseline entries: rerun with UPDATE_ENV_REGISTRY_BASELINE=1 to shrink it.",
     ).toEqual([]);
+  });
+
+  test("registered variables are read through the registry, never raw process.env", () => {
+    expect(
+      rawReads,
+      "Read registered variables with readEnvRaw/readEnvTrimmed(spec) instead of process.env.X.",
+    ).toEqual([]);
+  });
+
+  test("raw process.env detector flags registered names only", () => {
+    const registered = new Set(["HOME"]);
+    expect(
+      rawProcessEnvReads(
+        "x.ts",
+        `process.env.HOME; process.env["HOME"]; process.env.OTHER; env.HOME;`,
+        registered,
+      ),
+    ).toEqual(["x.ts\tHOME", "x.ts\tHOME"]);
+  });
+
+  test("raw process.env detector flags destructured reads", () => {
+    const registered = new Set(["HOME", "PATH"]);
+    expect(
+      rawProcessEnvReads(
+        "x.ts",
+        `const { HOME, OTHER, "PATH": p } = process.env; const { HOME: h2 } = env;`,
+        registered,
+      ),
+    ).toEqual(["x.ts\tHOME", "x.ts\tPATH"]);
   });
 
   test("baseline is sorted and has no duplicates", () => {
@@ -173,14 +271,14 @@ describe("environment variable registry", () => {
   });
 
   test("registry entries are unique, documented and listed in the environment docs", () => {
-    const names = ENV_REGISTRY.flatMap((spec) =>
+    const names = [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY].flatMap((spec) =>
       spec.legacyName ? [spec.name, spec.legacyName] : [spec.name],
     );
     expect(new Set(names).size).toBe(names.length);
     const docs = readFileSync(DOCS, "utf8");
     const missing = names.filter((name) => !docs.includes(`\`${name}\``));
     expect(missing, `Add to ${path.relative(ROOT, DOCS)}`).toEqual([]);
-    for (const spec of ENV_REGISTRY) {
+    for (const spec of [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY]) {
       expect(spec.doc.length).toBeGreaterThan(0);
       expect(spec.default.length).toBeGreaterThan(0);
     }

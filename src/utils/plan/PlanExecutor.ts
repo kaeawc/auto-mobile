@@ -9,7 +9,6 @@ import {
   DEFAULT_ABORT_STRATEGY,
 } from "../../models/Plan";
 import { logger, type Logger } from "../logger";
-import { ToolRegistry, type RegisteredTool } from "../../server/toolRegistry";
 import { ActionableError } from "../../models";
 import { isDebugModeEnabled } from "../debug";
 import {
@@ -28,7 +27,6 @@ import {
   ParticipantFailureTracker,
   type ParticipantFailedError,
 } from "./ParticipantFailureTracker";
-import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import {
@@ -38,6 +36,8 @@ import {
 } from "../../models/DeviceLostError";
 import {
   DefaultPlanStepExecutor,
+  type PlanStepTool,
+  type PlanStepTools,
   type StepExecutionContext,
   type StepExecutionResult,
 } from "./PlanStepExecutor";
@@ -163,19 +163,43 @@ interface ParallelPlanExecutionOptions {
   executionOptions?: PlanExecutionOptions;
 }
 
+/** The slice of the daemon session manager the executor reads to resolve a parallel track's device. */
+export interface PlanExecutorSessionManager {
+  getDeviceLabels(sessionId: string): Record<string, string> | undefined;
+  getDeviceForSession(sessionId: string): string | null;
+}
+
+/** The slice of daemon state the executor needs; the server layer wires the real singleton. */
+export interface PlanExecutorDaemon {
+  /** The session manager, or undefined when the daemon is not initialized (stdio, tests). */
+  sessionManager(): PlanExecutorSessionManager | undefined;
+}
+
+/** Collaborators injected so `src/utils` never imports the server or daemon tiers. */
+export interface PlanExecutorCollaborators<TTool extends PlanStepTool = PlanStepTool> {
+  toolRegistry: PlanStepTools<TTool>;
+  daemon: PlanExecutorDaemon;
+}
+
 /**
  * Default plan execution implementation
  * Executes plan steps sequentially or in parallel (multi-device)
  */
-export class DefaultPlanExecutor implements PlanExecutor {
+export class DefaultPlanExecutor<
+  TTool extends PlanStepTool = PlanStepTool,
+> implements PlanExecutor {
   private timer: Timer;
-  private stepExecutor: DefaultPlanStepExecutor<RegisteredTool>;
+  private stepExecutor: DefaultPlanStepExecutor<TTool>;
 
-  constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
+  constructor(
+    private readonly collaborators: PlanExecutorCollaborators<TTool>,
+    timer: Timer = defaultTimer,
+    loggerInstance: Logger = logger,
+  ) {
     this.timer = timer;
-    this.stepExecutor = new DefaultPlanStepExecutor<RegisteredTool>(
-      ToolRegistry,
-      () => DaemonState.getInstance().isInitialized(),
+    this.stepExecutor = new DefaultPlanStepExecutor<TTool>(
+      collaborators.toolRegistry,
+      () => collaborators.daemon.sessionManager() !== undefined,
       timer,
       loggerInstance,
     );
@@ -763,11 +787,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
   }
 
   private resolveTrackDeviceId(deviceLabel: string, sessionUuid?: string): string | undefined {
-    const daemonState = DaemonState.getInstance();
-    if (!sessionUuid || !daemonState.isInitialized()) {
+    const sessionManager = this.collaborators.daemon.sessionManager();
+    if (!sessionUuid || !sessionManager) {
       return undefined;
     }
-    const sessionManager = daemonState.getSessionManager();
     const trackSessionUuid = sessionManager.getDeviceLabels(sessionUuid)?.[deviceLabel];
     // A plan label is not a device ID. Unallocated tracks must never cancel
     // another track's jobs by falling back to the orchestrator's base device.

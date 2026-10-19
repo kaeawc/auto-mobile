@@ -1,4 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test";
 import { registerPlanTools } from "../../src/server/planTools";
 import * as realDeviceGestureRecordingManager from "../../src/server/deviceGestureRecordingManager";
@@ -66,11 +67,11 @@ describe("exportPlan tool", () => {
     expect(tool!.handler).toBeDefined();
 
     const response = await tool!.handler({});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.recordingId).toBe("rec-123");
     expect(payload.planName).toBe("test-plan");
     expect(payload.planContent).toContain("name: test-plan");
@@ -87,15 +88,16 @@ describe("exportPlan tool", () => {
       getDeviceGestureRecordingStatus: mockGetDeviceGestureRecordingStatus,
     }));
     const tool = ToolRegistry.getTool("exportPlan")!;
+    const outputSchema = tool.outputSchema!;
     const response = await tool.handler({});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
     expect(payload.success).toBe(true);
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.error).toBe(error);
     expect(payload.planContent).toBe(partialResult.planContent);
-    expect(tool.outputSchema.parse(payload)).toEqual(payload);
-    expect(tool.outputSchema.shape.warnings).toBeUndefined();
+    expect(outputSchema.parse(payload)).toEqual(payload);
+    expect(outputSchema.parse({ ...payload, warnings: ["x"] })).not.toHaveProperty("warnings");
   });
 
   test("getevent failure uses the existing export error field", async () => {
@@ -109,12 +111,12 @@ describe("exportPlan tool", () => {
     }));
     const tool = ToolRegistry.getTool("exportPlan")!;
     const response = await tool.handler({});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
     expect(payload.success).toBe(false);
-    expect(response.isError).toBe(true);
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.error).toContain("Touch track (getevent) spawn failed");
-    expect(tool.outputSchema.parse(payload)).toEqual(payload);
+    expect(tool.outputSchema?.parse(payload)).toEqual(payload);
   });
 
   test("nothing captured is a typed user-input failure", async () => {
@@ -125,10 +127,10 @@ describe("exportPlan tool", () => {
     }));
     const response = await ToolRegistry.getTool("exportPlan")!.handler({});
     const payload = { success: false, error: error.message, reason: "no_user_input_captured" };
-    expect(response.isError).toBe(true);
-    expect(response.structuredContent).toEqual(payload);
-    expect(JSON.parse(response.content[0].text)).toEqual(payload);
-    expect(ToolRegistry.getTool("exportPlan")!.outputSchema.parse(payload)).toEqual(payload);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolStructured(response)).toEqual(payload);
+    expect(toolJson(response)).toEqual(payload);
+    expect(ToolRegistry.getTool("exportPlan")!.outputSchema?.parse(payload)).toEqual(payload);
   });
 
   test("returns error when no active recording", async () => {
@@ -141,11 +143,11 @@ describe("exportPlan tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.handler({});
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(false);
-    expect(response.isError).toBe(true);
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.error).toContain("No active recording");
   });
 
@@ -159,11 +161,11 @@ describe("exportPlan tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.handler({ recordingId: "wrong-id" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(false);
-    expect(response.isError).toBe(true);
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.error).toContain("does not match active recording");
   });
 
@@ -192,11 +194,11 @@ describe("exportPlan tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.handler({ planName: customPlanName });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.planName).toBe(customPlanName);
   });
 
@@ -210,11 +212,11 @@ describe("exportPlan tool", () => {
     expect(tool).toBeDefined();
 
     const response = await tool!.handler({ recordingId: "rec-123" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+    const payload = toolJson(response);
 
     expect(payload.success).toBe(true);
-    expect(response.isError).toBeUndefined();
-    expect(response.structuredContent).toEqual(payload);
+    expect(toolIsError(response)).toBe(false);
+    expect(toolStructured(response)).toEqual(payload);
     expect(payload.recordingId).toBe("rec-123");
   });
 });

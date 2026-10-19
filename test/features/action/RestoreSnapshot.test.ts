@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -9,7 +10,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
-import * as os from "os";
+
 import { logger } from "../../../src/utils/logger";
 import {
   noOpSnapshotDirectorySync,
@@ -30,6 +31,7 @@ describe("RestoreSnapshot", () => {
   }>;
   let restoreSnapshot: RestoreSnapshot;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -43,7 +45,7 @@ describe("RestoreSnapshot", () => {
 
     // Create fakes
     fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     emulatorReadinessCalls = [];
@@ -62,7 +64,7 @@ describe("RestoreSnapshot", () => {
     } as AndroidEmulatorClient;
 
     // Create secure temporary directory for tests
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-restore-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create RestoreSnapshot instance with fakes
@@ -77,12 +79,6 @@ describe("RestoreSnapshot", () => {
   });
 
   afterEach(async () => {
-    // Clean up test directory
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch (error) {
-      // Ignore cleanup errors
-    }
     fakeTimer.reset();
   });
 
@@ -824,7 +820,7 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
       undefined,
       undefined,
       store,
-      simctl as any,
+      simctl,
       undefined,
       operations,
     );
@@ -929,6 +925,7 @@ describe("RestoreSnapshot (iOS)", () => {
   let device: BootedDevice;
   let simctl: FakeSimctl;
   let store: DeviceSnapshotStore;
+  const scratch = useScratchRoot("snapshot-test-");
   let testBasePath: string;
 
   beforeEach(async () => {
@@ -939,16 +936,8 @@ describe("RestoreSnapshot (iOS)", () => {
     };
 
     simctl = new FakeSimctl();
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-restore-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
-  });
-
-  afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
   });
 
   function makeRestore(
@@ -960,7 +949,7 @@ describe("RestoreSnapshot (iOS)", () => {
       undefined,
       new FakeTimer(),
       store,
-      simctl as any,
+      simctl,
       undefined,
       operations,
     );

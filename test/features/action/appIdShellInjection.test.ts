@@ -7,6 +7,7 @@ import type { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: BootedDevice = {
@@ -35,22 +36,10 @@ describe("app ID device-shell boundaries", () => {
     "launchApp keeps %s inside one device-shell word",
     async (_label, appId, quoted) => {
       const adb = new FakeAdbExecutor();
-      const launch = new LaunchApp(device, adb as any);
-      const perf = {
-        track: async <T>(_name: string, action: () => Promise<T>) => action(),
-        end: () => {},
-      };
+      const launch = new LaunchApp(device, adb);
+      const perf = new NoOpPerformanceTracker();
 
-      await (
-        launch as unknown as {
-          performLaunch(
-            packageName: string,
-            activityName: undefined,
-            userId: number,
-            perf: typeof perf,
-          ): Promise<unknown>;
-        }
-      ).performLaunch(appId, undefined, 0, perf);
+      await launch.performLaunch(appId, undefined, 0, perf);
 
       expect(adb.getExecutedCommands()).toEqual([
         `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER ${quoted}`,
@@ -83,7 +72,7 @@ describe("app ID device-shell boundaries", () => {
       );
       adb.setForegroundApp({ packageName: appId, userId: 0 });
 
-      await new TerminateApp(device, adb as any, { timer: new FakeTimer() }).execute(appId, {
+      await new TerminateApp(device, adb, { timer: new FakeTimer() }).execute(appId, {
         skipObservation: true,
       });
 

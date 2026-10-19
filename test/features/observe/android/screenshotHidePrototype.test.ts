@@ -1,5 +1,5 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, expect, test } from "bun:test";
-import WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { ScreenshotResult } from "../../../../src/features/observe/android/types";
 import {
@@ -29,15 +29,14 @@ function clientWithCapturedFrames(supportedCommands?: readonly string[]) {
   const adb = new FakeAdbExecutor();
   AndroidCtrlProxyClient.resetInstances();
   const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
-    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
     screenshotBackoffScheduler: new FakeScreenshotBackoffScheduler(),
   });
   const frames: Record<string, unknown>[] = [];
-  client["ws"] = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => frames.push(JSON.parse(data) as Record<string, unknown>),
-  } as unknown as WebSocket;
+  client.connectionTestHooks.socket = new FakeOpenSocket((data) => {
+    frames.push(JSON.parse(data) as Record<string, unknown>);
+  });
   // The handshake itself sends set_hierarchy_interval; only screenshot frames matter here.
   const sent = {
     get frames() {
@@ -77,7 +76,7 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
 
   test("a device advertising the capability receives the flag", async () => {
     const { client, sent } = clientWithCapturedFrames(fullAdvertisement);
-    await client["dispatchScreenshotRequest"]("s-1", undefined, 2, true);
+    await client["getScreenshotRequester"]().dispatchScreenshotRequest("s-1", undefined, 2, true);
     expect(sent.frames).toEqual([
       { type: "request_screenshot", requestId: "s-1", displayId: 2, hidePrototypes: true },
     ]);
@@ -92,13 +91,18 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
     ["no handshake yet", undefined],
   ])("%s never receives the flag", async (_, advertisement) => {
     const { client, sent } = clientWithCapturedFrames(advertisement);
-    await client["dispatchScreenshotRequest"]("s-1", undefined, undefined, true);
+    await client["getScreenshotRequester"]().dispatchScreenshotRequest(
+      "s-1",
+      undefined,
+      undefined,
+      true,
+    );
     expect(sent.frames).toEqual([{ type: "request_screenshot", requestId: "s-1" }]);
   });
 
   test("a capture without hiding never sends the flag", async () => {
     const { client, sent } = clientWithCapturedFrames(fullAdvertisement);
-    await client["dispatchScreenshotRequest"]("s-1");
+    await client["getScreenshotRequester"]().dispatchScreenshotRequest("s-1");
     expect(sent.frames).toEqual([{ type: "request_screenshot", requestId: "s-1" }]);
   });
 

@@ -6,7 +6,7 @@ import { FakePlanExecutionLock } from "../fakes/FakePlanExecutionLock";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import type { ToolSelectionSessionManager } from "../../src/features/toolSelection/selectionSessionResolver";
 import {
   ExecutionTrackerPlanExecutionLock,
@@ -208,10 +208,10 @@ describe("Plan execution lock through session routing", () => {
   let explicitFixture: McpTestFixture;
   let routingFixture: McpTestFixture;
   let restorePipeline: () => void;
-  let originalRepository: Parameters<typeof ToolRegistry.setToolCallRepositoryForTesting>[0];
+  let originalRepository: ToolRegistryCollaborators["toolCallRepository"];
 
   beforeAll(async () => {
-    originalRepository = ToolRegistry["toolCallRepository"];
+    originalRepository = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     // Reuse the pipeline seam: resolve no device and bypass DB-backed finalization.
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({

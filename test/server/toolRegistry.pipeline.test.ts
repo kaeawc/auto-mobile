@@ -44,6 +44,26 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
+const writtenObservation = z.looseObject({
+  viewHierarchy: z.looseObject({
+    hierarchy: z.looseObject({
+      node: z.looseObject({
+        "view-id": z.string().optional(),
+        node: z
+          .array(
+            z.looseObject({
+              "view-id": z.string().optional(),
+              occludedByViewId: z.string().optional(),
+              bounds: z.array(z.number()).optional(),
+            }),
+          )
+          .optional(),
+      }),
+    }),
+  }),
+});
+const finalizedStructured = z.looseObject({ viewHierarchy: z.unknown(), artifact: z.unknown() });
+
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
     name: "Pixel",
@@ -423,7 +443,6 @@ describe("ToolRegistry device-aware pipeline", () => {
   test("logs and continues when best-effort CtrlProxy session bind fails", async () => {
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([device]);
-    const originalGetInstance = (AndroidCtrlProxyClient as any).getInstance;
     const log = new FakeLogger();
     const registry = new ToolRegistryClass(undefined, log);
 
@@ -433,10 +452,8 @@ describe("ToolRegistry device-aware pipeline", () => {
         async recordToolCall(): Promise<void> {},
       },
     });
-    (AndroidCtrlProxyClient as any).getInstance = () => ({
-      bindSession() {
-        throw new Error("bind unavailable");
-      },
+    const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("bind unavailable");
     });
     const restorePipelineOverrides = registry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -462,7 +479,7 @@ describe("ToolRegistry device-aware pipeline", () => {
       );
     } finally {
       restorePipelineOverrides();
-      (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
+      getInstance.mockRestore();
     }
   });
 
@@ -594,9 +611,8 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
   test("all does not replace the session's last hierarchy", async () => {
     const daemon = DaemonState.getInstance();
-    const originalManager = Reflect.get(daemon, "sessionManager");
     const writes: string[] = [];
-    Reflect.set(daemon, "sessionManager", {
+    const originalManager = daemon.setSessionManagerForTesting({
       setLastHierarchy: () => writes.push("hierarchy"),
     });
     const initialized = spyOn(daemon, "isInitialized").mockReturnValue(true);
@@ -616,7 +632,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(writes).toEqual([]);
     } finally {
       initialized.mockRestore();
-      Reflect.set(daemon, "sessionManager", originalManager);
+      daemon.setSessionManagerForTesting(originalManager);
     }
   });
 
@@ -746,7 +762,9 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       },
     ]);
     expect(writer.writes).toHaveLength(1);
-    expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
+    expect(
+      writtenObservation.parse(writer.writes[0].data).viewHierarchy.hierarchy.node["view-id"],
+    ).toBeUndefined();
     expect(result.finalizedResponse.structuredContent).toEqual({
       artifact: {
         path: "/tmp/artifacts/observe-1.json",
@@ -806,11 +824,12 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         },
       ]);
       expect(writer.writes).toHaveLength(1);
-      const writtenRoot = (writer.writes[0].data as any).viewHierarchy.hierarchy.node;
+      const writtenRoot = writtenObservation.parse(writer.writes[0].data).viewHierarchy.hierarchy
+        .node;
       expect(writtenRoot["view-id"]).toBeUndefined();
-      expect(writtenRoot.node[0]["view-id"]).toBe("com.example:id/floating_overlay");
-      expect(writtenRoot.node[1].occludedByViewId).toBe("com.example:id/floating_overlay");
-      expect(writtenRoot.node[1].bounds).toEqual([24, 0, 1056, 120]);
+      expect(writtenRoot.node?.[0]?.["view-id"]).toBe("com.example:id/floating_overlay");
+      expect(writtenRoot.node?.[1]?.occludedByViewId).toBe("com.example:id/floating_overlay");
+      expect(writtenRoot.node?.[1]?.bounds).toEqual([24, 0, 1056, 120]);
       expect(wireResult.structuredContent).toBeUndefined();
       expect(JSON.parse(wireResult.content[0].text)).toEqual({
         artifact: {
@@ -847,8 +866,12 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     });
 
     expect(writer.writes).toHaveLength(0);
-    expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
-    expect((result.finalizedResponse.structuredContent as any).artifact).toBeUndefined();
+    expect(
+      finalizedStructured.parse(result.finalizedResponse.structuredContent).viewHierarchy,
+    ).toBeDefined();
+    expect(
+      finalizedStructured.parse(result.finalizedResponse.structuredContent).artifact,
+    ).toBeUndefined();
     expect(result.finalizedResponse.content[0].text).toBe(
       stringifyToolResponse(result.finalizedResponse.structuredContent),
     );
@@ -879,7 +902,9 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     expect(requestedDirectories).toEqual([]);
     expect(writer.writes).toHaveLength(0);
-    expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
+    expect(
+      finalizedStructured.parse(result.finalizedResponse.structuredContent).viewHierarchy,
+    ).toBeDefined();
   });
 
   // #10079: the writer's directory-validation cache and prune throttle are
@@ -982,11 +1007,11 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     const writer = new FakeObservationArtifactWriter();
     writer.throwOnWrite = new Error("artifact disk is full");
     const telemetryEvents: unknown[] = [];
-    const originalGetInstance = (TelemetryRecorder as any).getInstance;
-    (TelemetryRecorder as any).getInstance = () => ({
-      recordToolCallEvent(event: unknown) {
-        telemetryEvents.push(event);
-      },
+    const recordToolCallEvent = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordToolCallEvent",
+    ).mockImplementation((event) => {
+      telemetryEvents.push(event);
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
@@ -1013,17 +1038,17 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(telemetryEvents).toHaveLength(0);
       expect(getToolCallRecordingStatus({ timer })?.stepCount).toBe(0);
     } finally {
-      (TelemetryRecorder as any).getInstance = originalGetInstance;
+      recordToolCallEvent.mockRestore();
     }
   });
 
   test("records a structured tool error as its code:message, not [object Object]", async () => {
     const telemetryEvents: Array<{ success: boolean; error: unknown }> = [];
-    const originalGetInstance = (TelemetryRecorder as any).getInstance;
-    (TelemetryRecorder as any).getInstance = () => ({
-      recordToolCallEvent(event: { success: boolean; error: unknown }) {
-        telemetryEvents.push(event);
-      },
+    const recordToolCallEvent = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordToolCallEvent",
+    ).mockImplementation((event) => {
+      telemetryEvents.push(event);
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
@@ -1067,7 +1092,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         "device_already_stopped: Failed to kill android device: Emulator is not running",
       );
     } finally {
-      (TelemetryRecorder as any).getInstance = originalGetInstance;
+      recordToolCallEvent.mockRestore();
     }
   });
 });

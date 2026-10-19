@@ -4,6 +4,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("ToolRegistry.getToolDefinitions", () => {
   const originalStructuredContentSuppressed =

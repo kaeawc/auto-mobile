@@ -10,7 +10,7 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { TouchTrackFailure } from "../features/record/android/types";
 import { DualTrackRecorder } from "../features/record/android";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { isOwnerWithinBase } from "../db/videoRecordingRepository";
 
@@ -122,13 +122,11 @@ function retainStoppedPlan(
 
 /** Base session of a derived `${base}:${label}` session; itself when the daemon is not up. */
 function daemonBaseSessionUuid(sessionUuid: string): string {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!sessionManager) {
     return sessionUuid;
   }
-  return (
-    resolveToolSelectionBaseSessionUuid(sessionUuid, daemonState.getSessionManager()) ?? sessionUuid
-  );
+  return resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) ?? sessionUuid;
 }
 
 /**

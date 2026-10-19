@@ -8,7 +8,12 @@ import { logger } from "../../utils/logger";
 import { BootedDevice, ElementBounds, ScreenSize } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Idle } from "../observe/Idle";
-import { DeviceCapabilitiesDetector, DeviceCapabilities } from "../../utils/DeviceCapabilities";
+import { DeviceCapabilitiesDetector } from "../../utils/DeviceCapabilities";
+import type {
+  PerformanceAuditResult,
+  PerformanceMetrics,
+  PerformanceViolation,
+} from "../../models/PerformanceAuditResult";
 import { TouchLatencyTracker, InertTouchPointResolver } from "./TouchLatencyTracker";
 import { isTouchLatencySamplingEnabled } from "./performanceAuditConfig";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -30,72 +35,7 @@ import {
   type GfxCounterSample,
 } from "./PerformanceAuditWindow";
 
-/**
- * Performance metrics collected during audit
- */
-interface PerformanceMetrics {
-  // Frame timing metrics
-  p50Ms: number | null;
-  p90Ms: number | null;
-  p95Ms: number | null;
-  p99Ms: number | null;
-
-  // Jank indicators, measured over the audit window (PERF_AUDIT_WINDOW_MS) from
-  // two cumulative gfxinfo readings (#10094).
-  /** Janky frames per second over the window (the unit of `jankCountThreshold`). */
-  jankCount: number | null;
-  /** Raw per-cause deltas over the window; the causes overlap, so never sum them. */
-  missedVsyncCount: number | null;
-  slowUiThreadCount: number | null;
-  frameDeadlineMissedCount: number | null;
-
-  // CPU metrics
-  /**
-   * Process CPU time over the audit window as a percentage of ONE core, from
-   * two /proc/<pid>/stat readings (#10094). Can exceed 100 for a
-   * multi-threaded process.
-   */
-  cpuUsagePercent: number | null;
-  threadCount: number | null;
-
-  // Touch latency
-  touchLatencyMs: number | null;
-
-  // ANR detection
-  anrDetected: boolean;
-  anrDetails: string | null;
-
-  // Live metrics extension
-  timeToFirstFrameMs: number | null;
-  timeToInteractiveMs: number | null;
-  frameRateFps: number | null;
-
-  // Raw diagnostics
-  gfxinfoRaw: string | null;
-  cpuStatsRaw: string | null;
-}
-
-/**
- * Performance audit result
- */
-export interface PerformanceAuditResult {
-  passed: boolean;
-  metrics: PerformanceMetrics;
-  violations: PerformanceViolation[];
-  diagnostics: string | null;
-  deviceCapabilities: DeviceCapabilities;
-}
-
-/**
- * Represents a single performance threshold violation
- */
-interface PerformanceViolation {
-  metric: string;
-  threshold: number;
-  actual: number;
-  severity: "warning" | "critical";
-  contributionWeight: number; // 0-1, how much this contributes to the overall issue
-}
+export type { PerformanceAuditResult };
 
 /**
  * Options for metric collection
@@ -131,6 +71,14 @@ interface CollectMetricsOptions {
    */
   skipTouchLatency?: boolean;
 }
+
+// Max time a single touch-latency measurement waits for its frame.
+const TOUCH_LATENCY_MAX_WAIT_MS = 200;
+// Time-to-interactive: how often frame stats are sampled, how long they must stay
+// quiet to count as interactive, and the overall bound before giving up.
+const TTI_STABILITY_CHECK_INTERVAL_MS = 100;
+const TTI_STABILITY_THRESHOLD_MS = 500;
+const TTI_MAX_WAIT_MS = 5000;
 
 /**
  * Performance audit class for collecting and validating performance metrics
@@ -285,8 +233,11 @@ export class PerformanceAudit {
    * Collect graphics performance metrics using gfxinfo. Frame-time percentiles
    * come from the closing reading; jank is the difference between an opening
    * and a closing reading `PERF_AUDIT_WINDOW_MS` apart (#10094).
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async collectGfxMetrics(
+  async collectGfxMetrics(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
@@ -354,8 +305,11 @@ export class PerformanceAudit {
    * Collect CPU usage metrics for the package: the process's CPU time over the
    * device time elapsed between two readings `PERF_AUDIT_WINDOW_MS` apart, as a
    * percentage of one core (#10094).
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async collectCpuMetrics(
+  async collectCpuMetrics(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
@@ -405,8 +359,11 @@ export class PerformanceAudit {
 
   /**
    * Check for pending ANRs
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async checkForAnr(
+  async checkForAnr(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
@@ -439,8 +396,11 @@ export class PerformanceAudit {
    * Measure touch response latency
    * Injects touch on non-clickable area and measures response time
    * Only runs when UI perf mode and synthetic touch sampling are enabled.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async measureTouchLatency(
+  async measureTouchLatency(
     packageName: string,
     screenSize: ScreenSize | undefined,
     perf: PerformanceTracker,
@@ -481,7 +441,7 @@ export class PerformanceAudit {
           screenSize,
           {
             sampleCount: 3,
-            maxWaitMs: 200,
+            maxWaitMs: TOUCH_LATENCY_MAX_WAIT_MS,
             windowBounds,
             touchPoint,
           },
@@ -502,8 +462,11 @@ export class PerformanceAudit {
    * animating sample must not null out a run that also produced a real
    * measurement (issue #6167). Only report `null` when there is no valid
    * measurement at all.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private resolveTouchLatency(result: {
+  resolveTouchLatency(result: {
     success: boolean;
     latencyMs: number;
     animating?: boolean;
@@ -540,11 +503,11 @@ export class PerformanceAudit {
   /**
    * Calculate frame rate (FPS) from gfxinfo data.
    * Uses Total frames rendered / elapsed time to compute average FPS.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async calculateFrameRate(
-    packageName: string,
-    perf: PerformanceTracker,
-  ): Promise<number | null> {
+  async calculateFrameRate(packageName: string, perf: PerformanceTracker): Promise<number | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfoFrameRate", () =>
         this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
@@ -602,8 +565,11 @@ export class PerformanceAudit {
   /**
    * Measure time to first frame (TTFF) by parsing ActivityManager logcat output.
    * Looks for "ActivityManager: Displayed" log entries with timing information.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async measureTimeToFirstFrame(
+  async measureTimeToFirstFrame(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<number | null> {
@@ -631,16 +597,19 @@ export class PerformanceAudit {
   /**
    * Measure time to interactive (TTI).
    * TTI = TTFF + time until UI is stable (no jank for 500ms).
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async measureTimeToInteractive(
+  async measureTimeToInteractive(
     packageName: string,
     ttffMs: number,
     perf: PerformanceTracker,
   ): Promise<number | null> {
     try {
-      const stabilityCheckIntervalMs = 100;
-      const stabilityThresholdMs = 500;
-      const maxWaitMs = 5000;
+      const stabilityCheckIntervalMs = TTI_STABILITY_CHECK_INTERVAL_MS;
+      const stabilityThresholdMs = TTI_STABILITY_THRESHOLD_MS;
+      const maxWaitMs = TTI_MAX_WAIT_MS;
 
       let stableStartTime: number | null = null;
       let elapsedMs = 0;

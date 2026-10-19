@@ -1,8 +1,9 @@
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import type { DaemonManagerOptions, DaemonProcessSpawner } from "../../src/daemon/manager";
 import type {
@@ -83,13 +84,12 @@ class ImmediatelyReadyRecoveryManager extends DaemonManager {
 }
 
 describe("DaemonManager control-state recovery", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemonManagerRecovery-");
   let originalDataDir: string | undefined;
   let originalLogSink: string | undefined;
 
   function paths(): { lock: string; pid: string; socket: string } {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-recovery-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     originalDataDir ??= process.env.AUTOMOBILE_DATA_DIR;
     originalLogSink ??= process.env.AUTOMOBILE_LOG_SINK;
     process.env.AUTOMOBILE_DATA_DIR = dir;
@@ -134,10 +134,6 @@ describe("DaemonManager control-state recovery", () => {
   );
 
   afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
     if (originalDataDir === undefined) {
       delete process.env.AUTOMOBILE_DATA_DIR;
     } else {

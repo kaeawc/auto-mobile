@@ -5,7 +5,7 @@ import type { Plan, PlanExecutionResult } from "../../src/models/Plan";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -131,7 +131,7 @@ describe("finish-current-step participant failure at a barrier (#10025)", () => 
     whileRunning?: () => Promise<void>,
   ): Promise<PlanExecutionResult> {
     let settled = false;
-    const execution = new DefaultPlanExecutor(timer)
+    const execution = createDefaultPlanExecutor(timer)
       .executePlan(plan, 0, "android", "device-a", "base-uuid", undefined, "finish-current-step")
       .finally(() => {
         settled = true;

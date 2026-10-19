@@ -22,10 +22,9 @@ const mockRule: fc.Arbitrary<MockRule> = fc.record({
 });
 
 // buildNetworkMockRules only reads state.getMocks(); a minimal seam keeps it pure.
-const stateFrom = (rules: MockRule[]): NetworkState =>
-  ({
-    getMocks: () => new Map(rules.map((r, i) => [`k${i}`, r] as const)),
-  }) as unknown as NetworkState;
+const stateFrom = (rules: MockRule[]): Pick<NetworkState, "getMocks"> => ({
+  getMocks: () => new Map(rules.map((r, i) => [`k${i}`, r] as const)),
+});
 
 describe("buildNetworkMockRules (property-based)", () => {
   test("preserves count and insertion order by mockId", () => {

@@ -9,10 +9,12 @@ import {
 } from "../../../src/features/observe/GetAppMetadata";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { logger } from "../../../src/utils/logger";
 
-const fakeAdbFactory = (fakeAdb: FakeAdbExecutor) => ({ create: () => fakeAdb as any });
-const nullAdbFactory = { create: () => ({}) as any };
+const fakeAdbFactory = (fakeAdb: FakeAdbExecutor) => new FakeAdbClientFactory(fakeAdb);
+// iOS sources never touch adb, so an unconfigured fake executor stands in.
+const nullAdbFactory = new FakeAdbClientFactory(new FakeAdbExecutor());
 
 // --- Android tests ---
 

@@ -9,13 +9,14 @@ import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
-import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
-import { lifecycleRequester } from "./lifecycleDeviceOwnership";
+import type { DaemonStateLike } from "../daemon/daemonState";
+import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import {
   isAnonymousAcquisitionSession,
   type SessionRecoveryTarget,
 } from "../daemon/sessionManager";
 import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import { recordAcquiredSessionReadiness } from "./recordAcquiredSessionReadiness";
 import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { DeviceBootService, type DeviceBootResult } from "../devices/deviceBootService";
@@ -107,7 +108,6 @@ type StartDeviceHooks = {
     signal?: AbortSignal,
   ) => Promise<StructuredToolResponse>;
   stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
-  rollbackCreatedDevice?: CreatedDeviceRollback;
 };
 
 /** Bound a request's wait; shared removal cleanup must retain its own lifetime. */
@@ -353,8 +353,8 @@ const bootAndPrepareDevice = async (
     },
   });
   admitRestartReservedStart(args);
-  const exclusions = await startMatchExclusions(args);
-  const deferDeviceIds = devicesHeldByOtherSessions(args);
+  const exclusions = await startMatchExclusions(args, deps.daemonState);
+  const deferDeviceIds = devicesHeldByOtherSessions(args, deps.daemonState);
   perf.startOperation("bootDevice");
   // Establish the (--debug-perf-gated) ambient tracker around the shared
   // acquisition boot attempt (getAndroid/getApple/startDevice), matching
@@ -401,8 +401,7 @@ const bootAndPrepareDevice = async (
     preparation.sourceImage,
     initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
   );
-  const daemonState = DaemonState.getInstance();
-  await reserveBootReadiness(args, budgets, deps, daemonState, options);
+  await reserveBootReadiness(args, budgets, deps, deps.daemonState, options);
 
   // A new incarnation must not inherit a prior intentional-shutdown marker
   // while its per-device runner setup is in flight.
@@ -439,7 +438,7 @@ const bootAndPrepareDevice = async (
       operationName: budgets.operationName,
       bootService,
       deviceUtils,
-      daemonState,
+      daemonState: deps.daemonState,
       totalDeadlineMs: budgets.automationDeadlineMs,
       readinessTimeoutMs: budgets.automationReadyTimeoutMs,
       timer: deps.timer,
@@ -462,7 +461,7 @@ const bootAndPrepareDevice = async (
     });
     return await bindPreparedDevice(args, budgets, deps, {
       ...options,
-      daemonState,
+      daemonState: deps.daemonState,
       preparation,
       readinessResult,
       acquisitionReadinessKey,
@@ -486,7 +485,10 @@ const bootAndPrepareDevice = async (
 };
 
 /** Selectors skip recovery targets and broker bindings before discovery can boot them. */
-async function startMatchExclusions(args: StartDeviceArgs): Promise<{
+async function startMatchExclusions(
+  args: StartDeviceArgs,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
+): Promise<{
   excludeDeviceNames: ReadonlySet<string> | undefined;
   excludeDeviceIds: ReadonlySet<string> | undefined;
 }> {
@@ -501,9 +503,7 @@ async function startMatchExclusions(args: StartDeviceArgs): Promise<{
       excludeDeviceIds: exclusions,
     });
   }
-  const recoveryTargets = getStartDevicePool(
-    DaemonState.getInstance(),
-  )?.getRecoveringAndroidTargets();
+  const recoveryTargets = getStartDevicePool(daemonState)?.getRecoveringAndroidTargets();
   return withRestartMatchExclusions(args, {
     excludeDeviceNames: unionSets(recoveryTargets?.names, managed),
     excludeDeviceIds: recoveryTargets?.serials,
@@ -539,8 +539,10 @@ function withRestartMatchExclusions(
  * reuses a session it acquired (or routes to by autolock), an anonymous caller one an anonymous
  * acquisition created.
  */
-function devicesHeldByOtherSessions(args: StartDeviceArgs): ReadonlySet<string> | undefined {
-  const daemonState = DaemonState.getInstance();
+function devicesHeldByOtherSessions(
+  args: StartDeviceArgs,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool" | "getSessionManager">,
+): ReadonlySet<string> | undefined {
   const pool = getStartDevicePool(daemonState);
   if (!pool) {
     return undefined;
@@ -849,7 +851,7 @@ async function throwIfBindingAborted(
   signal.throwIfAborted();
 }
 
-async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
+export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
   request.perf?.startOperation("ensureCtrlProxy");
   try {
     const timer = getDeviceToolsDependencies().timer;
@@ -869,7 +871,7 @@ async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<vo
           0,
         ),
     };
-    const pool = getStartDevicePool(DaemonState.getInstance());
+    const pool = getStartDevicePool(getDeviceToolsDependencies().daemonState);
     if (
       pool &&
       (await waitForDevicePreparation(
@@ -899,7 +901,7 @@ async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<vo
   }
 }
 
-async function bindBootedDeviceSession(
+export async function bindBootedDeviceSession(
   device: BootedDevice,
   args: StartDeviceArgs,
   sourceImage?: DeviceInfo,
@@ -928,9 +930,9 @@ async function bindBootedDeviceSession(
   }
   // Reserve the exact ready device before resource notifications publish it
   // to concurrent allocators.
-  const daemonState = DaemonState.getInstance();
+  const { daemonState, idGenerator } = getDeviceToolsDependencies();
   if (!daemonState.isInitialized()) {
-    const sessionId = getDeviceToolsDependencies().idGenerator.next();
+    const sessionId = idGenerator.next();
     registerDirectSessionDevice(sessionId, device);
     return sessionId;
   }
@@ -969,30 +971,34 @@ async function bindBootedDeviceSession(
 
   const sessionId = resumeSessionId ?? getDeviceToolsDependencies().idGenerator.next();
   const bind = (recoveryTarget?: SessionRecoveryTarget) =>
-    daemonState
-      .getDevicePool()
-      .bindOrReuseDeviceSession(
-        sessionId,
-        device.deviceId,
-        device.platform,
-        sourceImage,
-        childProcess,
-        device,
-        false,
-        readinessReservationOwners,
-        verifiedAndroidAvdIdentity,
-        undefined,
-        args.__mcpSessionId,
-        args.__oneShotCli === true,
-        receipt,
-        false,
-        recoveryTarget,
-      );
-  if (resumeSessionId) {
-    return await resumePreparedDeviceSession(device, args, resumeSessionId, bind, {
-      autolockEnabled: useAutolock,
-      achievedReadiness,
+    daemonState.getDevicePool().bindOrReuseDeviceSession({
+      sessionId,
+      deviceId: device.deviceId,
+      platform: device.platform,
+      sourceImage,
+      childProcess,
+      expectedIdentity: device,
+      allowSessionRebind: false,
+      readinessReservationOwners,
+      verifiedAndroidAvdIdentity,
+      mcpSessionId: args.__mcpSessionId,
+      oneShotCli: args.__oneShotCli === true,
+      receipt,
+      refusePreparedForOtherRequest: false,
+      recoveryTarget,
     });
+  if (resumeSessionId) {
+    return await resumePreparedDeviceSession(
+      device,
+      args,
+      resumeSessionId,
+      bind,
+      {
+        autolockEnabled: useAutolock,
+        achievedReadiness,
+      },
+      daemonState,
+    );
   }
   const boundSessionId = await bind();
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
@@ -1012,8 +1018,8 @@ async function resumePreparedDeviceSession(
     autolockEnabled: boolean;
     achievedReadiness: DeviceReadinessLevel;
   },
+  daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">,
 ): Promise<string> {
-  const daemonState = DaemonState.getInstance();
   const pool = daemonState.getDevicePool();
   // The resume bind and adoption share a close fence, including provisionDevice callers.
   const endResumeBind = pool.beginMcpBind(args.__mcpSessionId);
@@ -1100,41 +1106,6 @@ export function restartResumeSessionForDevice(
     : undefined;
 }
 
-/**
- * Record the readiness level actually ACHIEVED by acquisition for a session
- * bound by `bindBootedDeviceSession` (#6227 P1 follow-up, round 6 fix). By
- * the time that function runs, the caller has already awaited whatever
- * readiness setup it chose to run for this device: normal `getAndroid` /
- * `startDevice` acquisition always awaits `prepareStartDeviceRunnerReadiness`
- * successfully, so CtrlProxy / accessibility-service setup is genuinely done
- * and `automationReady` is correct. But `provisionDevice({ readiness: "none" })`
- * deliberately SKIPS that setup in `ensureProvisionDeviceReadiness` — for that
- * path recording a hardcoded `automationReady` would be a lie: a later
- * `observe` (or any other `automationReady`-requiring tool) would see the
- * session's `deviceReadiness` slot already satisfied and skip the setup it
- * still needs. Callers must pass the readiness level actually achieved
- * (`achievedReadiness`), not assume the highest one.
- *
- * Called directly (bypassing `bindBootedDeviceSession`) from
- * `bootAndPrepareDevice`'s `readinessResult.preservedSessionId` branch too
- * (#6227 round 7): recovery re-verifies runner readiness on the
- * replacement device before handing back a preserved session id, so that
- * path's achieved level is likewise always `automationReady`.
- *
- * The setter this delegates to (`SessionManager.setDeviceReadiness`) is
- * monotonic by achieved level (#6227 round 7): a lower level passed here
- * for a session that already recorded a higher one is a no-op rather than
- * a downgrade, so callers do not need to compare against the existing
- * record themselves.
- */
-function recordAcquiredSessionReadiness(
-  daemonState: DaemonStateLike,
-  sessionId: string,
-  achievedReadiness: DeviceReadinessLevel,
-): void {
-  daemonState.getSessionManager().setDeviceReadiness(sessionId, achievedReadiness);
-}
-
 function buildBootedResponse(
   device: BootedDevice,
   source: "booted" | "cold-boot",
@@ -1214,9 +1185,32 @@ async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promis
   return { ...rest, cameraPosterPath: await writer.writePoster(cameraPosterQr.text) } as T;
 }
 
-export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
-  const { prepareDevice, stripInternalAcquisitionParams, rollbackCreatedDevice } = hooks;
+/** Boot + prepare, rolling a createIfMissing image back via the injected rollback (#11100, #11827). */
+export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceRollback) {
+  return async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    deviceUtils: PlatformDeviceManager,
+    options: BootPreparationOptions,
+  ) => {
+    const bootOptions = { ...options, rollbackCreatedDevice };
+    // Keep a close during boot visible through a resumed session's bind and autolock adoption.
+    const pool = options.autolockEnabled ? initializedDevicePool() : undefined;
+    const endAutolockBind = pool?.beginMcpBind(args.__mcpSessionId);
+    try {
+      return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
+    } catch (error) {
+      await rollbackCreatedDeviceAfterBoot(bootOptions, error);
+      throw error;
+    } finally {
+      endAutolockBind?.();
+    }
+  };
+}
 
+export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
+  const { prepareDevice, stripInternalAcquisitionParams } = hooks;
   const startDeviceHandler = async (
     rawArgs: StartDeviceArgs,
     progress?: ProgressCallback,
@@ -1280,27 +1274,6 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   };
 
   return {
-    bootAndPrepareDevice: async (
-      args: StartDeviceArgs,
-      budgets: DevicePreparationBudgets,
-      deps: DeviceToolsDependencies,
-      deviceUtils: PlatformDeviceManager,
-      options: BootPreparationOptions,
-    ) => {
-      const bootOptions = { ...options, rollbackCreatedDevice };
-      // Keep a close during boot visible through a resumed session's bind and autolock adoption.
-      const endAutolockBind = options.autolockEnabled
-        ? initializedDevicePool()?.beginMcpBind(args.__mcpSessionId)
-        : undefined;
-      try {
-        return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
-      } catch (error) {
-        await rollbackCreatedDeviceAfterBoot(bootOptions, error);
-        throw error;
-      } finally {
-        endAutolockBind?.();
-      }
-    },
     startDeviceHandler,
     bindBootedDeviceSession,
     ensureCtrlProxyReady,

@@ -1,4 +1,3 @@
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
@@ -27,12 +26,11 @@ async function realHarness(replies: AndroidCtrlProxyReplies): Promise<AndroidCtr
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const socket = new FakeWebSocket("ws://fake", "none", 0, timer);
-  const ws = socket as never as WebSocket;
   await Promise.resolve();
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "contract-device", platform: "android", name: "contract" },
     new FakeAdbExecutor(),
-    () => ws,
+    () => socket,
     timer,
     undefined,
     undefined,
@@ -48,7 +46,7 @@ async function realHarness(replies: AndroidCtrlProxyReplies): Promise<AndroidCtr
     false,
   );
   // The client's own tests drive the same private seams: an open socket, no reconnect, no redial.
-  client["ws"] = ws;
+  client.connectionTestHooks.socket = socket;
   client["autoReconnectEnabled"] = false;
   client["connectWebSocket"] = async () => true;
   client["onConnectionClosed"] = () => {};

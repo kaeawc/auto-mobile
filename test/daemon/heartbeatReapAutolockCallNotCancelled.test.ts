@@ -80,19 +80,13 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     deviceManager.bootedDevices = [DEVICE];
     Object.assign(devicePool, { deviceManager });
     await devicePool.initializeWithDevices([DEVICE]);
-    await devicePool.bindOrReuseDeviceSession(
-      SESSION,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER_CONNECTION,
-    );
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER_CONNECTION,
+    });
     return devicePool;
   }
 

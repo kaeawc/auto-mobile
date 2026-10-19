@@ -1,9 +1,4 @@
-import type {
-  BootedDevice,
-  ObserveResult,
-  ViewHierarchyNode,
-  ViewHierarchyResult,
-} from "../../../src/models";
+import type { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import type { ObserveScreenDependencies } from "../../../src/features/observe/ObserveScreenDependencies";
 import { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
@@ -82,11 +77,4 @@ export function createHierarchyForTest(fixture: TestHierarchy): ViewHierarchyRes
 export function createHierarchyForTest(fixture: TestHierarchy): ViewHierarchyResult {
   // Deliberate array-shaped roots exercise legacy/malformed captures outside the model.
   return fixture as ViewHierarchyResult;
-}
-
-export function createObserveResultForTest(
-  overrides: Pick<ObserveResult, "viewHierarchy">,
-): ObserveResult {
-  // Deliberately incomplete observation exercises private timestamp guards before other fields are read.
-  return overrides as ObserveResult;
 }

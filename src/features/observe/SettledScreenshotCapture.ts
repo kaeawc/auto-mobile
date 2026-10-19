@@ -1,4 +1,5 @@
-import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { ActionableError } from "../../models/ActionableError";
+import { StrictSettledScreenshotCaptureError } from "./StrictSettledScreenshotCaptureError";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../models";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
@@ -13,14 +14,6 @@ import {
   type ScreenshotEvidenceFiles,
 } from "./screenshot/observationScreenshotEvidence";
 import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
-
-export class StrictSettledScreenshotCaptureError extends ActionableError {
-  constructor(error: unknown, deviceId: string) {
-    super(toActionableError(error, `Failed to capture screenshot for device ${deviceId}`).message, {
-      cause: error,
-    });
-  }
-}
 
 /** Lazy getters: ObserveScreen tests may reassign these collaborators after construction. */
 export interface SettledScreenshotCaptureDeps {

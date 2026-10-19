@@ -95,12 +95,25 @@ fi
 # `module: ESNext` + `moduleResolution: bundler` -- the mode that matches how bun
 # actually resolves this repo's extensionless imports, and the same config
 # tsgolint reads for oxlint's `--type-aware` rules.
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+  RUN_STATUS=0
+  "$@" || RUN_STATUS=$?
+}
+
 run_tsc() {
-  if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
-    eval "$TYPECHECK_TSC_CMD" 2>&1
-  else
-    bunx tsgo --noEmit -p tsconfig.json 2>&1
-  fi
+  # A subshell, so an `exit` inside an injected TYPECHECK_TSC_CMD ends only the
+  # type-check, not this script.
+  (
+    if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
+      eval "$TYPECHECK_TSC_CMD" 2>&1
+    else
+      bunx tsgo --noEmit -p tsconfig.json 2>&1
+    fi
+  )
 }
 
 # Resolve the running tsgo version ("7.0.0-dev.20260707.2"), or "" when it cannot
@@ -316,7 +329,11 @@ baseline_signatures() {
 
 # tsc exits 0 on a clean check and non-zero (2) when it reports diagnostics --
 # the normal case here -- so capture the status instead of letting `set -e` abort.
-raw_tsc="$(run_tsc)" && tsc_status=0 || tsc_status=$?
+tsc_output_file="$(mktemp)"
+run_capture_status run_tsc > "$tsc_output_file"
+tsc_status="$RUN_STATUS"
+raw_tsc="$(<"$tsc_output_file")"
+rm -f "$tsc_output_file"
 current="$(printf '%s\n' "$raw_tsc" | normalize)"
 current_count="$(printf '%s' "$current" | grep -c ': error TS' || true)"
 
@@ -337,7 +354,8 @@ if [[ "$MODE" == "update" ]]; then
   if [[ -f "$BASELINE" && "$ALLOW_GROW" != "true" ]]; then
     # Count only real signature lines; `# swap-fp:` comment lines also contain
     # ": error TS" and must not inflate the ratchet's grow-check.
-    prev_count="$(baseline_signatures | grep -c ': error TS' || true)"
+    prev_signatures="$(baseline_signatures)"
+    prev_count="$(printf '%s\n' "$prev_signatures" | grep -c ': error TS' || true)"
     if [[ "$current_count" -gt "$prev_count" ]]; then
       echo "❌ refusing to grow the baseline: $prev_count -> $current_count error(s)." >&2
       echo "The typecheck baseline is a one-way ratchet. If this growth is truly" >&2
@@ -383,7 +401,7 @@ fixed_errors="$(comm -23 <(printf '%s\n' "$baseline_sorted") <(printf '%s\n' "$c
 new_count="$(printf '%s' "$new_errors" | grep -c ': error TS' || true)"
 fixed_count="$(printf '%s' "$fixed_errors" | grep -c ': error TS' || true)"
 # Exclude `# swap-fp:` comment lines, which also match ": error TS".
-baseline_count="$(baseline_signatures | grep -c ': error TS' || true)"
+baseline_count="$(printf '%s\n' "$baseline_sorted" | grep -c ': error TS' || true)"
 
 if [[ "$new_count" -gt 0 ]]; then
   echo "" >&2

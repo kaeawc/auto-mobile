@@ -80,6 +80,9 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { createRegistryWiredDevicePool } from "../helpers/createRegistryWiredDevicePool";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 class FailingKillDeviceManager extends FakeDeviceUtils {
   readonly childProcess = new EventEmitter() as ChildProcess;
@@ -892,12 +895,10 @@ describe("killDevice handler", () => {
           timer.enableAutoAdvance();
           const adb = new WedgedKillConsoleAdb(timer);
           adb.setDevices([unknownEmulator]);
-          const client = new AndroidEmulatorClient(
-            null,
-            null,
+          const client = new AndroidEmulatorClient({
             timer,
-            new FakeAdbClientFactory(adb),
-          );
+            adbFactory: new FakeAdbClientFactory(adb),
+          });
           manager = new RealAndroidClientKillDeviceManager(client);
           manager.setBootedDevices("android", [unknownEmulator]);
           const table = new FakeEmulatorProcessTableSource();
@@ -968,18 +969,11 @@ describe("killDevice handler", () => {
         const device = { ...unknownEmulator, name: "Pixel_8_Old" };
         const adb = new WedgedKillConsoleAdb(timer);
         adb.setDevices([device]);
-        const client = new AndroidEmulatorClient(
-          null,
-          null,
+        const client = new AndroidEmulatorClient({
           timer,
-          new FakeAdbClientFactory(adb),
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          new InMemoryEmulatorConsoleBusyRegistry(),
-        );
+          adbFactory: new FakeAdbClientFactory(adb),
+          consoleBusyRegistry: new InMemoryEmulatorConsoleBusyRegistry(),
+        });
         manager = new RealAndroidClientKillDeviceManager(client);
         manager.setBootedDevices("android", [device]);
         const table = new FakeEmulatorProcessTableSource();
@@ -2664,10 +2658,15 @@ describe("killDevice handler", () => {
       });
     }
     for (const [index, peer] of peers.entries()) {
-      await pool.bindOrReuseDeviceSession(`peer-session-${index}`, peer.deviceId, "android", {
+      await pool.bindOrReuseDeviceSession({
+        sessionId: `peer-session-${index}`,
+        deviceId: peer.deviceId,
         platform: "android",
-        name: peer.name,
-        isRunning: true,
+        sourceImage: {
+          platform: "android",
+          name: peer.name,
+          isRunning: true,
+        },
       });
     }
     const tool = ToolRegistry.getTool("killDevice");
@@ -2911,7 +2910,11 @@ describe("killDevice handler", () => {
       const activePool = DaemonState.getInstance().getDevicePool();
       await activePool.releaseDevice(image.deviceId!);
       try {
-        await activePool.bindOrReuseDeviceSession("racing-session", image.deviceId!, "android");
+        await activePool.bindOrReuseDeviceSession({
+          sessionId: "racing-session",
+          deviceId: image.deviceId!,
+          platform: "android",
+        });
       } catch (error) {
         bindingError = error;
       }
@@ -3746,10 +3749,7 @@ describe("killDevice handler", () => {
           },
         }) as never,
     );
-    (IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }).instances.set(
-      device.deviceId,
-      client,
-    );
+    IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       stop: async () => {},
     } as never);
@@ -5362,7 +5362,7 @@ describe("killDevice handler", () => {
     adb.setDevices([]);
     adb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
     const offlineManager = new RealAndroidClientKillDeviceManager(
-      new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb)),
+      new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) }),
     );
     manager = offlineManager;
     const deviceSessionRepository = new FakeDeviceSessionRepository();

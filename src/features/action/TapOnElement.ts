@@ -144,7 +144,7 @@ import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
@@ -215,7 +215,7 @@ interface TapOnElementDependencies extends DisplayFenceDependencies {
   talkBackStrategy?: TalkBackTapStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   waitForCondition?: WaitForCondition;
   /**
    * Override the platform-specific {@link TapStrategy}. Tests use this
@@ -315,11 +315,11 @@ function markFocusFailure(
 }
 
 function appendDisabledElementWarning(
-  platform: string,
+  strategy: TapStrategy,
   element: Element,
   warnings: string[],
 ): void {
-  if (platform === "android" && isFalsy(element.enabled)) {
+  if (strategy.warnsOnDisabledElement && isFalsy(element.enabled)) {
     warnings.push("The matched element is disabled; the tap may have no effect.");
   }
 }
@@ -366,7 +366,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
-  private accessibilityService: AndroidCtrlProxyClient;
+  private accessibilityService: import("./tapHierarchyRead").TapOnCtrlProxy;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
@@ -376,7 +376,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private talkBackStrategy: TalkBackTapStrategy;
-  private readonly featureFlags: FeatureFlagService;
+  private readonly featureFlags: FeatureFlagReader;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private strategy: TapStrategy;
@@ -735,7 +735,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return hierarchyFingerprint(viewHierarchy);
   }
 
-  private deriveTapEffect(
+  deriveTapEffect(
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult | undefined,
   ): TapOnElementResult["effect"] | undefined {
@@ -749,7 +749,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
-    if (this.device.platform !== "android" || !previousObservation) {
+    if (!this.strategy.settlesPostTapChange || !previousObservation) {
       return { effect: immediateEffect, observation: currentObservation };
     }
 
@@ -1009,7 +1009,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.tapPoints.invisibleMatchFailure(...args);
   }
 
-  private resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
+  resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
     return this.tapPoints.resolveTapPoint(...args);
   }
 
@@ -1119,7 +1119,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
     }
-    if (isUsableScreenSize(screenSize) && this.device.platform === "android") {
+    if (isUsableScreenSize(screenSize) && this.strategy.verifiesRefreshedDisplay) {
       await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
     }
     return captured;
@@ -1190,7 +1190,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     };
   }
 
-  private async readFreshHierarchy(
+  async readFreshHierarchy(
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
@@ -1304,7 +1304,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.findElementInHierarchy(options, hierarchy);
   }
 
-  private async searchForElement(
+  async searchForElement(
     options: TapVerificationOptions,
     observeResult: ObserveResult,
     signal?: AbortSignal,
@@ -1810,7 +1810,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const requireResourceId =
       typeof targetOptions === "boolean" ? targetOptions : targetOptions.requireResourceId;
-    if (!viewHierarchy || this.device.platform !== "android") {
+    if (!viewHierarchy || !this.strategy.promotesClickableAncestor) {
       return { element, usedParent: false };
     }
     const nodes = new SearchableHierarchy().project(viewHierarchy);
@@ -2284,9 +2284,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         if (this.device.platform === "android") {
           return await this.observedAndroidDisplayInteraction(options, {
@@ -2685,7 +2687,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               return ensureCheckedResult;
             }
           }
-          appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
+          appendDisabledElementWarning(this.strategy, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
           const { tapPoint, warning: tapPointWarning } = this.tapPoints.planVisibleTapPoint({
             options: tapOptions,
@@ -3207,9 +3209,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   /**
    * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
-   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
+   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate. (@internal unit-test seam)
    */
-  private async executeAndroidTapWithCoordinates(
+  async executeAndroidTapWithCoordinates(
     action: string,
     x: number,
     y: number,

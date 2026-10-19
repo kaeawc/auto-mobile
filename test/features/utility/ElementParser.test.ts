@@ -89,7 +89,7 @@ describe("DefaultElementParser", () => {
 
   describe("parseNodeBounds", () => {
     test("returns null for null node", () => {
-      expect(parser.parseNodeBounds(null as any)).toBeNull();
+      expect(parser.parseNodeBounds(null)).toBeNull();
     });
 
     test("parses Android node with object bounds", () => {
@@ -100,15 +100,15 @@ describe("DefaultElementParser", () => {
     });
 
     test("returns null for node with invalid string bounds", () => {
-      const node = { $: { text: "Login", bounds: "invalid" } } as ViewHierarchyNode;
+      const node: ViewHierarchyNode = { $: { text: "Login", bounds: "invalid" } };
       expect(parser.parseNodeBounds(node)).toBeNull();
     });
 
     test("handles iOS node with object bounds", () => {
-      const node = {
+      const node: ViewHierarchyNode = {
         $: { text: "Login" },
         bounds: { left: 10, top: 20, right: 300, bottom: 400 },
-      } as any;
+      };
       const element = parser.parseNodeBounds(node);
       expect(element).not.toBeNull();
       expect(element!.bounds).toEqual({ left: 10, top: 20, right: 300, bottom: 400 });
@@ -212,7 +212,7 @@ describe("DefaultElementParser", () => {
 
   describe("extractRootNodes", () => {
     test("returns empty array for null hierarchy", () => {
-      expect(parser.extractRootNodes(null as any)).toEqual([]);
+      expect(parser.extractRootNodes(null)).toEqual([]);
     });
 
     test("returns empty array for hierarchy with error", () => {
@@ -234,7 +234,7 @@ describe("DefaultElementParser", () => {
     test("extracts array of root nodes", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [{ $: { text: "root1" } }, { $: { text: "root2" } }] as any,
+          node: [{ $: { text: "root1" } }, { $: { text: "root2" } }],
         },
       };
       const roots = parser.extractRootNodes(viewHierarchy);
@@ -282,7 +282,7 @@ describe("DefaultElementParser", () => {
 
   describe("flattenViewHierarchy", () => {
     test("returns empty for null hierarchy", () => {
-      expect(parser.flattenViewHierarchy(null as any)).toEqual([]);
+      expect(parser.flattenViewHierarchy(null)).toEqual([]);
     });
 
     test("flattens single element", () => {

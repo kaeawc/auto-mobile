@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { PlanExecutionResult } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
   PlanExecutionOrchestrator,

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { z } from "zod/v4";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -273,10 +273,20 @@ describe("startDevice as an MCP task (#4668)", () => {
       teardown();
     }
   });
-  beforeEach(arrange);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrange();
+        await fn();
+      },
+      timeout,
+    );
+  }
   afterEach(teardown);
 
-  test("a non-declaring call gets the synchronous startDevice result and no task", async () => {
+  arranged("a non-declaring call gets the synchronous startDevice result and no task", async () => {
     const frame = await startSynchronously();
     expect(frame?.result.resultType).toBeUndefined();
     expect(frame?.result.isError).not.toBe(true);
@@ -288,40 +298,44 @@ describe("startDevice as an MCP task (#4668)", () => {
     expect(sessions.peekSession(sessionUuid)?.hasReceivedHeartbeat).toBe(false);
   });
 
-  test("startDevice is the eligible tool", () => {
-    expect([...TASK_ELIGIBLE_TOOLS]).toEqual(["startDevice"]);
+  arranged("startDevice is an eligible tool", () => {
+    expect(TASK_ELIGIBLE_TOOLS.has("startDevice")).toBe(true);
+    expect(TASK_ELIGIBLE_TOOLS.has("installApp")).toBe(true);
   });
 
-  test("a declaring call gets a task that completes with the startDevice result, holding the bound session until then", async () => {
-    const created = await post("tools/call", true, { name: "startDevice", arguments: START });
-    expect(created.result).toMatchObject({ resultType: "task", status: "working" });
-    const taskId = created.result.taskId as string;
+  arranged(
+    "a declaring call gets a task that completes with the startDevice result, holding the bound session until then",
+    async () => {
+      const created = await post("tools/call", true, { name: "startDevice", arguments: START });
+      expect(created.result).toMatchObject({ resultType: "task", status: "working" });
+      const taskId = created.result.taskId as string;
 
-    const done = await settled(taskId);
-    expect(done.result).toMatchObject({ resultType: "complete", status: "completed" });
-    const payload = payloadOf(done.result.result);
-    expect(payload).toMatchObject({ isReady: true });
-    const { sessionUuid } = payload.runtime.session;
-    expect(typeof sessionUuid).toBe("string");
+      const done = await settled(taskId);
+      expect(done.result).toMatchObject({ resultType: "complete", status: "completed" });
+      const payload = payloadOf(done.result.result);
+      expect(payload).toMatchObject({ isReady: true });
+      const { sessionUuid } = payload.runtime.session;
+      expect(typeof sessionUuid).toBe("string");
 
-    // The task held the session it bound and let it go once it settled.
-    expect(holds).toEqual([{ taskId, ownerKey: KEY, sessionUuid }]);
-    expect(keepalive.heldCount).toBe(0);
-    // The binding outlives the request servers: the key still routes to the bound device.
-    expect(bindings.boundSessionUuid(KEY)).toBe(sessionUuid);
-    expect(pool.getDevice(AVD_SERIAL)).toMatchObject({ status: "busy", sessionId: sessionUuid });
-    // The hold renewed the owner lease through the session manager's heartbeat.
-    expect(sessions.peekSession(sessionUuid)).toMatchObject({
-      assignedDevice: AVD_SERIAL,
-      hasReceivedHeartbeat: true,
-    });
+      // The task held the session it bound and let it go once it settled.
+      expect(holds).toEqual([{ taskId, ownerKey: KEY, sessionUuid }]);
+      expect(keepalive.heldCount).toBe(0);
+      // The binding outlives the request servers: the key still routes to the bound device.
+      expect(bindings.boundSessionUuid(KEY)).toBe(sessionUuid);
+      expect(pool.getDevice(AVD_SERIAL)).toMatchObject({ status: "busy", sessionId: sessionUuid });
+      // The hold renewed the owner lease through the session manager's heartbeat.
+      expect(sessions.peekSession(sessionUuid)).toMatchObject({
+        assignedDevice: AVD_SERIAL,
+        hasReceivedHeartbeat: true,
+      });
 
-    // A later call on a fresh request server under the same key reaches that device.
-    await post("tools/call", false, { name: PROBE, arguments: {} });
-    expect(probedSessions).toEqual([sessionUuid]);
-  });
+      // A later call on a fresh request server under the same key reaches that device.
+      await post("tools/call", false, { name: PROBE, arguments: {} });
+      expect(probedSessions).toEqual([sessionUuid]);
+    },
+  );
 
-  test("tasks/cancel during the boot stops it and leaves nothing bound", async () => {
+  arranged("tasks/cancel during the boot stops it and leaves nothing bound", async () => {
     let release!: () => void;
     runnerGate = new Promise<void>((resolve) => (release = resolve));
     const reached = new Promise<void>((resolve) => (runnerReached = resolve));

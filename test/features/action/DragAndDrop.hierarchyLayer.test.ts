@@ -27,7 +27,7 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
   spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
     isAvailable: async () => true,
-  } as unknown as AndroidCtrlProxyManager);
+  });
   const command = new DragAndDrop(
     { name: "Fake Android", deviceId: "fake-android", platform: "android" },
     new FakeAdbExecutor(),

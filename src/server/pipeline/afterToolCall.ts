@@ -1,5 +1,5 @@
 import { classifyToolResult } from "../../utils/toolEnvelopePayload";
-import { BootedDevice, type ViewHierarchyResult } from "../../models";
+import { BootedDevice, isViewHierarchyResult, type ViewHierarchyResult } from "../../models";
 import { NavigationGraphManager } from "../../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../../features/observe/ObserveScreen";
@@ -9,7 +9,7 @@ import { settleEmbeddedObservationInResponse } from "../embeddedObservationSettl
 import { serverConfig } from "../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../features/telemetry/TelemetryRecorder";
 import { logger } from "../../utils/logger";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/constants";
@@ -76,10 +76,6 @@ export function isToolResponseFailure(response: unknown): boolean {
     return false;
   }
   return isMarkedToolFailure(response);
-}
-
-function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
-  return isRecord(value) && isRecord(value.hierarchy);
 }
 
 /**
@@ -255,13 +251,13 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       }
     }
 
+    const sessionManager = defaultDaemonContext.sessionManager();
     if (
       shouldResolveDevice &&
       sessionUuid &&
       !(name === "observe" && args.display === "all") &&
-      DaemonState.getInstance().isInitialized()
+      sessionManager
     ) {
-      const sessionManager = DaemonState.getInstance().getSessionManager();
       const observedHierarchy = getObservedHierarchy(name, response);
       if (observedHierarchy) {
         sessionManager.setLastHierarchy(sessionUuid, observedHierarchy);
@@ -274,24 +270,17 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     }
 
     const baselineStore: ObservationBaselineStore | undefined =
-      sessionUuid && DaemonState.getInstance().isInitialized()
+      sessionUuid && sessionManager
         ? {
-            get: (uuid) =>
-              DaemonState.getInstance().getSessionManager().getLastRenderedObservation(uuid),
+            get: (uuid) => sessionManager.getLastRenderedObservation(uuid),
             set: (uuid, observation, displayRevision) =>
-              DaemonState.getInstance()
-                .getSessionManager()
-                .setLastRenderedObservation(uuid, observation, displayRevision),
+              sessionManager.setLastRenderedObservation(uuid, observation, displayRevision),
             getActionMetadata: (uuid, deviceId) =>
-              DaemonState.getInstance().getSessionManager().getLastActionMetadata(uuid, deviceId),
+              sessionManager.getLastActionMetadata(uuid, deviceId),
             setActionMetadata: (uuid, deviceId, blocks) =>
-              DaemonState.getInstance()
-                .getSessionManager()
-                .setLastActionMetadata(uuid, deviceId, blocks),
+              sessionManager.setLastActionMetadata(uuid, deviceId, blocks),
             setDisplayRevision: (uuid, revision, key, generation) =>
-              DaemonState.getInstance()
-                .getSessionManager()
-                .setLastRenderedDisplayRevision(uuid, revision, key, generation),
+              sessionManager.setLastRenderedDisplayRevision(uuid, revision, key, generation),
           }
         : undefined;
     const configuredArtifactDirectory = serverConfig.getToolOutputsDir();

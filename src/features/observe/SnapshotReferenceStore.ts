@@ -6,10 +6,9 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 const LIFETIME_MS = 5 * 60_000;
 const MAX_REFERENCES = 128;
 
-export interface SnapshotReference {
-  snapshotId: string;
-  expiresAt: number;
-}
+import type { SnapshotReference } from "../../models/SnapshotReference";
+
+export type { SnapshotReference };
 
 export type SnapshotReferenceCaptureResult =
   | { status: "captured"; reference: SnapshotReference }

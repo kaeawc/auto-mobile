@@ -212,7 +212,7 @@ async function executeFocusWithDuplicateEmail(
   }
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];
-  selector.selectByText = (hierarchy, _text, options) => {
+  selector.select = (hierarchy, _query, options) => {
     const intent = options?.selectionIntent ?? "tap";
     selectionIntents.push(intent);
     const element =

@@ -6,7 +6,6 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
-import { handleHttpHeartbeat, parseHttpHeartbeatBody } from "./httpHeartbeat";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   cancelExecutionsCutBySessionRelease,
@@ -25,16 +24,11 @@ import {
   createServer as createHttpServer,
   Server as HttpServer,
   type IncomingMessage,
-  type ServerResponse,
 } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import {
-  StatelessMcpHttpEndpoint,
-  type StatelessMcpRequestScope,
-  type StatelessMcpServer,
-} from "./statelessMcpHttpEndpoint";
+import { DaemonHttpIngress } from "./daemonHttpIngress";
+import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
   buildMcpRequestContext,
@@ -53,8 +47,7 @@ import {
 import { defaultMockLocationClearRegistry } from "../features/utility/MockLocationClear";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
-import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
-import { MultiPlatformDeviceManager, type BootedDeviceDiscovery } from "../devices/deviceUtils";
+import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import {
   SessionManager,
@@ -70,7 +63,7 @@ import {
   subscribeToolCallEndActivity,
 } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
-import { DatabaseHealthLateness } from "./databaseHealthLateness";
+import { createDaemonHealthCheck, type HealthFailureKind } from "./daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -81,12 +74,6 @@ import {
   createForeignCtrlProxyForwardEvidence,
   type ForeignCtrlProxyForwardEvidence,
 } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
-import {
-  assertControlNotOnForeignDaemonDevice,
-  assertInputNotOnForeignBindingDevice,
-} from "./inputDeviceOwnership";
-import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OwnerDisconnectExecutionVeto,
@@ -94,7 +81,6 @@ import {
 import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
-import { DaemonState } from "./daemonState";
 import {
   BrokerExecutionRelease,
   managedExecutionSessionsFrom,
@@ -199,7 +185,6 @@ import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
-import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
@@ -254,7 +239,6 @@ import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,
   getDeviceDataStreamServer,
-  type DeviceDataStreamSocketServer,
 } from "./deviceDataStreamSocketServer";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
@@ -289,18 +273,16 @@ import { getDaemonSocketPathsByName } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { pushInitialObservationFramesForSubscriber } from "./observationInitialFrame";
+import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
-  pushInitialObservationFramesForSubscriber,
-  type ObservationStreamIosClient,
-} from "./observationInitialFrame";
-import {
-  LEGACY_PROVENANCE_SENTINEL,
-  NavigationGraphManager,
-} from "../features/navigation/NavigationGraphManager";
-import {
-  convertSummaryToStreamData,
-  createNavigationGraphRequestHandler,
-} from "./navigationGraphRequestHandler";
+  NavigationGraphStreamBridge,
+  type StorageSubscriptionRequest,
+  applyStorageSubscriptionRequest,
+  createObservationStreamIosClient,
+  isHeldByAnotherOwner,
+  logSkippedObservationStreamDevice,
+} from "./daemonStreamRouting";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -338,10 +320,8 @@ import {
 import {
   initializeRecordingTeardownRedriveState,
   setStartupOrphanCaptures,
-  interruptVideoRecording,
   listActiveVideoRecordings,
   setVideoRecordingManagerDependencies,
-  stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator } from "../utils/IdGenerator";
@@ -349,13 +329,10 @@ import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
-  isTransitionalAdbState,
-  OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
   selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
-  selectTransitionalDeviceIds,
   type OfflineEpisode,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
@@ -363,7 +340,16 @@ import {
   defaultAdbTransportRestartRegistry,
   type AdbTransportRestartLookup,
 } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
+import {
+  collectDisconnectCandidates,
+  collectDisconnectedRecordings,
+  discoverAndReconcile,
+  getAndroidOfflineCanonicalIds,
+  logDisconnectMisses,
+  probeListedAndroidStates,
+  stopRecordingAfterDeviceDisconnect,
+  transitionalCandidateIds,
+} from "./deviceLossDiscovery";
 import { errorMessage } from "../utils/describeUnknownError";
 import { writeEmergencyLog } from "../utils/loggingConfig";
 import { exitAfterDatabaseHealthFailure } from "./databaseHealthExit";
@@ -378,7 +364,6 @@ import {
   setProcessShutdownHandler,
 } from "../processLifecycle";
 import type { BootedDevice, Platform } from "../models";
-import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -412,6 +397,7 @@ import {
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
+import type { DaemonStateWrites } from "./daemonContext";
 
 export type {
   DaemonDependencies,
@@ -419,28 +405,10 @@ export type {
   DaemonProcessGenerationTokenProvider,
 };
 
-const HTTP_BODY_TIMEOUT_MS = 60_000;
-const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;
-// The HTTP listener binds before device discovery (<=5 s) and session rehydration
-// (<=15 s). A direct HTTP MCP request waits this long for startup to finish so it
-// cannot take a device whose persisted session is about to be rehydrated (#11156);
-// past it the client gets 503 with Retry-After instead of an unbounded hang.
-const HTTP_STARTUP_ADMISSION_TIMEOUT_MS = 30_000;
-const HTTP_STARTUP_RETRY_AFTER_SECONDS = 1;
-
-type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
+type LogDisconnectMissesArgs =
+  Parameters<typeof logDisconnectMisses> extends [unknown, ...infer Rest] ? Rest : never;
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
-const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
-// Retain plan-time evidence while requiring two inactive observations before cleanup.
-const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
-const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
-// How long device-disconnect cleanup waits for a recording's stop before releasing the device.
-// An iOS recording started with `resolution` is re-encoded by ffmpeg on stop, which an
-// unattended stop bounds by up to 10 minutes; the device and its session must not wait that
-// long. This is the stream-copy post-process budget (and the former fixed bound). The stop
-// keeps running in the background under its own unattended ceiling.
-const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
@@ -466,7 +434,6 @@ function shutdownStage(
   return shutdownStageFrom(DAEMON_SHUTDOWN_STAGES, name, waitingOn, run);
 }
 
-type HealthFailureKind = "http" | "socket" | "database" | "unknown";
 type DeviceSessionRoutingTargets = {
   deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
   performancePush: ReturnType<typeof getPerformancePushServer>;
@@ -567,8 +534,6 @@ export function isProcessWideAdbServerReset(
  * - PID file management
  * - Graceful shutdown handling
  */
-/** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
-const STORAGE_WATCH_PURPOSE = "to watch stored values";
 
 /**
  * The steps of `Daemon.start()` that touch the machine: the process's working directory and
@@ -663,8 +628,6 @@ export class Daemon {
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
-  private httpServer: HttpServer | null = null;
-  private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
   private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
   private enteredDaemonProcess = false;
@@ -682,46 +645,17 @@ export class Daemon {
   private readonly startupCompletion: Promise<void>;
   private resolveStartupCompletion!: () => void;
   private rejectStartupCompletion!: (reason: unknown) => void;
-  /**
-   * Aborted when shutdown closes ingress, so an HTTP MCP request still waiting
-   * on {@link startupCompletion} answers 503 instead of holding the HTTP server
-   * close (and every later shutdown stage) open (#11189).
-   */
-  private readonly shutdownIngressAbort = new AbortController();
-  /** Host headers the HTTP listener admits; set when it starts. */
-  private httpAllowedHosts: string[] = [];
-  /** Builds one MCP request's transport (stateless: no transport session id, #4678); tests replace it with a double. */
-  private mcpHttpTransportFactory = (allowedHosts: string[]): StreamableHTTPServerTransport =>
-    new StreamableHTTPServerTransport({
-      enableDnsRebindingProtection: true,
-      allowedHosts,
-    });
-  /** Builds one MCP request's server; tests replace it with a double. */
-  private mcpRequestServerFactory = (
-    req: IncomingMessage,
-    scope: StatelessMcpRequestScope,
-  ): StatelessMcpServer<StreamableHTTPServerTransport> => this.createRequestMcpServer(req, scope);
-  /** One server and transport per MCP POST, closed with its response (#4678). */
-  private readonly mcpHttpEndpoint = new StatelessMcpHttpEndpoint<
-    IncomingMessage,
-    ServerResponse,
-    StreamableHTTPServerTransport
-  >({
-    timer: {
-      setInterval: (callback, ms) => this.timer.setInterval(callback, ms),
-      clearInterval: (handle) => this.timer.clearInterval(handle),
-    },
-    idGenerator: { next: () => this.idGenerator.next() },
-    keepaliveIntervalMs: SSE_KEEPALIVE_INTERVAL_MS,
-    createTransport: () => this.mcpHttpTransportFactory(this.httpAllowedHosts),
-    createServer: (req, scope) => this.mcpRequestServerFactory(req, scope),
-    cancelScopeExecutions: (requestScopeId, reason) =>
-      executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
-    closeReason: () =>
-      this.shutdownInProgress
-        ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
-        : "streamable_http_onclose",
+  private readonly httpIngress = new DaemonHttpIngress({
+    httpServerFactory: () => this.httpServerFactory(),
+    timer: () => this.timer,
+    idGenerator: () => this.idGenerator,
+    address: () => ({ host: this.host, port: this.port }),
+    strictPort: () => this.strictPort,
+    startupCompletion: () => this.startupCompletion,
+    sessionManager: () => this.sessionManager,
+    observerSessionRegistry: () => this.observerSessionRegistry,
+    createRequestMcpServer: (req, scope) => this.createRequestMcpServer(req, scope),
+    isShutdownInProgress: () => this.shutdownInProgress,
   });
   /** Runs control-socket forwards in process, one client and server each (#11820). */
   private readonly mcpDispatcher = createDaemonMcpDispatcher({
@@ -732,23 +666,16 @@ export class Daemon {
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
         : MCP_FORWARD_CLOSED_REASON,
   });
-  /** HTTP requests whose response is still open (SSE streams included). */
-  private openHttpRequests = 0;
-  /** HTTP requests ever received. */
-  private httpRequestsSeen = 0;
-  private acceptingHttpSessions = false;
-  /** Set once start() finished, so admitted HTTP requests skip the startup wait. */
-  private startupCompleted = false;
   private port: number;
   private host: string;
   private readonly strictPort: boolean;
   private debug: boolean;
-  private healthCheckTimer: NodeJS.Timeout | null = null;
-  private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
+  private healthCheck: SingleFlightInterval | null = null;
+  protected heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
   private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
   private orphanWatchdog: PrivateDaemonOrphanWatchdog | null = null;
-  private deviceDisconnectMonitor: SingleFlightInterval | null = null;
+  protected deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
   private completeIdentityPublished = false;
@@ -758,16 +685,16 @@ export class Daemon {
   // overwrite so the lock-less bind guard can (a) still see the live sibling on
   // an inconclusive probe and (b) restore its record if we refuse (issue #6232).
   private readonly incumbentOwnerGuard: IncumbentOwnerGuard;
-  private deviceDisconnectMisses: Map<string, number> = new Map();
-  private deviceDisconnectMissIncarnations: Map<string, DisconnectCandidateIncarnation> = new Map();
-  private confirmedDisconnectedDeviceIds: Set<string> = new Set();
-  private forceDisconnectedDeviceIds: Set<string> = new Set();
-  private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
+  protected deviceDisconnectMisses: Map<string, number> = new Map();
+  protected deviceDisconnectMissIncarnations = new Map<string, DisconnectCandidateIncarnation>();
+  protected confirmedDisconnectedDeviceIds: Set<string> = new Set();
+  protected forceDisconnectedDeviceIds: Set<string> = new Set();
+  protected forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
   // Serials that already had one bounded 'adb -s <serial> reconnect' this offline
   // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
   // a later episode for the same serial gets a fresh attempt.
-  private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
-  private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
+  protected offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
+  protected offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
   // Start of each candidate's current transitional-state episode (#11090, #11592):
   // adb offline/unauthorized and simctl Booting/Shutting Down sweeps run against
   // OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
@@ -791,7 +718,7 @@ export class Daemon {
   private bindingExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
   /** Journal entries this daemon is driving; shared by the drain and the binding reconciler. */
   private readonly bindingJournalInFlight = new BindingJournalInFlight();
-  private brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
+  protected brokerDeviceAcquisition: DaemonBrokerDeviceAcquisitionHandle | undefined;
   private managedExecutionReowner: ManagedExecutionReowner | undefined;
   private bindingRedrive: BindingJournalRedriveLoop | undefined;
   private readonly generationStartedAt: number;
@@ -812,13 +739,14 @@ export class Daemon {
     NonNullable<ReturnType<typeof getDeviceDataStreamServer>>,
     DefaultObservationInitialFrameCoordinator
   >();
-  private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
-  private readonly navigationGraphSeededStreamManagers = new WeakMap<
-    DeviceDataStreamSocketServer,
-    WeakSet<NavigationGraphManager>
-  >();
-  private unsubscribeAdbMissingDevice: (() => void) | null = null;
+  protected deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
+  protected readonly navigationGraphBridge = new NavigationGraphStreamBridge({
+    server: () => this.deviceDataStreamServer,
+    sessionIds: () => this.sessionManager.getAllSessions().map((session) => session.sessionId),
+    defaultManager: () => NavigationGraphManager.getInstance(),
+    managerForSession: (sessionId) => NavigationGraphManager.getInstanceForSession(sessionId),
+  });
+  protected unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
   private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
   private options: DaemonOptions;
@@ -839,6 +767,8 @@ export class Daemon {
   /** Exposed for tests only: the in-flight or settled startup provenance warm. */
   private androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
 
+  private readonly daemonState: DaemonStateWrites;
+
   constructor(options: DaemonOptions = {}, dependencies: DaemonDependencies = {}) {
     const {
       timer,
@@ -857,6 +787,7 @@ export class Daemon {
       recoverFromDatabaseHealthFailure,
       ...retained
     } = resolveDaemonDependencies(dependencies);
+    this.daemonState = retained.daemonState;
     this.httpServerFactory = retained.httpServerFactory;
     this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
     this.avdManagerFactory = retained.avdManagerFactory;
@@ -870,7 +801,7 @@ export class Daemon {
     // Startup can fail before the socket server exists or any request awaits it.
     void this.startupCompletion.then(
       () => {
-        this.startupCompleted = true;
+        this.httpIngress.markStartupCompleted();
       },
       (error: unknown) => {
         logger.debug(`Daemon startup completion rejected: ${errorMessage(error)}`);
@@ -973,14 +904,13 @@ export class Daemon {
       autolockSessionForMcpSession: (mcpSessionId) =>
         this.devicePool.captureAutolockSessionForMcpSession(mcpSessionId),
     });
-    // Initialize singleton for daemon state access
-    DaemonState.getInstance().initialize(
+    this.daemonState.initialize(
       this.sessionManager,
       this.devicePool,
       this.deviceSessionRegistry,
       this.observerSessionRegistry,
     );
-    DaemonState.getInstance().setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
+    this.daemonState.setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
     this.installManagedExecutionRelease();
     this.installBrokerDeviceAcquisition();
 
@@ -1107,16 +1037,9 @@ export class Daemon {
         this.sessionManager.getHeldDeviceSessions().find((session) => session.sessionId === id)
           ?.deviceId ?? null,
       onOwnershipLost: (id) => {
-        void this.cancelAndReleaseSession(
-          id,
-          "binding-ownership-lost",
-          false,
-          undefined,
-          undefined,
-          {
-            cutCallsLearnRelease: true,
-          },
-        ).catch((error: unknown) => {
+        void this.cancelAndReleaseSession(id, "binding-ownership-lost", {
+          cutCallsLearnRelease: true,
+        }).catch((error: unknown) => {
           logger.warn(`[Daemon] Lost managed execution ${id} release failed`, error);
         });
       },
@@ -1126,7 +1049,7 @@ export class Daemon {
         });
       },
     });
-    DaemonState.getInstance().setBrokerExecutionReowner(this.managedExecutionReowner);
+    this.daemonState.setBrokerExecutionReowner(this.managedExecutionReowner);
     this.sessionManager.setReleaseDeviceHold((id) =>
       this.managedExecutionReowner?.releaseDeviceHold(id),
     );
@@ -1208,7 +1131,7 @@ export class Daemon {
     this.backgroundRegistryUpgrade = undefined;
     await this.sessionBrokerService?.close();
     this.sessionBrokerService = undefined;
-    DaemonState.getInstance().setSessionBrokerService(undefined);
+    this.daemonState.setSessionBrokerService(undefined);
     this.brokerExecutionRelease?.close();
     this.managedExecutionReowner?.close();
     // Interrupt discovery and the inter-pass wait, then join within 100ms of this stage's 200ms.
@@ -1264,7 +1187,7 @@ export class Daemon {
           .getAllSessions()
           .map((session) => this.sessionManager.ownershipSessionUuid(session.sessionId)),
     });
-    DaemonState.getInstance().setSessionBrokerService(this.sessionBrokerService);
+    this.daemonState.setSessionBrokerService(this.sessionBrokerService);
     // No generic journal work starts before the exclusive host lock and inventory checks.
     if (!this.bindingRedrive && process.env.NODE_ENV !== "test") {
       this.bindingRedrive = acquisition.startJournalRedrive(registry);
@@ -1309,7 +1232,8 @@ export class Daemon {
         shouldCommit,
         releaseOptions,
       ) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
+        this.cancelAndReleaseSession(sessionId, releaseReason, {
+          shouldCommit,
           deferFailureFallback: true,
           releaseOptions,
         }),
@@ -1323,7 +1247,8 @@ export class Daemon {
           }
           // A cut read or a control call past the veto's bound is told the session is gone,
           // as a call arriving after the release is (#11381).
-          await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
+          await this.cancelAndReleaseSession(session.sessionId, reason, {
+            expectedSession: session,
             cutCallsLearnRelease: true,
           });
         },
@@ -1387,7 +1312,7 @@ export class Daemon {
   }
 
   /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
-  private stopSessionTimers(): void {
+  protected stopSessionTimers(): void {
     // A change in the last debounce window must not notify after the daemon closed (#11413).
     this.deviceStateChangeNotifier.dispose();
     this.sessionManager.stopCleanupTimer();
@@ -1401,7 +1326,7 @@ export class Daemon {
    * end re-arms the owner-disconnect releases it deferred (#10712). Subscribed by `start()` and
    * dropped by {@link stopSessionTimers}; idempotent so a retried start cannot stack listeners.
    */
-  private subscribeToolCallEndActivity(): void {
+  protected subscribeToolCallEndActivity(): void {
     this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = subscribeToolCallEndActivity(
       executionTracker,
@@ -1417,11 +1342,10 @@ export class Daemon {
       managedExecutionReowner: () => this.managedExecutionReowner,
       devicePool: () => this.devicePool,
       passiveWorkPolicy: () => this.passiveWorkPolicy,
-      navigationGraphListenerManagers: this.navigationGraphListenerManagers,
+      navigationGraphListenerManagers: this.navigationGraphBridge.listenerManagers,
       shutdownReleaseNotifications: () => this.shutdownReleaseNotifications,
       shutdownFallbackReleaseNotifications: () => this.shutdownFallbackReleaseNotifications,
-      setupNavigationGraphUpdateListener: (manager) =>
-        this.setupNavigationGraphUpdateListener(manager),
+      setupNavigationGraphUpdateListener: (manager) => this.navigationGraphBridge.attach(manager),
       reownRehydratedManagedExecutions: (rehydrated) =>
         this.reownRehydratedManagedExecutions(rehydrated),
       hasActiveSessionExecution: (sessionId, query) =>
@@ -1803,14 +1727,14 @@ export class Daemon {
     // for a competitor to claim the canonical port and for the fallback to
     // paper over it with a "successful" restart on the wrong port. Leaving
     // `this.port` as the requested port makes the real `listen()` call below
-    // (in startHttpServer) the single atomic bind-or-fail attempt.
+    // (in DaemonHttpIngress.start) the single atomic bind-or-fail attempt.
     if (!this.strictPort) {
       this.port = await this.findAvailablePort(this.port);
     }
 
     // Start HTTP MCP server
     startupBenchmark.startPhase("httpServerStart");
-    await this.startHttpServer();
+    await this.httpIngress.start();
     startupBenchmark.endPhase("httpServerStart");
   }
 
@@ -1897,9 +1821,8 @@ export class Daemon {
     this.completeIdentityPublished = true;
 
     // Verify DaemonState is initialized
-    const isInitialized = DaemonState.getInstance().isInitialized();
     logger.info(
-      `DaemonState initialized: ${isInitialized}, device count: ${this.devicePool.getTotalDeviceCount()}`,
+      `DaemonState initialized: ${this.daemonState.isInitialized()}, device count: ${this.devicePool.getTotalDeviceCount()}`,
     );
 
     // Start health check timer (every 30 seconds)
@@ -1922,7 +1845,7 @@ export class Daemon {
       port: this.port,
       socketPath: SOCKET_PATH,
       deviceCount: this.devicePool.getTotalDeviceCount(),
-      mcpHttpListenerBound: this.httpServer?.listening ?? false,
+      mcpHttpListenerBound: this.httpIngress.server?.listening ?? false,
       daemonSocketListenerBound: this.socketServer?.isListening() ?? false,
     });
 
@@ -2000,234 +1923,6 @@ export class Daemon {
     });
   }
 
-  /**
-   * Start the HTTP MCP server (internal daemon transport, not exposed publicly)
-   */
-  private async startHttpServer(): Promise<void> {
-    this.httpServer = this.httpServerFactory();
-    this.httpServerClosePromise = null;
-    this.acceptingHttpSessions = true;
-    const allowedHosts = [`127.0.0.1:${this.port}`, `localhost:${this.port}`, `[::1]:${this.port}`];
-    this.httpAllowedHosts = allowedHosts;
-
-    // Disable default timeouts on this loopback-only server. Node.js 18+ sets
-    // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
-    // connections for long-running tool calls like executePlan. With the timeout
-    // active the HTTP response is silently dropped after ~5 min, the
-    // request's transport closes, and the MCP client never
-    // receives the result — even when the tool completed successfully.
-    this.httpServer.requestTimeout = 0;
-    this.httpServer.headersTimeout = 0;
-    this.httpServer.timeout = 0;
-
-    const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
-      this.handleHttpRequest(req, res, allowedHosts);
-    this.httpServer.on("request", (req, res) => {
-      // Counted for the orphaned private-daemon watchdog (#10497): an open
-      // request is a connected client.
-      this.openHttpRequests++;
-      this.httpRequestsSeen++;
-      res.once("close", () => {
-        this.openHttpRequests--;
-      });
-      handleRequest(req, res).catch((error) => {
-        logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
-        if (!res.headersSent) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-        }
-        res.end();
-      });
-    });
-
-    // Start HTTP server
-    return new Promise((resolve, reject) => {
-      this.httpServer!.listen(this.port, this.host, () => {
-        logger.info(`automobile:${this.host}:${this.port}${MCP_STREAMABLE_PATH}`);
-        resolve();
-      });
-
-      this.httpServer!.on("error", (error: NodeJS.ErrnoException) => {
-        if (this.strictPort && error.code === "EADDRINUSE") {
-          // The authoritative guard (issue #6260): this listen() call is the
-          // one atomic bind attempt in strict-port mode, so a genuine
-          // EADDRINUSE here means another process holds the canonical port
-          // RIGHT NOW — not a stale probe result. Fail loudly instead of the
-          // caller (start()) ever falling back to a different port.
-          reject(
-            new ActionableError(
-              `Port ${this.port} on ${this.host} is required for this daemon start but is ` +
-                `already in use by another process. Refusing to fall back to a different port ` +
-                `and risk a split-brain daemon (issue #6260) — find and stop whatever holds ` +
-                `port ${this.port} and retry.`,
-            ),
-          );
-          return;
-        }
-        logger.error(`HTTP server error: ${error}`);
-        reject(error);
-      });
-    });
-  }
-
-  private async handleHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    allowedHosts: string[],
-  ): Promise<void> {
-    // Check every path before parsing the URL or handling preflight requests.
-    if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Forbidden" }));
-      return;
-    }
-
-    if (req.method === "OPTIONS") {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-
-    const url = new URL(req.url!, `http://${req.headers.host}`);
-
-    if (url.pathname === "/heartbeat") {
-      return this.handleHeartbeatHttpRequest(req, res);
-    }
-
-    if (url.pathname === MCP_STREAMABLE_PATH) {
-      return this.handleMcpHttpRequest(req, res);
-    } else {
-      // 404 for unknown paths
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Not found" }));
-    }
-  }
-
-  private async handleHeartbeatHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> {
-    if (req.method !== "POST") {
-      res.writeHead(405, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Method not allowed" }));
-      return;
-    }
-
-    const bodyResult = await this.readHttpBody(req);
-    if (!bodyResult.ok) {
-      this.respondToBodyReadFailure(res, bodyResult);
-      return;
-    }
-
-    const body = parseHttpHeartbeatBody(bodyResult.body);
-    if (!body.ok) {
-      res.writeHead(body.response.status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(body.response.body));
-      return;
-    }
-    const result = await handleHttpHeartbeat(
-      this.sessionManager,
-      this.observerSessionRegistry,
-      body.sessionId,
-      body.livenessOwnerToken,
-    );
-    res.writeHead(result.status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result.body));
-  }
-
-  /**
-   * Refuse a direct HTTP MCP request during shutdown, and hold it until startup
-   * (device discovery and session rehydration) completes, as the Unix socket
-   * path already does (#11156). Returns false after answering 503 when shutting
-   * down, or when startup is still running past the admission bound or failed.
-   */
-  private async admitHttpMcpRequest(res: ServerResponse): Promise<boolean> {
-    if (!this.acceptingHttpSessions) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-      return false;
-    }
-    if (this.startupCompleted) {
-      return true;
-    }
-    const timedOut = Symbol("HTTP startup admission timeout");
-    const signal = this.shutdownIngressAbort.signal;
-    try {
-      await raceWithDeadline(this.startupCompletion, {
-        timer: this.timer,
-        timeoutMs: HTTP_STARTUP_ADMISSION_TIMEOUT_MS,
-        signal,
-        label: "HTTP MCP startup admission",
-        timeoutError: () => timedOut,
-      });
-      return true;
-    } catch (error) {
-      if (signal.aborted) {
-        // Shutdown began while this request waited on startup; the HTTP server
-        // close waits for it, so answer now rather than after startup (#11189).
-        logger.info("HTTP MCP request refused: daemon shut down during startup admission");
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-        return false;
-      }
-      if (error === timedOut) {
-        logger.warn(
-          `HTTP MCP request refused: daemon still starting after ${HTTP_STARTUP_ADMISSION_TIMEOUT_MS}ms`,
-        );
-        res.writeHead(503, {
-          "Content-Type": "application/json",
-          "Retry-After": String(HTTP_STARTUP_RETRY_AFTER_SECONDS),
-        });
-        res.end(JSON.stringify({ error: "Daemon is still starting" }));
-        return false;
-      }
-      logger.warn(`HTTP MCP request refused: daemon startup failed: ${errorMessage(error)}`);
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon startup failed" }));
-      return false;
-    }
-  }
-
-  private async handleMcpHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!(await this.admitHttpMcpRequest(res))) {
-      return;
-    }
-
-    let parsedBody: unknown;
-
-    // Parse body for POST requests
-    if (req.method === "POST") {
-      const bodyResult = await this.readHttpBody(req);
-      if (!bodyResult.ok) {
-        this.respondToBodyReadFailure(res, bodyResult);
-        return;
-      }
-
-      try {
-        parsedBody = JSON.parse(bodyResult.body);
-      } catch (error) {
-        // Invalid client JSON is expected; the 400 response fully describes the failure.
-        logger.debug(`Invalid MCP JSON: ${error}`);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
-        return;
-      }
-    }
-
-    const sendJsonRpcError = (message: string, error?: unknown) =>
-      this.sendHttpJsonRpcError(res, parsedBody, message, error);
-
-    // A request may have begun reading its body just before shutdown
-    // quiesced the listener. Recheck admission before it can create a
-    // server after the shutdown in-flight snapshot is taken.
-    if (!this.acceptingHttpSessions) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-      return;
-    }
-
-    return this.mcpHttpEndpoint.handle(req, res, parsedBody, sendJsonRpcError);
-  }
-
   /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
     req: IncomingMessage,
@@ -2247,105 +1942,6 @@ export class Daemon {
       debug: this.debug,
       acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
     };
-  }
-
-  private sendHttpJsonRpcError(
-    res: ServerResponse,
-    parsedBody: unknown,
-    message: string,
-    error?: unknown,
-  ): void {
-    if (res.headersSent) {
-      return;
-    }
-    const id =
-      parsedBody && typeof parsedBody === "object" && "id" in parsedBody ? parsedBody.id : null;
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        error: {
-          code: -32603,
-          message,
-          data: error instanceof Error ? error.message : undefined,
-        },
-      }),
-    );
-  }
-
-  private readHttpBody(req: IncomingMessage): Promise<HttpBodyResult> {
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = [];
-      let bytes = 0;
-      let settled = false;
-      const finish = (result: HttpBodyResult): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        req.off("data", onData);
-        req.off("end", onEnd);
-        req.off("error", onError);
-        req.off("aborted", onAborted);
-        req.off("close", onClose);
-        resolve(result);
-      };
-      const onData = (chunk: Buffer | string): void => {
-        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        bytes += data.length;
-        if (bytes > HTTP_BODY_MAX_BYTES) {
-          finish({ ok: false, status: 413, error: "Request body too large" });
-          req.destroy();
-          return;
-        }
-        chunks.push(data);
-      };
-      const onEnd = (): void => finish({ ok: true, body: Buffer.concat(chunks).toString("utf8") });
-      const onError = (error: Error): void => {
-        logger.warn("HTTP request body read failed", error);
-        finish({ ok: false, status: 400, error: "Request body read failed" });
-      };
-      const onAborted = (): void => finish({ ok: false, status: 400, error: "Request aborted" });
-      const onClose = (): void => finish({ ok: false, status: 400, error: "Request closed" });
-      const timeout = this.timer.setTimeout(() => {
-        finish({ ok: false, status: 408, error: "Request body timed out" });
-        req.destroy();
-      }, HTTP_BODY_TIMEOUT_MS);
-      req.on("data", onData);
-      req.on("end", onEnd);
-      req.on("error", onError);
-      req.on("aborted", onAborted);
-      req.on("close", onClose);
-    });
-  }
-
-  private respondToBodyReadFailure(
-    res: ServerResponse,
-    result: Extract<HttpBodyResult, { ok: false }>,
-  ): void {
-    if (!res.destroyed) {
-      res.writeHead(result.status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: result.error }));
-    }
-  }
-
-  private closeHttpListener(): Promise<void> {
-    if (!this.httpServer) {
-      return Promise.resolve();
-    }
-    this.httpServerClosePromise ??= new Promise<void>((resolve, reject) => {
-      this.httpServer!.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        logger.info("HTTP server stopped");
-        resolve();
-      });
-    });
-    return this.httpServerClosePromise;
   }
 
   /**
@@ -2553,20 +2149,6 @@ export class Daemon {
     }
   }
 
-  private logSkippedObservationStreamDevice(
-    platform: "android" | "ios",
-    deviceId: string,
-    action: string,
-  ): void {
-    const optInEnv =
-      platform === "android"
-        ? "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES"
-        : "AUTOMOBILE_IOS_WARMUP_DEVICES";
-    logger.info(
-      `[Daemon] Skipping observation-stream ${action} for ${platform} device ${deviceId}: passive-work policy filtered it; set ${optInEnv} to opt in`,
-    );
-  }
-
   private getInitialFrameCoordinator(
     server: NonNullable<ReturnType<typeof getDeviceDataStreamServer>>,
   ) {
@@ -2583,7 +2165,7 @@ export class Daemon {
     return coordinator;
   }
 
-  private setupDeviceDataStreamCallback(): void {
+  protected setupDeviceDataStreamCallback(): void {
     const server = this.deviceDataStreamServer ?? getDeviceDataStreamServer();
     if (!server) {
       logger.warn("[Daemon] Observation stream server not available for callback setup");
@@ -2602,7 +2184,7 @@ export class Daemon {
       const allDevices = selectObservationStreamDevices(
         pooledDevices,
         this.passiveWorkPolicy,
-        (device) => this.logSkippedObservationStreamDevice(device.platform, device.id, "connect"),
+        (device) => logSkippedObservationStreamDevice(device.platform, device.id, "connect"),
       );
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
@@ -2617,7 +2199,8 @@ export class Daemon {
         },
         androidClientFactory: (device) =>
           AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
-        iosClientFactory: (device) => this.createObservationStreamIosClient(device),
+        iosClientFactory: (device) =>
+          createObservationStreamIosClient(device, getDeviceDataStreamServer),
       }).catch((error) => {
         logger.warn(`[Daemon] Error pushing initial observation frame: ${error}`);
       });
@@ -2635,7 +2218,7 @@ export class Daemon {
       for (const device of devices) {
         if (device.platform === "android") {
           if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("android", device.id, "screenshot cadence");
+            logSkippedObservationStreamDevice("android", device.id, "screenshot cadence");
             continue;
           }
           AndroidCtrlProxyClient.getExistingInstance(
@@ -2643,7 +2226,7 @@ export class Daemon {
           )?.refreshObservationStreamScreenshotCadence();
         } else if (device.platform === "ios") {
           if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("ios", device.id, "screenshot cadence");
+            logSkippedObservationStreamDevice("ios", device.id, "screenshot cadence");
             continue;
           }
           IOSCtrlProxyClient.getExistingInstance(
@@ -2661,7 +2244,7 @@ export class Daemon {
       for (const device of devices) {
         if (device.platform === "android") {
           if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("android", device.id, "hierarchy cadence");
+            logSkippedObservationStreamDevice("android", device.id, "hierarchy cadence");
             continue;
           }
           AndroidCtrlProxyClient.getExistingInstance(
@@ -2669,7 +2252,7 @@ export class Daemon {
           )?.refreshObservationStreamHierarchyCadence();
         } else if (device.platform === "ios") {
           if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
-            this.logSkippedObservationStreamDevice("ios", device.id, "hierarchy cadence");
+            logSkippedObservationStreamDevice("ios", device.id, "hierarchy cadence");
             continue;
           }
           const client = IOSCtrlProxyClient.getExistingInstance(device.id);
@@ -2725,7 +2308,11 @@ export class Daemon {
       return runObservationRequestBatch(
         pooledDevices,
         createDaemonObservationExecutor(requestStart, (pooledDevice) =>
-          this.isHeldByAnotherOwner(pooledDevice, sessionUuid),
+          isHeldByAnotherOwner(
+            { sessionManager: this.sessionManager, devicePool: this.devicePool },
+            pooledDevice,
+            sessionUuid,
+          ),
         ),
         {
           timer: this.timer,
@@ -2745,412 +2332,44 @@ export class Daemon {
     this.setupNavigationGraphStreamListener(server);
   }
 
-  /**
-   * Whether a device is held by a session other than the requester's (a derived
-   * `${base}:${label}` session counts as its base). Such a requester only watches it (#10967).
-   */
-  private isHeldByAnotherSession(deviceId: string, requesterSessionUuid?: string): boolean {
-    const holder =
-      this.sessionManager.getSessionForDevice(deviceId) ??
-      holderOf(this.devicePool.getDevice(deviceId));
-    if (!holder) {
-      return false;
-    }
-    const base = (sessionUuid: string | undefined) =>
-      resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessionManager);
-    return base(holder) !== base(requesterSessionUuid?.trim() || undefined);
+  private applyStorageSubscriptionRequest(request: StorageSubscriptionRequest): Promise<void> {
+    return applyStorageSubscriptionRequest({ devicePool: this.devicePool }, request);
   }
 
-  /**
-   * Whether anyone but the requester holds the device, for classifying a READ: another local
-   * session, a broker binding (idle or not, unless the requester is the binding's execution), or
-   * another daemon's claim. Such a request is downgraded to the connect-only read, never refused.
-   * An ownership state that cannot be read counts as held: a read must not risk a rebind on a
-   * device that may belong to someone else. The checks reuse the pool's own gates and their
-   * one-second snapshots, so an observation adds no cross-daemon round trip beyond them.
-   */
-  private async isHeldByAnotherOwner(
-    pooledDevice: PooledDevice,
-    requesterSessionUuid?: string,
-  ): Promise<boolean> {
-    const deviceId = pooledDevice.id;
-    if (this.isHeldByAnotherSession(deviceId, requesterSessionUuid)) {
-      return true;
-    }
-    if (this.sessionManager.getSessionForDevice(deviceId) ?? holderOf(pooledDevice)) {
-      // The requester's own session holds it; the pool's gates govern others, not the holder.
-      return false;
-    }
-    const platform = pooledDevice.platform;
-    const requester = requesterSessionUuid?.trim() || undefined;
-    try {
-      await assertInputNotOnForeignBindingDevice({
-        action: "observe",
-        deviceId,
-        platform,
-        requesterSessionUuid: requester,
-        sessionManager: this.sessionManager,
-        gate: this.devicePool,
-      });
-      await assertControlNotOnForeignDaemonDevice({
-        deviceId,
-        platform,
-        gate: this.devicePool,
-      });
-      return false;
-    } catch (error) {
-      if (
-        error instanceof DeviceAssignedToBindingError ||
-        error instanceof DeviceOwnedByOtherDaemonError
-      ) {
-        // A broker binding or another daemon holds the device: an expected verdict, so the read is
-        // downgraded to connect-only rather than refused.
-        logger.debug(`[Daemon] observation of ${deviceId} is read-only: ${errorMessage(error)}`);
-      } else {
-        // Unknown ownership is treated as held; the trace says why the read was downgraded.
-        logger.warn(
-          `[Daemon] ownership of ${deviceId} unreadable; observation is read-only: ${errorMessage(error)}`,
-          error,
-        );
-      }
-      return true;
-    }
-  }
-
-  /**
-   * Expand one storage (un)subscription to the devices it targets and apply it.
-   *
-   * FUNNEL 2 for every target the expansion produces. A request that scopes
-   * itself to a serial is already refused at the socket server, but an
-   * ALL-DEVICE request names no serial at all, so nothing there can preflight it
-   * — and `deviceId === null` means every pooled Android device here. Gating each
-   * expanded target is what stops the request from installing a content observer
-   * on whichever replacement AVD now answers on a quarantined serial and still
-   * acking success. The refusals are collected rather than thrown at the first
-   * one, so a healthy device still gets its observer and the caller learns which
-   * targets the request could not cover -- the same partial-completion shape the
-   * all-device observation path uses
-   * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-   *
-   * Teardown is exempt, as it is at the socket server: refusing it would strand
-   * the observer this daemon registered, and releasing one touches only
-   * bookkeeping the quarantine does not question.
-   */
-  private async applyStorageSubscriptionRequest({
-    deviceId,
-    sessionUuid,
-    packageName,
-    fileName,
-    subscribe,
-  }: {
-    deviceId: string | null;
-    sessionUuid?: string;
-    packageName: string;
-    fileName: string;
-    subscribe: boolean;
-  }): Promise<void> {
-    const devices = this.devicePool
-      .getAllDevices()
-      .filter((device) => deviceId === null || device.id === deviceId);
-    const refusals: string[] = [];
-    const authenticator = createDefaultStreamSocketAuthenticator("observationStream", {
-      allowObserverSessions: true,
-    });
-    for (const device of devices) {
-      if (device.platform !== "android") {
-        continue;
-      }
-      try {
-        // Watching stored values is a read: a held device admits any live identity (#10830).
-        authenticator.authorize({ sessionUuid, deviceId: device.id, admitViewer: true });
-      } catch (error) {
-        refusals.push(errorMessage(error));
-        continue;
-      }
-      if (subscribe) {
-        try {
-          this.devicePool.assertDeviceActionable(device.id, STORAGE_WATCH_PURPOSE);
-        } catch (error) {
-          refusals.push(errorMessage(error));
-          continue;
-        }
-      }
-      const client = AndroidCtrlProxyClient.getExistingInstance(device.id);
-      if (!client) {
-        continue;
-      }
-      if (subscribe) {
-        await client.subscribeStorage(packageName, fileName);
-      } else {
-        await client.unsubscribeStorage(`${packageName}:${fileName}`);
-      }
-    }
-    if (refusals.length > 0) {
-      throw new ActionableError(refusals.join("; "));
-    }
-  }
-
-  private createObservationStreamIosClient(device: BootedDevice): ObservationStreamIosClient {
-    const client = IOSCtrlProxyClient.getInstance(device);
-    return {
-      ensureConnected: async () => {
-        const connected = await client.ensureConnected();
-        const server = getDeviceDataStreamServer();
-        if (connected && server) {
-          client.refreshObservationStreamHierarchyCadence(
-            server.getHierarchyIntervalMsForDevice(device.deviceId),
-          );
-        }
-        return connected;
-      },
-      getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
-      requestHierarchySyncWithoutObservationStreamPush: async (...args) => {
-        const result = await client.requestHierarchySyncWithoutObservationStreamPush(...args);
-        return result
-          ? {
-              hierarchy: result.hierarchy,
-              ...(result.frameContext === undefined ? {} : { frameContext: result.frameContext }),
-            }
-          : null;
-      },
-      convertToViewHierarchyResult: (hierarchy) =>
-        client.convertToViewHierarchyResult(hierarchy as never),
-      recordInitialObservationStreamHierarchy: (hierarchy, captureSequence) =>
-        client.recordInitialObservationStreamHierarchy(hierarchy, captureSequence),
-      requestScreenshotWithoutObservationStreamPush: (...args) =>
-        client.requestScreenshotWithoutObservationStreamPush(...args),
-    };
-  }
-
-  /**
-   * Set up listener for navigation graph changes.
-   * When the navigation graph changes, push updates to all subscribed IDE plugins.
-   */
   private setupNavigationGraphStreamListener(
     server: ReturnType<typeof getDeviceDataStreamServer>,
   ): void {
-    if (!server) {
-      return;
-    }
-
-    this.setupNavigationGraphUpdateListener(NavigationGraphManager.getInstance());
-    for (const session of this.sessionManager.getAllSessions()) {
-      this.setupNavigationGraphUpdateListener(
-        NavigationGraphManager.getInstanceForSession(session.sessionId),
-      );
-    }
-
-    // Requests retain the legacy unattributed graph behavior. Live graph changes
-    // above are also wired to each active session manager, which is where tool
-    // execution records navigation state.
-    server.setOnNavigationGraphRequested(
-      createNavigationGraphRequestHandler({
-        exportGraphSummary: () => this.resolveUnscopedNavigationGraphManager().exportGraphSummary(),
-        exportGraphSummaryForApp: (appId) =>
-          this.resolveUnscopedNavigationGraphManager().exportGraphSummaryForApp(appId),
-      }),
-    );
-
-    logger.info("[Daemon] Navigation graph stream listener configured");
-  }
-
-  private resolveUnscopedNavigationGraphManager(): NavigationGraphManager {
-    const sessions = this.sessionManager.getAllSessions();
-    return sessions.length === 1
-      ? NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId)
-      : NavigationGraphManager.getInstance();
-  }
-
-  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {
-    const streamServer = this.deviceDataStreamServer;
-    if (
-      streamServer &&
-      !this.navigationGraphSeededStreamManagers.get(streamServer)?.has(navGraphManager)
-    ) {
-      const seededManagers =
-        this.navigationGraphSeededStreamManagers.get(streamServer) ??
-        new WeakSet<NavigationGraphManager>();
-      seededManagers.add(navGraphManager);
-      this.navigationGraphSeededStreamManagers.set(streamServer, seededManagers);
-      for (const context of navGraphManager.getBuildContexts()) {
-        if (context.deviceId !== LEGACY_PROVENANCE_SENTINEL) {
-          streamServer.pushBuildContextUpdate(context.deviceId, context.appId, {
-            packageId: context.appId,
-            versionCode: context.versionCode,
-            ...(context.versionKey === undefined ? {} : { versionKey: context.versionKey }),
-            contentHash: context.contentHash,
-          });
-        }
-      }
-    }
-    if (this.navigationGraphListenerManagers.has(navGraphManager)) {
-      return;
-    }
-    this.navigationGraphListenerManagers.add(navGraphManager);
-    navGraphManager.setBuildContextUpdateListener(({ appId, deviceId, buildContext }) => {
-      if (
-        !this.navigationGraphListenerManagers.has(navGraphManager) ||
-        deviceId === LEGACY_PROVENANCE_SENTINEL
-      ) {
-        return;
-      }
-      this.deviceDataStreamServer?.pushBuildContextUpdate(
-        deviceId,
-        appId,
-        buildContext === null
-          ? null
-          : {
-              packageId: appId,
-              versionCode: buildContext.versionCode,
-              ...(buildContext.versionKey === undefined
-                ? {}
-                : { versionKey: buildContext.versionKey }),
-              contentHash: buildContext.contentHash,
-            },
-      );
-    });
-    navGraphManager.setGraphUpdateListener(async () => {
-      logger.info("[Daemon] Navigation graph listener triggered, exporting summary...");
-      try {
-        const summary = await navGraphManager.exportGraphSummary();
-        if (!this.navigationGraphListenerManagers.has(navGraphManager)) {
-          logger.debug("[Daemon] Ignoring navigation update from a released or rebound session");
-          return;
-        }
-        logger.info(
-          `[Daemon] Got summary: appId=${summary.appId}, nodes=${summary.nodes.length}, edges=${summary.edges.length}`,
-        );
-
-        const streamData = convertSummaryToStreamData(summary);
-        // Attribute the update to the device that owns this app's graph so panes
-        // watching other devices are not cross-contaminated (epic #5256; #4837).
-        const deviceId = navGraphManager.getDeviceIdForApp(summary.appId);
-        this.deviceDataStreamServer?.pushNavigationGraphUpdate(streamData, deviceId);
-
-        logger.info(
-          `[Daemon] Pushed navigation graph update: ${summary.nodes.length} nodes, ${summary.edges.length} edges`,
-        );
-      } catch (error) {
-        logger.warn(`[Daemon] Failed to push navigation graph update: ${error}`);
-      }
-    });
-  }
-
-  private checkHealthListeners(
-    recordHealthCheckFailure: (kind: HealthFailureKind) => void,
-  ): boolean {
-    // Check if HTTP server is responsive
-    if (!this.httpServer) {
-      logger.warn("Health check failed: HTTP server not initialized");
-      recordHealthCheckFailure("http");
-      return false;
-    }
-    if (!this.httpServer.listening) {
-      logger.warn("Health check failed: HTTP server not listening");
-      recordHealthCheckFailure("http");
-      return false;
-    }
-    // Check socket servers before probing shared dependencies; clients
-    // can only subscribe to advertised streams while their socket paths exist.
-    if (!this.socketServer || !this.socketServer.isListening()) {
-      logger.warn("Health check failed: Socket server not listening");
-      recordHealthCheckFailure("socket");
-      return false;
-    }
-    if (!this.observationStreamHealth.isHealthy()) {
-      logger.warn("Health check failed: Observation stream socket unavailable");
-      recordHealthCheckFailure("socket");
-      return false;
-    }
-    return true;
+    this.navigationGraphBridge.listen(server);
   }
 
   /**
    * Start periodic health checks
    */
   private startHealthCheckTimer(): void {
-    const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
-    const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
-    const lateness = new DatabaseHealthLateness(this.timer, HEALTH_CHECK_INTERVAL);
-    let failedCheckCount = 0;
-    let lastFailureKind: HealthFailureKind = "unknown";
-    const recordHealthCheckFailure = (failureKind: HealthFailureKind): void => {
-      // Recovery behavior depends on the failure kind, so only same-kind streaks
-      // should reach a kind-specific recovery action.
-      if (lastFailureKind !== failureKind) {
-        failedCheckCount = 0;
-      }
-      lastFailureKind = failureKind;
-      failedCheckCount++;
-    };
-    const resetHealthCheckFailures = (): void => {
-      failedCheckCount = 0;
-      lastFailureKind = "unknown";
-    };
-
-    const checkDatabaseHealth = async (
-      tickGap: ReturnType<DatabaseHealthLateness["tick"]>,
-    ): Promise<boolean> => {
-      const timeoutIsInconclusive = lateness.beginProbe(tickGap);
-      try {
-        await this.databaseHealthProbe.check();
-        this.lastDatabaseHealthFailure = undefined;
-        // Health check passed
-        resetHealthCheckFailures();
-        logger.debug("Health check passed");
-      } catch (error) {
-        if (timeoutIsInconclusive(error, failedCheckCount)) {
-          return false;
-        }
-        this.lastDatabaseHealthFailure = errorMessage(error);
-        logger.warn(`Health check failed: Database probe failed: ${error}`);
-        recordHealthCheckFailure("database");
-      }
-      return true;
-    };
-
-    const checkHealth = async (): Promise<void> => {
-      const tickGap = lateness.tick();
-      try {
-        if (this.checkHealthListeners(recordHealthCheckFailure)) {
-          if (!(await checkDatabaseHealth(tickGap))) {
-            return;
-          }
-        }
-
-        // If too many failures, attempt recovery
-        if (failedCheckCount >= MAX_FAILED_CHECKS) {
-          logger.error(`Health check failed ${failedCheckCount} times, attempting recovery...`);
-          await this.attemptRecovery(lastFailureKind);
-          resetHealthCheckFailures();
-        }
-      } catch (error) {
-        logger.warn(`Health check error: ${error}`);
-        recordHealthCheckFailure("unknown");
-      }
-    };
-    this.healthCheckTimer = this.timer.setInterval(() => {
-      // checkHealth logs failures and updates the failure counter internally.
-      void checkHealth();
-    }, HEALTH_CHECK_INTERVAL);
-
-    // Keep timer alive even if there are no other references
-    if (typeof (this.healthCheckTimer as { unref?: () => void }).unref === "function") {
-      (this.healthCheckTimer as { unref: () => void }).unref();
-    }
+    this.healthCheck = createDaemonHealthCheck({
+      timer: this.timer,
+      httpServer: () => this.httpIngress.server,
+      socketServerListening: () => this.socketServer?.isListening() ?? false,
+      observationStreamHealthy: () => this.observationStreamHealth.isHealthy(),
+      databaseHealthProbe: () => this.databaseHealthProbe,
+      onDatabaseFailureChanged: (message) => {
+        this.lastDatabaseHealthFailure = message;
+      },
+      recover: (kind) => this.attemptRecovery(kind),
+    });
+    this.healthCheck.start();
   }
 
-  private stopHealthCheckTimer(): void {
-    if (this.healthCheckTimer) {
-      this.timer.clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
+  private async stopHealthCheckTimer(): Promise<void> {
+    const healthCheck = this.healthCheck;
+    this.healthCheck = null;
+    await healthCheck?.stop();
   }
 
   /**
    * Start periodic heartbeat checks to cancel stale sessions
    */
-  private startHeartbeatMonitor(): void {
+  protected startHeartbeatMonitor(): void {
     // Owners can reconnect only now that the control socket accepts connections.
     this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
@@ -3162,7 +2381,7 @@ export class Daemon {
         // A call still in flight (a read never keeps the session; a control call only until its
         // veto runs out) learns why it was cancelled: the typed terminal refusal, not a generic
         // abort (#11322). That includes a call that reached the session through autolock (#11400).
-        await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
+        await this.cancelAndReleaseSession(sessionId, reason, {
           cutCallsLearnRelease: true,
         });
       },
@@ -3224,11 +2443,11 @@ export class Daemon {
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +
-          this.openHttpRequests,
+          this.httpIngress.openRequestCount,
         clientActivityCount: () =>
           (this.socketServer?.getAcceptedClientConnectionCount() ?? 0) +
           getAcceptedAuxSocketConnectionCount() +
-          this.httpRequestsSeen,
+          this.httpIngress.requestsSeenCount,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
           this.selfExitRecorder.record("orphan-watchdog");
@@ -3347,7 +2566,7 @@ export class Daemon {
     return true;
   }
 
-  private async recordAndTryRecoverCapturedDisconnect(
+  protected async recordAndTryRecoverCapturedDisconnect(
     deviceId: string,
     pooledDevice: PooledDevice | null,
     assignmentCount: number,
@@ -3408,69 +2627,7 @@ export class Daemon {
     }
   }
 
-  private async discoverAndReconcile(
-    deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
-    {
-      planActive,
-      platform = "either",
-      bypassAndroidDeviceListCache = false,
-    }: {
-      planActive: boolean;
-      platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
-      bypassAndroidDeviceListCache?: boolean;
-    },
-  ) {
-    const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
-      bypassAndroidDeviceListCache,
-    });
-    discovery.devices = await this.mapMonitorAndroidDiscovery(discovery.devices);
-    // Reconciliation can quarantine identity and cancel in-flight work. During
-    // allocation, discovery supplies only presence evidence for miss counting.
-    if (!planActive) {
-      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
-        settleMembership: true,
-      });
-    }
-    return discovery;
-  }
-
-  /**
-   * Monitor ticks only map known transports. A wireless adb port change shows
-   * up as an unknown `host:port` row while the pooled transport goes missing;
-   * probe-and-fold it (ro.serialno + boot_id) before that counts as a miss, or
-   * the held session is released after three ticks (#11133).
-   */
-  private async mapMonitorAndroidDiscovery(devices: BootedDevice[]): Promise<BootedDevice[]> {
-    const mapped = this.devicePool.mapAndroidDiscovery(devices);
-    const present = new Set(mapped.map((device) => device.deviceId));
-    const pooled = this.devicePool
-      .getAllDevices()
-      .filter((device) => device.platform === "android");
-    const pooledIds = new Set(pooled.map((device) => device.id));
-    const unmappedTransport = mapped.some(
-      (device) =>
-        device.platform === "android" &&
-        !pooledIds.has(device.deviceId) &&
-        isAndroidTransportAddressSerial(device.deviceId),
-    );
-    if (!unmappedTransport) {
-      return mapped;
-    }
-    const missingTransportCandidate = pooled.some(
-      (device) =>
-        !present.has(device.id) &&
-        [device.id, ...this.devicePool.getAndroidTransportAliases(device.id)].some(
-          isAndroidTransportAddressSerial,
-        ),
-    );
-    if (!missingTransportCandidate) {
-      return mapped;
-    }
-    // Additive fold: a monitor tick must not prune alias groups or connection evidence.
-    return await this.devicePool.normalizeAndroidDiscovery(devices, false, () => true, false);
-  }
-
-  private startDeviceDisconnectMonitor(
+  protected startDeviceDisconnectMonitor(
     deviceManager: Pick<
       MultiPlatformDeviceManager,
       | "getBootedDevicesDetailed"
@@ -3505,7 +2662,9 @@ export class Daemon {
         try {
           this.startDeferredSessionRecoverySweep(planActive);
 
-          let discovery = await this.discoverAndReconcile(deviceManager, { planActive });
+          let discovery = await this.discoverAndReconcile(deviceManager, {
+            planActive,
+          });
           let succeededPlatforms = discovery.succeededPlatforms;
           let bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
           const activeRecordings = planActive ? [] : await listRecordings();
@@ -3513,7 +2672,8 @@ export class Daemon {
           const missingByDevice = new Map<string, string[]>();
           const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
             this.collectDisconnectCandidates(activeRecordings);
-          const listed = await this.probeListedAndroidStates(
+          const listed = await probeListedAndroidStates(
+            this.devicePool,
             deviceManager,
             planActive,
             candidateDeviceIds,
@@ -3561,7 +2721,7 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
-            transitionalDeviceIds: this.transitionalCandidateIds(discovery, listed),
+            transitionalDeviceIds: transitionalCandidateIds(this.devicePool, discovery, listed),
             offlineEpisodes: this.offlineEpisodes,
             nowMs: this.timer.monotonicNow?.() ?? this.timer.now(),
             immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
@@ -3609,7 +2769,7 @@ export class Daemon {
             return;
           }
           adbServerResetCohort = adbServerResetDetachment.devices;
-          const adbServerResetCohortByDeviceId = this.collectDisconnectedRecordings(
+          const adbServerResetCohortByDeviceId = collectDisconnectedRecordings(
             adbServerResetCohort,
             missingByDevice,
             activeRecordings,
@@ -3634,6 +2794,23 @@ export class Daemon {
     this.deviceDisconnectMonitor.start();
   }
 
+  private discoverAndReconcile(
+    deviceManager: Parameters<typeof discoverAndReconcile>[1],
+    options: Parameters<typeof discoverAndReconcile>[2],
+  ) {
+    return discoverAndReconcile(this.devicePool, deviceManager, options);
+  }
+
+  private logDisconnectMisses(...args: LogDisconnectMissesArgs): void {
+    logDisconnectMisses(this.deviceDisconnectMisses, ...args);
+  }
+
+  private collectDisconnectCandidates(
+    activeRecordings: Parameters<typeof collectDisconnectCandidates>[2],
+  ) {
+    return collectDisconnectCandidates(this.devicePool, this.sessionManager, activeRecordings);
+  }
+
   private createPlanDeviceLossCheck(
     deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
     discover: PlanDeviceLossPort["discover"],
@@ -3656,7 +2833,8 @@ export class Daemon {
       isStartupLeased: (id) => this.devicePool.isDeviceLeasedForAndroidStartup(id),
       isShutdownReserved: (id) => this.devicePool.isShutdownReservationHeld(id),
       discover,
-      getOfflineDeviceIds: (ids) => this.getAndroidOfflineCanonicalIds(deviceManager, ids),
+      getOfflineDeviceIds: (ids) =>
+        getAndroidOfflineCanonicalIds(this.devicePool, deviceManager, ids),
       isAdbReset: (ids, discovery) =>
         isProcessWideAdbServerReset(
           ids,
@@ -3697,143 +2875,6 @@ export class Daemon {
     };
   }
 
-  /**
-   * Online-ness is otherwise binary: an in-session Android emulator that
-   * dropped to ADB `offline` looks identical to one that is fully gone, since
-   * bootedDeviceIds only ever contains `device`-state serials. Ask only about
-   * candidates already missing from that list, so a fully-healthy sweep never
-   * pays for this extra `devices -l` probe (#7536). Every non-`device` row
-   * counts as still attached for the immediate physical-device path; only
-   * `offline` drives reconnect (#11090), and the transitional rows (`offline`,
-   * `unauthorized`) are held under the budget (#11592). Every set is undefined
-   * when the probe is skipped (plan active) or fails.
-   */
-  private async probeListedAndroidStates(
-    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
-    planActive: boolean,
-    candidateDeviceIds: Set<string>,
-    bootedDeviceIds: Set<string>,
-    candidatePlatforms: Map<string, "android" | "ios">,
-  ): Promise<{
-    offlineDeviceIds?: Set<string>;
-    offlineTransportIds?: Map<string, Set<string>>;
-    transitionalAdbDeviceIds?: Set<string>;
-    listedNonDeviceIds?: Set<string>;
-  }> {
-    if (planActive) {
-      return {};
-    }
-    const missingAndroidCandidateIds = this.findMissingAndroidCandidates(
-      candidateDeviceIds,
-      bootedDeviceIds,
-      candidatePlatforms,
-    );
-    const aliasOwners = this.androidAliasOwners(missingAndroidCandidateIds);
-    try {
-      const listedStates =
-        missingAndroidCandidateIds.size > 0
-          ? await deviceManager.getAndroidListedDeviceStates(
-              new Set([...missingAndroidCandidateIds, ...aliasOwners.keys()]),
-            )
-          : new Map<string, string>();
-      const candidateStates = [...listedStates].map(([id, state]): [string, string] => [
-        aliasOwners.get(id) ?? id,
-        state,
-      ]);
-      const offlineTransportIds = new Map<string, Set<string>>();
-      for (const [id, state] of listedStates) {
-        const canonicalId = aliasOwners.get(id) ?? id;
-        if (state === "offline" && missingAndroidCandidateIds.has(canonicalId)) {
-          const transports = offlineTransportIds.get(canonicalId) ?? new Set<string>();
-          transports.add(id);
-          offlineTransportIds.set(canonicalId, transports);
-        }
-      }
-      return {
-        offlineTransportIds,
-        listedNonDeviceIds: new Set(candidateStates.map(([id]) => id)),
-        offlineDeviceIds: new Set(
-          candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),
-        ),
-        transitionalAdbDeviceIds: new Set(
-          candidateStates.filter(([, state]) => isTransitionalAdbState(state)).map(([id]) => id),
-        ),
-      };
-    } catch (error) {
-      if (!(error instanceof AndroidOfflineProbeError)) {
-        throw error;
-      }
-      // Auxiliary probe failure supplies no evidence that an offline episode ended.
-      logger.warn(
-        `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
-      );
-      return {};
-    }
-  }
-
-  /**
-   * One rule for both platforms (#11592): a held device the platform still
-   * lists mid-transition (adb `offline`/`unauthorized`, simctl `Booting`/
-   * `Shutting Down`) is held under the budget instead of counting misses. The
-   * simulator half reads the sweep's own listing and the same held-device
-   * filter the inventory surfaces use, so an unheld pooled simulator keeps the
-   * three-miss rule and the surfaces agree with what the monitor keeps.
-   */
-  private transitionalCandidateIds(
-    discovery: Pick<BootedDeviceDiscovery, "devices" | "transitionalSimulators">,
-    listed: { transitionalAdbDeviceIds?: ReadonlySet<string> },
-  ): Set<string> {
-    return selectTransitionalDeviceIds(
-      listed.transitionalAdbDeviceIds,
-      transitionalHeldSimulators({
-        transitional: discovery.transitionalSimulators,
-        discovered: discovery.devices,
-        devicePool: this.devicePool,
-      }).map(({ device }) => device.deviceId),
-    );
-  }
-
-  /**
-   * A held USB+Wi-Fi phone is keyed by its USB serial; after an unplug its
-   * still-attached Wi-Fi alias may be listed offline/authorizing. Map each
-   * known alias serial to the canonical id it speaks for (#11133).
-   */
-  private androidAliasOwners(deviceIds: Iterable<string>): Map<string, string> {
-    return new Map(
-      [...deviceIds].flatMap((deviceId) =>
-        this.devicePool
-          .getAndroidTransportAliases(deviceId)
-          .map((alias): [string, string] => [alias, deviceId]),
-      ),
-    );
-  }
-
-  /** Offline canonical ids, counting an offline alias serial as its canonical (#11133). */
-  private async getAndroidOfflineCanonicalIds(
-    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
-    deviceIds: Iterable<string>,
-  ): Promise<Set<string>> {
-    const ids = [...deviceIds];
-    const aliasOwners = this.androidAliasOwners(ids);
-    const offline = await deviceManager.getAndroidOfflineDeviceIds(
-      new Set([...ids, ...aliasOwners.keys()]),
-    );
-    return new Set([...offline].map((id) => aliasOwners.get(id) ?? id));
-  }
-
-  private findMissingAndroidCandidates(
-    candidateDeviceIds: Set<string>,
-    bootedDeviceIds: Set<string>,
-    candidatePlatforms: Map<string, "android" | "ios">,
-  ): Set<string> {
-    return new Set(
-      [...candidateDeviceIds].filter(
-        (deviceId) =>
-          !bootedDeviceIds.has(deviceId) && candidatePlatforms.get(deviceId) === "android",
-      ),
-    );
-  }
-
   private startDeferredSessionRecoverySweep(planActive: boolean): void {
     if (!planActive) {
       this.trackDeferredSessionRecoverySweep(
@@ -3845,57 +2886,6 @@ export class Daemon {
         }),
       );
     }
-  }
-
-  private collectDisconnectedRecordings(
-    adbServerResetCohort: readonly PooledDevice[],
-    missingByDevice: Map<string, string[]>,
-    activeRecordings: Awaited<ReturnType<typeof listActiveVideoRecordings>>,
-  ): Map<string, PooledDevice> {
-    const processWideAdbServerReset = adbServerResetCohort.length > 0;
-    const adbServerResetCohortByDeviceId = new Map(
-      adbServerResetCohort.map((device) => [device.id, device]),
-    );
-    if (processWideAdbServerReset) {
-      logger.warn(
-        "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
-          "treating this as an ADB server reset and recovering by AVD name",
-      );
-      for (const device of adbServerResetCohort) {
-        missingByDevice.set(device.id, []);
-      }
-    }
-
-    for (const recording of activeRecordings) {
-      if (missingByDevice.has(recording.deviceId)) {
-        missingByDevice.get(recording.deviceId)!.push(recording.recordingId);
-      }
-    }
-    return adbServerResetCohortByDeviceId;
-  }
-
-  private collectDisconnectCandidates(
-    activeRecordings: Awaited<ReturnType<typeof listActiveVideoRecordings>>,
-  ) {
-    const candidateDeviceIds = new Set<string>();
-    const candidatePlatforms = new Map<string, "android" | "ios">();
-    const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
-    for (const recording of activeRecordings) {
-      candidateDeviceIds.add(recording.deviceId);
-      candidatePlatforms.set(recording.deviceId, recording.platform);
-    }
-    for (const device of this.devicePool.getAllDevices()) {
-      candidateDeviceIds.add(device.id);
-      candidatePlatforms.set(device.id, device.platform);
-      candidateIncarnations.set(device.id, device.incarnation);
-    }
-    for (const session of this.sessionManager.getAllSessions()) {
-      candidateDeviceIds.add(session.assignedDevice);
-      if (!candidatePlatforms.has(session.assignedDevice)) {
-        candidatePlatforms.set(session.assignedDevice, session.platform);
-      }
-    }
-    return { candidateDeviceIds, candidatePlatforms, candidateIncarnations };
   }
 
   private prepareOfflineRecovery(
@@ -3940,34 +2930,6 @@ export class Daemon {
       ),
     );
     return { dispatchTargets, offlineRecoveryTargets };
-  }
-
-  private logDisconnectMisses(
-    disconnectResult: ReturnType<typeof evaluateDeviceDisconnects>,
-    planActive: boolean,
-    bootedDeviceIds: Set<string>,
-  ): void {
-    for (const { deviceId, misses: evaluatedMisses, budgetExhausted } of disconnectResult.missed) {
-      const misses = planActive
-        ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
-        : evaluatedMisses;
-      if (planActive) {
-        // Also lower pre-plan misses so a plan-driven restart gets the same grace.
-        this.deviceDisconnectMisses.set(deviceId, misses);
-      }
-      const missState = budgetExhausted ? "transitional, budget exhausted" : "absent";
-      const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
-      if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
-        logger.debug(message);
-      } else {
-        logger.info(message);
-      }
-    }
-    for (const { deviceId, transitionalForMs } of disconnectResult.transitional) {
-      logger.info(
-        `[DisconnectMonitor] Device ${deviceId} listed in a transitional state for ${Math.round(transitionalForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
-      );
-    }
   }
 
   private captureDisconnectCleanup(
@@ -4108,8 +3070,7 @@ export class Daemon {
       await this.cancelAndReleaseSession(
         sessionIdAtDisconnect,
         deviceLossCancellationReason(deviceId, incidentId),
-        false,
-        sessionAtDisconnect,
+        { expectedSession: sessionAtDisconnect },
       );
     }
 
@@ -4209,77 +3170,18 @@ export class Daemon {
     }
   }
 
-  private async stopRecordingAfterDeviceDisconnect(
+  protected stopRecordingAfterDeviceDisconnect(
     recordingId: string,
     deviceId: string,
   ): Promise<boolean> {
-    if (this.stoppingRecordings.has(recordingId)) {
-      return false;
-    }
-    this.stoppingRecordings.add(recordingId);
-    const stopped = this.stopOrInterruptRecordingAfterDeviceDisconnect(
+    return stopRecordingAfterDeviceDisconnect(
+      { timer: this.timer, stoppingRecordings: this.stoppingRecordings },
       recordingId,
       deviceId,
-    ).finally(() => this.stoppingRecordings.delete(recordingId));
-    const stillStopping = new Error("recording stop still running");
-    try {
-      return await raceWithDeadline(stopped, {
-        timer: this.timer,
-        timeoutMs: DISCONNECT_RECORDING_STOP_WAIT_MS,
-        label: "Stop recording after device disconnect",
-        timeoutError: () => stillStopping,
-      });
-    } catch (error) {
-      if (error !== stillStopping) {
-        throw error;
-      }
-      // The capture itself ended with the device; what is left is post-processing, bounded by
-      // the unattended stop's own ceiling. The recording stays in `stoppingRecordings` until
-      // it finishes, so releasing the device neither waits for it nor starts a second stop.
-      logger.warn(
-        `[Daemon] Recording ${recordingId} is still finishing after device ${deviceId} disconnected; releasing the device without waiting`,
-      );
-      return true;
-    }
+    );
   }
 
-  private async stopOrInterruptRecordingAfterDeviceDisconnect(
-    recordingId: string,
-    deviceId: string,
-  ): Promise<boolean> {
-    try {
-      await stopVideoRecordingUnattended(recordingId);
-      logger.warn(
-        `[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`,
-      );
-      return true;
-    } catch (error) {
-      logger.warn(
-        `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`,
-      );
-      return await this.interruptRecordingAfterDeviceDisconnect(recordingId, deviceId);
-    }
-  }
-
-  private async interruptRecordingAfterDeviceDisconnect(
-    recordingId: string,
-    deviceId: string,
-  ): Promise<boolean> {
-    try {
-      await interruptVideoRecording(recordingId);
-      logger.warn(
-        `[Daemon] Marked recording ${recordingId} interrupted after device ${deviceId} disconnected`,
-      );
-      return true;
-    } catch (error) {
-      logger.warn(
-        `[Daemon] Failed to mark recording ${recordingId} interrupted after device ${deviceId} disconnected: ${error}`,
-      );
-      return false;
-    }
-  }
-
-  private async shouldSkipStaleDisconnectCleanup(
+  protected async shouldSkipStaleDisconnectCleanup(
     pooledDeviceAtDisconnect: PooledDevice | null,
     deviceId: string,
     forceGenerationAtDisconnect: number | undefined = this.forceDisconnectedDeviceGenerations.get(
@@ -4326,7 +3228,7 @@ export class Daemon {
     return true;
   }
 
-  private isCapturedDisconnectTargetCurrent(
+  protected isCapturedDisconnectTargetCurrent(
     deviceId: string,
     pooledDeviceAtDisconnect: PooledDevice | null,
     assignmentCountAtDisconnect: number | undefined,
@@ -4353,7 +3255,7 @@ export class Daemon {
     );
   }
 
-  private startAdbMissingDeviceListener(): void {
+  protected startAdbMissingDeviceListener(): void {
     if (this.unsubscribeAdbMissingDevice) {
       return;
     }
@@ -4380,10 +3282,10 @@ export class Daemon {
   async cancelAndReleaseSession(
     sessionId: string,
     releaseReason: SessionReleaseReason = "explicit-release",
-    allowExpired: boolean = false,
-    expectedSession?: Session,
-    shouldCommit?: () => boolean,
     options?: {
+      allowExpired?: boolean;
+      expectedSession?: Session;
+      shouldCommit?: () => boolean;
       deferFailureFallback?: boolean;
       releaseOptions?: SessionReleaseOptions;
       /**
@@ -4394,6 +3296,7 @@ export class Daemon {
       cutCallsLearnRelease?: boolean;
     },
   ): Promise<boolean> {
+    const { allowExpired = false, expectedSession, shouldCommit } = options ?? {};
     const release = async (cancelled: number): Promise<boolean> => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
@@ -4884,7 +3787,7 @@ export class Daemon {
     requestScopeId: string,
     transport: Pick<StreamableHTTPServerTransport, "close">,
   ): void {
-    this.mcpHttpEndpoint.trackForTesting(requestScopeId, () => transport.close());
+    this.httpIngress.trackTransportForTesting(requestScopeId, () => transport.close());
   }
 
   /** Test seam: behave as if shutdown had already started, without running it. */
@@ -4978,7 +3881,7 @@ export class Daemon {
         () => cleanupDaemonChildProcesses(),
       ),
       shutdownStage("health check timer", "the database health probe", async () => {
-        this.stopHealthCheckTimer();
+        await this.stopHealthCheckTimer();
         await this.databaseHealthProbe.dispose?.();
       }),
       shutdownStage("location routes", "nothing (synchronous)", () =>
@@ -5089,7 +3992,7 @@ export class Daemon {
         // also marks the stage as still running for the database stage.
         runShutdownCleanupStages(
           [
-            ...this.mcpHttpEndpoint.inFlightRequests().map(({ requestScopeId, close }) => ({
+            ...this.httpIngress.inFlightRequests().map(({ requestScopeId, close }) => ({
               name: `Streamable HTTP request ${requestScopeId}`,
               run: close,
             })),
@@ -5104,7 +4007,9 @@ export class Daemon {
       shutdownStage("active HTTP session registry", "nothing (synchronous)", () =>
         this.clearHttpSessionRegistry(),
       ),
-      shutdownStage("HTTP server", "open HTTP connections closing", () => this.closeHttpListener()),
+      shutdownStage("HTTP server", "open HTTP connections closing", () =>
+        this.httpIngress.closeListener(),
+      ),
     ];
   }
 
@@ -5246,7 +4151,7 @@ export class Daemon {
   }
 
   private clearHttpSessionRegistry(): void {
-    this.mcpHttpEndpoint.clear();
+    this.httpIngress.clearSessions();
   }
 
   private async drainShutdownDatabaseWrites(timeoutMs: number): Promise<void> {
@@ -5325,14 +4230,13 @@ export class Daemon {
    * shutdown teardown without persisting its retryable handoff outcome.
    */
   private async quiesceProvisioningIngress(): Promise<void> {
-    this.acceptingHttpSessions = false;
-    this.mcpHttpEndpoint.stopAccepting();
+    this.httpIngress.stopAccepting();
     // No forward reaches the MCP server from here on: the in-process gate HTTP's 503 was.
     this.mcpDispatcher.stopAccepting();
-    this.shutdownIngressAbort.abort();
+    this.httpIngress.abortPendingAdmissions();
     // Start closing the listener now so it cannot admit a connection after the
     // transport snapshot. The later HTTP server stage awaits this close.
-    void this.closeHttpListener().catch((error) => {
+    void this.httpIngress.closeListener().catch((error) => {
       logger.warn(`Failed to begin HTTP listener shutdown: ${errorMessage(error)}`, error);
     });
     const quiescing = this.socketServer?.quiesce();
@@ -5361,7 +4265,7 @@ export class Daemon {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
     const releases = sessionIds.map(async (sessionId) => {
-      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true);
+      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", { allowExpired: true });
     });
     const reportFailures = (results: PromiseSettledResult<void>[]): void => {
       for (const [index, release] of results.entries()) {

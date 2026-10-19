@@ -347,16 +347,15 @@ describe("Android doctor command line tools check", () => {
 describe("post-repair Android doctor checks", () => {
   test("remain device-neutral and never enumerate AVDs", async () => {
     let listAvdsCalls = 0;
-    const adbFactory = {
-      create: () => ({
-        getAdbPathOnly: async () => "/test/android-sdk/platform-tools/adb",
-        executeCommand: async () => ({
-          stdout: adbVersionOutput,
-          stderr: "",
-          exitCode: 0,
-        }),
-      }),
-    } as unknown as AdbClientFactory;
+    const adbExecutor = new FakeAdbExecutor();
+    adbExecutor.setCommandResponse("--version", {
+      stdout: adbVersionOutput,
+      stderr: "",
+      toString: () => adbVersionOutput,
+      trim: () => adbVersionOutput.trim(),
+      includes: (s: string) => adbVersionOutput.includes(s),
+    });
+    const adbFactory = new FakeAdbClientFactory(adbExecutor);
 
     const results = await runPostRepairAndroidChecks(
       {},
@@ -409,11 +408,11 @@ describe("post-repair Android doctor checks", () => {
           return null;
         },
         adbFactory: {
-          create: () => {
+          create: (): never => {
             adbFactoryCalls++;
             throw new Error("post-deadline Android probes must not start");
           },
-        } as unknown as AdbClientFactory,
+        },
       },
     );
 
@@ -823,21 +822,16 @@ describe("doctor probe cancellation seam (#7008)", () => {
 
   test("checkAdbInstallation forwards the signal and deadline to adb path discovery", async () => {
     const controller = new AbortController();
-    const calls: Array<DoctorProbeOptions | undefined> = [];
-    const fakeFactory: AdbClientFactory = {
-      create: () =>
-        ({
-          getAdbPathOnly: async (probe?: DoctorProbeOptions) => {
-            calls.push(probe);
-            return "/usr/local/bin/adb";
-          },
-        }) as any,
-    };
+    const fakeExecutor = new FakeAdbExecutor();
+    const fakeFactory = new FakeAdbClientFactory(fakeExecutor);
 
     await checkAdbInstallation(fakeFactory, { signal: controller.signal, timeoutMs: 1234 });
     await checkAdbInstallation(fakeFactory);
 
-    expect(calls).toEqual([{ signal: controller.signal, timeoutMs: 1234 }, {}]);
+    expect(fakeExecutor.adbPathProbeOptions).toEqual([
+      { signal: controller.signal, timeoutMs: 1234 },
+      {},
+    ]);
   });
 
   test("checkAndroidCommandLineTools forwards the signal and deadline to the version probe", async () => {

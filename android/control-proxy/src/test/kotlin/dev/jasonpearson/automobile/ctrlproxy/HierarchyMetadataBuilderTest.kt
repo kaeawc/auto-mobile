@@ -61,11 +61,12 @@ class HierarchyMetadataBuilderTest {
 
   @Test
   fun `both hierarchy routes use the shared metadata builder`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val source =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("HierarchyController.kt").readText())
 
-    for (route in listOf("private fun extractHierarchyDirect", "private fun extractHierarchy(")) {
+    for (route in listOf("private fun extractHierarchyDirect", "internal fun extractHierarchy(")) {
       val start = source.indexOf(route)
-      assertTrue("$route not found in CtrlProxy.kt", start >= 0)
+      assertTrue("$route not found in HierarchyController.kt", start >= 0)
       val bodyOpen = source.indexOf('{', start)
       val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
       assertTrue(

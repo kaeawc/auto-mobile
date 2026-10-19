@@ -21,6 +21,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const other = { ...device, deviceId: "emulator-5556", name: "Pixel B" };
@@ -112,7 +115,11 @@ async function abandon(
   h: Awaited<ReturnType<typeof harness>>,
   reason: "biometric-enrollment" | "network-condition",
 ) {
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   if (reason === "biometric-enrollment") {
     h.manager.setBiometricEnrollment("old", { initialEnrollment: "not_enrolled" });
   } else {
@@ -217,7 +224,11 @@ for (const reason of ["biometric-enrollment", "network-condition", "clock"] as c
   test(`${reason} restores successfully with an unchanged incarnation`, async () => {
     const h = await harness();
     h.succeed();
-    await h.pool.bindOrReuseDeviceSession("old", device.deviceId, device.platform);
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "old",
+      deviceId: device.deviceId,
+      platform: device.platform,
+    });
     setRestoreState(h.manager, reason);
     await expect(h.manager.releaseSession("old")).resolves.toBe(device.deviceId);
     expect(h.calls).toBe(1);
@@ -284,7 +295,11 @@ test.each(["remove", "bump", "recreate"] as const)(
 
 test("incarnation captured before initial restore prevents blaming replacement", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setBiometricEnrollment("old", { initialEnrollment: "not_enrolled" });
   await h.manager.releaseSession("old");
   h.pool.bumpDeviceIncarnation(device.deviceId);
@@ -305,7 +320,11 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
       registerUtilityTools();
       const acquire = () =>
         route === "direct"
-          ? h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")
+          ? h.pool.bindOrReuseDeviceSession({
+              sessionId: "next",
+              deviceId: device.deviceId,
+              platform: "android",
+            })
           : route === "autolock"
             ? h.pool.autolockDevice(device.deviceId, "android", "new-client")
             : ToolRegistry.getTool("setActiveDevice")!.handler({
@@ -329,7 +348,11 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
 
 test("TTL exhaustion marks through the same store, without racing a live owner", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setNetworkCondition("old", { initialProfile: "none" });
   h.manager.scheduleNetworkConditionExpiry(h.manager.getSession("old")!, 1);
   await h.timer.advanceTimeAsync(1000);
@@ -340,7 +363,13 @@ test("TTL exhaustion marks through the same store, without racing a live owner",
   }
   expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("network-condition");
   expect(h.calls).toBe(3);
-  expect(await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android")).toBe("old");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "old",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
+  ).toBe("old");
   h.succeed();
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
@@ -349,7 +378,11 @@ test("TTL exhaustion marks through the same store, without racing a live owner",
 
 test("clock failure marks busy quarantine and successful retry clears it", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
@@ -392,7 +425,11 @@ test("timed-out background restore stops overlapping retries and retains the mar
     expect(h.calls).toBe(4);
     expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("network-condition");
     await expect(
-      h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android"),
+      h.pool.bindOrReuseDeviceSession({
+        sessionId: "next",
+        deviceId: device.deviceId,
+        platform: "android",
+      }),
     ).rejects.toThrow("network-condition");
   } finally {
     h.resume();
@@ -402,7 +439,11 @@ test("timed-out background restore stops overlapping retries and retains the mar
 
 test("clock timeout surfaces reason while the original restore remains quarantined", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.getSession("old")!.cacheData.clock = { initialAutomaticTime: 1, rootedByUs: false };
   h.pause();
   const release = h.manager.releaseSession("old");
@@ -433,7 +474,11 @@ test("clock timeout surfaces reason while the original restore remains quarantin
 
 test("a TTL restore abandoned after its owner releases still marks the device", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setNetworkCondition("old", { initialProfile: "none" });
   h.manager.scheduleNetworkConditionExpiry(h.manager.getSession("old")!, 1);
   await h.timer.advanceTimeAsync(1000);
@@ -457,10 +502,12 @@ test("a TTL restore abandoned after its owner releases still marks the device", 
 const APP_CLEANUP_RETRY_BUDGET_MS = 21_000;
 
 async function allocationError(h: Awaited<ReturnType<typeof harness>>): Promise<string> {
-  const error = await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android").then(
-    () => undefined,
-    (caught: unknown) => caught,
-  );
+  const error = await h.pool
+    .bindOrReuseDeviceSession({ sessionId: "next", deviceId: device.deviceId, platform: "android" })
+    .then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
   expect(error).toBeInstanceOf(ActionableError);
   return error instanceof Error ? error.message : "";
 }
@@ -604,7 +651,11 @@ test("a timed-out background restore that later fails continues with a scaled de
 
 test("a failed keep-awake restore quarantines the device until background recovery restores it (#11145)", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.setKeepScreenAwake("old", {
     applied: true,
     method: "svc",
@@ -629,12 +680,14 @@ test("a failed keep-awake restore quarantines the device until background recove
 });
 
 async function typedAllocationError(h: Awaited<ReturnType<typeof harness>>) {
-  return h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android").then(
-    () => {
-      throw new Error("expected refusal");
-    },
-    (error: unknown) => error,
-  );
+  return h.pool
+    .bindOrReuseDeviceSession({ sessionId: "next", deviceId: device.deviceId, platform: "android" })
+    .then(
+      () => {
+        throw new Error("expected refusal");
+      },
+      (error: unknown) => error,
+    );
 }
 
 test("#12112 named unhealthy recovery has an exact shrinking bound", async () => {
@@ -725,7 +778,11 @@ test("#12112 app-cleanup uses its own retry deadline and keeps the permanent rem
 
 test("#12112 clock recovery is unbounded and an orphan marker is permanent", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   setRestoreState(h.manager, "clock");
   await h.manager.releaseSession("old");
   await h.pool.releaseDevice(device.deviceId, "old");
@@ -821,7 +878,11 @@ test("#12112 every unhealthy candidate carries evidence and the smallest recover
 
 test("#12112 an unhealthy idle candidate does not preempt waiting for a healthy busy device", async () => {
   const h = await harness(2);
-  await h.pool.bindOrReuseDeviceSession("owner", other.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: other.deviceId,
+    platform: "android",
+  });
   h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "app-cleanup");
   let settled = false;
   const waiting = h.pool.assignDeviceToSession("next", "android").finally(() => {
@@ -839,7 +900,11 @@ test("#12112 an unhealthy idle candidate does not preempt waiting for a healthy 
 
 test("#12112 skipped ticks under a live owner preserve all three dispatched attempts", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   let calls = 0;
   h.manager.markDeviceNeedsAppCleanup(
     device.deviceId,
@@ -979,7 +1044,11 @@ test("#12112 multiple recovering markers use the largest remaining device bound"
 
 test("#12112 a bounded marker plus pending clock recovery has no device bound", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "old",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   h.manager.markDeviceNeedsAppCleanup(
     device.deviceId,
     async () => {
@@ -1082,7 +1151,13 @@ test("recording-teardown refuses idle and exact binds until recovery confirms st
   await flush();
   expect(stopped).toBe(true);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
-  expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
+  ).toBe("next");
 });
 
 test("#12112 recording-teardown refusal carries its real recovery bound", async () => {
@@ -1167,7 +1242,11 @@ test("#12112 recording-teardown refusal reports the re-check after three dispatc
 
 test("#12112 recording-teardown recovery waits for a live owner without consuming attempts", async () => {
   const h = await harness();
-  await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+  await h.pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
   let calls = 0;
   h.manager.markDeviceNeedsRecorderTeardown(
     device.deviceId,
@@ -1184,7 +1263,13 @@ test("#12112 recording-teardown recovery waits for a live owner without consumin
   await h.timer.advanceTimeAsync(1_000, flush);
   expect(calls).toBe(1);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
-  expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
+  expect(
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "next",
+      deviceId: device.deviceId,
+      platform: "android",
+    }),
+  ).toBe("next");
 });
 
 test("three recorder recovery failures hold the incarnation independently of app-cleanup", async () => {
@@ -1332,13 +1417,12 @@ test("removed startup orphan is acquirable on the first bind with a newly starte
   await h.pool.addDevice(device);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeDefined();
   expect(
-    await h.pool.bindOrReuseDeviceSession(
-      "fresh",
-      device.deviceId,
-      "android",
-      undefined,
-      new FakeChildProcess() as unknown as ChildProcess,
-    ),
+    await h.pool.bindOrReuseDeviceSession({
+      sessionId: "fresh",
+      deviceId: device.deviceId,
+      platform: "android",
+      childProcess: new FakeChildProcess() as unknown as ChildProcess,
+    }),
   ).toBe("fresh");
   expect(commands).toBe(1);
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();

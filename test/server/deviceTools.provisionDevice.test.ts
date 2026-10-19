@@ -145,7 +145,23 @@ interface ToolResponse {
 
 /** Narrows the handler's `unknown` result to the MCP tool-response shape these tests read. */
 function asToolResponse(response: unknown): ToolResponse {
-  if (typeof response !== "object" || response === null || !("content" in response)) {
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("content" in response) ||
+    !Array.isArray(response.content) ||
+    response.content.length === 0 ||
+    !response.content.every(
+      (item: unknown) =>
+        typeof item === "object" &&
+        item !== null &&
+        "text" in item &&
+        typeof item.text === "string",
+    ) ||
+    ("isError" in response &&
+      response.isError !== undefined &&
+      typeof response.isError !== "boolean")
+  ) {
     throw new Error("tool returned an invalid response");
   }
   return response as ToolResponse;
@@ -2586,7 +2602,10 @@ describe("provisionDevice handler", () => {
         .getExecutedOperations()
         .filter((operation) => operation.startsWith("destroyDevice:")),
     ).toEqual([]);
-    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+    // The configured boot step starts the committed device, so it lists as running.
+    expect(await deviceManager.listDeviceImages("android")).toEqual([
+      { ...created.device, isRunning: true },
+    ]);
   });
 
   test.each(["android", "ios"] as const)(

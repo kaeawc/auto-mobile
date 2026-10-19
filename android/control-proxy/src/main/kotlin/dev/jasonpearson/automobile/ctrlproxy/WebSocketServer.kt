@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.os.Build
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.*
 import dev.jasonpearson.automobile.protocol.WebSocketRequest as ProtocolRequest
 import io.ktor.http.*
@@ -357,7 +358,12 @@ class WebSocketServer(
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_prototype honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the prototype would silently land on the default display.
-    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("prototype_display_id_v1")
+    // v1 stays for hosts that predate v2; v2 is what current hosts require, so an APK cut before
+    // the API 32 floor (which advertised v1 on API 30/31) can never satisfy them (#13164).
+    if (sdkInt() >= PrototypeDisplayRouting.DISPLAY_API) {
+      add("prototype_display_id_v1")
+      add("prototype_display_id_v2")
+    }
     // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
     // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
     add("prototype_multi_surface_v1")
@@ -832,6 +838,15 @@ class WebSocketServer(
       return
     }
     broadcastToClients(message)
+  }
+
+  /**
+   * Typed counterpart of [broadcastWithPerfSync]: flushes accumulated perf data, builds the typed
+   * response around it, and routes it exactly as [broadcast] does. The response carries the perf
+   * snapshot as compact JSON text, which the protocol serializer embeds as an object on the wire.
+   */
+  suspend fun broadcastTypedWithPerf(buildResponse: (perfTiming: String?) -> WebSocketResponse) {
+    broadcast(buildResponse(perfProvider.flush()?.toString()))
   }
 
   /**

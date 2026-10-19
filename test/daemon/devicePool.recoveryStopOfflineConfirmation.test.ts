@@ -81,14 +81,13 @@ async function setup() {
   });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
-  await pool.bindOrReuseDeviceSession(
-    "session",
-    original.deviceId,
-    "android",
-    image,
-    undefined,
-    original,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "session",
+    deviceId: original.deviceId,
+    platform: "android",
+    sourceImage: image,
+    expectedIdentity: original,
+  });
   const captured = pool.getDevice(original.deviceId)!;
   const recover = async (): Promise<RecoveryOutcome> =>
     await settleWithFakeTime(
@@ -257,7 +256,10 @@ for (const offline of [false, true]) {
         }
         return result;
       };
-      const client = new AndroidEmulatorClient(null, null, s.timer, new FakeAdbClientFactory(adb));
+      const client = new AndroidEmulatorClient({
+        timer: s.timer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       const stopper = new FakeEmulatorProcessStopper();
       stopper.outcome = { kind: "stopped", pid: 42, signal: "SIGTERM" };
       stopper.onStop = () => {

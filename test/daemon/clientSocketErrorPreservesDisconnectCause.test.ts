@@ -3,6 +3,7 @@ import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 let createdSocket: FakeSocket | undefined;
 let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">>;
@@ -30,7 +31,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       "/fake/socket",
       1_000,
       new FakeTimer(),
-      {},
+      ISOLATED_DAEMON_RECOVERY,
       null,
       undefined,
       "win32",
@@ -58,7 +59,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       "/fake/socket",
       1_000,
       new FakeTimer(),
-      {},
+      ISOLATED_DAEMON_RECOVERY,
       null,
       undefined,
       "win32",
@@ -82,7 +83,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       "/fake/socket",
       1_000,
       new FakeTimer(),
-      {},
+      ISOLATED_DAEMON_RECOVERY,
       null,
       undefined,
       "win32",
@@ -111,7 +112,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       "/fake/socket",
       1_000,
       new FakeTimer(),
-      {},
+      ISOLATED_DAEMON_RECOVERY,
       null,
       undefined,
       "win32",
@@ -163,7 +164,7 @@ describe("DaemonClient socket error disconnect cause", () => {
       "/fake/socket",
       1_000,
       new FakeTimer(),
-      {},
+      ISOLATED_DAEMON_RECOVERY,
       null,
       undefined,
       "win32",

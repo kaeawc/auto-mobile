@@ -1,9 +1,10 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test, beforeEach, afterEach, afterAll, mock, spyOn } from "bun:test";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
+import { activeVideoRecording, stoppedVideoRecording } from "../helpers/planVideoFixtures";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { BootedDevice } from "../../src/models";
@@ -33,8 +34,8 @@ const buildVideoRecorder = (
   filePath: string = "/tmp/fake-recording.mp4",
   recordingId: string = "rec-1",
 ): VideoRecorder => ({
-  startVideoRecording: mock(() => Promise.resolve({ recordingId } as any)),
-  stopVideoRecording: mock(() => Promise.resolve({ metadata: { filePath } } as any)),
+  startVideoRecording: mock(() => Promise.resolve(activeVideoRecording(recordingId))),
+  stopVideoRecording: mock(() => Promise.resolve(stoppedVideoRecording(recordingId, filePath))),
 });
 
 const iosDevice: BootedDevice = {
@@ -574,7 +575,7 @@ steps:
       {
         ...baseDeps(),
         timer: fakeTimer,
-        testExecutionRepository: fakeRepo as unknown as TestExecutionRepository,
+        testExecutionRepository: fakeRepo,
       },
     );
 
@@ -592,7 +593,7 @@ steps:
     const fakeRepo = new FakeTestExecutionRepository();
     const orchestrator = new PlanExecutionOrchestrator(
       { device: iosDevice, request: baseRequest },
-      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository },
+      { ...baseDeps(), testExecutionRepository: fakeRepo },
     );
     await orchestrator.execute();
     expect(fakeRepo.recorded).toHaveLength(0);
@@ -617,7 +618,7 @@ steps:
           testMetadata: { testClass: "FooTest", testMethod: "shouldFail" },
         },
       },
-      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository },
+      { ...baseDeps(), testExecutionRepository: fakeRepo },
     );
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
@@ -668,7 +669,7 @@ steps:
           testMetadata: { testClass: "FooTest", testMethod: "parallelOptional" },
         },
       },
-      { ...baseDeps(), testExecutionRepository: fakeRepo as unknown as TestExecutionRepository },
+      { ...baseDeps(), testExecutionRepository: fakeRepo },
     );
 
     const result = await orchestrator.execute();
@@ -708,19 +709,12 @@ steps:
       startVideoRecording: mock((options: any) => {
         const id = options.outputName as string;
         startedNames.push(id);
-        return Promise.resolve({
-          recordingId: id,
-          outputPath: path.join(segmentDir, `${id}.mp4`),
-          fileName: `${id}.mp4`,
-          startedAt: new Date(0).toISOString(),
-          outputName: id,
-        } as any);
+        return Promise.resolve(activeVideoRecording(id, path.join(segmentDir, `${id}.mp4`), id));
       }),
-      stopVideoRecording: mock((recordingId?: string) =>
-        Promise.resolve({
-          metadata: { recordingId, filePath: path.join(segmentDir, `${recordingId}.mp4`) },
-          evictedRecordingIds: [],
-        } as any),
+      stopVideoRecording: mock((recordingId = "") =>
+        Promise.resolve(
+          stoppedVideoRecording(recordingId, path.join(segmentDir, `${recordingId}.mp4`)),
+        ),
       ),
     };
 
@@ -775,19 +769,18 @@ steps:
     const missingDir = path.join(os.tmpdir(), "auto-mobile-plan-video-missing", "nope");
     const androidRecorder: VideoRecorder = {
       startVideoRecording: mock((options: any) =>
-        Promise.resolve({
-          recordingId: options.outputName as string,
-          outputPath: path.join(missingDir, `${options.outputName}.mp4`),
-          fileName: `${options.outputName}.mp4`,
-          startedAt: new Date(0).toISOString(),
-          outputName: options.outputName,
-        } as any),
+        Promise.resolve(
+          activeVideoRecording(
+            options.outputName as string,
+            path.join(missingDir, `${options.outputName}.mp4`),
+            options.outputName,
+          ),
+        ),
       ),
-      stopVideoRecording: mock((recordingId?: string) =>
-        Promise.resolve({
-          metadata: { recordingId, filePath: path.join(missingDir, `${recordingId}.mp4`) },
-          evictedRecordingIds: [],
-        } as any),
+      stopVideoRecording: mock((recordingId = "") =>
+        Promise.resolve(
+          stoppedVideoRecording(recordingId, path.join(missingDir, `${recordingId}.mp4`)),
+        ),
       ),
     };
 
@@ -805,7 +798,7 @@ steps:
   });
 
   test("repository write errors are logged and do not crash the run", async () => {
-    const exploding = {
+    const exploding: Pick<TestExecutionRepository, "recordExecution"> = {
       recordExecution: () => Promise.reject(new Error("db down")),
     };
     const orchestrator = new PlanExecutionOrchestrator(
@@ -818,7 +811,7 @@ steps:
       },
       {
         timer: new FakeTimer(),
-        testExecutionRepository: exploding as unknown as TestExecutionRepository,
+        testExecutionRepository: exploding,
       },
     );
     const result = await orchestrator.execute();

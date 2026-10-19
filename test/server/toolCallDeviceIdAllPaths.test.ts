@@ -26,6 +26,9 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #11618 follow-up: EVERY path that takes a caller-supplied device id resolves it through the one
@@ -166,25 +169,19 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
       ...(options.iosRows ?? []),
     ]);
   readinessScan(options.pooledRows);
-  const registryTimer: unknown = Reflect.get(ToolRegistry, "timer");
-  Reflect.set(ToolRegistry, "timer", timer);
+  const registryTimer = ToolRegistry.getCollaboratorsForTesting().timer;
+  ToolRegistry.setCollaboratorsForTesting({ timer: timer });
   const hold = async (): Promise<void> => {
     if (!options.held || sessions.getSessionForDevice(options.held) === HOLDER) {
       return;
     }
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      options.held,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: options.held,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: HOLDER_CONNECTION,
+    });
     sessions.setDeviceReadiness(HOLDER, "automationReady");
     // Keep-awake is device work behind its own adb seam; mark it settled for this session.
     sessions.getSession(HOLDER)!.cacheData.keepScreenAwake = {
@@ -291,7 +288,7 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
       for (const fixture of connections.values()) {
         await fixture.teardown();
       }
-      Reflect.set(ToolRegistry, "timer", registryTimer);
+      ToolRegistry.setCollaboratorsForTesting({ timer: registryTimer });
       PlatformDeviceManagerFactory.setInstance(null);
       tools.uninstall();
       DaemonState.getInstance().reset();

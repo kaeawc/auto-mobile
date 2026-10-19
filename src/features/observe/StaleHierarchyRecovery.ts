@@ -12,7 +12,7 @@ import {
   treeNamesWindow,
   type ActiveWindowAttributionReconciler,
 } from "./ActiveWindowAttribution";
-import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort } from "./collectors/collectorPorts";
 import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import type { ObserveScreenExecuteOptions } from "./interfaces/ObserveScreen";
@@ -22,7 +22,7 @@ export interface StaleHierarchyRecoveryDeps {
   timer: () => Timer;
   device: () => BootedDevice;
   viewHierarchy: () => ViewHierarchyInterface;
-  deviceStateCollector: () => DeviceStateCollector;
+  deviceStateCollector: () => DeviceStateCollectorPort;
   platformValidator: () => HierarchyPlatformValidator;
   reconciler: () => ActiveWindowAttributionReconciler;
 }
@@ -44,7 +44,7 @@ export class StaleHierarchyRecovery {
   private get viewHierarchy(): ViewHierarchyInterface {
     return this.deps.viewHierarchy();
   }
-  private get deviceStateCollector(): DeviceStateCollector {
+  private get deviceStateCollector(): DeviceStateCollectorPort {
     return this.deps.deviceStateCollector();
   }
   private get platformValidator(): HierarchyPlatformValidator {

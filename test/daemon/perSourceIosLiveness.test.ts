@@ -1,11 +1,13 @@
 import { makePool } from "../helpers/makePool";
-import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
-import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  MultiPlatformDeviceManager,
+  type DeviceManagerSimCtl,
+} from "../../src/devices/deviceUtils";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import type { BootedDevice, Platform } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -42,22 +44,11 @@ const PHYSICAL = iosDevice(PHYSICAL_UDID, "Jason's iPhone");
 const SIMULATOR = iosDevice(SIMULATOR_UDID, "iPhone 16 Pro");
 
 /**
- * The surface `MultiPlatformDeviceManager.getBootedDevicesDetailed` actually
- * calls on each injected client. Naming them keeps the fakes checked against a
- * real signature: the constructor takes the concrete classes, so the cast at
- * the boundary is unavoidable, but it now covers a declared shape rather than
- * an anonymous literal, and any drift in these two methods fails to compile.
+ * The simctl surface `MultiPlatformDeviceManager.getBootedDevicesDetailed` actually calls is
+ * `isAvailable` and `getBootedSimulatorsChecked`; every other operation of the real handle type
+ * refuses, so a drift in what the manager drives fails loudly.
  */
-interface SimctlBootedDeviceSurface {
-  isAvailable(): Promise<boolean>;
-  getBootedSimulatorsChecked(): Promise<BootedDevice[]>;
-}
-
-interface EmulatorBootedDeviceSurface {
-  getBootedDevicesChecked(): Promise<BootedDevice[]>;
-}
-
-class FakeBootedSimctl implements SimctlBootedDeviceSurface {
+class FakeBootedSimctl implements DeviceManagerSimCtl {
   constructor(private readonly simulators: BootedDevice[] | Error) {}
 
   async isAvailable(): Promise<boolean> {
@@ -70,21 +61,33 @@ class FakeBootedSimctl implements SimctlBootedDeviceSurface {
     }
     return this.simulators;
   }
-}
 
-/** Adapt the two-method fake to the handle the device manager takes. */
-function asManagerSimctl(fake: SimctlBootedDeviceSurface) {
-  return fakeDeviceManagerSimctl({
-    isAvailable: () => fake.isAvailable(),
-    getBootedSimulatorsChecked: () => fake.getBootedSimulatorsChecked(),
-  });
-}
+  async listSimulatorImages(): Promise<never> {
+    throw new TypeError("FakeBootedSimctl.listSimulatorImages is not stubbed");
+  }
 
-class FakeBootedEmulator implements EmulatorBootedDeviceSurface {
-  async getBootedDevicesChecked(): Promise<BootedDevice[]> {
-    return [];
+  async getBootedSimulators(): Promise<never> {
+    throw new TypeError("FakeBootedSimctl.getBootedSimulators is not stubbed");
+  }
+
+  async startSimulator(): Promise<never> {
+    throw new TypeError("FakeBootedSimctl.startSimulator is not stubbed");
+  }
+
+  async deleteSimulator(): Promise<never> {
+    throw new TypeError("FakeBootedSimctl.deleteSimulator is not stubbed");
+  }
+
+  async killSimulator(): Promise<never> {
+    throw new TypeError("FakeBootedSimctl.killSimulator is not stubbed");
+  }
+
+  async waitForSimulatorReady(): Promise<never> {
+    throw new TypeError("FakeBootedSimctl.waitForSimulatorReady is not stubbed");
   }
 }
+
+const bootedEmulator = () => createFakeAndroidEmulator({ getBootedDevicesChecked: async () => [] });
 
 describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)", () => {
   const manager = (options: {
@@ -95,12 +98,10 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
   }): MultiPlatformDeviceManager =>
     new MultiPlatformDeviceManager(
       null,
-      asManagerSimctl(
-        new FakeBootedSimctl(
-          options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
-        ),
+      new FakeBootedSimctl(
+        options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
       ),
-      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      bootedEmulator(),
       undefined,
       undefined,
       {
@@ -172,8 +173,8 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
   test("a replayed iPhone is reported but not fresh", async () => {
     const manager = new MultiPlatformDeviceManager(
       null,
-      asManagerSimctl(new FakeBootedSimctl([SIMULATOR])),
-      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      new FakeBootedSimctl([SIMULATOR]),
+      bootedEmulator(),
       undefined,
       undefined,
       {
@@ -236,7 +237,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-simulator");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-a", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-a",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).resolves.toBeDefined();
     expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-a");
   });
@@ -246,7 +251,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-physical");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-b", SIMULATOR_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-b",
+        deviceId: SIMULATOR_UDID,
+        platform: "ios",
+      }),
     ).resolves.toBeDefined();
     expect(devicePool.getDevice(SIMULATOR_UDID)?.sessionId).toBe("session-b");
   });
@@ -256,7 +265,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-simulator");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-c", SIMULATOR_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-c",
+        deviceId: SIMULATOR_UDID,
+        platform: "ios",
+      }),
     ).rejects.toThrow(/Unable to verify iOS simulator/);
     // Unverifiable, never proven gone: the pooled entry survives.
     expect(devicePool.getDevice(SIMULATOR_UDID)).toBeDefined();
@@ -282,8 +295,8 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     });
     const manager = new MultiPlatformDeviceManager(
       null,
-      asManagerSimctl(new FakeBootedSimctl([SIMULATOR])),
-      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      new FakeBootedSimctl([SIMULATOR]),
+      bootedEmulator(),
       undefined,
       undefined,
       lister,
@@ -316,7 +329,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.bootedDevices = discovery.devices;
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-d", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-d",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).resolves.toBeDefined();
     expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-d");
 
@@ -340,7 +357,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.failedSources.add("ios-simulator");
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-f", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-f",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).rejects.toThrow(/Unable to verify iOS device/);
     // Unverifiable, never proven gone: retained, not pruned.
     expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
@@ -351,7 +372,11 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     deviceManager.bootedDevices = [SIMULATOR];
 
     await expect(
-      devicePool.bindOrReuseDeviceSession("session-e", PHYSICAL_UDID, "ios"),
+      devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-e",
+        deviceId: PHYSICAL_UDID,
+        platform: "ios",
+      }),
     ).rejects.toThrow();
     expect(devicePool.getDevice(PHYSICAL_UDID)?.status).toBe("idle");
   });

@@ -8,14 +8,22 @@ import {
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 1000, timer, {}, null, new FakeIdGenerator());
-  client.attachSocketForTesting(socket);
+  const client = new DaemonClient(
+    "/fake/socket",
+    1000,
+    timer,
+    ISOLATED_DAEMON_RECOVERY,
+    null,
+    new FakeIdGenerator(),
+  );
+  client.testHooks.attachSocket(socket);
   const respond = (id: string) =>
-    client.simulateIncomingDataForTesting(
+    client.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({ id, type: "mcp_response", success: true, result: { ok: true } }) + "\n",
       ),
@@ -37,8 +45,8 @@ describe("DaemonClient tool cancellation", () => {
       expect(first.method).toBe(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
       controller.abort(new Error("proxy closing"));
       expect(await subscription).toMatchObject({ cause: controller.signal.reason });
-      expect(client.hasPendingRequestForTesting(first.id)).toBe(false);
-      expect(client.hasPendingRequestForTesting(second.id)).toBe(true);
+      expect(client.testHooks.hasPendingRequest(first.id)).toBe(false);
+      expect(client.testHooks.hasPendingRequest(second.id)).toBe(true);
       expect(socket.destroyed).toBe(false);
       const cancel = socket.getWrittenMessages<DaemonRequest>()[2];
       expect(cancel).toMatchObject({
@@ -80,7 +88,7 @@ describe("DaemonClient tool cancellation", () => {
         params: { uri: "automobile:devices/booted", sessionUuid: "session-a" },
       });
       controller.abort(new Error("cancel daemon resource read"));
-      expect(client.hasPendingRequestForTesting(first.id)).toBe(false);
+      expect(client.testHooks.hasPendingRequest(first.id)).toBe(false);
       expect(await cancelled).toBe(controller.signal.reason);
       const frames = socket.getWrittenMessages<DaemonRequest>();
       expect(frames).toHaveLength(3);
@@ -89,7 +97,7 @@ describe("DaemonClient tool cancellation", () => {
         params: { requestId: first.id },
       });
       expect(socket.destroyed).toBe(false);
-      expect(client.hasPendingRequestForTesting(second.id)).toBe(true);
+      expect(client.testHooks.hasPendingRequest(second.id)).toBe(true);
       respond(first.id);
       respond(frames[2].id);
       respond(second.id);
@@ -160,8 +168,8 @@ describe("DaemonClient tool cancellation", () => {
       method: DAEMON_CANCEL_REQUEST_METHOD,
       params: { requestId: first.id },
     });
-    expect(client.hasPendingRequestForTesting(first.id)).toBe(false);
-    expect(client.hasPendingRequestForTesting(second.id)).toBe(true);
+    expect(client.testHooks.hasPendingRequest(first.id)).toBe(false);
+    expect(client.testHooks.hasPendingRequest(second.id)).toBe(true);
     respond(first.id);
     respond(frames[2].id);
     respond(second.id);
@@ -206,7 +214,7 @@ describe("DaemonClient tool cancellation", () => {
     client.connect = async () => {
       started.resolve();
       await gate.promise;
-      client.attachSocketForTesting(nextSocket);
+      client.testHooks.attachSocket(nextSocket);
     };
     const controller = new AbortController();
     const result = client.callTool("tapOn", {}, undefined, undefined, controller.signal).then(

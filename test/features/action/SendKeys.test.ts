@@ -1,8 +1,6 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import {
-  runWithTextRequestContext,
-  TextIndeterminateError,
-} from "../../../src/features/action/textTransportTimeout";
+import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
+import { TextIndeterminateError } from "../../../src/features/action/TextIndeterminateError";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -2265,6 +2263,36 @@ describe("DefaultSendKeysCommandExecutor", () => {
       trackedInputTextCommand("shell input text 's%s1'", 31),
     ]);
   });
+
+  // 42 characters with a space, quote, backtick and backslash: the first 32 end at "z".
+  const longRun = "abc def'g h`i\\j klmnopqrstuvwxyz0123456789";
+  const longRunHead =
+    String.raw`input text 'abc%sdef'\''g%sh` + "`" + String.raw`i\j%sklmnopqrstuvwxyz'`;
+  for (const [apiLevel, expected] of [
+    [30, [longRunHead.replace("xyz'", "xyz0123456789'")]],
+    [31, [longRunHead, "input text '0123456789'"]],
+  ] as const) {
+    test(`eventAll types a 42-char run as ${expected.length} input text command(s) on API ${apiLevel}`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(apiLevel);
+      // The per-chunk consume wait (~28 ms per char) must run on a FakeTimer, not the real clock.
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation(longRun)),
+        { textClient: createTextClient().client, timer },
+      );
+
+      const result = await executor.type({ action: "type", text: longRun, mode: "eventAll" });
+
+      expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+      expect(adb.getExecutedCommands().filter((command) => command.includes("input text"))).toEqual(
+        expected.map((command) => trackedInputTextCommand(`shell ${command}`, apiLevel)),
+      );
+    });
+  }
 
   test("auto password replace is not pre-checked and sets the whole value", async () => {
     const adb = new FakeAdbExecutor();
@@ -4937,9 +4965,9 @@ describe("Android insertion stops mixed typing after an unconfirmed suffix or ru
 describe("Android clear, eventLast caret and eventAll case read-backs", () => {
   function sequencedObserver(texts: Array<string | undefined>, order: string[] = []) {
     const options: Array<Parameters<SendKeysObserver["execute"]>[0]> = [];
-    const observer = {
-      captureScreenshot: async () => null,
-      execute: async (callOptions: Parameters<SendKeysObserver["execute"]>[0]) => {
+    const observer: SendKeysObserver = {
+      captureScreenshot: async () => {},
+      execute: async (callOptions) => {
         options.push(callOptions);
         order.push("read");
         const text = texts[Math.min(options.length - 1, texts.length - 1)];
@@ -4947,7 +4975,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           ? ({ timestamp: 0 } as ObserveResult)
           : focusedAndroidObservation(text, {}, 0);
       },
-    } as unknown as SendKeysObserver;
+    };
     return { observer, options, reads: () => options.length };
   }
 

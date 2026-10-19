@@ -1,4 +1,4 @@
-import { sql, type Kysely } from "kysely";
+import { type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type {
   Database,
@@ -8,66 +8,55 @@ import type {
   NavigationNode,
   NewNavigationEdge,
   NavigationEdge,
-  NewUIElement,
   UIElement,
-  NewEdgeUIElement,
-  NewNodeModal,
-  NewEdgeModal,
-  NewScrollPosition,
   NavigationNodeFingerprint,
   NewNavigationNodeFingerprint,
   NavigationSuggestion,
-  NewNavigationSuggestion,
   NavigationBuildKey,
-  NewNavigationBuildKey,
-  NewNavigationNodeObservation,
-  NewNavigationEdgeObservation,
-  NewNavigationSuggestionObservation,
 } from "./types";
 import { logger } from "../utils/logger";
-import { storedEdgeActionKey } from "../features/navigation/edgeReplayKey";
+import { storedEdgeActionKey } from "./edgeReplayKey";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { nowIso } from "./nowIso";
 
-/**
- * Flat row of a node-provenance join (nav (app,build) Phase 2, #4985):
- * navigation_node_observations ⋈ navigation_build_keys. `package_id` is the build
- * key's `app_id`. Grouped per `node_id` by the caller.
- */
-export interface NavigationNodeProvenanceRow {
-  node_id: number;
-  package_id: string;
-  version_code: number;
-  content_hash: string;
-  device_id: string;
-  session_uuid: string;
-  last_seen_at: number;
-}
+import {
+  getOrCreateUIElement,
+  getUIElementsForEdge,
+  linkUIElementsToEdge,
+} from "./navigationUiElementQueries";
+import {
+  getEdgeModals,
+  getNodeModals,
+  getScrollPosition,
+  setEdgeModals,
+  setNodeModals,
+  setScrollPosition,
+} from "./navigationModalScrollQueries";
+import {
+  addOrUpdateSuggestion,
+  getEdgeProvenanceForApp,
+  getNodeProvenanceForApp,
+  getOrCreateBuildKey,
+  getSuggestions,
+  hasNamedNodes,
+  promoteSuggestion,
+  recordEdgeObservation,
+  recordNodeObservation,
+  recordSuggestionObservation,
+  transferSuggestionObservations,
+} from "./navigationSuggestionQueries";
+import type {
+  NavigationEdgeProvenanceRow,
+  NavigationEdgeTarget,
+  NavigationNodeProvenanceRow,
+  NavigationQueryContext,
+} from "./navigationRepositoryTypes";
 
-/**
- * Flat row of an edge-provenance join (#4985), symmetric to
- * {@link NavigationNodeProvenanceRow} but keyed by `edge_id`.
- */
-export interface NavigationEdgeProvenanceRow {
-  edge_id: number;
-  package_id: string;
-  version_code: number;
-  content_hash: string;
-  device_id: string;
-  session_uuid: string;
-  last_seen_at: number;
-}
-
-/**
- * One distinct outgoing transition of a screen, without hydration (see
- * {@link NavigationRepository.getEdgeTargetsFrom}). `toolArgs` is the raw stored JSON
- * string; callers that need it must parse it defensively.
- */
-export interface NavigationEdgeTarget {
-  toScreen: string;
-  toolName: string | null;
-  toolArgs: string | null;
-}
+export type {
+  NavigationEdgeProvenanceRow,
+  NavigationEdgeTarget,
+  NavigationNodeProvenanceRow,
+} from "./navigationRepositoryTypes";
 
 /**
  * Repository for navigation graph database operations.
@@ -75,12 +64,14 @@ export interface NavigationEdgeTarget {
  */
 export class NavigationRepository {
   private db: Kysely<Database> | null;
+  private readonly ctx: NavigationQueryContext;
 
   constructor(
     db?: Kysely<Database>,
     private readonly timer: Timer = defaultTimer,
   ) {
     this.db = db ?? null;
+    this.ctx = { timer: this.timer, repository: this, getDb: () => this.getDb() };
   }
 
   private getDb(): Kysely<Database> {
@@ -536,130 +527,7 @@ export class NavigationRepository {
     },
     timestamp: number,
   ): Promise<UIElement> {
-    const db = this.getDb();
-
-    // ui_elements has no UNIQUE index and matching is on a *dynamic* subset of columns,
-    // so this get-or-create cannot be expressed as a single onConflict upsert. Wrap the
-    // SELECT-then-INSERT/UPDATE in a transaction instead: BEGIN takes exclusive ownership
-    // of the single connection (bunSqliteDialect #reserveTransaction), so concurrent
-    // callers for the same element serialize rather than both inserting duplicate rows
-    // (R2356). Keep the body to DB reads/writes only — no IO — since it blocks the daemon
-    // for its duration.
-    //
-    // When this repo is already bound to a caller's transaction (via withExecutor),
-    // opening another transaction would be a nested BEGIN on the same connection —
-    // `#reserveTransaction` throws "Nested transactions are not supported". Run the
-    // body directly on the existing executor instead; it is already serialized and
-    // atomic under the enclosing transaction.
-    if (db.isTransaction) {
-      return this.getOrCreateUIElementWithin(db, appId, element, timestamp);
-    }
-    return db
-      .transaction()
-      .execute((trx) => this.getOrCreateUIElementWithin(trx, appId, element, timestamp));
-  }
-
-  private buildUIElementBounds(element: {
-    bounds?: { left: number; top: number; right: number; bottom: number };
-  }): Pick<NewUIElement, "bounds_left" | "bounds_top" | "bounds_right" | "bounds_bottom"> {
-    return {
-      bounds_left: element.bounds?.left ?? null,
-      bounds_top: element.bounds?.top ?? null,
-      bounds_right: element.bounds?.right ?? null,
-      bounds_bottom: element.bounds?.bottom ?? null,
-    };
-  }
-
-  private buildUIElement(
-    appId: string,
-    element: {
-      text?: string;
-      resourceId?: string;
-      contentDescription?: string;
-      className?: string;
-      bounds?: { left: number; top: number; right: number; bottom: number };
-      clickable?: boolean;
-      scrollable?: boolean;
-    },
-    timestamp: number,
-  ): NewUIElement {
-    return {
-      app_id: appId,
-      text: element.text ?? null,
-      resource_id: element.resourceId ?? null,
-      content_description: element.contentDescription ?? null,
-      class_name: element.className ?? null,
-      ...this.buildUIElementBounds(element),
-      clickable: element.clickable !== undefined ? (element.clickable ? 1 : 0) : null,
-      scrollable: element.scrollable !== undefined ? (element.scrollable ? 1 : 0) : null,
-      first_seen_at: timestamp,
-      last_seen_at: timestamp,
-    };
-  }
-
-  private async getOrCreateUIElementWithin(
-    trx: Kysely<Database>,
-    appId: string,
-    element: {
-      text?: string;
-      resourceId?: string;
-      contentDescription?: string;
-      className?: string;
-      bounds?: { left: number; top: number; right: number; bottom: number };
-      clickable?: boolean;
-      scrollable?: boolean;
-    },
-    timestamp: number,
-  ): Promise<UIElement> {
-    // Try to find existing element with same properties
-    let query = trx.selectFrom("ui_elements").selectAll().where("app_id", "=", appId);
-
-    if (element.text !== undefined) {
-      query = query.where("text", "=", element.text);
-    }
-    if (element.resourceId !== undefined) {
-      query = query.where("resource_id", "=", element.resourceId);
-    }
-    if (element.contentDescription !== undefined) {
-      query = query.where("content_description", "=", element.contentDescription);
-    }
-    if (element.className !== undefined) {
-      query = query.where("class_name", "=", element.className);
-    }
-    if (element.bounds) {
-      query = query
-        .where("bounds_left", "=", element.bounds.left)
-        .where("bounds_top", "=", element.bounds.top)
-        .where("bounds_right", "=", element.bounds.right)
-        .where("bounds_bottom", "=", element.bounds.bottom);
-    }
-
-    const existing = await query.executeTakeFirst();
-
-    if (existing) {
-      // Update last_seen_at
-      await trx
-        .updateTable("ui_elements")
-        .set({ last_seen_at: timestamp })
-        .where("id", "=", existing.id)
-        .execute();
-
-      return {
-        ...existing,
-        last_seen_at: timestamp,
-      };
-    }
-
-    // Create new UI element
-    const newElement = this.buildUIElement(appId, element, timestamp);
-
-    const result = await trx
-      .insertInto("ui_elements")
-      .values(newElement)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-
-    return result;
+    return getOrCreateUIElement(this.ctx, appId, element, timestamp);
   }
 
   /**
@@ -674,85 +542,14 @@ export class NavigationRepository {
    * navigation-graph write, not just the offending link.
    */
   async linkUIElementsToEdge(edgeId: number, uiElementIds: number[]): Promise<void> {
-    if (uiElementIds.length === 0) {
-      return;
-    }
-
-    const db = this.getDb();
-    // storeUIElements calls this on a repository already bound to the enclosing
-    // recordNavigationEvent transaction (via withExecutor), so opening a nested
-    // `db.transaction()` would throw "Nested transactions are not supported" —
-    // mirrors the db.isTransaction guard in getOrCreateUIElement/promoteSuggestion.
-    if (db.isTransaction) {
-      return this.linkUIElementsToEdgeWithin(db, edgeId, uiElementIds);
-    }
-    return db
-      .transaction()
-      .execute((trx) => this.linkUIElementsToEdgeWithin(trx, edgeId, uiElementIds));
-  }
-
-  private async linkUIElementsToEdgeWithin(
-    trx: Kysely<Database>,
-    edgeId: number,
-    uiElementIds: number[],
-  ): Promise<void> {
-    // Read what this edge already links, inside the transaction, so new elements
-    // are appended AFTER the current maximum selection_order rather than restarting
-    // at zero. Restarting collided on order across calls: linking [A,B] then [B,C]
-    // gave both B and C order 1, so getUIElementsForEdge()'s `ORDER BY
-    // selection_order` could not preserve a stable observation order.
-    const existing = await trx
-      .selectFrom("edge_ui_elements")
-      .select(["ui_element_id", "selection_order"])
-      .where("edge_id", "=", edgeId)
-      .execute();
-    const existingIds = new Set<number>(existing.map((row) => row.ui_element_id));
-    let nextOrder = existing.reduce((max, row) => Math.max(max, row.selection_order), -1) + 1;
-
-    // De-dupe within this call, and skip pairs already linked (they keep their
-    // recorded order). Two ids resolving to the same ui_elements row must not
-    // produce two rows for one (edge_id, ui_element_id) pair.
-    const seen = new Set<number>();
-    const values: NewEdgeUIElement[] = [];
-    for (const uiElementId of uiElementIds) {
-      if (seen.has(uiElementId) || existingIds.has(uiElementId)) {
-        continue;
-      }
-      seen.add(uiElementId);
-      values.push({
-        edge_id: edgeId,
-        ui_element_id: uiElementId,
-        selection_order: nextOrder++,
-      });
-    }
-
-    if (values.length === 0) {
-      return;
-    }
-
-    // onConflict is retained as a safety net against a concurrent inserter racing
-    // the same pair between the read above and this insert; it keeps the
-    // first-recorded row, matching the "leave existing identity alone on conflict"
-    // convention used elsewhere in this file's onConflict upserts (e.g. getOrCreateApp).
-    await trx
-      .insertInto("edge_ui_elements")
-      .values(values)
-      .onConflict((oc) => oc.columns(["edge_id", "ui_element_id"]).doNothing())
-      .execute();
+    return linkUIElementsToEdge(this.ctx, edgeId, uiElementIds);
   }
 
   /**
    * Get UI elements for an edge.
    */
   async getUIElementsForEdge(edgeId: number): Promise<UIElement[]> {
-    const db = this.getDb();
-    return db
-      .selectFrom("edge_ui_elements")
-      .innerJoin("ui_elements", "ui_elements.id", "edge_ui_elements.ui_element_id")
-      .selectAll("ui_elements")
-      .where("edge_id", "=", edgeId)
-      .orderBy("selection_order", "asc")
-      .execute();
+    return getUIElementsForEdge(this.ctx, edgeId);
   }
 
   /**
@@ -767,48 +564,14 @@ export class NavigationRepository {
    * instead of attempting a nested BEGIN.
    */
   async setNodeModals(nodeId: number, modalStack: string[]): Promise<void> {
-    const db = this.getDb();
-    if (db.isTransaction) {
-      return this.setNodeModalsWithin(db, nodeId, modalStack);
-    }
-    return db.transaction().execute((trx) => this.setNodeModalsWithin(trx, nodeId, modalStack));
-  }
-
-  private async setNodeModalsWithin(
-    trx: Kysely<Database>,
-    nodeId: number,
-    modalStack: string[],
-  ): Promise<void> {
-    // Delete existing modals
-    await trx.deleteFrom("node_modals").where("node_id", "=", nodeId).execute();
-
-    if (modalStack.length === 0) {
-      return;
-    }
-
-    // Insert new modals
-    const values: NewNodeModal[] = modalStack.map((modalId, index) => ({
-      node_id: nodeId,
-      modal_identifier: modalId,
-      stack_level: index,
-    }));
-
-    await trx.insertInto("node_modals").values(values).execute();
+    return setNodeModals(this.ctx, nodeId, modalStack);
   }
 
   /**
    * Get modal stack for a node.
    */
   async getNodeModals(nodeId: number): Promise<string[]> {
-    const db = this.getDb();
-    const modals = await db
-      .selectFrom("node_modals")
-      .select("modal_identifier")
-      .where("node_id", "=", nodeId)
-      .orderBy("stack_level", "asc")
-      .execute();
-
-    return modals.map((m) => m.modal_identifier);
+    return getNodeModals(this.ctx, nodeId);
   }
 
   /**
@@ -828,57 +591,14 @@ export class NavigationRepository {
     position: "from" | "to",
     modalStack: string[],
   ): Promise<void> {
-    const db = this.getDb();
-    if (db.isTransaction) {
-      return this.setEdgeModalsWithin(db, edgeId, position, modalStack);
-    }
-    return db
-      .transaction()
-      .execute((trx) => this.setEdgeModalsWithin(trx, edgeId, position, modalStack));
-  }
-
-  private async setEdgeModalsWithin(
-    trx: Kysely<Database>,
-    edgeId: number,
-    position: "from" | "to",
-    modalStack: string[],
-  ): Promise<void> {
-    // Delete existing modals for this position
-    await trx
-      .deleteFrom("edge_modals")
-      .where("edge_id", "=", edgeId)
-      .where("position", "=", position)
-      .execute();
-
-    if (modalStack.length === 0) {
-      return;
-    }
-
-    // Insert new modals
-    const values: NewEdgeModal[] = modalStack.map((modalId, index) => ({
-      edge_id: edgeId,
-      position,
-      modal_identifier: modalId,
-      stack_level: index,
-    }));
-
-    await trx.insertInto("edge_modals").values(values).execute();
+    return setEdgeModals(this.ctx, edgeId, position, modalStack);
   }
 
   /**
    * Get modal stack for an edge position.
    */
   async getEdgeModals(edgeId: number, position: "from" | "to"): Promise<string[]> {
-    const db = this.getDb();
-    const modals = await db
-      .selectFrom("edge_modals")
-      .select("modal_identifier")
-      .where("edge_id", "=", edgeId)
-      .where("position", "=", position)
-      .orderBy("stack_level", "asc")
-      .execute();
-
-    return modals.map((m) => m.modal_identifier);
+    return getEdgeModals(this.ctx, edgeId, position);
   }
 
   /**
@@ -901,31 +621,11 @@ export class NavigationRepository {
     speed?: string,
     swipeCount?: number,
   ): Promise<void> {
-    const db = this.getDb();
-    const scrollPos: NewScrollPosition = {
-      edge_id: edgeId,
-      target_element_id: targetElementId,
-      container_element_id: containerElementId ?? null,
-      direction,
-      speed: speed ?? null,
-      swipe_count: swipeCount ?? null,
-    };
-
-    if (db.isTransaction) {
-      return this.setScrollPositionWithin(db, edgeId, scrollPos);
-    }
-    return db.transaction().execute((trx) => this.setScrollPositionWithin(trx, edgeId, scrollPos));
-  }
-
-  private async setScrollPositionWithin(
-    trx: Kysely<Database>,
-    edgeId: number,
-    scrollPos: NewScrollPosition,
-  ): Promise<void> {
-    // Upsert: delete if exists, then insert
-    await trx.deleteFrom("scroll_positions").where("edge_id", "=", edgeId).execute();
-
-    await trx.insertInto("scroll_positions").values(scrollPos).execute();
+    return setScrollPosition(this.ctx, edgeId, targetElementId, direction, {
+      containerElementId,
+      speed,
+      swipeCount,
+    });
   }
 
   /**
@@ -938,82 +638,7 @@ export class NavigationRepository {
     speed?: string;
     swipeCount?: number;
   } | null> {
-    const db = this.getDb();
-
-    const result = await db
-      .selectFrom("scroll_positions")
-      .innerJoin("ui_elements as target", "target.id", "scroll_positions.target_element_id")
-      .leftJoin("ui_elements as container", "container.id", "scroll_positions.container_element_id")
-      .select([
-        "scroll_positions.direction",
-        "scroll_positions.speed",
-        "scroll_positions.swipe_count",
-      ])
-      .selectAll("target")
-      .select([
-        "container.id as container_id",
-        "container.text as container_text",
-        "container.resource_id as container_resource_id",
-        "container.content_description as container_content_description",
-      ])
-      .where("edge_id", "=", edgeId)
-      .executeTakeFirst();
-
-    if (!result) {
-      return null;
-    }
-
-    const response: {
-      targetElement: UIElement;
-      containerElement?: UIElement;
-      direction: string;
-      speed?: string;
-      swipeCount?: number;
-    } = {
-      targetElement: {
-        id: result.id,
-        app_id: result.app_id,
-        text: result.text,
-        resource_id: result.resource_id,
-        content_description: result.content_description,
-        class_name: result.class_name,
-        bounds_left: result.bounds_left,
-        bounds_top: result.bounds_top,
-        bounds_right: result.bounds_right,
-        bounds_bottom: result.bounds_bottom,
-        clickable: result.clickable,
-        scrollable: result.scrollable,
-        first_seen_at: result.first_seen_at,
-        last_seen_at: result.last_seen_at,
-        created_at: result.created_at,
-      },
-      direction: result.direction,
-      speed: result.speed ?? undefined,
-      swipeCount: result.swipe_count ?? undefined,
-    };
-
-    // Add container element if present
-    if (result.container_id) {
-      response.containerElement = {
-        id: result.container_id,
-        app_id: result.app_id, // Same app
-        text: result.container_text,
-        resource_id: result.container_resource_id,
-        content_description: result.container_content_description,
-        class_name: null,
-        bounds_left: null,
-        bounds_top: null,
-        bounds_right: null,
-        bounds_bottom: null,
-        clickable: null,
-        scrollable: null,
-        first_seen_at: 0,
-        last_seen_at: 0,
-        created_at: "",
-      };
-    }
-
-    return response;
+    return getScrollPosition(this.ctx, edgeId);
   }
 
   /**
@@ -1213,36 +838,7 @@ export class NavigationRepository {
     data: string,
     timestamp: number,
   ): Promise<NavigationSuggestion> {
-    const db = this.getDb();
-
-    // Atomic upsert on UNIQUE(app_id, fingerprint_hash)
-    // (idx_navigation_suggestions_app_hash). occurrence_count increments in SQL so a
-    // concurrent first-create no longer throws a UNIQUE collision and concurrent
-    // revisits don't lose increments (R2356). first_seen_at and promoted_to_fingerprint_id
-    // are left untouched on the conflict path so a prior promotion is never clobbered.
-    const newSuggestion: NewNavigationSuggestion = {
-      app_id: appId,
-      fingerprint_hash: hash,
-      fingerprint_data: data,
-      first_seen_at: timestamp,
-      last_seen_at: timestamp,
-      occurrence_count: 1,
-      promoted_to_fingerprint_id: null,
-    };
-
-    const result = await db
-      .insertInto("navigation_suggestions")
-      .values(newSuggestion)
-      .onConflict((oc) =>
-        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet((eb) => ({
-          last_seen_at: timestamp,
-          occurrence_count: eb("navigation_suggestions.occurrence_count", "+", 1),
-        })),
-      )
-      .returningAll()
-      .executeTakeFirstOrThrow();
-
-    return result;
+    return addOrUpdateSuggestion(this.ctx, appId, hash, data, timestamp);
   }
 
   /** Record one uncorrelated reach under its actual build/device/session. */
@@ -1253,53 +849,21 @@ export class NavigationRepository {
     sessionUuid: string,
     seenAt: number,
   ): Promise<void> {
-    const observation: NewNavigationSuggestionObservation = {
-      suggestion_id: suggestionId,
-      build_key_id: buildKeyId,
-      device_id: deviceId,
-      session_uuid: sessionUuid,
-      first_seen_at: seenAt,
-      last_seen_at: seenAt,
-    };
-    await this.getDb()
-      .insertInto("navigation_suggestion_observations")
-      .values(observation)
-      .onConflict((oc) =>
-        oc.columns(["suggestion_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
-          first_seen_at: sql`min(navigation_suggestion_observations.first_seen_at, ${seenAt})`,
-          last_seen_at: sql`max(navigation_suggestion_observations.last_seen_at, ${seenAt})`,
-        }),
-      )
-      .execute();
+    return recordSuggestionObservation(
+      this.ctx,
+      suggestionId,
+      buildKeyId,
+      deviceId,
+      sessionUuid,
+      seenAt,
+    );
   }
 
   /** Move every historical reach to its named node, preserving observation windows.
    * The caller's promotion transaction makes transfer and cleanup atomic.
    * Returns false for pre-migration suggestions with no known provenance. */
   async transferSuggestionObservations(suggestionId: number, nodeId: number): Promise<boolean> {
-    const rows = await this.getDb()
-      .selectFrom("navigation_suggestion_observations")
-      .select(["build_key_id", "device_id", "session_uuid", "first_seen_at", "last_seen_at"])
-      .where("suggestion_id", "=", suggestionId)
-      .execute();
-
-    for (const row of rows) {
-      await this.recordNodeObservationWindow(
-        nodeId,
-        row.build_key_id,
-        row.device_id,
-        row.session_uuid,
-        row.first_seen_at,
-        row.last_seen_at,
-      );
-    }
-    if (rows.length > 0) {
-      await this.getDb()
-        .deleteFrom("navigation_suggestion_observations")
-        .where("suggestion_id", "=", suggestionId)
-        .execute();
-    }
-    return rows.length > 0;
+    return transferSuggestionObservations(this.ctx, suggestionId, nodeId);
   }
 
   /**
@@ -1311,82 +875,21 @@ export class NavigationRepository {
     nodeId: number,
     timestamp: number,
   ): Promise<NavigationNodeFingerprint> {
-    const db = this.getDb();
-    if (db.isTransaction) {
-      return this.promoteSuggestionWithin(db, suggestionId, nodeId, timestamp);
-    }
-
-    return db
-      .transaction()
-      .execute((trx) =>
-        this.withExecutor(trx).promoteSuggestionWithin(trx, suggestionId, nodeId, timestamp),
-      );
-  }
-
-  private async promoteSuggestionWithin(
-    db: Kysely<Database>,
-    suggestionId: number,
-    nodeId: number,
-    timestamp: number,
-  ): Promise<NavigationNodeFingerprint> {
-    // Get the suggestion
-    const suggestion = await db
-      .selectFrom("navigation_suggestions")
-      .selectAll()
-      .where("id", "=", suggestionId)
-      .executeTakeFirst();
-
-    if (!suggestion) {
-      throw new Error(`Suggestion not found: ${suggestionId}`);
-    }
-
-    // Create fingerprint record (using app_id from suggestion)
-    const fingerprint = await this.withExecutor(db).getOrCreateFingerprint(
-      suggestion.app_id,
-      nodeId,
-      suggestion.fingerprint_hash,
-      suggestion.fingerprint_data,
-      timestamp,
-    );
-
-    // Link suggestion to fingerprint
-    await db
-      .updateTable("navigation_suggestions")
-      .set({ promoted_to_fingerprint_id: fingerprint.id })
-      .where("id", "=", suggestionId)
-      .execute();
-
-    logger.info(`[NAV_REPO] Promoted suggestion ${suggestionId} to node ${nodeId}`);
-
-    return fingerprint;
+    return promoteSuggestion(this.ctx, suggestionId, nodeId, timestamp);
   }
 
   /**
    * Check if an app has any named navigation nodes.
    */
   async hasNamedNodes(appId: string): Promise<boolean> {
-    const db = this.getDb();
-    const result = await db
-      .selectFrom("navigation_nodes")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
-      .executeTakeFirst();
-
-    return Number(result?.count || 0) > 0;
+    return hasNamedNodes(this.ctx, appId);
   }
 
   /**
    * Get unpromoted suggestions for an app.
    */
   async getSuggestions(appId: string): Promise<NavigationSuggestion[]> {
-    const db = this.getDb();
-    return db
-      .selectFrom("navigation_suggestions")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("promoted_to_fingerprint_id", "is", null)
-      .orderBy("occurrence_count", "desc")
-      .execute();
+    return getSuggestions(this.ctx, appId);
   }
 
   // ==========================================
@@ -1406,23 +909,7 @@ export class NavigationRepository {
     versionCode: number,
     contentHash: string,
   ): Promise<NavigationBuildKey> {
-    const db = this.getDb();
-    const newBuildKey: NewNavigationBuildKey = {
-      app_id: appId,
-      version_code: versionCode,
-      content_hash: contentHash,
-    };
-
-    return db
-      .insertInto("navigation_build_keys")
-      .values(newBuildKey)
-      .onConflict((oc) =>
-        oc.columns(["app_id", "version_code", "content_hash"]).doUpdateSet((eb) => ({
-          app_id: eb.ref("navigation_build_keys.app_id"),
-        })),
-      )
-      .returningAll()
-      .executeTakeFirstOrThrow();
+    return getOrCreateBuildKey(this.ctx, appId, versionCode, contentHash);
   }
 
   /**
@@ -1441,44 +928,7 @@ export class NavigationRepository {
     sessionUuid: string,
     seenAt: number,
   ): Promise<void> {
-    await this.recordNodeObservationWindow(
-      nodeId,
-      buildKeyId,
-      deviceId,
-      sessionUuid,
-      seenAt,
-      seenAt,
-    );
-  }
-
-  private async recordNodeObservationWindow(
-    nodeId: number,
-    buildKeyId: number,
-    deviceId: string,
-    sessionUuid: string,
-    firstSeenAt: number,
-    lastSeenAt: number,
-  ): Promise<void> {
-    const db = this.getDb();
-    const observation: NewNavigationNodeObservation = {
-      node_id: nodeId,
-      build_key_id: buildKeyId,
-      device_id: deviceId,
-      session_uuid: sessionUuid,
-      first_seen_at: firstSeenAt,
-      last_seen_at: lastSeenAt,
-    };
-
-    await db
-      .insertInto("navigation_node_observations")
-      .values(observation)
-      .onConflict((oc) =>
-        oc.columns(["node_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
-          first_seen_at: sql`min(navigation_node_observations.first_seen_at, ${firstSeenAt})`,
-          last_seen_at: sql`max(navigation_node_observations.last_seen_at, ${lastSeenAt})`,
-        }),
-      )
-      .execute();
+    return recordNodeObservation(this.ctx, nodeId, buildKeyId, deviceId, sessionUuid, seenAt);
   }
 
   /**
@@ -1492,26 +942,7 @@ export class NavigationRepository {
     sessionUuid: string,
     seenAt: number,
   ): Promise<void> {
-    const db = this.getDb();
-    const observation: NewNavigationEdgeObservation = {
-      edge_id: edgeId,
-      build_key_id: buildKeyId,
-      device_id: deviceId,
-      session_uuid: sessionUuid,
-      first_seen_at: seenAt,
-      last_seen_at: seenAt,
-    };
-
-    await db
-      .insertInto("navigation_edge_observations")
-      .values(observation)
-      .onConflict((oc) =>
-        oc.columns(["edge_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
-          first_seen_at: sql`min(navigation_edge_observations.first_seen_at, ${seenAt})`,
-          last_seen_at: sql`max(navigation_edge_observations.last_seen_at, ${seenAt})`,
-        }),
-      )
-      .execute();
+    return recordEdgeObservation(this.ctx, edgeId, buildKeyId, deviceId, sessionUuid, seenAt);
   }
 
   /**
@@ -1522,30 +953,7 @@ export class NavigationRepository {
    * the build key's `app_id` (== the queried app), surfaced for the read shape.
    */
   async getNodeProvenanceForApp(appId: string): Promise<NavigationNodeProvenanceRow[]> {
-    const db = this.getDb();
-    return (
-      db
-        .selectFrom("navigation_node_observations as obs")
-        .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
-        .innerJoin("navigation_nodes as n", "n.id", "obs.node_id")
-        .where("n.app_id", "=", appId)
-        // Constrain the build key to the node's own app: observation rows accept
-        // independent entity + build-key ids, so a mis-scoped build key must not
-        // surface another app's provenance in this app-union (#4985).
-        .whereRef("bk.app_id", "=", "n.app_id")
-        .select([
-          "obs.node_id as node_id",
-          "bk.app_id as package_id",
-          "bk.version_code as version_code",
-          "bk.content_hash as content_hash",
-          "obs.device_id as device_id",
-          "obs.session_uuid as session_uuid",
-          "obs.last_seen_at as last_seen_at",
-        ])
-        .orderBy("obs.last_seen_at", "desc")
-        .orderBy("obs.device_id", "asc")
-        .execute()
-    );
+    return getNodeProvenanceForApp(this.ctx, appId);
   }
 
   /**
@@ -1556,29 +964,7 @@ export class NavigationRepository {
    * transition.
    */
   async getEdgeProvenanceForApp(appId: string): Promise<NavigationEdgeProvenanceRow[]> {
-    const db = this.getDb();
-    return (
-      db
-        .selectFrom("navigation_edge_observations as obs")
-        .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
-        .innerJoin("navigation_edges as e", "e.id", "obs.edge_id")
-        .where("e.app_id", "=", appId)
-        // Symmetric to the node query: pin the build key to the edge's own app so
-        // a mis-scoped build key cannot leak another app's provenance (#4985).
-        .whereRef("bk.app_id", "=", "e.app_id")
-        .select([
-          "obs.edge_id as edge_id",
-          "bk.app_id as package_id",
-          "bk.version_code as version_code",
-          "bk.content_hash as content_hash",
-          "obs.device_id as device_id",
-          "obs.session_uuid as session_uuid",
-          "obs.last_seen_at as last_seen_at",
-        ])
-        .orderBy("obs.last_seen_at", "desc")
-        .orderBy("obs.device_id", "asc")
-        .execute()
-    );
+    return getEdgeProvenanceForApp(this.ctx, appId);
   }
 
   /**

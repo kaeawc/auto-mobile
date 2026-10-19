@@ -150,6 +150,29 @@ export interface ExplicitBindOptions {
 }
 
 /**
+ * One explicit bind of a known device to a session, by name. Only the three identifying fields
+ * are required; every flag defaults to off.
+ */
+export interface BindDeviceRequest {
+  sessionId: string;
+  deviceId: string;
+  platform: Platform;
+  sourceImage?: DeviceInfo;
+  childProcess?: ChildProcess | null;
+  expectedIdentity?: ExplicitBindOptions["expectedIdentity"];
+  allowSessionRebind?: boolean;
+  readinessReservationOwners?: ReadonlySet<symbol>;
+  verifiedAndroidAvdIdentity?: DeviceInfo;
+  expectedExistingSessionDeviceId?: string;
+  mcpSessionId?: string;
+  oneShotCli?: boolean;
+  /** Records the session this call mints; its presence also defers rebind cleanup. */
+  receipt?: AcquisitionReceipt;
+  refusePreparedForOtherRequest?: boolean;
+  recoveryTarget?: SessionRecoveryTarget;
+}
+
+/**
  * The session overrides `SessionManager`'s rebind restores on the device the session leaves. A
  * session moved back to that device (an undone rebind) no longer has them applied there.
  */
@@ -194,40 +217,25 @@ export class ExplicitDeviceBind {
    * selection. If the device is already bound to a live session, reuse that
    * session so repeated startDevice calls stay idempotent.
    */
-  async bindOrReuseDeviceSession(
-    sessionId: string,
-    deviceId: string,
-    platform: Platform,
-    sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    allowSessionRebind = false,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    expectedExistingSessionDeviceId?: string,
-    mcpSessionId?: string,
-    oneShotCli = false,
-    receipt?: AcquisitionReceipt,
-    refusePreparedForOtherRequest = false,
-    recoveryTarget?: SessionRecoveryTarget,
-  ): Promise<string> {
+  async bindOrReuseDeviceSession(request: BindDeviceRequest): Promise<string> {
+    const { sessionId, deviceId, platform, receipt, mcpSessionId } = request;
     // Registered before the first await so a close racing the whole bind is seen (#11146).
     const endBind = this.port.beginMcpBind(mcpSessionId);
     try {
       return await this.bindOrReuseDeviceSessionUnderBindClaim(sessionId, deviceId, platform, {
-        recoveryTarget,
-        sourceImage,
-        childProcess,
-        expectedIdentity,
-        allowSessionRebind,
-        readinessReservationOwners,
-        verifiedAndroidAvdIdentity,
-        expectedExistingSessionDeviceId,
+        recoveryTarget: request.recoveryTarget,
+        sourceImage: request.sourceImage,
+        childProcess: request.childProcess,
+        expectedIdentity: request.expectedIdentity,
+        allowSessionRebind: request.allowSessionRebind ?? false,
+        readinessReservationOwners: request.readinessReservationOwners,
+        verifiedAndroidAvdIdentity: request.verifiedAndroidAvdIdentity,
+        expectedExistingSessionDeviceId: request.expectedExistingSessionDeviceId,
         mcpSessionId,
-        oneShotCli,
+        oneShotCli: request.oneShotCli ?? false,
         receipt: receipt ?? {},
         deferRebindCleanup: receipt !== undefined,
-        refusePreparedForOtherRequest,
+        refusePreparedForOtherRequest: request.refusePreparedForOtherRequest ?? false,
       });
     } finally {
       endBind();
@@ -666,15 +674,12 @@ export class ExplicitDeviceBind {
       );
       await this.cancelAndSettleRebindCleanup(fromDeviceId, sessionId, cleanup);
       await runWithAcquisitionReceipt({ rebound, deferredRebindCleanup: cleanup }, () =>
-        this.bindOrReuseDeviceSession(
+        this.bindOrReuseDeviceSession({
           sessionId,
-          fromDeviceId,
-          rebound.fromPlatform,
-          undefined,
-          undefined,
-          undefined,
-          true,
-        ),
+          deviceId: fromDeviceId,
+          platform: rebound.fromPlatform,
+          allowSessionRebind: true,
+        }),
       );
       // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
       // session is on the device that cache described again, so it gets back what still describes

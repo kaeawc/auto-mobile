@@ -95,6 +95,14 @@ describe("HomeScreen", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let previousObserveCacheStore: ReturnType<typeof getObserveCacheStore>;
 
+  // Collaborators are fixed at construction; a test that needs a different window builds its own.
+  const createHomeScreen = (window: WindowInterface = fakeWindow): HomeScreen =>
+    new HomeScreen(mockDevice, fakeAdb, fakeTimer, undefined, {
+      observeScreen: fakeObserveScreen,
+      window,
+      awaitIdle: fakeAwaitIdle,
+    });
+
   beforeEach(() => {
     previousObserveCacheStore = getObserveCacheStore();
     // Foreground changes leave a pending resolution on the store; keep it local to this test.
@@ -132,12 +140,7 @@ describe("HomeScreen", () => {
       platform: "android",
       deviceId: "test-device",
     };
-    homeScreen = new HomeScreen(mockDevice, fakeAdb, fakeTimer);
-
-    // Replace the internal managers with our fakes
-    (homeScreen as any).observeScreen = fakeObserveScreen;
-    (homeScreen as any).window = fakeWindow;
-    (homeScreen as any).awaitIdle = fakeAwaitIdle;
+    homeScreen = createHomeScreen();
   });
 
   afterEach(() => {
@@ -1274,8 +1277,6 @@ describe("HomeScreen", () => {
         platform: "android",
         deviceId: "device-2",
       };
-      const homeScreen2 = new HomeScreen(otherDevice, fakeAdb);
-
       // Set up fakes for the second HomeScreen instance
       const fakeWindow2 = new FakeWindow();
       const fakeObserveScreen2 = new FakeObserveScreen();
@@ -1289,9 +1290,11 @@ describe("HomeScreen", () => {
       });
       fakeObserveScreen2.setObserveResult(() => createObserveResult());
 
-      (homeScreen2 as any).observeScreen = fakeObserveScreen2;
-      (homeScreen2 as any).window = fakeWindow2;
-      (homeScreen2 as any).awaitIdle = fakeAwaitIdle2;
+      const homeScreen2 = new HomeScreen(otherDevice, fakeAdb, undefined, undefined, {
+        observeScreen: fakeObserveScreen2,
+        window: fakeWindow2,
+        awaitIdle: fakeAwaitIdle2,
+      });
 
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
@@ -1333,7 +1336,7 @@ describe("HomeScreen", () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
       });
-      (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
@@ -1351,12 +1354,14 @@ describe("HomeScreen", () => {
       // attempt + 2 backoff retries) before giving up, so it must see the
       // app unchanged on all 3 of those checks; only the post-ADB-keyevent
       // verification's first check sees the launcher.
-      (homeScreen as any).window = sequencedWindow([
-        "com.android.settings",
-        "com.android.settings",
-        "com.android.settings",
-        "com.android.launcher3",
-      ]);
+      homeScreen = createHomeScreen(
+        sequencedWindow([
+          "com.android.settings",
+          "com.android.settings",
+          "com.android.settings",
+          "com.android.launcher3",
+        ]),
+      );
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       const result = await homeScreen.execute();
@@ -1369,7 +1374,7 @@ describe("HomeScreen", () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
       });
-      (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
@@ -1388,7 +1393,7 @@ describe("HomeScreen", () => {
         },
       });
 
-      await (homeScreen as any).executeAndroidHome();
+      await homeScreen.execute();
 
       const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
       expect(keyeventCall).toBeDefined();
@@ -1412,7 +1417,7 @@ describe("HomeScreen", () => {
       controller.abort();
 
       await expect(
-        runWithAbortSignal(controller.signal, () => (homeScreen as any).executeAndroidHome()),
+        runWithAbortSignal(controller.signal, () => homeScreen.testHooks.executeAndroidHome()),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
       const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));

@@ -81,14 +81,12 @@ async function setupOwnedIOS(
   const pool = createPool(sessions, timer, manager, true, onLoss);
   manager.bootedDevices = [IOS_SIMULATOR];
   await pool.initializeWithDevices([IOS_SIMULATOR]);
-  await pool.bindOrReuseDeviceSession(
-    "ios-session",
-    IOS_SIMULATOR.deviceId,
-    "ios",
-    undefined,
-    undefined,
-    IOS_SIMULATOR,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "ios-session",
+    deviceId: IOS_SIMULATOR.deviceId,
+    platform: "ios",
+    expectedIdentity: IOS_SIMULATOR,
+  });
   const captured = pool.getDevice(IOS_SIMULATOR.deviceId);
   if (!captured) {
     throw new Error("expected the simulator to be pooled");
@@ -274,14 +272,12 @@ test("physical iOS device loss remains terminal", async () => {
   const manager = new FakeDeviceManager([], [IOS_PHYSICAL_DEVICE]);
   const pool = createPool(sessions, timer, manager);
   await pool.initializeWithDevices([IOS_PHYSICAL_DEVICE]);
-  await pool.bindOrReuseDeviceSession(
-    "physical-session",
-    IOS_PHYSICAL_DEVICE.deviceId,
-    "ios",
-    undefined,
-    undefined,
-    IOS_PHYSICAL_DEVICE,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "physical-session",
+    deviceId: IOS_PHYSICAL_DEVICE.deviceId,
+    platform: "ios",
+    expectedIdentity: IOS_PHYSICAL_DEVICE,
+  });
   const captured = pool.getDevice(IOS_PHYSICAL_DEVICE.deviceId);
   if (!captured) {
     throw new Error("expected the physical iOS device to be pooled");
@@ -309,22 +305,19 @@ test("Android emulators and iOS simulators resolve through the shared continuity
   const pool = createPool(sessions, timer, manager);
   await pool.addDevice(ANDROID_EMULATOR, ANDROID_IMAGE);
   await pool.addDevice(IOS_SIMULATOR);
-  await pool.bindOrReuseDeviceSession(
-    "android-session",
-    ANDROID_EMULATOR.deviceId,
-    "android",
-    ANDROID_IMAGE,
-    undefined,
-    ANDROID_EMULATOR,
-  );
-  await pool.bindOrReuseDeviceSession(
-    "ios-session",
-    IOS_SIMULATOR.deviceId,
-    "ios",
-    undefined,
-    undefined,
-    IOS_SIMULATOR,
-  );
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "android-session",
+    deviceId: ANDROID_EMULATOR.deviceId,
+    platform: "android",
+    sourceImage: ANDROID_IMAGE,
+    expectedIdentity: ANDROID_EMULATOR,
+  });
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "ios-session",
+    deviceId: IOS_SIMULATOR.deviceId,
+    platform: "ios",
+    expectedIdentity: IOS_SIMULATOR,
+  });
   const android = pool.getDevice(ANDROID_EMULATOR.deviceId);
   const ios = pool.getDevice(IOS_SIMULATOR.deviceId);
   if (!android || !ios) {

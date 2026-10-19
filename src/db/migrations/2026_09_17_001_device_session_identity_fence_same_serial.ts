@@ -1,6 +1,6 @@
 import { sql, type Kysely } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     const existingColumn = await sql<{ name: string }>`
       SELECT name FROM pragma_table_info('device_sessions')
@@ -35,7 +35,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   });
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     await sql`DROP TRIGGER IF EXISTS clear_stale_device_session_identity`.execute(trx);
     await sql`

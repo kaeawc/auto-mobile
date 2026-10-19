@@ -4,7 +4,5 @@ src/ctrlProxy/CtrlProxyManager.ts -> src/features/accessibility/interfaces/Acces
 src/ctrlProxy/CtrlProxyManager.ts -> src/features/observe/android/foreignCtrlProxyForwardEvidence
 src/ctrlProxy/CtrlProxyManager.ts -> src/features/prototype/savedPrototypeMirror
 src/ctrlProxy/CtrlProxyManager.ts -> src/features/prototype/savedPrototypeRestore
-src/ctrlProxy/IOSCtrlProxyManager.ts -> src/doctor/deadline
-src/ctrlProxy/IOSCtrlProxyManager.ts -> src/doctor/types
 src/ctrlProxy/RunnerReadinessService.ts -> src/features/observe/android
 src/ctrlProxy/RunnerReadinessService.ts -> src/features/observe/ios

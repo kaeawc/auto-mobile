@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
 
@@ -44,6 +47,7 @@ function createFakeDaemonState(
       getDeviceLabels: (sessionId: string) => sessionDeviceLabels.get(sessionId),
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -55,7 +59,7 @@ function createFakeDaemonState(
   };
 }
 
-function createServer() {
+function createServer(): UnixSocketServerHarness {
   const sessionDevices = new Map<string, string>();
   const sessionDeviceLabels = new Map<string, DeviceLabelMap>();
   const mcpAutolockSessions = new Map<string, string>();
@@ -68,18 +72,15 @@ function createServer() {
   // mcp-bound has an autolock session resolving to session-a (device-1)
   mcpAutolockSessions.set("mcp-bound", "session-a");
 
-  const server = new UnixSocketServer(
+  return createHarnessServer(
     join(tmpdir(), `scope-${randomUUID()}.sock`),
     createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
     new FakeTimer(),
   );
-  return server;
 }
 
-function scopeKey(server: UnixSocketServer, args: unknown): string | undefined {
-  return (
-    server as unknown as { getRequestArgumentScopeKey: (a: unknown) => string | undefined }
-  ).getRequestArgumentScopeKey(args);
+function scopeKey(server: UnixSocketServerHarness, args: unknown): string | undefined {
+  return server.scopeKeyFor(args);
 }
 
 describe("UnixSocketServer.getRequestArgumentScopeKey precedence", () => {

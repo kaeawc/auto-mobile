@@ -1,5 +1,5 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { decodeCtrlProxyMessage } from "../../../../src/features/observe/ios/decodeCtrlProxyMessage";
@@ -47,14 +47,11 @@ function gestureHarness(environment = new FakeSystemDetection()) {
   const timer = new FakeTimer();
   const requestManager = new RequestManager(timer);
   const sent: string[] = [];
-  const socket = {
-    readyState: WebSocket.OPEN,
-    send(data: string) {
-      sent.push(data);
-      const request: { requestId: string } = JSON.parse(data);
-      requestManager.resolve(request.requestId, { success: true });
-    },
-  } as unknown as WebSocket;
+  const socket = new FakeOpenSocket((data) => {
+    sent.push(data);
+    const request: { requestId: string } = JSON.parse(data);
+    requestManager.resolve(request.requestId, { success: true });
+  });
   return {
     sent,
     gestures: new CtrlProxyGestures(

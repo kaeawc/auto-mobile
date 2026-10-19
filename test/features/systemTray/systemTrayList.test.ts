@@ -24,6 +24,9 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = {
   deviceId: "test",
@@ -2372,7 +2375,7 @@ test("lists topmost window rows once when also nested in the primary hierarchy",
   const observation = page(identifiedRow("primary"), sharedTop);
   observation.viewHierarchy!.windows = [
     { windowLayer: 10, hierarchy: page(sharedTop).viewHierarchy!.hierarchy },
-  ] as any;
+  ];
   setup([observation]);
   const result = await list();
   expect(result.notifications.map((entry) => entry.title)).toEqual(["top-window", "primary"]);
@@ -2384,7 +2387,7 @@ test("matching identical notification titles prefers the topmost window before s
   const observation = page(primary);
   observation.viewHierarchy!.windows = [
     { windowLayer: 10, hierarchy: page(upper).viewHierarchy!.hierarchy },
-  ] as any;
+  ];
   setup([observation]);
   const result = await waitForNotificationMatch(device, { title: "Same" }, [], 1000);
   expect(result.match?.candidate.element?.bounds.top).toBe(900);

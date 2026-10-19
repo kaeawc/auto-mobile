@@ -1,9 +1,12 @@
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const executePlanError = new Error("Simulated executePlan failure: device disconnected");
 

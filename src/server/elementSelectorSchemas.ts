@@ -1,8 +1,6 @@
+import type { ResolverSelector } from "../models/ResolverSelector";
 import { z } from "zod/v4";
-import {
-  ELEMENT_SELECTION_STRATEGIES,
-  type ElementSelectionStrategy,
-} from "../models/ElementSelectionStrategy";
+import { ELEMENT_SELECTION_STRATEGIES } from "../models/ElementSelectionStrategy";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import { HIERARCHY_LAYERS } from "../models/HierarchyLayer";
 
@@ -86,20 +84,7 @@ export const validateElementIdTextSelector = (
   }
 };
 
-/** Canonical resolver selector. Tools compose this schema as they migrate. */
-export interface ResolverSelector {
-  elementId?: string;
-  text?: string;
-  testTag?: string;
-  contentDescription?: string;
-  className?: string;
-  index?: number;
-  selectionStrategy?: ElementSelectionStrategy;
-  match?: "exact" | "contains" | "regex";
-  caseSensitive?: boolean;
-  container?: ResolverSelector;
-  sibling?: ResolverSelector;
-}
+export type { ResolverSelector };
 
 export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
   z

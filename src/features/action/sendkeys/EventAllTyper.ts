@@ -15,9 +15,13 @@ import { logger } from "../../../utils/logger";
 import { segmentGraphemes } from "./AndroidTypingConstants";
 import {
   buildAndroidInputTextPlan,
+  splitAndroidInputText,
   canJoinAndroidInputText,
 } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 
+import { readBackWithSettle } from "./readBackWithSettle";
+import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
+import type { Timer } from "../../../utils/SystemTimer";
 import { passwordTextPlaceholder } from "../imeFailureDiagnostics";
 interface AndroidEventAllProgress {
   mutated: boolean;
@@ -30,6 +34,7 @@ interface AndroidEventAllProgress {
 }
 export interface EventAllTyperHost {
   session: TypingSession;
+  timer: Timer;
   hasFocusedPasswordField(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean;
   graphemeCodePoints(graphemes: string[]): string;
   markPartialAfterPriorMutation(
@@ -67,6 +72,7 @@ export interface EventAllTyperHost {
   ): Promise<TextActionResult>;
   checkAbort(signal?: AbortSignal, error?: unknown): void;
   getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null>;
+  getAndroidApiLevel(signal?: AbortSignal): Promise<number | null>;
   clearForReplace(
     operation: SendKeysOperation,
     signal?: AbortSignal,
@@ -130,10 +136,12 @@ export class EventAllTyper implements AndroidModeTyper {
     if (!clearResult.success) {
       return clearResult;
     }
+    const outcome = { batchedKeyRun: false };
     const typed = await this.executeAndroidEventAllCharacters(
       graphemes,
       operation === "replace",
       operation === "replace",
+      outcome,
       signal,
     );
     if (!typed.success) {
@@ -142,7 +150,79 @@ export class EventAllTyper implements AndroidModeTyper {
     const confirmed = unchangedWarning
       ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
       : typed;
-    return this.host.verifyKeyEventLetterCase(text, confirmed, "eventAll", signal, display);
+    const caseChecked = await this.host.verifyKeyEventLetterCase(
+      text,
+      confirmed,
+      "eventAll",
+      signal,
+      display,
+    );
+    return outcome.batchedKeyRun
+      ? this.verifyPre31Delivery(graphemes, caseChecked, signal, display)
+      : caseChecked;
+  }
+
+  /**
+   * `adb shell input text` on API 30 and below drops characters under load and still exits 0
+   * (#12733), so success from the dispatch proves nothing there. Read the focused field back and
+   * fail as a partial application when the typed text is not in it. Case is ignored (the
+   * letter-case check owns that), only batched `input text` runs are read (the API level is already
+   * known there, so no extra adb call), an unreadable field stays a success, and API 31+ and password
+   * fields are not read.
+   */
+  private async verifyPre31Delivery(
+    graphemes: string[],
+    typed: TextActionResult,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    if (!typed.success || this.host.session.typingPasswordField) {
+      return typed;
+    }
+    const apiLevel = await this.host.getAndroidApiLevel(signal);
+    if (apiLevel === null || apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL) {
+      return typed;
+    }
+    const expected = graphemes.join("").toLowerCase();
+    const field = await readBackWithSettle(
+      async () => this.host.readFocusedText(await this.host.readFreshObservation(signal, display)),
+      (value) => value === undefined || value.toLowerCase().includes(expected),
+      {
+        timer: this.host.timer,
+        finish: (value, accepted) => (accepted ? undefined : value),
+        beforeRead: () => this.host.checkAbort(signal),
+        onReadError: (error) => {
+          this.host.checkAbort(signal, error);
+          logger.warn(
+            `[SendKeys] eventAll delivery read-back unavailable: ${errorMessage(error)}`,
+            error,
+          );
+        },
+      },
+    );
+    if (field === undefined) {
+      return typed;
+    }
+    const committedGraphemes = this.committedPrefixLength(graphemes, field.toLowerCase());
+    const error = `eventAll typed ${graphemes.length} graphemes but the focused field does not contain them: ${committedGraphemes} leading graphemes arrived and the device dropped the rest (adb input text on API ${await this.host.getAndroidApiLevel(signal)} loses characters). Use mode "ime" or "a11y" for reliable delivery.`;
+    logger.warn(`[SendKeys] ${error}`);
+    return this.host.withTextWarnings(
+      { success: false, error, committedGraphemes, partialApplication: true },
+      typed.warning ? [typed.warning] : [],
+    );
+  }
+
+  private committedPrefixLength(graphemes: string[], fieldLower: string): number {
+    let prefix = "";
+    let count = 0;
+    for (const grapheme of graphemes) {
+      prefix += grapheme.toLowerCase();
+      if (!fieldLower.includes(prefix)) {
+        break;
+      }
+      count++;
+    }
+    return count;
   }
 
   /**
@@ -180,6 +260,7 @@ export class EventAllTyper implements AndroidModeTyper {
     graphemes: string[],
     previouslyMutated: boolean,
     replacing: boolean,
+    outcome: { batchedKeyRun: boolean },
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
     const progress: AndroidEventAllProgress = {
@@ -198,12 +279,11 @@ export class EventAllTyper implements AndroidModeTyper {
           index,
           (await this.eventAllKeyEventRunEnd(graphemes, index)) + 1,
         );
-        const eventFailure = await this.executeEventAllKeyRunSafely(
-          run,
-          plan,
-          progress.mutated,
-          signal,
-        );
+        const { failure: eventFailure, deliveredGraphemes } =
+          await this.executeEventAllKeyRunSafely(run, plan, progress.mutated, signal);
+        // Chunks that completed before a later one failed stay committed, so a retry from
+        // committedGraphemes does not type them again.
+        progress.committedGraphemes += deliveredGraphemes;
         if (eventFailure) {
           return this.host.withTextWarnings(
             {
@@ -214,8 +294,8 @@ export class EventAllTyper implements AndroidModeTyper {
             progress.warnings,
           );
         }
+        outcome.batchedKeyRun ||= run.length > 1;
         progress.mutated = true;
-        progress.committedGraphemes += run.length;
         progress.pendingKeyText += run.join("");
         progress.sinceLastInsertEvents = true;
         index += run.length - 1;
@@ -295,16 +375,27 @@ export class EventAllTyper implements AndroidModeTyper {
     plan: KeyEventPlan,
     previouslyMutated: boolean,
     signal?: AbortSignal,
-  ): Promise<TextActionResult | undefined> {
+  ): Promise<{ failure?: TextActionResult; deliveredGraphemes: number }> {
     if (run.length === 1) {
-      return this.host.executeKeyEventPlanSafely(plan, previouslyMutated, signal);
+      const failure = await this.host.executeKeyEventPlanSafely(plan, previouslyMutated, signal);
+      return failure ? { failure, deliveredGraphemes: 0 } : { deliveredGraphemes: 1 };
     }
-    // The process may have typed part of the run before failing, so any failure is partial.
-    return this.host.executeKeyEventPlanSafely(
-      buildAndroidInputTextPlan(run.join("")),
-      true,
-      signal,
-    );
+    const apiLevel = await this.host.getAndroidApiLevel(signal);
+    // One dispatch per chunk: a failure in a later chunk must not hide the finished ones.
+    let deliveredGraphemes = 0;
+    for (const chunk of splitAndroidInputText(run.join(""), apiLevel)) {
+      // The process may have typed part of the chunk before failing, so any failure is partial.
+      const failure = await this.host.executeKeyEventPlanSafely(
+        buildAndroidInputTextPlan(chunk, apiLevel),
+        true,
+        signal,
+      );
+      if (failure) {
+        return { failure, deliveredGraphemes };
+      }
+      deliveredGraphemes += chunk.length;
+    }
+    return { deliveredGraphemes };
   }
 
   private async eventAllInsertRunEnd(graphemes: string[], index: number): Promise<number> {

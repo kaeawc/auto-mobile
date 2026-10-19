@@ -150,7 +150,7 @@ actor SdkEndpointResolver {
     }
 
     private func health(at url: URL) async throws -> SdkHierarchyServerInfo? {
-        var request = URLRequest(url: url.appendingPathComponent("health"))
+        var request = URLRequest(url: url.appendingPathComponent(SdkRoute.health.path))
         request.setValue(simulatorUdid, forHTTPHeaderField: Self.identityHeader)
         let result: (Data, URLResponse)
         do {

@@ -90,21 +90,15 @@ async function harness(withControlVeto = false) {
     receipt?: AcquisitionReceipt,
     connection = CONNECTION,
   ) =>
-    pool.bindOrReuseDeviceSession(
-      id,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      connection,
+    pool.bindOrReuseDeviceSession({
+      sessionId: id,
+      deviceId: DEVICE.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: connection,
       oneShotCli,
       receipt,
-    );
+    });
   const mint = async (autolock: boolean) =>
     autolock
       ? (await pool.autolockDevice(
@@ -577,19 +571,13 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
     const answer = Promise.withResolvers<void>();
     server.mcpClientFactory = async () => ({
       callTool: async ({ arguments: args }) => {
-        const id = await h.pool.bindOrReuseDeviceSession(
-          "socket-mint",
-          DEVICE.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          String(args?.__mcpSessionId),
-        );
+        const id = await h.pool.bindOrReuseDeviceSession({
+          sessionId: "socket-mint",
+          deviceId: DEVICE.deviceId,
+          platform: "android",
+          allowSessionRebind: false,
+          mcpSessionId: String(args?.__mcpSessionId),
+        });
         minted.resolve(id);
         await answer.promise;
         return { content: [] };

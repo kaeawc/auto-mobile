@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import {
   afterAll,
   afterEach,
@@ -38,7 +39,14 @@ import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycl
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { PROTOTYPE_EVENT_BUFFER_CAPACITY } from "../../src/features/prototype/PrototypeEventBuffer";
-import { getRemovedToolActionHint } from "../../src/models/removedTools";
+import { getRemovedToolActionHint } from "../../src/utils/removedTools";
+import {
+  readToolResponse,
+  toolIsError,
+  toolJson,
+  toolStructured,
+  toolText,
+} from "../helpers/toolResponse";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
@@ -73,11 +81,27 @@ describe("prototype MCP tool", () => {
     restore();
   });
 
-  async function call(input: unknown, target = device) {
+  function shownPrototype(index: number) {
+    const entry = client.getPrototypeHistory().at(index);
+    if (entry?.method !== "show") {
+      throw new Error(`expected a show request at history index ${index}`);
+    }
+    return entry;
+  }
+
+  function dismissedPrototype(index: number) {
+    const entry = client.getPrototypeHistory().at(index);
+    if (entry?.method !== "dismiss") {
+      throw new Error(`expected a dismiss request at history index ${index}`);
+    }
+    return entry;
+  }
+
+  async function call(input: Record<string, unknown>, target = device) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(target, input);
-    const payload = prototypeOutputSchema.parse(response.structuredContent);
-    expect(JSON.parse(response.content[0].text)).toEqual(payload);
-    expect(response.content.every((item: { type: string }) => item.type === "text")).toBe(true);
+    const payload = prototypeOutputSchema.parse(toolStructured(response));
+    expect(toolJson(response)).toEqual(payload);
+    expect(readToolResponse(response).content.every((item) => item.type === "text")).toBe(true);
     return { response, payload };
   }
 
@@ -87,7 +111,7 @@ describe("prototype MCP tool", () => {
   ])("removed %s action is refused with the replacement before dispatch", async (action, input) => {
     expect(prototypeSchema.safeParse(input).success).toBe(false);
     const { response, payload } = await call(input);
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain(getRemovedToolActionHint("prototype", action)!);
     expect(payload.error).toContain("use show");
     expect(client.getPrototypeHistory()).toEqual([]);
@@ -133,7 +157,7 @@ describe("prototype MCP tool", () => {
   ])("action contract rejects %j", async (input, message) => {
     expect(prototypeSchema.safeParse(input).success).toBe(false);
     const result = await call(input);
-    expect(result.response.isError).toBe(true);
+    expect(toolIsError(result.response)).toBe(true);
     expect(result.payload.error).toContain(message);
     expect(client.getPrototypeHistory()).toEqual([]);
   });
@@ -243,7 +267,8 @@ describe("prototype MCP tool", () => {
     };
     const { payload } = await call({ action: "show", spec: authored });
     expect(payload.success).toBe(true);
-    expect(client.getPrototypeHistory()).toEqual([
+    // The host sends the authored window as-is; the opacity default is applied on the device.
+    expect<unknown>(client.getPrototypeHistory()).toEqual([
       {
         method: "show",
         spec: {
@@ -334,7 +359,7 @@ describe("prototype MCP tool", () => {
       timestamp: 1,
     });
     const { response, payload } = await call({ action: "awaitEvent", id: "panel" });
-    expect(response.isError).not.toBe(true);
+    expect(toolIsError(response)).not.toBe(true);
     expect(payload).toMatchObject({
       success: true,
       event: { id: "panel", sequence: 1 },
@@ -348,7 +373,7 @@ describe("prototype MCP tool", () => {
     const waiting = call({ action: "awaitEvent", id: "panel", timeoutMs: 10 });
     timer.advanceTime(10);
     const { response, payload } = await waiting;
-    expect(response.isError).not.toBe(true);
+    expect(toolIsError(response)).not.toBe(true);
     expect(payload).toEqual({ success: true, timedOut: true, pendingCount: 0, droppedCount: 0 });
     expect(client.getPrototypeHistory()).toEqual([]);
     expect(client.getPrototypeListenerCount()).toBe(0);
@@ -365,7 +390,7 @@ describe("prototype MCP tool", () => {
       { action: "awaitEvent", id: "panel" },
       progress,
     );
-    expect(prototypeOutputSchema.parse(response.structuredContent).event?.sequence).toBe(1);
+    expect(prototypeOutputSchema.parse(toolStructured(response)).event?.sequence).toBe(1);
     expect(progress.mock.calls.map(([amount]) => amount)).toEqual([0, 1]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -384,7 +409,7 @@ describe("prototype MCP tool", () => {
     const expected = {
       id: "panel",
       sequence: 3,
-      kind: "emit",
+      kind: "emit" as const,
       name: "save",
       payload: { value: 3 },
       state: { title: "Hello" },
@@ -578,12 +603,12 @@ describe("prototype MCP tool", () => {
     const show = await call({ action: "show", spec });
     const expectedShow =
       '{"success":true,"lastResult":{"id":"panel","lastAction":"show","chrome":"bar","success":true,"timestamp":0}}';
-    expect(show.response.content[0].text).toBe(expectedShow);
-    expect(JSON.stringify(show.response.structuredContent)).toBe(expectedShow);
-    expect((await call({ action: "status" })).response.content[0].text).toBe(
+    expect(toolText(show.response)).toBe(expectedShow);
+    expect(JSON.stringify(toolStructured(show.response))).toBe(expectedShow);
+    expect(toolText((await call({ action: "status" })).response)).toBe(
       '{"success":true,"prototypes":[{"id":"panel","lastAction":"show","chrome":"bar","success":true,"timestamp":0}],"lastResult":{"id":"panel","lastAction":"show","chrome":"bar","success":true,"timestamp":0}}',
     );
-    expect((await call({ action: "dismiss", all: true })).response.content[0].text).toBe(
+    expect(toolText((await call({ action: "dismiss", all: true })).response)).toBe(
       '{"success":true,"lastResult":{"all":true,"lastAction":"dismiss","success":true,"timestamp":0}}',
     );
   });
@@ -602,7 +627,7 @@ describe("prototype MCP tool", () => {
     { action: "dismiss", id: "panel", eventName: "save" },
   ])("rejects invalid wait fields %j", async (input) => {
     expect(prototypeSchema.safeParse(input).success).toBe(false);
-    expect((await call(input)).response.isError).toBe(true);
+    expect(toolIsError((await call(input)).response)).toBe(true);
     expect(client.getPrototypeListenerCount()).toBe(0);
   });
 
@@ -868,7 +893,7 @@ describe("prototype MCP tool", () => {
 
   test("omitted opacity uses the existing spec default", async () => {
     await call({ action: "show", spec: { ...spec, window: { placement: spec.window.placement } } });
-    expect(client.getPrototypeHistory()[0].spec?.window).toEqual({
+    expect<unknown>(shownPrototype(0).spec?.window).toEqual({
       placement: spec.window.placement,
     });
   });
@@ -944,7 +969,7 @@ describe("prototype MCP tool", () => {
     expect((await call({ action: "show", spec: authored, ...metadata })).payload.success).toBe(
       true,
     );
-    expect(client.getPrototypeHistory()[0].spec).toEqual(authored);
+    expect(shownPrototype(0).spec).toEqual(authored);
     expect(state).toEqual(
       Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, "authored"])),
     );
@@ -972,7 +997,9 @@ describe("prototype MCP tool", () => {
 
   test("a reserved name in authored state is still validated", async () => {
     const state = { [INTERNAL_TOOL_PARAM_NAMES[0]]: { invalid: true } };
-    expect((await call({ action: "show", spec: { ...spec, state } })).response.isError).toBe(true);
+    expect(toolIsError((await call({ action: "show", spec: { ...spec, state } })).response)).toBe(
+      true,
+    );
     expect(client.getPrototypeHistory()).toEqual([]);
   });
 
@@ -1010,12 +1037,12 @@ describe("prototype MCP tool", () => {
   test("dismiss id and all update local status", async () => {
     await call({ action: "show", spec });
     await call({ action: "dismiss", id: "panel" });
-    expect(client.getPrototypeHistory()[1].target).toEqual({ id: "panel" });
+    expect(dismissedPrototype(1).target).toEqual({ id: "panel" });
     expect((await call({ action: "status" })).payload.prototypes).toEqual([]);
     await call({ action: "show", spec });
     await call({ action: "show", spec: { ...spec, id: "second" } });
     await call({ action: "dismiss", all: true });
-    expect(client.getPrototypeHistory().at(-1)?.target).toEqual({ all: true });
+    expect(dismissedPrototype(-1).target).toEqual({ all: true });
     expect((await call({ action: "status" })).payload.prototypes).toEqual([]);
   });
 
@@ -1058,7 +1085,7 @@ describe("prototype MCP tool", () => {
     [{ action: "show", spec, reset: true }, "launchApp with prototype: true"],
   ])("iOS %o without an injected agent never reaches CtrlProxy", async (input, guidance) => {
     const { response, payload } = await call(input, { ...device, platform: "ios" });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain(guidance);
     expect(client.getPrototypeHistory()).toEqual([]);
   });
@@ -1072,7 +1099,7 @@ describe("prototype MCP tool", () => {
     const input = { action: "show", spec: invalid };
     expect(prototypeSchema.safeParse(input).success).toBe(false);
     const { response, payload } = await call(input);
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toContain(path);
     expect(payload.error).toContain(allowed);
     expect(client.getPrototypeHistory()).toEqual([]);
@@ -1087,14 +1114,14 @@ describe("prototype MCP tool", () => {
     { action: "status", id: "panel" },
   ])("action contract rejects ambiguous input %j", async (input) => {
     expect(prototypeSchema.safeParse(input).success).toBe(false);
-    expect((await call(input)).response.isError).toBe(true);
+    expect(toolIsError((await call(input)).response)).toBe(true);
     expect(client.getPrototypeHistory()).toEqual([]);
   });
 
   test("failed show has lastResult but is not shown; failed same-id show/dismiss preserve presence", async () => {
     client.setPrototypeResult({ success: false, error: "Permission denied; enable accessibility" });
     const failed = await call({ action: "show", spec });
-    expect(failed.response.isError).toBe(true);
+    expect(toolIsError(failed.response)).toBe(true);
     expect(failed.payload.error).toContain("enable accessibility");
     let status = (await call({ action: "status" })).payload;
     expect(status.prototypes).toEqual([]);
@@ -1118,7 +1145,7 @@ describe("prototype MCP tool", () => {
       "show_prototype: this CtrlProxy build does not support prototypes; update the connected CtrlProxy.";
     client.setFailureMode("requestShowPrototype", new ActionableError(message));
     const { response, payload } = await call({ action: "show", spec });
-    expect(response.isError).toBe(true);
+    expect(toolIsError(response)).toBe(true);
     expect(payload.error).toBe(message);
     expect((await call({ action: "status" })).payload.prototypes).toEqual([]);
   });
@@ -1141,7 +1168,7 @@ describe("prototype MCP tool", () => {
           toolName: "prototype",
           enabled: true,
         });
-        expect(response.isError).not.toBe(true);
+        expect(toolIsError(response)).not.toBe(true);
         expect(await selection.isEnabled("profile", "prototype", false)).toBe(true);
         expect(await selection.isEnabled("profile", "highlight", false)).toBe(false);
       },
@@ -1167,6 +1194,17 @@ describe("prototype discovery over MCP", () => {
         (definition) => definition.outputSchema,
       ),
     );
+    // First listing builds every tool's schema and the client's validators; keep it out of the test.
+    await fixture.client.listTools();
+    // Enabling a tool rebuilds the listing with its schemas and the client validates them; run the
+    // same enable, list, disable cycle once so the test measures steady state.
+    for (const enabled of [true, false]) {
+      await fixture.client.callTool({
+        name: "setToolEnabled",
+        arguments: { toolName: "prototype", enabled },
+      });
+      await fixture.client.listTools();
+    }
   });
   afterAll(async () => {
     unsubscribe();
@@ -1182,8 +1220,9 @@ describe("prototype discovery over MCP", () => {
       arguments: { toolName: "prototype", enabled: true },
     });
     expect(enabled.isError).not.toBe(true);
-    expect(await names()).toContain("prototype");
-    expect(await names()).not.toContain("highlight");
+    const whileEnabled = await names();
+    expect(whileEnabled).toContain("prototype");
+    expect(whileEnabled).not.toContain("highlight");
     const disabled = await fixture.client.callTool({
       name: "setToolEnabled",
       arguments: { toolName: "prototype", enabled: false },
@@ -1252,10 +1291,8 @@ describe("prototype CLI and advertised schema registration", () => {
     );
   });
   test("the advertised theme objects reject empty objects like the validator does", () => {
-    type Node = { minProperties?: number; properties: Record<string, Node> };
-    const root = definition.inputSchema as unknown as Node;
-    const theme = root.properties.spec.properties.theme;
-    expect(theme.minProperties).toBe(1);
-    expect(theme.properties.colors.minProperties).toBe(1);
+    const theme = parseJsonSchemaNode(definition.inputSchema).properties?.spec?.properties?.theme;
+    expect(theme?.minProperties).toBe(1);
+    expect(theme?.properties?.colors?.minProperties).toBe(1);
   });
 });

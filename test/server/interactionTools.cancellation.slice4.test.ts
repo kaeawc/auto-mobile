@@ -1,7 +1,6 @@
 import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
-import type WebSocket from "ws";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { Keyboard } from "../../src/features/action/Keyboard";
 import { HomeScreen } from "../../src/features/action/HomeScreen";
@@ -12,12 +11,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { CtrlProxyKeyboard } from "../../src/features/observe/ios/CtrlProxyKeyboard";
 import { CtrlProxyGestures } from "../../src/features/observe/ios/CtrlProxyGestures";
 import type { DelegateContext } from "../../src/features/observe/ios/types";
-import {
-  setKeyboardFactory,
-  resetKeyboardFactory,
-  setOpenUrlFactory,
-  resetOpenUrlFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   setSystemTrayDependencies,
@@ -31,6 +25,7 @@ import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
+const interactionDeps: InteractionToolDependencies = {};
 const android: BootedDevice = { platform: "android", deviceId: "slice4-android", name: "Test" };
 const ios: BootedDevice = {
   platform: "ios",
@@ -60,14 +55,17 @@ const observation: ObserveResult = {
   },
 };
 const restores: Array<() => void> = [];
-const handler = cancellationHandlers(["keyboard", "openLink", "systemTray", "homeScreen"]);
+const handler = cancellationHandlers(
+  ["keyboard", "openLink", "systemTray", "homeScreen"],
+  interactionDeps,
+);
 
 const test = cancellationTests(() => {
   for (const restore of restores.splice(0)) {
     restore();
   }
-  resetKeyboardFactory();
-  resetOpenUrlFactory();
+  delete interactionDeps.keyboardFactory;
+  delete interactionDeps.openUrlFactory;
   resetSystemTrayDependencies();
   ToolRegistry.clearTools();
 });
@@ -174,7 +172,7 @@ function delayedConnection() {
   const context: DelegateContext = {
     timer,
     requestManager: manager,
-    getWebSocket: () => socket as WebSocket,
+    getWebSocket: () => socket,
     ensureConnected: () => {
       started.resolve();
       return connected.promise;
@@ -228,15 +226,13 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
       },
     );
     restores.push(() => delegate.mockRestore());
-    setKeyboardFactory(
-      () =>
-        new Keyboard(
-          ios,
-          { create: () => new FakeAdbExecutor() },
-          new FakeKeyboardHierarchyProvider(),
-          h.timer,
-        ),
-    );
+    interactionDeps.keyboardFactory = () =>
+      new Keyboard(
+        ios,
+        { create: () => new FakeAdbExecutor() },
+        new FakeKeyboardHierarchyProvider(),
+        h.timer,
+      );
     const controller = new AbortController();
     const pending = handler("keyboard")(
       ios,
@@ -278,7 +274,8 @@ test("physical iOS openLink forwards cancellation to devicectl", async () => {
     },
   );
   restores.push(() => launch.mockRestore());
-  setOpenUrlFactory(() => new UnobservedOpenURL(ios, new FakeAdbExecutor(), null, launcher, timer));
+  interactionDeps.openUrlFactory = () =>
+    new UnobservedOpenURL(ios, new FakeAdbExecutor(), null, launcher, timer);
   await expect(
     handler("openLink")(ios, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");

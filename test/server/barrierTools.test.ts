@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -316,7 +316,7 @@ describe("barrier tool", () => {
         name: "barrier device loss",
         steps: [{ tool: "barrier", params: { device: "A", lock: "loss-lock", deviceCount: 1 } }],
       };
-      const error = await new DefaultPlanExecutor(timer)
+      const error = await createDefaultPlanExecutor(timer)
         .executePlan(
           plan,
           0,
@@ -453,7 +453,7 @@ describe("barrier tool", () => {
         ],
       };
 
-      const result = await new DefaultPlanExecutor().executePlan(
+      const result = await createDefaultPlanExecutor().executePlan(
         plan,
         0,
         "android",

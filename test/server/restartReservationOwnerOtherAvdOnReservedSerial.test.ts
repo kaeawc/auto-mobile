@@ -111,19 +111,19 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    const previousSessionManager: unknown = Reflect.get(ToolRegistry, "deviceSessionManager");
-    const previousToolCalls: unknown = Reflect.get(ToolRegistry, "toolCallRepository");
+    const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
     const deviceSessions = new FakeDeviceSessionManager();
     deviceSessions.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessions);
-    Reflect.set(ToolRegistry, "toolCallRepository", { recordToolCall: async () => {} });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     cleanups.push(() => {
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       timer.reset();
       restorePipeline();
-      Reflect.set(ToolRegistry, "deviceSessionManager", previousSessionManager);
-      Reflect.set(ToolRegistry, "toolCallRepository", previousToolCalls);
+      ToolRegistry.setCollaboratorsForTesting(previousCollaborators);
     });
     setDeviceToolsDependencies({
       env,
@@ -137,19 +137,14 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     });
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessions, pool);
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      device,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      CONNECTION,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: device.deviceId,
+      platform: "android",
+      expectedIdentity: device,
+      allowSessionRebind: false,
+      mcpSessionId: CONNECTION,
+    });
     const live = sessions.getSession(HOLDER)!;
     live.expiresAt = timer.now() + 600_000;
     live.sessionTimeoutMs = 600_000;

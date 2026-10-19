@@ -1,7 +1,7 @@
-import type { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
 
-/** The public, mockable surface of `IosCtrlProxyBuilder` (its constructor is private). */
-export type IosCtrlProxyBuilderMembers = Partial<IosCtrlProxyBuilder>;
+/** The members of `IosCtrlProxyBuilder` that `IOSCtrlProxyManager` depends on. */
+export type IosCtrlProxyBuilderMembers = Partial<IosCtrlProxyBuilderSurface>;
 
 /**
  * Default fake for IosCtrlProxyBuilder.writeRunnerEnvironment: returns a
@@ -20,16 +20,31 @@ export async function fakeWriteRunnerEnvironment(
   return `${dir}/automobile-runner-${safeDeviceId}.xctestrun`;
 }
 
+function unsupported(member: string): never {
+  throw new Error(`IosCtrlProxyBuilder.${member} was not supplied to the fake builder`);
+}
+
 /**
- * Typed partial `IosCtrlProxyBuilder`. `IosCtrlProxyBuilder` has a private
- * constructor and private state, so no object literal can satisfy it
- * structurally. Tests supply only the members the code under test calls; each
- * member is checked against the real signature (typos and wrong shapes fail the
- * typecheck). Calling a member that was not supplied throws, like any missing
- * method. This is the one place the narrowing assertion lives.
+ * Typed `IosCtrlProxyBuilderSurface`. Tests supply only the members the code under test calls;
+ * each member is checked against the real signature (typos and wrong shapes fail the typecheck).
+ * Calling a member that was not supplied throws, like any missing method.
  */
-export function asIosCtrlProxyBuilder(members: IosCtrlProxyBuilderMembers): IosCtrlProxyBuilder {
-  return members as unknown as IosCtrlProxyBuilder;
+export function fakeIosCtrlProxyBuilder(
+  members: IosCtrlProxyBuilderMembers,
+): IosCtrlProxyBuilderSurface {
+  return {
+    build: members.build ?? (async () => unsupported("build")),
+    getExpectedAppHash: members.getExpectedAppHash ?? (() => unsupported("getExpectedAppHash")),
+    getInstalledBundleVersion:
+      members.getInstalledBundleVersion ?? (async () => unsupported("getInstalledBundleVersion")),
+    getXctestrunPath: members.getXctestrunPath ?? (async () => unsupported("getXctestrunPath")),
+    needsRebuild: members.needsRebuild ?? (async () => unsupported("needsRebuild")),
+    verifyRunnerBinaryBeforeLaunch:
+      members.verifyRunnerBinaryBeforeLaunch ??
+      (async () => unsupported("verifyRunnerBinaryBeforeLaunch")),
+    writeRunnerEnvironment:
+      members.writeRunnerEnvironment ?? (async () => unsupported("writeRunnerEnvironment")),
+  };
 }
 
 /**
@@ -40,10 +55,9 @@ export function asIosCtrlProxyBuilder(members: IosCtrlProxyBuilderMembers): IosC
 export function createStartableBuilder(
   xctestrunPath: string | null,
   overrides: IosCtrlProxyBuilderMembers = {},
-): IosCtrlProxyBuilder {
-  return asIosCtrlProxyBuilder({
+): IosCtrlProxyBuilderSurface {
+  return fakeIosCtrlProxyBuilder({
     getXctestrunPath: async () => xctestrunPath,
-    getRunnerBinaryPath: async () => null,
     verifyRunnerBinaryBeforeLaunch: async () => {},
     writeRunnerEnvironment: fakeWriteRunnerEnvironment,
     ...overrides,
@@ -54,12 +68,11 @@ export function createStartableBuilder(
  * Builder fake for flows that adopt an already-running external runner: any
  * attempt to resolve an xctestrun (i.e. to build or launch) fails the test.
  */
-export function createReusedRunnerBuilder(): IosCtrlProxyBuilder {
-  return asIosCtrlProxyBuilder({
+export function createReusedRunnerBuilder(): IosCtrlProxyBuilderSurface {
+  return fakeIosCtrlProxyBuilder({
     getXctestrunPath: async () => {
       throw new Error("should not build when an external CtrlProxy process is reused");
     },
-    getRunnerBinaryPath: async () => null,
     verifyRunnerBinaryBeforeLaunch: async () => {},
     writeRunnerEnvironment: fakeWriteRunnerEnvironment,
   });

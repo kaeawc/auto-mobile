@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   handleDaemonRequest,
@@ -27,7 +27,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
   let previousAutolock: string | undefined;
   let barrier: FakeDbWriteBarrier;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock ? "1" : "0";
     timer = new FakeTimer();
@@ -53,7 +53,11 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     await pool.initializeWithDevices(deviceManager.bootedDevices);
     sessionId = autolock
       ? (await pool.autolockDevice(deviceId, "android", "client"))!
-      : await pool.bindOrReuseDeviceSession(explicitSessionId, deviceId, "android");
+      : await pool.bindOrReuseDeviceSession({
+          sessionId: explicitSessionId,
+          deviceId,
+          platform: "android",
+        });
     state = {
       isInitialized: () => true,
       getSessionManager: () => manager,
@@ -61,7 +65,32 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
       getDeviceSessionRegistry: () => ({ list: () => [] }),
     };
     expect(pool.getDevice(deviceId)).toMatchObject({ sessionId, status: "busy" });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table)(
+        name,
+        async (row: T) => {
+          await arrangeHarness();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(() => {
     manager.stopCleanupTimer();
@@ -102,7 +131,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     }
   }
 
-  test("a healthy retry completes the fenced release", async () => {
+  arranged("a healthy retry completes the fenced release", async () => {
     const free = spyOn(pool, "releaseDevice");
     try {
       await failTerminalWrite();
@@ -122,48 +151,51 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     }
   });
 
-  test("repeated failure surfaces; expiry retains ownership until a healthy sweep frees once", async () => {
+  arranged(
+    "repeated failure surfaces; expiry retains ownership until a healthy sweep frees once",
+    async () => {
+      const free = spyOn(pool, "releaseDevice");
+      try {
+        await failTerminalWrite();
+        await expect(release()).rejects.toThrow("Failed to persist terminal release");
+        timer.advanceTime(24 * 3600_000);
+        await sweep();
+        expect(manager.hasSession(sessionId)).toBe(true);
+        expect(pool.getDevice(deviceId)).toMatchObject({ sessionId, status: "busy" });
+        expect(free).not.toHaveBeenCalled();
+        persistence.failure = null;
+        await sweep();
+        expect(manager.hasSession(sessionId)).toBe(false);
+        expect(pool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+        expect(pool.getAvailableDeviceCount()).toBe(1);
+        expect(free).toHaveBeenCalledTimes(1);
+        await sweep();
+        expect(await release()).toMatchObject({ result: { alreadyReleased: true } });
+        expect(free).toHaveBeenCalledTimes(1);
+      } finally {
+        free.mockRestore();
+      }
+    },
+  );
+
+  arranged("expiry alone completes a failed explicit release and frees once", async () => {
     const free = spyOn(pool, "releaseDevice");
     try {
       await failTerminalWrite();
-      await expect(release()).rejects.toThrow("Failed to persist terminal release");
-      timer.advanceTime(24 * 3600_000);
-      await sweep();
-      expect(manager.hasSession(sessionId)).toBe(true);
-      expect(pool.getDevice(deviceId)).toMatchObject({ sessionId, status: "busy" });
-      expect(free).not.toHaveBeenCalled();
       persistence.failure = null;
+      timer.advanceTime(24 * 3600_000);
       await sweep();
       expect(manager.hasSession(sessionId)).toBe(false);
       expect(pool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
-      expect(pool.getAvailableDeviceCount()).toBe(1);
       expect(free).toHaveBeenCalledTimes(1);
       await sweep();
-      expect(await release()).toMatchObject({ result: { alreadyReleased: true } });
       expect(free).toHaveBeenCalledTimes(1);
     } finally {
       free.mockRestore();
     }
   });
 
-  test("expiry alone completes a failed explicit release and frees once", async () => {
-    const free = spyOn(pool, "releaseDevice");
-    try {
-      await failTerminalWrite();
-      persistence.failure = null;
-      timer.advanceTime(24 * 3600_000);
-      await sweep();
-      expect(manager.hasSession(sessionId)).toBe(false);
-      expect(pool.getDevice(deviceId)).toMatchObject({ sessionId: null, status: "idle" });
-      expect(free).toHaveBeenCalledTimes(1);
-      await sweep();
-      expect(free).toHaveBeenCalledTimes(1);
-    } finally {
-      free.mockRestore();
-    }
-  });
-
-  test.each(["retry", "sweep"])("%s never frees a different owner", async (path) => {
+  arrangedEach(["retry", "sweep"])("%s never frees a different owner", async (path) => {
     await failTerminalWrite();
     if (path === "sweep") {
       timer.advanceTime(24 * 3600_000);
@@ -185,7 +217,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     expect(pool.getDevice(deviceId)).toMatchObject({ sessionId: replacementId, status: "busy" });
   });
 
-  test.each([undefined, "restored_to_baseline", "failed"] as const)(
+  arrangedEach([undefined, "restored_to_baseline", "failed"] as const)(
     "release result adds only a known keep-awake report (%s)",
     async (reported) => {
       const report = {
@@ -224,7 +256,7 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     },
   );
 
-  test("normal release and genuinely absent retries remain idempotent", async () => {
+  arranged("normal release and genuinely absent retries remain idempotent", async () => {
     const free = spyOn(pool, "releaseDevice");
     try {
       expect(await release()).toMatchObject({

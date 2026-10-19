@@ -13,9 +13,9 @@
 import {
   createObserveScreenForTest,
   createHierarchyForTest,
-  createObserveResultForTest,
   type TestHierarchyResult,
 } from "./observeScreenTestBuilders";
+import { createObserveResultForTest } from "./flatHierarchyBuilders";
 import type { ObserveResultCacheStore } from "../../../src/features/observe/cache/ObserveResultCacheStore";
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";

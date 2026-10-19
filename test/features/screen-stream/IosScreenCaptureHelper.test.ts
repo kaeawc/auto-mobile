@@ -66,7 +66,7 @@ function withFakeSpawner(
     spawner: (command, args) => {
       spawnArgs.command = command;
       spawnArgs.args = args;
-      return fake as unknown as ChildProcessWithoutNullStreams;
+      return fake;
     },
   });
   return { fake, spawnArgs, helper };
@@ -146,7 +146,7 @@ describe("IosScreenCaptureHelper", () => {
         nativeHelperRegistry: testNativeHelperRegistry,
         binaryPath: "/fake/screen-capture-helper",
         target: { kind: "simulator", windowID: 1, fps },
-        spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+        spawner: () => fake,
       });
       expect(() => helper.start()).toThrow(/simulator fps must be an integer in \[5, 60\]/);
     },
@@ -177,7 +177,7 @@ describe("IosScreenCaptureHelper", () => {
       target: { kind: "device" },
       now: () => now,
       frameDeliveryScheduler: scheduler,
-      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => fake,
     });
     const frames: DecodedFrame[] = [];
     helper.on("frame", (frame) => frames.push(frame));
@@ -696,7 +696,7 @@ describe("IosScreenCaptureHelper", () => {
       nativeHelperRegistry: testNativeHelperRegistry,
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "simulator", windowID: 1 },
-      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => fake,
       timer,
       processGroupKiller: (pid, signal) => processGroupSignals.push({ pid, signal }),
     });
@@ -729,7 +729,7 @@ describe("IosScreenCaptureHelper", () => {
         nativeHelperRegistry: testNativeHelperRegistry,
         binaryPath: "/fake/screen-capture-helper",
         target: { kind: "simulator", windowID: 1 },
-        spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+        spawner: () => fake,
         timer,
         processGroupKiller: () => {
           throw new Error("kill: no such process group");
@@ -763,7 +763,7 @@ describe("IosScreenCaptureHelper", () => {
       nativeHelperRegistry: testNativeHelperRegistry,
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "simulator", windowID: 1 },
-      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+      spawner: () => fake,
       timer,
     });
     helper.start();

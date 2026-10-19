@@ -169,13 +169,50 @@ describe("stdio proxy relays the Tasks extension to the daemon (#4668)", () => {
     ]);
   });
 
-  test("a declaring device-binding call is not relayed as declared", async () => {
-    const client = daemon();
+  test("a declaring startDevice runs as a task and later calls route to the session it completed with", async () => {
+    const booted = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            platform: "android",
+            runtime: { deviceId: "emulator-5554", session: { sessionUuid: "booted-session" } },
+          }),
+        },
+      ],
+    };
+    let status = "working";
+    const client = daemon({
+      toolResultFor: (toolName) => (toolName === "startDevice" ? CREATED : undefined),
+      onRelayTaskMethod: () => ({
+        ...COMPLETED,
+        status,
+        ...(status === "completed" ? { result: booted } : { result: undefined }),
+      }),
+    });
     const wire = await connect(client);
 
-    await wire.call("startDevice", true);
+    const created = await wire.call("startDevice", true);
+    await wire.task("tasks/get", { taskId: "task-1" });
+    await wire.call("observe", false);
+    status = "completed";
+    const done = await wire.task("tasks/get", { taskId: "task-1" });
+    await wire.task("tasks/get", { taskId: "task-1" });
+    await wire.call("observe", false);
 
-    expect(client.callToolOptions).toEqual([undefined]);
+    expect(JSON.stringify(created.result)).toBe(JSON.stringify(CREATED));
+    expect(client.callToolOptions[0]?.tasks?.declared).toBe(true);
+    expect(done.result.result).toEqual(booted);
+    const routed = client.callToolCalls.filter((call) => call.toolName === "observe");
+    expect(routed.map((call) => call.params.sessionUuid)).toEqual([undefined, "booted-session"]);
+    // Binding claims the session's liveness ownership once; later keeper ticks only renew it.
+    const claims = client.callDaemonMethodCalls.filter(
+      (call) =>
+        call.method === "daemon/heartbeat" &&
+        call.params.sessionId === "booted-session" &&
+        call.params.claimLivenessOwnership === true,
+    );
+    expect(claims).toHaveLength(1);
   });
 
   test("tasks/get, tasks/update and tasks/cancel reach the daemon under the call's owner key", async () => {

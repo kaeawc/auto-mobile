@@ -149,15 +149,16 @@ wiring_requires_yq() {
 }
 
 @test "reports the resolved environment when no SDK root can be found at all" {
+  # Empty fallback roots keep the run hermetic: without it the script finds the
+  # runner's real SDK and sdkmanager-installs the emulator package (~230s).
   run env -u ANDROID_HOME -u ANDROID_SDK_ROOT -u ANDROID_SDK_HOME -u HOME \
+    ENSURE_EMULATOR_SDK_FALLBACK_ROOTS= \
     bash -c 'cd / && exec "$0"' "$SCRIPT_PATH"
 
-  # Either it resolved a real SDK on this machine (status 0) or it failed with a
-  # diagnostic that names what it looked at -- never a bare failure.
-  if [ "$status" -ne 0 ]; then
-    [[ "$output" == *"ANDROID_HOME="* ]]
-    [[ "$output" == *"PATH="* ]]
-  fi
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not resolve an Android SDK root"* ]]
+  [[ "$output" == *"ANDROID_HOME="* ]]
+  [[ "$output" == *"PATH="* ]]
 }
 
 @test "the resolution tripwire fails when the product cannot find the emulator" {

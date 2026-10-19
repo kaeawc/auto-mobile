@@ -49,7 +49,6 @@ import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
-import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { registerNavigationTools } from "../../../src/server/navigationTools";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
@@ -58,6 +57,11 @@ import { reportToolDispatched } from "../../../src/utils/ToolDispatchContext";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import type { LaunchAppCall } from "../../../src/features/action/LaunchApp";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
+
+isolateToolRegistry();
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -240,10 +244,10 @@ describe("Explore", () => {
         },
       } as typeof run.observeScreen;
       let taps = 0;
-      Reflect.set(run, "tapElement", async () => {
+      run.tapElement = async () => {
         taps++;
         return true;
-      });
+      };
       const result = await run.execute(options);
       return { result, taps };
     }
@@ -263,7 +267,7 @@ describe("Explore", () => {
 
     test("does not include permission-denial controls in dry-run interactions", async () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      (explore as any).observeScreen = {
+      explore.observeScreen = {
         execute: async () =>
           createMockObservation([
             createMockViewHierarchyNode({
@@ -298,10 +302,10 @@ describe("Explore", () => {
         });
 
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-        (explore as any).observeScreen = {
+        explore.observeScreen = {
           execute: async () => createMockObservation(),
         };
-        (explore as any).performInteraction = async () => {
+        explore.performInteraction = async () => {
           fakeGraph.recordNavigationEvent({
             destination: "Settings",
             source: "TEST",
@@ -370,7 +374,7 @@ describe("Explore", () => {
           depth: 0,
         });
       }
-      Reflect.set(explore, "elementParser", parser);
+      explore.setStateForTesting({ elementParser: parser });
       let foreground = initialForeground;
       let screen = initialScreen;
       const actions: string[] = [];
@@ -429,7 +433,7 @@ describe("Explore", () => {
         expect(run.actions).toEqual(["back", "launch"]);
         expect(result.durationMs).toBe(2000);
         expect(fakeTimer.now()).toBe(2000);
-        expect(Reflect.get(explore, "consecutiveOutOfAppCount")).toBe(1);
+        expect(explore.diagnostics.consecutiveOutOfAppCount).toBe(1);
       } finally {
         run.restore();
       }
@@ -531,7 +535,7 @@ describe("Explore", () => {
           expect(result.stopReason).toBe("Reached max interactions limit (3)");
           expect(result.interactionsPerformed).toBe(3);
           expect(result.explorationPath).toEqual(["Home", "Detail"]);
-          expect(Reflect.get(explore, "rootScreens")).toEqual(new Set());
+          expect(explore.diagnostics.rootScreens).toEqual(new Set());
         } finally {
           run.restore();
         }
@@ -547,10 +551,7 @@ describe("Explore", () => {
         run.setScreen("Detail");
         return { success: true, packageName: target };
       });
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-        handleDeadEnd: () => Promise<void>;
-      };
+      const seams = explore;
       try {
         await seams.enforceTargetApp(
           { activeWindow: { appId: launcher } } as ObserveResult,
@@ -559,7 +560,7 @@ describe("Explore", () => {
         await seams.enforceTargetApp({ activeWindow: { appId: target } } as ObserveResult, target);
         await seams.handleDeadEnd();
         expect(run.actions).toEqual(["launch", "back"]);
-        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set());
+        expect(explore.diagnostics.rootScreens).toEqual(new Set());
       } finally {
         run.restore();
       }
@@ -582,10 +583,7 @@ describe("Explore", () => {
         run.setScreen("Home");
         return { success: true, packageName: target };
       });
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-        handleDeadEnd: () => Promise<void>;
-      };
+      const seams = explore;
       try {
         await seams.enforceTargetApp(
           { activeWindow: { appId: launcher } } as ObserveResult,
@@ -594,7 +592,7 @@ describe("Explore", () => {
         await seams.enforceTargetApp({ activeWindow: { appId: target } } as ObserveResult, target);
         await seams.handleDeadEnd();
         expect(run.actions).toEqual(["launch"]);
-        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set(["Home"]));
+        expect(explore.diagnostics.rootScreens).toEqual(new Set(["Home"]));
       } finally {
         run.restore();
       }
@@ -602,10 +600,7 @@ describe("Explore", () => {
 
     test("a null relaunch screen marks no root and unresolved dead ends still press Back", async () => {
       const run = rootRun(undefined, "Login", launcher);
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-        handleDeadEnd: () => Promise<void>;
-      };
+      const seams = explore;
       const observation = (packageName: string) =>
         ({ activeWindow: { appId: packageName } }) as ObserveResult;
       try {
@@ -618,8 +613,8 @@ describe("Explore", () => {
         await seams.enforceTargetApp(observation(target), target);
         await seams.handleDeadEnd();
         expect(run.actions).toEqual(["launch", "back", "launch", "back"]);
-        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set());
-        expect(Reflect.get(explore, "stopReason")).toBe("");
+        expect(explore.diagnostics.rootScreens).toEqual(new Set());
+        expect(explore.diagnostics.stopReason).toBe("");
       } finally {
         run.restore();
       }
@@ -647,7 +642,7 @@ describe("Explore", () => {
         expect(result.interactionsPerformed).toBe(1);
         expect(result.explorationPath).toEqual(["Detail", "Login"]);
         expect(result.durationMs).toBe(2000);
-        expect(Reflect.get(explore, "consecutiveOutOfAppCount")).toBe(0);
+        expect(explore.diagnostics.consecutiveOutOfAppCount).toBe(0);
       } finally {
         run.restore();
       }
@@ -685,20 +680,18 @@ describe("Explore", () => {
 
     test("target returns alone do not reset the five-attempt recovery bound", async () => {
       const run = rootRun();
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-      };
+      const seams = explore;
       const observation = (packageName: string) =>
         ({ activeWindow: { appId: packageName } }) as ObserveResult;
       try {
         for (let attempt = 1; attempt < 5; attempt++) {
           expect(await seams.enforceTargetApp(observation(launcher), target)).toBe("handled");
           expect(await seams.enforceTargetApp(observation(target), target)).toBe("ok");
-          expect(Reflect.get(explore, "consecutiveOutOfAppCount")).toBe(attempt);
+          expect(explore.diagnostics.consecutiveOutOfAppCount).toBe(attempt);
         }
         expect(await seams.enforceTargetApp(observation(launcher), target)).toBe("stop");
         expect(run.launch).toHaveBeenCalledTimes(5);
-        expect(Reflect.get(explore, "stopReason")).toBe(
+        expect(explore.diagnostics.stopReason).toBe(
           "Left target app (com.test.app) without exploration progress after 5 return attempts",
         );
         expect(fakeTimer.now()).toBe(5000);
@@ -710,16 +703,7 @@ describe("Explore", () => {
 
   describe("target app recovery and reports", () => {
     function recoverySeams() {
-      return explore as unknown as {
-        selectNextElement: () => Promise<Element | undefined>;
-        performInteraction: () => Promise<boolean>;
-        consecutiveOutOfAppCount: number;
-        generateReport: (
-          initialGraph: ExportedGraph,
-          startTime: number,
-          cancelled: boolean,
-        ) => Promise<ExploreResult>;
-      };
+      return explore;
     }
 
     async function seedTargetGraph(): Promise<ExportedGraph> {
@@ -863,7 +847,7 @@ describe("Explore", () => {
       explore.observeScreen = {
         execute: async () => createMockObservation([], ""),
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
       try {
@@ -901,7 +885,7 @@ describe("Explore", () => {
           return createMockObservation([], "");
         },
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       try {
         const result = await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
@@ -919,7 +903,7 @@ describe("Explore", () => {
       explore.observeScreen = {
         execute: async () => createMockObservation([], ""),
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       try {
         await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
@@ -935,7 +919,7 @@ describe("Explore", () => {
       explore.observeScreen = {
         execute: async () => createMockObservation([], ""),
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockImplementation(async () => {
         controller.abort();
         throw new Error("Operation cancelled");
@@ -1001,11 +985,8 @@ describe("Explore", () => {
           stopReason,
         };
         const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(result);
-        const manager = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-          fakeGraph as unknown as NavigationGraphManager,
-        );
         try {
-          registerNavigationTools();
+          registerNavigationTools({ navigationManagerFactory: () => fakeGraph });
           const response = (await ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!(
             device,
             {},
@@ -1022,7 +1003,6 @@ describe("Explore", () => {
           );
         } finally {
           execute.mockRestore();
-          manager.mockRestore();
         }
       });
     }
@@ -1030,13 +1010,7 @@ describe("Explore", () => {
 
   describe("execute characterization", () => {
     function executionSeams(instance: Explore) {
-      return instance as unknown as {
-        performInteraction: () => Promise<boolean>;
-        resetToHome: () => Promise<void>;
-        loopDetection: Map<string, number>;
-        previousScreen: string | null;
-        consecutiveNoChangeCount: number;
-      };
+      return instance;
     }
 
     test("tracks first, unchanged, missing and returning screens only after successful interactions", async () => {
@@ -1208,7 +1182,7 @@ describe("Explore", () => {
         "resource-id": "com.test:id/settings_btn",
       });
       // Set hierarchyDepth for button (deeper in the hierarchy)
-      (buttonElement as any).hierarchyDepth = 8;
+      Object.assign(buttonElement, { hierarchyDepth: 8 });
 
       const tabElement = createMockElement({
         text: "Profile",
@@ -1216,7 +1190,7 @@ describe("Explore", () => {
         "resource-id": "com.test:id/tab_profile",
       });
       // Set hierarchyDepth for tab (closer to root, should score higher)
-      (tabElement as any).hierarchyDepth = 2;
+      Object.assign(tabElement, { hierarchyDepth: 2 });
 
       const buttonScore = calculateNavigationScore(buttonElement);
       const tabScore = calculateNavigationScore(tabElement);
@@ -1287,7 +1261,7 @@ describe("Explore", () => {
       ]);
 
       let observeCount = 0;
-      (explore as any).observeScreen = {
+      explore.observeScreen = {
         execute: async () => {
           observeCount++;
           return denyOnlyDialog;
@@ -1304,7 +1278,7 @@ describe("Explore", () => {
         packageName: "com.test.app",
       });
 
-      const maxNoChange = (Explore as any).MAX_CONSECUTIVE_NO_CHANGE as number;
+      const maxNoChange = Explore.MAX_CONSECUTIVE_NO_CHANGE;
       expect(result.stopReason).toContain("stuck");
       // Bounded by the stuck counter, not maxInteractions or the timeout.
       expect(observeCount).toBe(maxNoChange);
@@ -1332,7 +1306,7 @@ describe("Explore", () => {
       const normalScreen = createMockObservation();
 
       let observeCount = 0;
-      (explore as any).observeScreen = {
+      explore.observeScreen = {
         execute: async () => {
           observeCount++;
           return observeCount === 1 ? grantDialog : normalScreen;
@@ -1345,7 +1319,7 @@ describe("Explore", () => {
       // is needed to keep the test fast.
       // Successful interactions advance the interaction counter so the run ends
       // deterministically at maxInteractions rather than via stuck detection.
-      (explore as any).performInteraction = async () => true;
+      explore.performInteraction = async () => true;
 
       const result = await explore.execute({
         maxInteractions: 2,
@@ -1386,12 +1360,12 @@ describe("Explore", () => {
       ]);
 
       // Simulate a streak accrued by an earlier, unrelated ungrantable dialog.
-      (explore as any).consecutiveNoChangeCount = 39;
+      explore.setStateForTesting({ consecutiveNoChangeCount: 39 });
 
-      const outcome = await (explore as any).handlePermissionDialogFastPath(grantDialog);
+      const outcome = await explore.handlePermissionDialogFastPath(grantDialog);
 
       expect(outcome).toBe("continue");
-      expect((explore as any).consecutiveNoChangeCount).toBe(0);
+      expect(explore.diagnostics.consecutiveNoChangeCount).toBe(0);
       expect(fakeTap.calls).toHaveLength(1);
     });
 
@@ -1403,7 +1377,7 @@ describe("Explore", () => {
         createMockViewHierarchyNode({ text: "OK", "resource-id": "com.example.app:id/ok_button" }),
       ]);
 
-      expect(await (explore as any).handlePermissionDialogFastPath(observation)).toBe("none");
+      expect(await explore.handlePermissionDialogFastPath(observation)).toBe("none");
       expect(fakeTap.calls).toEqual([]);
     });
 
@@ -1422,7 +1396,7 @@ describe("Explore", () => {
       ]);
 
       for (let i = 0; i < 10; i++) {
-        await (explore as any).handlePermissionDialogFastPath(observation);
+        await explore.handlePermissionDialogFastPath(observation);
       }
 
       expect(fakeTap.calls).toHaveLength(3);
@@ -1506,7 +1480,7 @@ describe("Explore", () => {
         const { calls, restore } = captureTapOptions();
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
         const perform: (element: Element, observation: ObserveResult) => Promise<boolean> =
-          Reflect.get(explore, "performInteraction").bind(explore);
+          explore.performInteraction.bind(explore);
         try {
           expect(await perform(candidate, observation)).toBe(true);
           expect(calls).toEqual([{ text: "Skip", action: "tap" }]);
@@ -1528,7 +1502,7 @@ describe("Explore", () => {
       const tap = spyOn(TapAtCoordinate.prototype, "execute").mockResolvedValue({ success: true });
       const { calls, restore } = captureTapOptions();
       const perform: (element: Element, observation: ObserveResult) => Promise<boolean> =
-        Reflect.get(explore, "performInteraction").bind(explore);
+        explore.performInteraction.bind(explore);
       try {
         expect(
           await perform(
@@ -1549,7 +1523,7 @@ describe("Explore", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const { calls, restore } = captureTapOptions();
       const perform: (element: Element, observation: ObserveResult) => Promise<boolean> =
-        Reflect.get(explore, "performInteraction").bind(explore);
+        explore.performInteraction.bind(explore);
       try {
         const element = createMockElement({
           text: "",
@@ -1573,7 +1547,7 @@ describe("Explore", () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
 
       try {
-        const success = await (explore as any).performInteraction(
+        const success = await explore.performInteraction(
           createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
           createMockObservation(),
         );
@@ -1590,11 +1564,11 @@ describe("Explore", () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).performInteraction(
+        await explore.performInteraction(
           createMockElement({ text: "Settings", "resource-id": undefined }),
           createMockObservation(),
         );
-        await (explore as any).performInteraction(
+        await explore.performInteraction(
           createMockElement({
             text: undefined,
             "resource-id": undefined,
@@ -1636,7 +1610,7 @@ describe("Explore", () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).performInteraction(
+        await explore.performInteraction(
           createMockElement({
             text: "Alpha",
             "resource-id": rowId,
@@ -1644,7 +1618,7 @@ describe("Explore", () => {
           }),
           observation,
         );
-        await (explore as any).performInteraction(
+        await explore.performInteraction(
           createMockElement({
             text: "Beta",
             "resource-id": rowId,
@@ -1670,21 +1644,21 @@ describe("Explore", () => {
         $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
         bounds: { left: 0, top, right: 100, bottom: top + 50 },
       });
-      const observation = {
-        viewHierarchy: {
+      const observation = createObserveResultForTest({
+        viewHierarchy: createHierarchyForTest({
           hierarchy: {
             node: [row("Beta", -100), row("Alpha", 0), row("Beta", 50), row("Beta", 100)],
           },
           packageName: "com.test.app",
           screenWidth: 100,
           screenHeight: 200,
-        },
-      } as unknown as ObserveResult;
+        }),
+      });
       const { calls, restore } = captureTapOptions();
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).performInteraction(
+        await explore.performInteraction(
           createMockElement({
             text: "Beta",
             "resource-id": rowId,
@@ -1711,7 +1685,7 @@ describe("Explore", () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).performInteraction(
+        await explore.performInteraction(
           createMockElement({ text: "Alpha", "resource-id": "com.test:id/row" }),
           observation,
         );
@@ -1729,7 +1703,7 @@ describe("Explore", () => {
 
     function perform(): Perform {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      return Reflect.get(explore, "performInteraction").bind(explore);
+      return explore.performInteraction.bind(explore);
     }
 
     function recorded(index = 0): { toolName: string; args: unknown } {
@@ -1789,14 +1763,14 @@ describe("Explore", () => {
         $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
         bounds: { left: 0, top, right: 100, bottom: top + 50 },
       });
-      const observation = {
-        viewHierarchy: {
+      const observation = createObserveResultForTest({
+        viewHierarchy: createHierarchyForTest({
           hierarchy: { node: [row("Beta", 0), row("Beta", 50)] },
           packageName: "com.test.app",
           screenWidth: 100,
           screenHeight: 200,
-        },
-      } as unknown as ObserveResult;
+        }),
+      });
       const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
       try {
         await perform()(
@@ -1978,7 +1952,7 @@ describe("Explore", () => {
         const dead = await swipeWithoutNavigation();
         const press = unrecordedPress("Previous");
         try {
-          await Reflect.get(dead, "handleDeadEnd").call(dead);
+          await dead.handleDeadEnd.call(dead);
         } finally {
           press.mockRestore();
         }
@@ -2000,7 +1974,7 @@ describe("Explore", () => {
         const reset = await swipeWithoutNavigation();
         const press = unrecordedPress("Launcher");
         try {
-          await Reflect.get(reset, "resetToHome").call(reset);
+          await reset.resetToHome.call(reset);
         } finally {
           press.mockRestore();
         }
@@ -2015,7 +1989,7 @@ describe("Explore", () => {
         await swipeWithoutNavigation();
         const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
         try {
-          const next: Perform = Reflect.get(explore, "performInteraction").bind(explore);
+          const next: Perform = explore.performInteraction.bind(explore);
           await next(createMockElement({ text: "Settings" }), createMockObservation());
         } finally {
           tap.mockRestore();
@@ -2050,7 +2024,7 @@ describe("Explore", () => {
           createMockObservation(),
         );
         navigate("Settings");
-        await Reflect.get(explore, "handleDeadEnd").call(explore);
+        await explore.handleDeadEnd.call(explore);
       } finally {
         tap.mockRestore();
         press.mockRestore();
@@ -2107,7 +2081,7 @@ describe("Explore", () => {
 
     function backSeam(): (progress?: undefined, observation?: ObserveResult) => Promise<void> {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      return Reflect.get(explore, "handleDeadEnd").bind(explore);
+      return explore.handleDeadEnd.bind(explore);
     }
 
     test("the dead-end Back records pressButton back, and the edge it creates replays as that Back", async () => {
@@ -2146,7 +2120,7 @@ describe("Explore", () => {
 
       expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
       expect(await historySize()).toBe(0);
-      expect(Reflect.get(explore, "stopReason")).toContain("no keyevent");
+      expect(explore.diagnostics.stopReason).toContain("no keyevent");
     });
 
     test("the iOS dead-end Back records pressButton back and withdraws it when the tool fails", async () => {
@@ -2158,7 +2132,7 @@ describe("Explore", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         explore = new Explore(ios, mockAdb, fakeTimer, fakeGraph);
-        const run = Reflect.get(explore, "handleDeadEnd").bind(explore) as () => Promise<void>;
+        const run = explore.handleDeadEnd.bind(explore) as () => Promise<void>;
         await run();
         expect(fakeGraph.getMethodCallArgs("recordToolCall", 0)).toEqual([
           "pressButton",
@@ -2181,10 +2155,10 @@ describe("Explore", () => {
     test("a root-screen dead end presses no Back and records nothing", async () => {
       fakeGraph.setCurrentScreenValue("Home");
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      Reflect.get(explore, "rootScreens").add("Home");
+      explore.setStateForTesting({ rootScreens: ["Home"] });
       const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       try {
-        await (Reflect.get(explore, "handleDeadEnd") as () => Promise<void>).call(explore);
+        await (explore.handleDeadEnd as () => Promise<void>).call(explore);
       } finally {
         press.mockRestore();
       }
@@ -2236,7 +2210,7 @@ describe("Explore", () => {
         spyOn(explore.observeScreen, "execute").mockImplementation(async () =>
           ++observeCount === 1 ? dialog : normal,
         );
-        Reflect.set(explore, "performInteraction", async () => true);
+        explore.performInteraction = async () => true;
 
         await explore.execute({ maxInteractions: 1, timeoutMs: 5000, packageName: "com.test.app" });
 
@@ -2338,7 +2312,7 @@ describe("Explore", () => {
           );
           expect(run.tap).toHaveBeenCalledTimes(1);
           expect(run.back).toHaveBeenCalledTimes(1);
-          expect(Reflect.get(explore, "consecutiveBackCount")).toBe(0);
+          expect(explore.diagnostics.consecutiveBackCount).toBe(0);
         } finally {
           run.restore();
         }
@@ -2387,17 +2361,17 @@ describe("Explore", () => {
     // on a multiple of resetInterval — including 0 (issue #6126).
     test("resets once per resetInterval successful interactions and never at count 0", async () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-      (explore as any).observeScreen = {
+      explore.observeScreen = {
         execute: async () => createMockObservation(),
       };
       const outcomes = [false, true, true, false, true];
       const log: string[] = [];
-      (explore as any).performInteraction = async () => {
+      explore.performInteraction = async () => {
         const success = outcomes.shift() ?? true;
         log.push(success ? "interaction:ok" : "interaction:fail");
         return success;
       };
-      (explore as any).resetToHome = async () => {
+      explore.resetToHome = async () => {
         log.push("reset");
       };
 
@@ -2448,10 +2422,10 @@ describe("Explore", () => {
         },
       );
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
-      (explore as any).targetPackageName = "com.test.app";
+      explore.setStateForTesting({ targetPackageName: "com.test.app" });
 
       try {
-        await (explore as any).resetToHome(undefined, signal);
+        await explore.resetToHome(undefined, signal);
       } finally {
         launchSpy.mockRestore();
         ctrlProxySpy.mockRestore();
@@ -2461,7 +2435,7 @@ describe("Explore", () => {
         "shell input keyevent 3",
         'launch ["com.test.app",false,false] signal=true',
       ]);
-      expect((explore as any).stopReason).toBe("");
+      expect(explore.diagnostics.stopReason).toBe("");
     });
 
     test("forwards the exploration AbortSignal through PressButton into the ADB home dispatch (#6289)", async () => {
@@ -2483,7 +2457,7 @@ describe("Explore", () => {
       // No targetPackageName -> no relaunch; keep the test on the press dispatch.
 
       try {
-        await (explore as any).resetToHome(undefined, controller.signal);
+        await explore.resetToHome(undefined, controller.signal);
       } finally {
         ctrlProxySpy.mockRestore();
       }
@@ -2491,7 +2465,7 @@ describe("Explore", () => {
       // Explore's signal (not merely a remaining timeout) reached the ADB
       // keyevent dispatch, so a cancelled exploration aborts the home press.
       expect(dispatchSignal).toBe(controller.signal);
-      expect((explore as any).stopReason).toBe("");
+      expect(explore.diagnostics.stopReason).toBe("");
     });
 
     test("records a failed relaunch as a terminal partial-report reason", async () => {
@@ -2510,16 +2484,18 @@ describe("Explore", () => {
         executeCommand: async () => launcherDumpsysResult(),
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
-      (explore as any).targetPackageName = "com.test.app";
+      explore.setStateForTesting({ targetPackageName: "com.test.app" });
 
       try {
-        await (explore as any).resetToHome();
+        await explore.resetToHome();
       } finally {
         launchSpy.mockRestore();
         ctrlProxySpy.mockRestore();
       }
 
-      expect((explore as any).stopReason).toBe("Home-screen recovery failed: App is not installed");
+      expect(explore.diagnostics.stopReason).toBe(
+        "Home-screen recovery failed: App is not installed",
+      );
     });
 
     test("relaunches the target app through the internal launchApp tool on iOS", async () => {
@@ -2540,9 +2516,9 @@ describe("Explore", () => {
       });
       const signal = new AbortController().signal;
       explore = new Explore(iOSDevice, null, fakeTimer, fakeGraph, "session-1");
-      (explore as any).targetPackageName = "com.test.app";
+      explore.setStateForTesting({ targetPackageName: "com.test.app" });
 
-      await (explore as any).resetToHome(undefined, signal);
+      await explore.resetToHome(undefined, signal);
 
       expect(calls.map((call) => call.name)).toEqual(["homeScreen", "launchApp"]);
       expect(calls[1].args).toEqual({
@@ -2572,7 +2548,7 @@ describe("Explore", () => {
           const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
           const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
           explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-          const seams = explore as unknown as { performInteraction: () => Promise<boolean> };
+          const seams = explore;
           seams.performInteraction = async () => true;
           let observeCount = 0;
           explore.observeScreen = {
@@ -2627,10 +2603,7 @@ describe("Explore", () => {
           action.deviceId = device.deviceId;
           action.observationId = "before-recovery";
           explore = new Explore({ ...device, platform }, mockAdb, fakeTimer, fakeGraph);
-          const seams = explore as unknown as {
-            handleDeadEnd(): Promise<void>;
-            resetToHome(): Promise<void>;
-          };
+          const seams = explore;
           try {
             await runWithPostActionCaptureScope(undefined, async () => {
               deferTerminalScreenshot(action, async () => {
@@ -2677,8 +2650,8 @@ describe("Explore", () => {
       });
 
       explore = new Explore(iOSDevice, adb, fakeTimer, fakeGraph);
-      await (explore as any).handleDeadEnd();
-      await (explore as any).resetToHome();
+      await explore.handleDeadEnd();
+      await explore.resetToHome();
 
       expect(calls).toEqual([
         {
@@ -2723,7 +2696,7 @@ describe("Explore", () => {
         ToolRegistry.registerDeviceAware(
           "pressButton",
           "pressButton",
-          { parse: (args: unknown) => args } as any,
+          { parse: (args: unknown) => args },
           async (selectedDevice) => {
             selectedDeviceIds.push(selectedDevice.deviceId);
             return { success: true };
@@ -2731,7 +2704,7 @@ describe("Explore", () => {
         );
         explore = new Explore(iosB, null, fakeTimer, fakeGraph);
 
-        await (explore as any).handleDeadEnd();
+        await explore.handleDeadEnd();
 
         expect(selectedDeviceIds).toEqual([iosB.deviceId]);
       } finally {
@@ -2763,16 +2736,12 @@ describe("Explore", () => {
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).handleDeadEnd(
-          async (current: number, total?: number, message?: string) => {
-            progressUpdates.push({ current, total, message });
-          },
-        );
-        await (explore as any).resetToHome(
-          async (current: number, total?: number, message?: string) => {
-            progressUpdates.push({ current, total, message });
-          },
-        );
+        await explore.handleDeadEnd(async (current: number, total?: number, message?: string) => {
+          progressUpdates.push({ current, total, message });
+        });
+        await explore.resetToHome(async (current: number, total?: number, message?: string) => {
+          progressUpdates.push({ current, total, message });
+        });
       } finally {
         ctrlProxySpy.mockRestore();
       }
@@ -2796,12 +2765,12 @@ describe("Explore", () => {
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).handleDeadEnd();
+        await explore.handleDeadEnd();
       } finally {
         ctrlProxySpy.mockRestore();
       }
 
-      expect((explore as any).stopReason).toBe(
+      expect(explore.diagnostics.stopReason).toBe(
         "Back-navigation recovery failed: Failed to press button: Back navigation was rejected",
       );
     });
@@ -2818,12 +2787,12 @@ describe("Explore", () => {
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
 
       try {
-        await (explore as any).resetToHome();
+        await explore.resetToHome();
       } finally {
         ctrlProxySpy.mockRestore();
       }
 
-      expect((explore as any).stopReason).toBe(
+      expect(explore.diagnostics.stopReason).toBe(
         "Home-screen recovery failed: Failed to press button: Home navigation was rejected",
       );
     });
@@ -2838,10 +2807,10 @@ describe("Explore", () => {
         },
       } as AdbClient;
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
-      (explore as any).observeScreen = {
+      explore.observeScreen = {
         execute: async () => createMockObservation([], "com.test.app"),
       };
-      (explore as any).selectNextElement = async () => undefined;
+      explore.selectNextElement = async () => undefined;
 
       let result;
       try {
@@ -2918,7 +2887,7 @@ describe("Explore", () => {
       });
       const back = spyOn(PressButton.prototype, "press").mockImplementation(async (button) => {
         expect(button).toBe("back");
-        backStopReasons.push(Reflect.get(explore, "stopReason"));
+        backStopReasons.push(explore.diagnostics.stopReason);
         if (options.returnToA) {
           fakeGraph.setCurrentScreenValue("A");
         }
@@ -3385,7 +3354,7 @@ describe("Explore", () => {
       markNodeVisited(state, "Screen2");
 
       const initialGraph = await fakeGraph.exportGraph();
-      const result = await (explore as any).generateReport(initialGraph, Date.now(), false);
+      const result = await explore.generateReport(initialGraph, Date.now(), false);
 
       expect(result.graphTraversal).toBeDefined();
       expect(result.graphTraversal?.nodesVisited).toBe(2);

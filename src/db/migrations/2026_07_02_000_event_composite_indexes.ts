@@ -1,7 +1,7 @@
 import { type Kysely, sql } from "kysely";
 import { EVENT_TABLES } from "../eventTables";
 
-async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+async function tableExists<DB>(db: Kysely<DB>, tableName: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
   `.execute(db);
@@ -37,7 +37,7 @@ async function tableExists(db: Kysely<unknown>, tableName: string): Promise<bool
  *     `idx_<table>_device` indexes to cut per-insert write amplification is
  *     deferred to a follow-up so the change is reviewed on its own (see #2788).
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   for (const table of EVENT_TABLES) {
     if (!(await tableExists(db, table))) {
       continue;
@@ -53,7 +53,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   for (const table of EVENT_TABLES) {
     // .ifExists() so a partial-up followed by down (recovery machinery can
     // invoke migrations in unusual orders) does not throw.

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
 import {
@@ -43,13 +42,13 @@ async function harness() {
     { deviceId: "request-id-echo", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
     },
   );
   await Promise.resolve(); // FakeWebSocket opens on a microtask, without real timers.
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   // Keep hierarchy delivery on the real cache/waiter path, with downstream consumers neutralized.
   const streamPushes: string[] = [];

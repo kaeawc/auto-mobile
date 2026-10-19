@@ -11,18 +11,21 @@ import {
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
-import { getRemovedToolHint } from "../../src/models/removedTools";
+import { getRemovedToolHint } from "../../src/utils/removedTools";
 import {
   getToolCallRecorder,
   resetToolCallRecordingState,
   startToolCallRecording,
 } from "../../src/server/toolCallRecordingManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import { getStructuredField } from "../../src/utils/toolUtils";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolField, toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
+
+isolateToolRegistry();
 
 // Exercise plain registered handlers and the existing protocol onclose hook
 // directly: no live transport, SDK request timers, device, or database needed.
@@ -89,19 +92,19 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     const publicBegin = tool.schema.parse({ action: "begin" });
     const a = await tool.handler({ ...publicBegin, __mcpSessionId: "A" });
     const b = await tool.handler({ ...publicBegin, __mcpSessionId: "B" });
-    expect(getStructuredField(a, "success")).toBe(true);
-    expect(getStructuredField(b, "alreadyActive")).toBeUndefined();
+    expect(toolField(a, "success")).toBe(true);
+    expect(toolField(b, "alreadyActive")).toBeUndefined();
     getToolCallRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
     const statusB = await tool.handler({ action: "status", __mcpSessionId: "B" });
-    expect(getStructuredField(statusB, "stepCount")).toBe(0);
+    expect(toolField(statusB, "stepCount")).toBe(0);
     const endB = await tool.handler({ action: "end", __mcpSessionId: "B" });
-    expect(getStructuredField(endB, "success")).toBe(false);
-    expect(endB.isError).toBe(true);
-    expect(endB.structuredContent).toEqual(JSON.parse(endB.content[0].text));
+    expect(toolField(endB, "success")).toBe(false);
+    expect(toolIsError(endB)).toBe(true);
+    expect(toolStructured(endB)).toEqual(toolJson(endB));
     const endA = await tool.handler({ action: "end", __mcpSessionId: "A" });
-    expect(getStructuredField(endA, "success")).toBe(true);
-    expect(endA.isError).toBeUndefined();
-    expect(getStructuredField(endA, "planContent")).toContain("Only A");
+    expect(toolField(endA, "success")).toBe(true);
+    expect(toolIsError(endA)).toBe(false);
+    expect(toolField(endA, "planContent")).toContain("Only A");
   });
 
   test("disabled recording and ending without a recording are errors", async () => {
@@ -114,15 +117,15 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
         error:
           "Tool call recording is disabled. Enable the 'tool-call-recording' feature flag first.",
       };
-      expect(response.isError).toBe(true);
-      expect(response.structuredContent).toEqual(payload);
-      expect(JSON.parse(response.content[0].text)).toEqual(payload);
+      expect(toolIsError(response)).toBe(true);
+      expect(toolStructured(response)).toEqual(payload);
+      expect(toolJson(response)).toEqual(payload);
     }
     serverConfig.setToolCallRecordingEnabled(true);
     const response = await tool.handler({ action: "end" });
-    expect(response.isError).toBe(true);
-    expect(getStructuredField(response, "success")).toBe(false);
-    expect(response.structuredContent).toEqual(JSON.parse(response.content[0].text));
+    expect(toolIsError(response)).toBe(true);
+    expect(toolField(response, "success")).toBe(false);
+    expect(toolStructured(response)).toEqual(toolJson(response));
   });
 
   test("a caught begin failure marks the original payload", async () => {
@@ -132,25 +135,25 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
     });
     const response = await ToolRegistry.getTool("recordToolCalls")!.handler({ action: "begin" });
     const payload = { success: false, action: "begin", error: "Fake recorder clock failure" };
-    expect(response.isError).toBe(true);
-    expect(response.structuredContent).toEqual(payload);
-    expect(JSON.parse(response.content[0].text)).toEqual(payload);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolStructured(response)).toEqual(payload);
+    expect(toolJson(response)).toEqual(payload);
   });
 
   test("inactive status and already-active begin remain successful", async () => {
     const tool = ToolRegistry.getTool("recordToolCalls")!;
     serverConfig.setToolCallRecordingEnabled(false);
     const status = await tool.handler({ action: "status" });
-    expect(status.isError).toBeUndefined();
-    expect(status.structuredContent).toEqual({ success: true, action: "status", recording: false });
+    expect(toolIsError(status)).toBe(false);
+    expect(toolStructured(status)).toEqual({ success: true, action: "status", recording: false });
     serverConfig.setToolCallRecordingEnabled(true);
     const first = await tool.handler({ action: "begin" });
     const second = await tool.handler({ action: "begin" });
-    expect(first.isError).toBeUndefined();
-    expect(second.isError).toBeUndefined();
-    expect(getStructuredField(second, "success")).toBe(true);
-    expect(getStructuredField(second, "alreadyActive")).toBe(true);
-    expect(second.structuredContent).toEqual(JSON.parse(second.content[0].text));
+    expect(toolIsError(first)).toBe(false);
+    expect(toolIsError(second)).toBe(false);
+    expect(toolField(second, "success")).toBe(true);
+    expect(toolField(second, "alreadyActive")).toBe(true);
+    expect(toolStructured(second)).toEqual(toolJson(second));
   });
 
   test("recordToolCalls end exports launchApp without transport metadata", async () => {
@@ -169,9 +172,9 @@ describe("recordToolCalls connection scope and direct transport teardown", () =>
       planName: "clean-launch",
       __mcpSessionId: "clean-export",
     });
-    expect(getStructuredField(result, "success")).toBe(true);
-    expect(getStructuredField(result, "planContent")).toContain("appId: com.android.settings");
-    expect(getStructuredField(result, "planContent")).not.toContain("__");
+    expect(toolField(result, "success")).toBe(true);
+    expect(toolField(result, "planContent")).toContain("appId: com.android.settings");
+    expect(toolField(result, "planContent")).not.toContain("__");
   });
 
   test("direct onclose discards its recording and preserves other connections", () => {

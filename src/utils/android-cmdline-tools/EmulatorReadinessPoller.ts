@@ -1,13 +1,13 @@
 import type { HostChildProcess as ChildProcess } from "../HostCommandExecutor";
 import { StringDecoder } from "node:string_decoder";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import { ActionableError, type BootedDevice } from "../../models";
 import type { Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
-import { DeviceLockStore } from "../../devices/DeviceLockStore";
 import { AdbClient } from "./AdbClient";
 import type { AdbClientFactory } from "./AdbClientFactory";
-import { AndroidWakeAndUnlock } from "./AndroidWakeAndUnlock";
+import { DefaultEmulatorBootUnlock, type EmulatorBootUnlock } from "./EmulatorBootUnlock";
 import {
   READINESS_NAME_TIMEOUT_MS,
   type AndroidDeviceInventoryScanner,
@@ -16,7 +16,7 @@ import {
   type ReadinessDiagnostic,
 } from "./AndroidDeviceInventoryScanner";
 import { EmulatorExitedDuringReadinessError } from "./EmulatorLauncher";
-import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+import type { AdbDeviceState, AdbExecutor } from "./interfaces/AdbExecutor";
 import type { AndroidEmulatorReadinessOptions } from "./AndroidEmulatorClient";
 import {
   matchesRequestedAvdOrUnknown,
@@ -37,8 +37,6 @@ export const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 const READINESS_PROBE_TIMEOUT_MS = 10_000;
-const PRIMARY_USER_UNLOCK_WAIT_MS = 5_000;
-const PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS = 250;
 
 export interface OfflineTracker {
   deviceId: string | null;
@@ -106,14 +104,6 @@ export interface EmulatorReadinessHost {
   throwLaunchError(error?: ActionableError): void;
   getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined;
   captureLaunchTargetDeviceId(childProcess: ChildProcess, output: string): void;
-  clearOfflineTracker(tracker: OfflineTracker): void;
-  detectOfflineFailure(
-    deviceId: string | undefined,
-    tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
-  ): Promise<ActionableError | null>;
   maybeRecoverFreshOffline(
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
@@ -163,10 +153,29 @@ export interface EmulatorReadinessPoller {
     options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice>;
   wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void>;
+  detectOfflineFailure(
+    deviceId: string | undefined,
+    tracker: OfflineTracker,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    observedStates?: AdbDeviceState[],
+  ): Promise<ActionableError | null>;
 }
 
 export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
-  constructor(private readonly host: EmulatorReadinessHost) {}
+  private readonly bootUnlock: EmulatorBootUnlock;
+
+  constructor(
+    private readonly host: EmulatorReadinessHost,
+    bootUnlock?: EmulatorBootUnlock,
+  ) {
+    this.bootUnlock =
+      bootUnlock ??
+      new DefaultEmulatorBootUnlock({
+        timer: () => this.host.timer(),
+        adbFactory: () => this.host.adbFactory(),
+      });
+  }
 
   private get timer(): Timer {
     return this.host.timer();
@@ -174,6 +183,81 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
   private get adbFactory(): AdbClientFactory {
     return this.host.adbFactory();
+  }
+
+  /**
+   * Clear only the CURRENT OBSERVATION on the offline tracker (device serial,
+   * offline-since, and last observed state). Used when there is no target serial
+   * and when a device-state probe rejects/omits the target, so a stale offline
+   * reading cannot drive recovery off out-of-date data (#7054).
+   *
+   * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
+   * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
+   * the one-shot `adb -s <serial> reconnect` has been dispatched must not wipe that
+   * history, or a later re-confirmed offline would issue a SECOND reconnect.
+   */
+  private clearOfflineTracker(tracker: OfflineTracker): void {
+    tracker.deviceId = null;
+    tracker.since = null;
+    tracker.state = undefined;
+  }
+
+  async detectOfflineFailure(
+    deviceId: string | undefined,
+    tracker: OfflineTracker,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    observedStates?: AdbDeviceState[],
+  ): Promise<ActionableError | null> {
+    let states: AdbDeviceState[];
+    try {
+      states =
+        observedStates ??
+        (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs, signal })) ??
+        [];
+    } catch (error) {
+      throwIfReadinessAborted(signal);
+      // Auxiliary diagnostic probe; a failure here must not block readiness polling.
+      logger.debug(
+        `Offline-state probe unavailable during emulator readiness: ${errorMessage(error)}`,
+      );
+      // A rejected probe is NOT a current offline observation. Clear the tracker
+      // so both the reconnect dispatch and the fail-fast wait for a fresh,
+      // successful observation that still shows offline; a run of failed probes
+      // must not by itself satisfy the offline-failure threshold (#7054).
+      this.clearOfflineTracker(tracker);
+      return null;
+    }
+    if (!deviceId) {
+      this.clearOfflineTracker(tracker);
+      return null;
+    }
+    const targetState = states.find((state: AdbDeviceState) => state.deviceId === deviceId);
+    tracker.state = this.targetReadinessState(targetState);
+    if (targetState?.state !== "offline") {
+      tracker.deviceId = null;
+      tracker.since = null;
+      return null;
+    }
+    if (tracker.deviceId !== targetState.deviceId) {
+      // Refresh the current observation for a (re-)observed offline serial.
+      // Recovery history stays monotonic for the invocation, so a re-confirmed
+      // offline after the one-shot reconnect keeps advancing toward the
+      // fail-fast instead of resurrecting a second reconnect (#7054).
+      tracker.deviceId = targetState.deviceId;
+      tracker.since = this.timer.now();
+    }
+    // An offline ADB state is transient during normal emulator startup. Keep
+    // tracking it for diagnostics, but wait for the caller's readiness deadline
+    // unless the emulator process provides definitive failure evidence.
+    return null;
+  }
+
+  private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
+    if (targetState?.state === "offline") {
+      return "offline";
+    }
+    return targetState === undefined ? "absent" : "not-ready";
   }
 
   private async settleReadinessExit(
@@ -516,10 +600,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     emulator: BootedDevice,
     scanDiagnostic: ReadinessDiagnostic | undefined,
     results: [
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
     ],
   ): boolean {
     const { state, signal } = context;
@@ -690,10 +774,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
             : undefined;
         } catch (error) {
           // A failed snapshot is a gap in offline observations, not continued offline time.
-          this.host.clearOfflineTracker(offlineTracker);
+          this.clearOfflineTracker(offlineTracker);
           throw error;
         }
-        await this.host.detectOfflineFailure(
+        await this.detectOfflineFailure(
           correlatedTargetDeviceId,
           offlineTracker,
           Math.min(AdbClient.DEVICE_LIST_TIMEOUT_MS, remainingTimeoutMs),
@@ -877,72 +961,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     perf.endOperation("wakeAndUnlock");
   }
 
-  /**
-   * Wake up the emulator and dismiss the lock screen after boot.
-   * This ensures the device is immediately usable for automation.
-   *
-   * Delegates to the shared {@link AndroidWakeAndUnlock} implementation so boot uses the same
-   * path as the `wakeAndUnlock` tool: a swipe lock is dismissed, and a secure
-   * lock is unlocked with the PIN remembered for the device this session (if
-   * any). A secure device with no remembered PIN is left locked — non-fatal, the
-   * device is still ready and the user can unlock it with the tool (#4360).
-   * @param device - The booted device to wake and unlock
-   */
-  async wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
-    try {
-      const wakeAndUnlock = new AndroidWakeAndUnlock(device, this.adbFactory, {
-        timer: this.timer,
-        credentialStore: new DeviceLockStore(),
-      });
-      const result = await wakeAndUnlock.execute(undefined, signal);
-      await this.waitForPrimaryUserUnlock(device, signal);
-      if (!result.unlocked && result.secure) {
-        logger.info(
-          `[WakeAndUnlock] Device ${device.deviceId} is secure-locked and no PIN is remembered; ` +
-            "leaving it locked. Unlock it once with the wakeAndUnlock tool (passing a pin) to remember it.",
-        );
-      } else {
-        logger.info(
-          `[WakeAndUnlock] Device ${device.deviceId} wake/unlock: ${JSON.stringify(result)}`,
-        );
-      }
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      // Log but don't fail - the device is still ready, just might need manual interaction.
-      // A secure lock with no remembered PIN throws ActionableError here; that is expected.
-      logger.warn(`[WakeAndUnlock] Failed to wake/unlock device ${device.deviceId}: ${error}`);
-    }
-  }
-
-  private async waitForPrimaryUserUnlock(
-    device: BootedDevice,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const adb = this.adbFactory.create(device);
-    let elapsedMs = 0;
-    try {
-      while (elapsedMs < PRIMARY_USER_UNLOCK_WAIT_MS) {
-        throwIfReadinessAborted(signal);
-        const users = await adb.listUsers(signal);
-        const primaryUser = users.find(
-          (user) => user.profileType === "primary" || user.userId === 0,
-        );
-        if (primaryUser?.startState !== "RUNNING_LOCKED") {
-          return;
-        }
-        await this.timer.sleep(PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS);
-        elapsedMs += PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS;
-      }
-      logger.warn(
-        `[WakeAndUnlock] Primary user on ${device.deviceId} is still RUNNING_LOCKED after ` +
-          `${PRIMARY_USER_UNLOCK_WAIT_MS}ms; CtrlProxy cannot bind until the device unlocks.`,
-      );
-    } catch (error) {
-      // User-state inspection is supplementary; preserve the completed unlock result if unavailable.
-      throwIfReadinessAborted(signal);
-      logger.debug(
-        `[WakeAndUnlock] Could not confirm primary-user unlock state for ${device.deviceId}: ${error}`,
-      );
-    }
+  wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+    return this.bootUnlock.wakeAndUnlock(device, signal);
   }
 }

@@ -198,7 +198,7 @@ describe("DevicePool binding exclusion", () => {
     await setUp([ios("SIM-SLOT")]);
 
     const error = await pool
-      .bindOrReuseDeviceSession("generic", "SIM-SLOT", "ios")
+      .bindOrReuseDeviceSession({ sessionId: "generic", deviceId: "SIM-SLOT", platform: "ios" })
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(DeviceAssignedToBindingError);
@@ -218,7 +218,11 @@ describe("DevicePool binding exclusion", () => {
       await assignBindingDevice(registry, "ios", stableId, "runner-a", "slot-exec");
       await setUp([{ ...ios("SIM-SLOT"), name: stableId }]);
 
-      await pool.bindOrReuseDeviceSession("slot-exec", "SIM-SLOT", "ios");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "slot-exec",
+        deviceId: "SIM-SLOT",
+        platform: "ios",
+      });
 
       expect(pool.getDevice("SIM-SLOT")?.sessionId).toBe("slot-exec");
     },
@@ -288,10 +292,15 @@ describe("DevicePool binding exclusion", () => {
     await setUp([android("emulator-5554")]);
 
     const error = await pool
-      .bindOrReuseDeviceSession("generic", "emulator-5554", "android", {
-        name: "slot-avd",
+      .bindOrReuseDeviceSession({
+        sessionId: "generic",
+        deviceId: "emulator-5554",
         platform: "android",
-        source: "local",
+        sourceImage: {
+          name: "slot-avd",
+          platform: "android",
+          source: "local",
+        },
       })
       .catch((caught: unknown) => caught);
 
@@ -302,7 +311,11 @@ describe("DevicePool binding exclusion", () => {
     "auto-start skips unregistered product AVD %s",
     async (name) => {
       await setUp([android("d1")]);
-      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "base",
+        deviceId: "d1",
+        platform: "android",
+      });
       manager.deviceImages = [
         { name, platform: "android", isRunning: false },
         { name: "spare-avd", platform: "android", isRunning: false },
@@ -327,7 +340,7 @@ describe("DevicePool binding exclusion", () => {
   test("auto-start never boots a stopped AVD a binding holds", async () => {
     await assignBindingDevice(registry, "android", "slot-avd");
     await setUp([android("d1")]);
-    await pool.bindOrReuseDeviceSession("base", "d1", "android");
+    await pool.bindOrReuseDeviceSession({ sessionId: "base", deviceId: "d1", platform: "android" });
     manager.deviceImages = [
       { name: "slot-avd", platform: "android", isRunning: false },
       { name: "spare-avd", platform: "android", isRunning: false },
@@ -401,7 +414,9 @@ describe("DevicePool binding exclusion", () => {
   test("a plain caller cannot take a device absent from the retained snapshot", async () => {
     await setUp([ios("SIM-FREE")]);
     await failAfterSnapshot();
-    await expect(pool.bindOrReuseDeviceSession("plain", "SIM-FREE", "ios")).rejects.toMatchObject({
+    await expect(
+      pool.bindOrReuseDeviceSession({ sessionId: "plain", deviceId: "SIM-FREE", platform: "ios" }),
+    ).rejects.toMatchObject({
       code: BINDING_DISCOVERY_INCOMPLETE_CODE,
       retryable: true,
     });
@@ -476,7 +491,11 @@ describe("DevicePool binding exclusion", () => {
 
   test("an existing unmanaged holder keeps control and inventory remains available", async () => {
     await setUp([ios("SIM-FREE")]);
-    await pool.bindOrReuseDeviceSession("existing", "SIM-FREE", "ios");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "existing",
+      deviceId: "SIM-FREE",
+      platform: "ios",
+    });
     await failAfterSnapshot();
     await pool.assertNotAssignedToBinding({
       action: "tapOn",

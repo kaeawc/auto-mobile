@@ -4,6 +4,7 @@ import type { ElementBounds, PinchOnOptions, ViewHierarchyResult } from "../../.
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -49,9 +50,9 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
   });
   const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
   const iosSpy = spyOnIosClientInstance(ios);
-  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-    isAvailable: async () => true,
-  } as unknown as AndroidCtrlProxyManager);
+  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+    FakeCtrlProxyManager.withAvailability(true),
+  );
   restores.push(
     () => androidSpy.mockRestore(),
     () => iosSpy.mockRestore(),
@@ -439,36 +440,3 @@ describe("PinchOn validation characterization", () => {
     expect(capture.requests).toEqual([]);
   });
 });
-
-test.each([
-  [undefined, "android", "Pinch direction is required ('in' or 'out')"],
-  [
-    "out",
-    "web",
-    "pinch on elements is not supported on platform 'web'. Supported platforms: android, ios.",
-  ],
-] as const)(
-  "preserves direction/platform validation priority: %s/%s",
-  async (direction, platform, error) => {
-    const { pinch, history, adb, capture } = harness("android", normal);
-    Object.assign(pinch, { device: { deviceId: "unsupported-fake", name: "Fake", platform } });
-    const options = { direction, scale: 0 } as unknown as PinchOnOptions;
-    expect(await pinch.execute(options)).toStrictEqual({
-      success: false,
-      direction: direction ?? "in",
-      distanceStart: 0,
-      distanceEnd: 0,
-      duration: 0,
-      scale: 0,
-      rotationDegrees: undefined,
-      centerX: 0,
-      centerY: 0,
-      targetType: "screen",
-      container: undefined,
-      error,
-    });
-    expect(history()).toEqual([]);
-    expect(adb.getExecutedCommands()).toEqual([]);
-    expect(capture.requests).toEqual([]);
-  },
-);

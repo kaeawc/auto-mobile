@@ -2,6 +2,13 @@ import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  applySuccessVerdict,
+  attachTelemetry,
+  hasUsableHierarchy,
+  observationNeedsRetry,
+  warnStillStale,
+} from "./observedInteractionStages";
 import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -74,7 +81,7 @@ import { PredictionAnalyzer, PredictionActionContext } from "../observe/Predicti
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../daemon/daemonContext";
 import {
   resolveScreenshotMode,
   shouldSkipActionObservationScreenshot,
@@ -135,27 +142,32 @@ export interface DisplayFenceDependencies {
   observeScreen?: ObserveScreen;
   awaitIdle?: AwaitIdle;
   window?: Window;
+  predictionAnalyzer?: Pick<PredictionAnalyzer, "recordOutcomeForAction">;
   displayTransitions?: DisplayTransitionReader;
   renderedDisplayRevision?: RenderedDisplayRevisionReader;
   renderedDisplayGeneration?: RenderedDisplayRevisionReader;
 }
 
-export function sessionRenderedDisplayGeneration(deviceId: string): number | undefined {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+export function sessionRenderedDisplayGeneration(
+  deviceId: string,
+  daemon: DaemonContext = defaultDaemonContext,
+): number | undefined {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return undefined;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   return sessionId ? sessions.getLastRenderedDisplayGeneration(sessionId) : undefined;
 }
 
-function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+function sessionRenderedDisplayRevision(
+  deviceId: string,
+  daemon: DaemonContext = defaultDaemonContext,
+): number | undefined {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return undefined;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : undefined;
 }
@@ -166,6 +178,17 @@ function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
  * `FINAL_OBSERVATION_RETRY_BACKOFF_MS` above.
  */
 export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
+
+/** Mutable display-fence state shared by the fence, pre-read and run stages. */
+interface CallerFenceState {
+  displayRevision: number;
+  fence: DisplayFence;
+  observedGeneration: number;
+  reresolvesTarget: boolean;
+  refreshForDisplayChange: boolean;
+}
+
+type HomeProbe = "verified" | "expired" | "not-home";
 
 interface PostActionCapture {
   observation: ObserveResult;
@@ -192,7 +215,7 @@ export class BaseVisualChange {
   awaitIdle: AwaitIdle;
   observeScreen: ObserveScreen;
   window: Window;
-  private predictionAnalyzer: PredictionAnalyzer;
+  private predictionAnalyzer: Pick<PredictionAnalyzer, "recordOutcomeForAction">;
   private deferredPredictionOutcomes = new WeakMap<
     object,
     (observation: ObserveResult) => Promise<void>
@@ -242,7 +265,7 @@ export class BaseVisualChange {
     // same clock or a FakeTimer's elapsed time won't shrink the ADB sub-read
     // budgets in the integrated path (issue #6289).
     this.window = displayFence.window ?? new RealWindow(device, this.adbFactory, timer);
-    this.predictionAnalyzer = new PredictionAnalyzer();
+    this.predictionAnalyzer = displayFence.predictionAnalyzer ?? new PredictionAnalyzer();
     this.timer = timer;
     this.renderedDisplayRevision = displayFence.renderedDisplayRevision ?? renderedDisplayRevision;
     this.displayTransitionReader = displayFence.displayTransitions ?? displayTransitions;
@@ -334,305 +357,44 @@ export class BaseVisualChange {
     ) => Promise<R | ObservedActionResult>,
     options: ObservedChangeOptions,
   ): Promise<R & ObservedEnvelope> {
+    // Stages: fence -> pre-read -> run -> post-read.
     await beginPostActionCaptureAction();
     const timeoutMs = options.timeoutMs || 12000;
-    const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
-    const actionDisplayRevision = (): number =>
-      this.displayTransitionReader.identityRevision(this.device.deviceId);
-    let displayRevision = actionDisplayRevision();
-    let fence = this.captureDisplayFence();
-    // Without a stored caller stamp, in-flight fences use the action-start identity generation.
-    let observedGeneration =
-      this.renderedDisplayGeneration(this.device.deviceId) ?? displayRevision;
-    const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
-    // An unscoped selector action re-reads the display instead of trusting a caller stamp; an
-    // in-call read it passes in is checked against the current revision below.
-    const reresolvesTarget =
-      options.resolvesTargetFromRead === true &&
-      options.display === undefined &&
-      !options.skipPreviousObserve;
-    let refreshForDisplayChange = false;
-    if (
-      !options.skipCallerDisplayFence &&
-      COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
-      callerDisplayRevision !== undefined &&
-      (this.device.platform === "ios"
-        ? !this.displayTransitionReader.sameIdentitySince(
-            this.device.deviceId,
-            callerDisplayRevision,
-          )
-        : callerDisplayRevision !== this.displayTransitionReader.revision(this.device.deviceId))
-    ) {
-      if (!reresolvesTarget) {
-        throw this.staleDisplay(observedGeneration);
-      }
-      refreshForDisplayChange = true;
-    }
+    const state = this.captureCallerFenceState(options);
 
-    if (progress) {
-      await progress(0, 100, "Preparing to execute action...");
+    if (options.progress) {
+      await options.progress(0, 100, "Preparing to execute action...");
     }
     throwIfAborted(options.signal);
 
-    // Fetch cached view hierarchy (skip if we just terminated/cleared the app)
-    let previousObserveResult: ObserveResult | null = options.previousObservation ?? null;
+    const previousObserveResult = await this.resolvePreviousObservation(options, perf, state);
     const predictionContext = this.buildPredictionContext(options.predictionContext);
-    if (options.skipPreviousObserve) {
-      logger.info("[BaseVisualChange] Skipping previous observe (app was terminated/cleared)");
-    } else if (!previousObserveResult) {
-      const resolutionGeneration =
-        options.usesObservationForResolution !== false
-          ? pendingWindowResolutionGeneration(this.device.deviceId)
-          : undefined;
-      // A pending window resolution or a caller-stale display needs one fresh read.
-      const requiresFreshRead = refreshForDisplayChange || resolutionGeneration !== undefined;
-      let staleCachedRefetch = false;
-      let knownWrongWindow = resolutionGeneration !== undefined;
-      try {
-        if (progress) {
-          await progress(10, 100, "Getting previous view hierarchy...");
-        }
-        previousObserveResult = await perf.track("getPreviousObserve", async () => {
-          const cached = options.display
-            ? undefined
-            : await this.observeScreen.getMostRecentCachedObserveResult();
-          knownWrongWindow ||= hasWrongWindowEvidence(cached);
-          // Preserve the missing/errored-cache fallback; a rejected usable cache
-          // must instead get exactly one fresh read before any action is dispatched.
-          const usableCached = Boolean(
-            cached?.viewHierarchy && !cached.viewHierarchy.hierarchy.error,
-          );
-          staleCachedRefetch =
-            requiresFreshRead ||
-            (usableCached && BaseVisualChange.shouldRefetchCachedObservation(cached!));
-          if (
-            !usableCached ||
-            staleCachedRefetch ||
-            BaseVisualChange.shouldRefetchCachedObservation(cached!, options.skipCallerDisplayFence)
-          ) {
-            return this.observeScreen.execute({
-              ...INTERMEDIATE_OBSERVATION_OPTIONS,
-              freshness:
-                staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
-              timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
-              skipStaleWindowRecovery: true,
-              display: options.display,
-              queryOptions: options.queryOptions,
-              perf,
-              signal: options.signal,
-            });
-          }
-          return cached!;
-        });
-      } catch (error) {
-        if (knownWrongWindow && options.usesObservationForResolution !== false) {
-          throw new MissingViewHierarchyError({ cause: error });
-        }
-        logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
-        previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
-          return this.observeScreen.execute({
-            ...INTERMEDIATE_OBSERVATION_OPTIONS,
-            freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
-            timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
-            skipStaleWindowRecovery: true,
-            display: options.display,
-            queryOptions: options.queryOptions,
-            perf,
-            signal: options.signal,
-          });
-        });
-      }
+    const coordinateAction = this.reconcileDisplayAfterRead(options, state, previousObserveResult);
 
-      if (
-        !previousObserveResult ||
-        (knownWrongWindow &&
-          options.usesObservationForResolution !== false &&
-          (!previousObserveResult.viewHierarchy ||
-            previousObserveResult.viewHierarchy.hierarchy.error))
-      ) {
-        throw new MissingViewHierarchyError();
-      }
-      if (resolutionGeneration !== undefined && !hasWrongWindowEvidence(previousObserveResult)) {
-        completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
-      }
-    }
-
-    if (
-      !options.skipPreviousObserve &&
-      options.usesObservationForResolution !== false &&
-      !options.previousObservation &&
-      hasWrongWindowEvidence(previousObserveResult!)
-    ) {
-      throw new ActionableError(
-        `Cannot resolve elements against a wrong-window hierarchy: ${previousObserveResult?.freshness?.warning ?? "The refreshed observation still belongs to another window"}`,
-      );
-    }
-
-    const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
-    if (
-      reresolvesTarget &&
-      (refreshForDisplayChange || actionDisplayRevision() !== displayRevision) &&
-      previousObserveResult?.displayRevision !== undefined &&
-      previousObserveResult.displayRevision ===
-        this.displayTransitionReader.revision(this.device.deviceId)
-    ) {
-      // The pre-action read was recorded at the current display revision, so the selector
-      // resolves against the new generation; later transitions are still fenced from here.
-      displayRevision = actionDisplayRevision();
-      observedGeneration = this.displayTransitionReader.identityRevision(this.device.deviceId);
-      fence = this.captureDisplayFence(observedGeneration);
-      refreshForDisplayChange = false;
-    }
-    if (
-      coordinateAction &&
-      (refreshForDisplayChange || actionDisplayRevision() !== displayRevision)
-    ) {
-      throw this.staleDisplay(observedGeneration);
-    }
-
-    // Record the action start time (device time if available) to ensure fresh data
-    const actionStartTime = await perf.track("getActionStartTime", async () => {
-      if (this.device.platform !== "android") {
-        return this.timer.now();
-      }
-      if (typeof this.adb.getDeviceTimestampMs === "function") {
-        return this.adb.getDeviceTimestampMs();
-      }
-      return this.timer.now();
-    });
-    // Host-device clock skew, measured once with the action-start read. Zero on
-    // iOS and whenever the device clock was unavailable (host-time fallback).
-    // Taken after the read so any round trip makes the converted floor earlier,
-    // never later, than the true post-input device time.
-    const clockSkewMs = actionStartTime - this.timer.now();
-
-    const blockResult = await perf.track("executeBlock", async () => {
-      throwIfAborted(options.signal);
-      if (coordinateAction && actionDisplayRevision() !== displayRevision) {
-        throw this.staleDisplay(observedGeneration);
-      }
-      try {
-        return await block(previousObserveResult!, fence);
-      } finally {
-        if (options.foregroundAppMayChange) {
-          this.windowCacheInvalidator.invalidate(this.device, true);
-        }
-      }
-    });
-
-    // Unconfirmed iOS text must return before post-action reads consume the
-    // response margin or replace its non-retryable result with cancellation.
-    if (
-      this.device.platform === "ios" &&
-      blockResult?.success === false &&
-      blockResult.retryable === false &&
-      !(options.observePartialApplication && blockResult.partialApplication === true)
-    ) {
+    const { actionStartTime, clockSkewMs } = await this.readActionClock(perf);
+    const blockResult = await this.runBlock(
+      block,
+      previousObserveResult,
+      state,
+      options,
+      perf,
+      coordinateAction,
+    );
+    if (this.isUnconfirmedIosFailure(blockResult, options)) {
       perf.end();
       // Returned before any post-action read, so `observation` is absent (see ObservedEnvelope).
       return blockResult as R & ObservedEnvelope;
     }
+    this.invalidateCtrlProxyCacheForDisplay(options);
 
-    if (options.display !== undefined) {
-      // ADB input bypasses CtrlProxy's gesture debouncer. Clear its tree before
-      // the shared post-action capture; this also works with CtrlProxy dispatch.
-      if (this.device.platform === "android") {
-        AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-      } else if (this.device.platform === "ios") {
-        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-      }
-      throwIfAborted(options.signal);
-    }
-
-    let observationStartTime = actionStartTime;
-    const hostTimestamp = options.observationHostTimestampProvider?.();
-    const observationTimestampOverride =
-      options.observationTimestampProvider?.() ??
-      (typeof hostTimestamp === "number" ? hostTimestamp + clockSkewMs : undefined);
-    if (
-      typeof observationTimestampOverride === "number" &&
-      !Number.isNaN(observationTimestampOverride)
-    ) {
-      if (observationTimestampOverride >= actionStartTime) {
-        observationStartTime = observationTimestampOverride;
-        logger.debug(
-          `[BaseVisualChange] Using observation timestamp override: ${observationStartTime}`,
-        );
-      } else {
-        logger.debug(
-          `[BaseVisualChange] Ignoring observation timestamp override (${observationTimestampOverride}) older than action start (${actionStartTime})`,
-        );
-      }
-    }
-
-    // Get package name for UI stability waiting
-    // Priority: options > previousObserveResult.viewHierarchy.packageName > cached
-    let packageName = options.packageName;
-
-    // Try to get packageName from the observe result's view hierarchy (from accessibility service)
-    if (!packageName && previousObserveResult?.viewHierarchy?.packageName) {
-      packageName = previousObserveResult.viewHierarchy.packageName;
-      logger.info(`[BaseVisualChange] Using packageName from view hierarchy: ${packageName}`);
-    }
-
-    // Fall back to cached active window if no packageName from hierarchy
-    if (!packageName && options.display === undefined) {
-      const cachedPackageName = (await this.window.getCachedActiveWindow())?.appId;
-      if (cachedPackageName) {
-        packageName = cachedPackageName;
-        logger.info(`[BaseVisualChange] Using cached packageName: ${packageName}`);
-      }
-    }
-
-    // Start UI stability tracking if we have a package name (skip if requested)
-    let initState: UiStabilityState | null = null;
-    let gfxMetrics: GfxMetrics | null = null;
-
-    if (options.skipUiStability) {
-      logger.info("[BaseVisualChange] Skipping UI stability tracking (skipUiStability=true)");
-    } else if (this.device.platform !== "android") {
-      logger.debug("[BaseVisualChange] Skipping UI stability tracking (gfxinfo is Android-only)");
-    } else if (packageName) {
-      logger.info(
-        `[BaseVisualChange] Starting UI stability initialization with package: ${packageName}`,
-      );
-      initState = await perf
-        .track("initUiStability", async () => {
-          return this.awaitIdle.initializeUiStabilityTracking(
-            packageName!,
-            timeoutMs,
-            options.signal,
-          );
-        })
-        .catch((error) => {
-          throwIfAborted(options.signal);
-          logger.debug(`[BaseVisualChange] UI stability initialization failed: ${error}`);
-          return null;
-        });
-
-      // Execute UI stability waiting with appropriate state
-      if (packageName.trim() !== "") {
-        perf.serial("uiStability");
-        if (initState !== null) {
-          gfxMetrics = await this.awaitIdle.waitForUiStabilityWithState(
-            packageName,
-            timeoutMs,
-            initState,
-            perf,
-            options.signal,
-          );
-        } else {
-          gfxMetrics = await this.awaitIdle.waitForUiStability(
-            packageName,
-            timeoutMs,
-            perf,
-            options.signal,
-          );
-        }
-        perf.end();
-      }
-    }
+    const observationStartTime = this.resolveObservationStartTime(
+      options,
+      actionStartTime,
+      clockSkewMs,
+    );
+    const packageName = await this.resolvePackageName(options, previousObserveResult);
+    const gfxMetrics = await this.awaitUiStability(options, packageName, timeoutMs, perf);
 
     const observed = await this.takeObservation(blockResult, previousObserveResult, {
       changeExpected: options.changeExpected,
@@ -661,6 +423,401 @@ export class BaseVisualChange {
     }
     this.annotateDeviceLock(observed, previousObserveResult);
     return observed;
+  }
+
+  private actionDisplayRevision(): number {
+    return this.displayTransitionReader.identityRevision(this.device.deviceId);
+  }
+
+  /** Fence stage: capture the action-start display identity and reject a stale caller stamp. */
+  private captureCallerFenceState(options: ObservedChangeOptions): CallerFenceState {
+    const displayRevision = this.actionDisplayRevision();
+    // Without a stored caller stamp, in-flight fences use the action-start identity generation.
+    const observedGeneration =
+      this.renderedDisplayGeneration(this.device.deviceId) ?? displayRevision;
+    // An unscoped selector action re-reads the display instead of trusting a caller stamp; an
+    // in-call read it passes in is checked against the current revision below.
+    const reresolvesTarget =
+      options.resolvesTargetFromRead === true &&
+      options.display === undefined &&
+      !options.skipPreviousObserve;
+    const state: CallerFenceState = {
+      displayRevision,
+      fence: this.captureDisplayFence(),
+      observedGeneration,
+      reresolvesTarget,
+      refreshForDisplayChange: false,
+    };
+    if (this.callerDisplayStampIsStale(options)) {
+      if (!reresolvesTarget) {
+        throw this.staleDisplay(observedGeneration);
+      }
+      state.refreshForDisplayChange = true;
+    }
+    return state;
+  }
+
+  private callerDisplayStampIsStale(options: ObservedChangeOptions): boolean {
+    const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
+    if (
+      options.skipCallerDisplayFence ||
+      !COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") ||
+      callerDisplayRevision === undefined
+    ) {
+      return false;
+    }
+    return this.device.platform === "ios"
+      ? !this.displayTransitionReader.sameIdentitySince(this.device.deviceId, callerDisplayRevision)
+      : callerDisplayRevision !== this.displayTransitionReader.revision(this.device.deviceId);
+  }
+
+  /** Pre-read stage: the hierarchy the block resolves against (never null unless skipped). */
+  private async resolvePreviousObservation(
+    options: ObservedChangeOptions,
+    perf: PerformanceTracker,
+    state: CallerFenceState,
+  ): Promise<ObserveResult | null> {
+    if (options.skipPreviousObserve) {
+      logger.info("[BaseVisualChange] Skipping previous observe (app was terminated/cleared)");
+      return options.previousObservation ?? null;
+    }
+    if (options.previousObservation) {
+      return options.previousObservation;
+    }
+    const previous = await this.readFreshPreviousObservation(
+      options,
+      perf,
+      state.refreshForDisplayChange,
+    );
+    if (options.usesObservationForResolution !== false && hasWrongWindowEvidence(previous)) {
+      throw new ActionableError(
+        `Cannot resolve elements against a wrong-window hierarchy: ${previous.freshness?.warning ?? "The refreshed observation still belongs to another window"}`,
+      );
+    }
+    return previous;
+  }
+
+  private async readFreshPreviousObservation(
+    options: ObservedChangeOptions,
+    perf: PerformanceTracker,
+    refreshForDisplayChange: boolean,
+  ): Promise<ObserveResult> {
+    const resolvesFromObservation = options.usesObservationForResolution !== false;
+    const resolutionGeneration = resolvesFromObservation
+      ? pendingWindowResolutionGeneration(this.device.deviceId)
+      : undefined;
+    // A pending window resolution or a caller-stale display needs one fresh read.
+    const requiresFreshRead = refreshForDisplayChange || resolutionGeneration !== undefined;
+    const evidence = { knownWrongWindow: resolutionGeneration !== undefined };
+    let previous: ObserveResult | undefined;
+    try {
+      await options.progress?.(10, 100, "Getting previous view hierarchy...");
+      previous = await perf.track("getPreviousObserve", () =>
+        this.readCachedOrFreshPrevious(options, perf, requiresFreshRead, evidence),
+      );
+    } catch (error) {
+      if (evidence.knownWrongWindow && resolvesFromObservation) {
+        throw new MissingViewHierarchyError({ cause: error });
+      }
+      logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
+      previous = await this.readPreviousFallback(options, perf);
+    }
+    BaseVisualChange.assertUsablePrevious(
+      previous,
+      evidence.knownWrongWindow && resolvesFromObservation,
+    );
+    this.completeResolutionRead(previous, resolutionGeneration);
+    return previous;
+  }
+
+  /** A missing read, or an unusable hierarchy known to be the wrong window, cannot resolve targets. */
+  private static assertUsablePrevious(
+    previous: ObserveResult | undefined,
+    wrongWindowMatters: boolean,
+  ): asserts previous is ObserveResult {
+    if (!previous) {
+      throw new MissingViewHierarchyError();
+    }
+    if (wrongWindowMatters && (!previous.viewHierarchy || previous.viewHierarchy.hierarchy.error)) {
+      throw new MissingViewHierarchyError();
+    }
+  }
+
+  private completeResolutionRead(
+    previous: ObserveResult,
+    resolutionGeneration: number | undefined,
+  ): void {
+    if (resolutionGeneration !== undefined && !hasWrongWindowEvidence(previous)) {
+      completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
+    }
+  }
+
+  private readPreviousFallback(
+    options: ObservedChangeOptions,
+    perf: PerformanceTracker,
+  ): Promise<ObserveResult> {
+    return perf.track("getPreviousObserveFallback", () =>
+      this.observeScreen.execute(
+        this.previousObserveOptions(
+          options,
+          perf,
+          options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+        ),
+      ),
+    );
+  }
+
+  private async readCachedOrFreshPrevious(
+    options: ObservedChangeOptions,
+    perf: PerformanceTracker,
+    requiresFreshRead: boolean,
+    evidence: { knownWrongWindow: boolean },
+  ): Promise<ObserveResult> {
+    const cached = options.display
+      ? undefined
+      : await this.observeScreen.getMostRecentCachedObserveResult();
+    evidence.knownWrongWindow ||= hasWrongWindowEvidence(cached);
+    // Preserve the missing/errored-cache fallback; a rejected usable cache
+    // must instead get exactly one fresh read before any action is dispatched.
+    const usableCached = Boolean(cached?.viewHierarchy && !cached.viewHierarchy.hierarchy.error);
+    const staleCachedRefetch =
+      requiresFreshRead ||
+      (usableCached && BaseVisualChange.shouldRefetchCachedObservation(cached!));
+    if (
+      !usableCached ||
+      staleCachedRefetch ||
+      BaseVisualChange.shouldRefetchCachedObservation(cached!, options.skipCallerDisplayFence)
+    ) {
+      return this.observeScreen.execute(
+        this.previousObserveOptions(
+          options,
+          perf,
+          staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+        ),
+      );
+    }
+    return cached!;
+  }
+
+  private previousObserveOptions(
+    options: ObservedChangeOptions,
+    perf: PerformanceTracker,
+    freshness: "fresh" | "cached-ok",
+  ): Parameters<ObserveScreen["execute"]>[0] {
+    return {
+      ...INTERMEDIATE_OBSERVATION_OPTIONS,
+      freshness,
+      timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+      skipStaleWindowRecovery: true,
+      display: options.display,
+      queryOptions: options.queryOptions,
+      perf,
+      signal: options.signal,
+    };
+  }
+
+  /**
+   * Fence stage after the pre-read: a selector action adopts the new display generation when
+   * the read was recorded at the current revision; a coordinate action on a moved display is
+   * rejected. Returns whether this is a coordinate action.
+   */
+  private reconcileDisplayAfterRead(
+    options: ObservedChangeOptions,
+    state: CallerFenceState,
+    previous: ObserveResult | null,
+  ): boolean {
+    const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
+    const displayMoved = (): boolean =>
+      state.refreshForDisplayChange || this.actionDisplayRevision() !== state.displayRevision;
+    if (
+      state.reresolvesTarget &&
+      displayMoved() &&
+      previous?.displayRevision !== undefined &&
+      previous.displayRevision === this.displayTransitionReader.revision(this.device.deviceId)
+    ) {
+      // The pre-action read was recorded at the current display revision, so the selector
+      // resolves against the new generation; later transitions are still fenced from here.
+      state.displayRevision = this.actionDisplayRevision();
+      state.observedGeneration = this.displayTransitionReader.identityRevision(
+        this.device.deviceId,
+      );
+      state.fence = this.captureDisplayFence(state.observedGeneration);
+      state.refreshForDisplayChange = false;
+    }
+    if (coordinateAction && displayMoved()) {
+      throw this.staleDisplay(state.observedGeneration);
+    }
+    return coordinateAction;
+  }
+
+  /** Record the action start time (device time if available) to ensure fresh data. */
+  private async readActionClock(
+    perf: PerformanceTracker,
+  ): Promise<{ actionStartTime: number; clockSkewMs: number }> {
+    const actionStartTime = await perf.track("getActionStartTime", async () => {
+      if (this.device.platform !== "android") {
+        return this.timer.now();
+      }
+      if (typeof this.adb.getDeviceTimestampMs === "function") {
+        return this.adb.getDeviceTimestampMs();
+      }
+      return this.timer.now();
+    });
+    // Host-device clock skew, measured once with the action-start read. Zero on
+    // iOS and whenever the device clock was unavailable (host-time fallback).
+    // Taken after the read so any round trip makes the converted floor earlier,
+    // never later, than the true post-input device time.
+    return { actionStartTime, clockSkewMs: actionStartTime - this.timer.now() };
+  }
+
+  /** Run stage: dispatch the block against the pre-read, fenced against display changes. */
+  private runBlock<R extends ObservedActionResult>(
+    block: (
+      observeResult: ObserveResult,
+      fence?: DisplayFence,
+    ) => Promise<R | ObservedActionResult>,
+    previous: ObserveResult | null,
+    state: CallerFenceState,
+    options: ObservedChangeOptions,
+    perf: PerformanceTracker,
+    coordinateAction: boolean,
+  ): Promise<R | ObservedActionResult> {
+    return perf.track("executeBlock", async () => {
+      throwIfAborted(options.signal);
+      if (coordinateAction && this.actionDisplayRevision() !== state.displayRevision) {
+        throw this.staleDisplay(state.observedGeneration);
+      }
+      try {
+        return await block(previous!, state.fence);
+      } finally {
+        if (options.foregroundAppMayChange) {
+          this.windowCacheInvalidator.invalidate(this.device, true);
+        }
+      }
+    });
+  }
+
+  /**
+   * Unconfirmed iOS text must return before post-action reads consume the response margin or
+   * replace its non-retryable result with cancellation.
+   */
+  private isUnconfirmedIosFailure(
+    blockResult: ObservedActionResult,
+    options: ObservedChangeOptions,
+  ): boolean {
+    return (
+      this.device.platform === "ios" &&
+      blockResult?.success === false &&
+      blockResult.retryable === false &&
+      !(options.observePartialApplication && blockResult.partialApplication === true)
+    );
+  }
+
+  private invalidateCtrlProxyCacheForDisplay(options: ObservedChangeOptions): void {
+    if (options.display === undefined) {
+      return;
+    }
+    // ADB input bypasses CtrlProxy's gesture debouncer. Clear its tree before
+    // the shared post-action capture; this also works with CtrlProxy dispatch.
+    if (this.device.platform === "android") {
+      AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+    } else if (this.device.platform === "ios") {
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+    }
+    throwIfAborted(options.signal);
+  }
+
+  private resolveObservationStartTime(
+    options: ObservedChangeOptions,
+    actionStartTime: number,
+    clockSkewMs: number,
+  ): number {
+    const hostTimestamp = options.observationHostTimestampProvider?.();
+    const override =
+      options.observationTimestampProvider?.() ??
+      (typeof hostTimestamp === "number" ? hostTimestamp + clockSkewMs : undefined);
+    if (typeof override !== "number" || Number.isNaN(override)) {
+      return actionStartTime;
+    }
+    if (override >= actionStartTime) {
+      logger.debug(`[BaseVisualChange] Using observation timestamp override: ${override}`);
+      return override;
+    }
+    logger.debug(
+      `[BaseVisualChange] Ignoring observation timestamp override (${override}) older than action start (${actionStartTime})`,
+    );
+    return actionStartTime;
+  }
+
+  /** Package name for UI stability waiting: options, then the pre-read hierarchy, then cache. */
+  private async resolvePackageName(
+    options: ObservedChangeOptions,
+    previous: ObserveResult | null,
+  ): Promise<string | undefined> {
+    if (options.packageName) {
+      return options.packageName;
+    }
+    const fromHierarchy = previous?.viewHierarchy?.packageName;
+    if (fromHierarchy) {
+      logger.info(`[BaseVisualChange] Using packageName from view hierarchy: ${fromHierarchy}`);
+      return fromHierarchy;
+    }
+    if (options.display !== undefined) {
+      return undefined;
+    }
+    const cachedPackageName = (await this.window.getCachedActiveWindow())?.appId;
+    if (cachedPackageName) {
+      logger.info(`[BaseVisualChange] Using cached packageName: ${cachedPackageName}`);
+    }
+    return cachedPackageName || undefined;
+  }
+
+  /** Android-only gfxinfo stability wait; null when skipped or unavailable. */
+  private async awaitUiStability(
+    options: ObservedChangeOptions,
+    packageName: string | undefined,
+    timeoutMs: number,
+    perf: PerformanceTracker,
+  ): Promise<GfxMetrics | null> {
+    if (options.skipUiStability) {
+      logger.info("[BaseVisualChange] Skipping UI stability tracking (skipUiStability=true)");
+      return null;
+    }
+    if (this.device.platform !== "android") {
+      logger.debug("[BaseVisualChange] Skipping UI stability tracking (gfxinfo is Android-only)");
+      return null;
+    }
+    if (!packageName) {
+      return null;
+    }
+    logger.info(
+      `[BaseVisualChange] Starting UI stability initialization with package: ${packageName}`,
+    );
+    const initState: UiStabilityState | null = await perf
+      .track("initUiStability", async () => {
+        return this.awaitIdle.initializeUiStabilityTracking(packageName, timeoutMs, options.signal);
+      })
+      .catch((error) => {
+        throwIfAborted(options.signal);
+        logger.debug(`[BaseVisualChange] UI stability initialization failed: ${error}`);
+        return null;
+      });
+    if (packageName.trim() === "") {
+      return null;
+    }
+    perf.serial("uiStability");
+    const gfxMetrics =
+      initState !== null
+        ? await this.awaitIdle.waitForUiStabilityWithState(
+            packageName,
+            timeoutMs,
+            initState,
+            perf,
+            options.signal,
+          )
+        : await this.awaitIdle.waitForUiStability(packageName, timeoutMs, perf, options.signal);
+    perf.end();
+    return gfxMetrics;
   }
 
   /**
@@ -1057,6 +1214,34 @@ export class BaseVisualChange {
     }
   }
 
+  /** Settle a non-default display, then finalize the terminal screenshot unless deferred. */
+  private async refineCapture(
+    initial: PostActionCapture,
+    observeScreen: ObserveScreen,
+    options: {
+      display?: string;
+      signal?: AbortSignal;
+      deferPostActionScreenshot?: boolean;
+    },
+    perf: PerformanceTracker,
+  ): Promise<PostActionCapture> {
+    let captured = initial;
+    if (
+      options.display !== undefined &&
+      !captured.readFailed &&
+      hasUsableHierarchy(captured.observation)
+    ) {
+      captured = await this.settleDisplayObservation(captured.observation, observeScreen, {
+        display: options.display,
+        signal: options.signal,
+      });
+    }
+    if (!options.deferPostActionScreenshot) {
+      captured = await this.finalizePostActionCapture(captured, { ...options, perf });
+    }
+    return captured;
+  }
+
   private async takeObservation<R extends ObservedActionResult>(
     blockResult: R | ObservedActionResult,
     previousObserveResult: ObserveResult | null,
@@ -1082,23 +1267,8 @@ export class BaseVisualChange {
     const minTimestamp = options.actionStartTime ?? 0;
     const previousHash = hierarchyFingerprint(previousObserveResult?.viewHierarchy);
 
-    const shouldRetry = (observation: ObserveResult): boolean => {
-      // Don't retry if the observation has an error (service unavailable, connection failed, etc.)
-      // Retrying won't help in these cases and just adds latency
-      if (observation.viewHierarchy?.hierarchy?.error) {
-        return false;
-      }
-
-      const isFresh = observation.freshness?.isFresh ?? true;
-      if (minTimestamp > 0 && !isFresh) {
-        return true;
-      }
-      if (!options.changeExpected) {
-        return false;
-      }
-      const currentHash = hierarchyFingerprint(observation.viewHierarchy);
-      return !!previousHash && !!currentHash && previousHash === currentHash;
-    };
+    const shouldRetry = (observation: ObserveResult): boolean =>
+      observationNeedsRetry(observation, minTimestamp, options.changeExpected, previousHash);
 
     let captured = await this.capturePostActionObservation(
       observeScreen,
@@ -1114,42 +1284,11 @@ export class BaseVisualChange {
       shouldRetry,
       blockResult,
     );
-    let latestObservation = captured.observation;
-
-    if (!captured.readFailed && shouldRetry(latestObservation)) {
-      const warning =
-        minTimestamp > 0
-          ? "Observation may be stale after interaction"
-          : "Observation may not reflect expected visual change";
-      // Spreading a possibly-undefined `freshness` used to drop the required
-      // `isFresh`. When no freshness was computed at all, the honest value is
-      // `false` (not confirmed fresh) — this branch only runs because the
-      // observation still looks stale/unchanged after every retry.
-      latestObservation.freshness = latestObservation.freshness
-        ? { ...latestObservation.freshness, warning }
-        : { isFresh: false, warning };
-      logger.warn(`[BaseVisualChange] ${warning}`);
+    if (!captured.readFailed && shouldRetry(captured.observation)) {
+      warnStillStale(captured.observation, minTimestamp);
     }
-
-    if (
-      options.display !== undefined &&
-      !captured.readFailed &&
-      latestObservation.viewHierarchy &&
-      !latestObservation.viewHierarchy.hierarchy.error
-    ) {
-      captured = await this.settleDisplayObservation(latestObservation, observeScreen, {
-        display: options.display,
-        signal: options.signal,
-      });
-      latestObservation = captured.observation;
-    }
-    if (!options.deferPostActionScreenshot) {
-      captured = await this.finalizePostActionCapture(
-        { ...captured, observation: latestObservation },
-        { ...options, perf },
-      );
-      latestObservation = captured.observation;
-    }
+    captured = await this.refineCapture(captured, observeScreen, options, perf);
+    const latestObservation = captured.observation;
     // The same object the block returned, which the pipeline fills in below.
     const mutable: ObservedActionResult & ObservedEnvelope = blockResult;
     if (captured.staleDisplay) {
@@ -1161,36 +1300,8 @@ export class BaseVisualChange {
     const visualChange = options.changeExpected
       ? hierarchyChanged(previousObserveResult?.viewHierarchy, latestObservation.viewHierarchy)
       : null;
-    if (visualChange !== null) {
-      // Don't override an explicit failure from the inner block — the action itself failed
-      if (mutable.success !== false) {
-        mutable.success = visualChange;
-        if (!mutable.success) {
-          mutable.error = "No visual change observed";
-        }
-      }
-    } else {
-      if (blockResult && "error" in blockResult && blockResult.error !== undefined) {
-        mutable.success = false;
-      } else if (blockResult && !("success" in blockResult)) {
-        mutable.success = true;
-      } else if (blockResult && "success" in blockResult && blockResult.success === undefined) {
-        mutable.success = true;
-      }
-    }
-
-    // Add gfxMetrics to the observation if available
-    if (options.gfxMetrics) {
-      latestObservation.gfxMetrics = options.gfxMetrics;
-    }
-
-    // Add perf timing to the observation if enabled
-    if (perf.isEnabled()) {
-      const timings = perf.getTimings();
-      if (timings) {
-        latestObservation.perfTiming = timings;
-      }
-    }
+    applySuccessVerdict(mutable, visualChange);
+    attachTelemetry(latestObservation, options.gfxMetrics, perf);
 
     mutable.observation = latestObservation;
 
@@ -1321,34 +1432,9 @@ export class BaseVisualChange {
         // would raise the raw AbortError before the read runs, mis-typing an
         // ambient-only cancellation instead of letting the read's own
         // OPERATION_CANCELLED rejection propagate (issue #6289).
-        // Do not revive an expired verification budget by handing its zero value
-        // to Window, which must clamp subcommand timeouts to keep those commands
-        // bounded. No device read is valid once this operation's deadline passed.
-        if ((remainingMs() ?? 1) <= 0) {
-          return false;
-        }
-        const activeWindow = await this.window.getActive(true, undefined, {
-          signal,
-          timeoutMs: remainingMs(),
-        });
-        if ((remainingMs() ?? 1) <= 0) {
-          return false;
-        }
-        const isLauncher = await isForegroundLauncher(
-          activeWindow.appId,
-          this.adb,
-          this.device.deviceId,
-          this.timer,
-          deviceIncarnationToken(this.device.deviceId),
-          signal,
-          remainingMs(),
-        );
-        // A successful launcher lookup is evidence only while it remains within
-        // the caller's deadline; a fast cached lookup must not accept success
-        // after a preceding foreground read spent the budget.
-        if (isLauncher && (remainingMs() ?? 1) > 0) {
-          options.onVerifiedForeground?.(activeWindow.appId);
-          return true;
+        const probe = await this.probeHomeForeground(signal, remainingMs, options);
+        if (probe !== "not-home") {
+          return probe === "verified";
         }
       } catch (error) {
         // A cancellation must not be masked as "not the launcher": rethrow so the
@@ -1362,16 +1448,51 @@ export class BaseVisualChange {
         );
       }
       const delay = retryDelaysMs[attempt];
-      if (delay === undefined) {
-        return false;
-      }
       // Don't sleep past the shared deadline: a backoff that would overrun the
       // remaining budget ends verification now instead of stalling the keyed op.
       const remaining = remainingMs();
-      if (remaining !== undefined && remaining <= delay) {
+      if (delay === undefined || (remaining !== undefined && remaining <= delay)) {
         return false;
       }
       await this.timer.sleep(delay);
     }
+  }
+
+  /** One foreground read plus launcher check, bounded by the shared deadline. */
+  private async probeHomeForeground(
+    signal: AbortSignal | undefined,
+    remainingMs: () => number | undefined,
+    options: { onVerifiedForeground?: (appId: string) => void },
+  ): Promise<HomeProbe> {
+    // Do not revive an expired verification budget by handing its zero value
+    // to Window, which must clamp subcommand timeouts to keep those commands
+    // bounded. No device read is valid once this operation's deadline passed.
+    if ((remainingMs() ?? 1) <= 0) {
+      return "expired";
+    }
+    const activeWindow = await this.window.getActive(true, undefined, {
+      signal,
+      timeoutMs: remainingMs(),
+    });
+    if ((remainingMs() ?? 1) <= 0) {
+      return "expired";
+    }
+    const isLauncher = await isForegroundLauncher(
+      activeWindow.appId,
+      this.adb,
+      this.device.deviceId,
+      this.timer,
+      deviceIncarnationToken(this.device.deviceId),
+      signal,
+      remainingMs(),
+    );
+    // A successful launcher lookup is evidence only while it remains within
+    // the caller's deadline; a fast cached lookup must not accept success
+    // after a preceding foreground read spent the budget.
+    if (isLauncher && (remainingMs() ?? 1) > 0) {
+      options.onVerifiedForeground?.(activeWindow.appId);
+      return "verified";
+    }
+    return "not-home";
   }
 }

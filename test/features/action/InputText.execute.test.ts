@@ -60,12 +60,17 @@ describe("InputText.execute", () => {
     viewHierarchy: { hierarchy: { node: { $: {} } } },
   });
 
-  const wireFakes = (inputText: InputText): void => {
-    (inputText as any).observeScreen = fakeObserveScreen;
-    (inputText as any).window = fakeWindow;
-    (inputText as any).awaitIdle = fakeAwaitIdle;
-    (inputText as any).timer = fakeTimer;
-  };
+  const createInputText = (
+    device: BootedDevice,
+    adb: ConstructorParameters<typeof InputText>[1],
+    keyboardCloserFactory?: ConstructorParameters<typeof InputText>[2],
+    targetFocuserFactory?: ConstructorParameters<typeof InputText>[4],
+  ): InputText =>
+    new InputText(device, adb, keyboardCloserFactory, fakeTimer, targetFocuserFactory, {
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+      awaitIdle: fakeAwaitIdle,
+    });
 
   beforeEach(() => {
     savedMarkers = serverConfig.getEventAllMarkers();
@@ -98,10 +103,9 @@ describe("InputText.execute", () => {
   });
 
   test("returns a no-text failure without invoking any transport when text is undefined", async () => {
-    const inputText = new InputText(androidDevice, fakeAdb);
-    wireFakes(inputText);
+    const inputText = createInputText(androidDevice, fakeAdb);
 
-    const result = await inputText.execute(undefined as any);
+    const result = await inputText.execute(undefined);
 
     expect(result).toMatchObject({
       success: false,
@@ -117,8 +121,7 @@ describe("InputText.execute", () => {
     serverConfig.setEventAllMarkers([]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const inputText = new InputText(androidDevice, fakeAdb);
-    wireFakes(inputText);
+    const inputText = createInputText(androidDevice, fakeAdb);
 
     const result = await inputText.execute("/a");
 
@@ -140,8 +143,7 @@ describe("InputText.execute", () => {
       expect(state.hasPending()).toBe(true);
       return reply.promise;
     });
-    const input = new InputText(androidDevice, fakeAdb);
-    wireFakes(input);
+    const input = createInputText(androidDevice, fakeAdb);
     const error = new Error("setText failed");
     const result = runWithAbortSignal(undefined, () => input.execute("hi"), { textState: state });
     const outcome = result.then(
@@ -192,6 +194,9 @@ describe("InputText.execute", () => {
           child,
           result: childResult.promise,
         });
+        // Real (non-test-mode) process path: isTestMode is fixed at construction from this env flag.
+        const priorTestMode = process.env.AUTOMOBILE_TEST_MODE;
+        process.env.AUTOMOBILE_TEST_MODE = "false";
         const adb = new AdbClient(
           androidDevice,
           null,
@@ -204,16 +209,15 @@ describe("InputText.execute", () => {
           undefined,
           host,
         );
+        if (priorTestMode === undefined) {
+          delete process.env.AUTOMOBILE_TEST_MODE;
+        } else {
+          process.env.AUTOMOBILE_TEST_MODE = priorTestMode;
+        }
         // Exercise real cancellation/settlement without SDK lookup or a real process.
-        const internals = adb as unknown as {
-          isTestMode: boolean;
-          getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-        };
-        internals.isTestMode = false;
-        internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+        spyOn(adb, "getBaseCommandParts").mockResolvedValue({ adbPath: "adb", baseArgs: [] });
         spyOn(adb, "getDeviceTimestampMs").mockImplementation(async () => fakeTimer.now());
-        const input = new InputText(androidDevice, adb);
-        wireFakes(input);
+        const input = createInputText(androidDevice, adb);
         const controller = new AbortController();
         const reason = new Error("text cancelled");
         const state = new TextRequestState();
@@ -310,8 +314,7 @@ describe("InputText.execute", () => {
         }
         return execute(args, options);
       });
-      const input = new InputText(androidDevice, fakeAdb);
-      wireFakes(input);
+      const input = createInputText(androidDevice, fakeAdb);
       const result = runWithAbortSignal(
         undefined,
         () => input.execute("hi", undefined, false, mode),
@@ -363,10 +366,9 @@ describe("InputText.execute", () => {
           return setText(value, options);
         },
       );
-      const input = new InputText(androidDevice, fakeAdb, () => ({
+      const input = createInputText(androidDevice, fakeAdb, () => ({
         close: async () => ({ success: true, action: "close" }),
       }));
-      wireFakes(input);
       const result = runWithAbortSignal(
         undefined,
         () => input.execute(text, undefined, dismissKeyboard, mode),
@@ -421,8 +423,7 @@ describe("InputText.execute", () => {
       }
       return execute(command);
     });
-    const input = new InputText(androidDevice, fakeAdb);
-    wireFakes(input);
+    const input = createInputText(androidDevice, fakeAdb);
     const result = runWithAbortSignal(undefined, () => input.execute("hi", imeAction), {
       textState: state,
     });
@@ -460,8 +461,7 @@ describe("InputText.execute", () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
         fakeA11yService,
       );
-      const input = new InputText(androidDevice, fakeAdb);
-      wireFakes(input);
+      const input = createInputText(androidDevice, fakeAdb);
       expect(
         await runWithAbortSignal(undefined, () => input.execute("hi", undefined, false, mode)),
       ).toMatchObject({ success: true, method: mode });
@@ -472,8 +472,7 @@ describe("InputText.execute", () => {
     serverConfig.setEventAllMarkers(["/"]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const inputText = new InputText(androidDevice, fakeAdb);
-    wireFakes(inputText);
+    const inputText = createInputText(androidDevice, fakeAdb);
 
     const result = await inputText.execute("/a");
 
@@ -487,8 +486,7 @@ describe("InputText.execute", () => {
   test("routes iOS input through the CtrlProxy client and ignores Android modes", async () => {
     iosGetInstanceSpy = spyOnIosClientInstance(fakeIosCtrlProxy);
 
-    const inputText = new InputText(iosDevice, fakeAdb);
-    wireFakes(inputText);
+    const inputText = createInputText(iosDevice, fakeAdb);
 
     const result = await inputText.execute("hello", undefined, false, "eventAll");
 
@@ -560,9 +558,7 @@ describe("InputText.execute", () => {
       );
 
       const focusCalls: unknown[] = [];
-      const inputText = new InputText(androidDevice, fakeAdb);
-      wireFakes(inputText);
-      (inputText as any).targetFocuser = {
+      const inputText = createInputText(androidDevice, fakeAdb, undefined, () => ({
         focus: async (selector: unknown) => {
           focusCalls.push(selector);
           return {
@@ -572,7 +568,7 @@ describe("InputText.execute", () => {
             matchedText: "First name",
           };
         },
-      };
+      }));
 
       const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
         text: "First name",
@@ -589,11 +585,9 @@ describe("InputText.execute", () => {
     });
 
     test("returns the focus failure without typing when the selector cannot be focused", async () => {
-      const inputText = new InputText(androidDevice, fakeAdb);
-      wireFakes(inputText);
-      (inputText as any).targetFocuser = {
+      const inputText = createInputText(androidDevice, fakeAdb, undefined, () => ({
         focus: async () => ({ success: false, error: "no element matches text=Missing" }),
-      };
+      }));
 
       const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
         text: "Missing",
@@ -612,15 +606,13 @@ describe("InputText.execute", () => {
         fakeA11yService,
       );
 
-      const inputText = new InputText(androidDevice, fakeAdb);
-      wireFakes(inputText);
-      (inputText as any).targetFocuser = {
+      const inputText = createInputText(androidDevice, fakeAdb, undefined, () => ({
         focus: async () => ({
           success: true,
           focusVerified: false,
           matchedText: "Phone notification: ",
         }),
-      };
+      }));
 
       const result = await inputText.execute("555-0100", undefined, false, undefined, undefined, {
         text: "Phone",

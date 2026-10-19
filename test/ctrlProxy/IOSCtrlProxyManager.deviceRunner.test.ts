@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
-import type { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderSurface } from "../../src/ctrlProxy/IosCtrlProxyBuilderSurface";
+import { fakeIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
@@ -177,10 +178,9 @@ class DeviceWorld {
   }
 }
 
-function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilder {
-  return {
+function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilderSurface {
+  return fakeIosCtrlProxyBuilder({
     getXctestrunPath: async () => "/tmp/CtrlProxy.xctestrun",
-    getRunnerBinaryPath: async () => null,
     verifyRunnerBinaryBeforeLaunch: async () => {},
     writeRunnerEnvironment: async (
       _path: string,
@@ -192,8 +192,8 @@ function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilder {
     },
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
-    getExpectedAppHash: () => null,
-  } as unknown as IosCtrlProxyBuilder;
+    getExpectedAppHash: () => "",
+  });
 }
 
 const defaultSigning = {

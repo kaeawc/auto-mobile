@@ -1,8 +1,9 @@
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
 import {
-  AndroidDisplayReadError,
   ObservedAndroidDisplayCache,
   observedAndroidDisplay,
   observedIosDisplay,
@@ -18,7 +19,7 @@ import type {
   AccessibilityHierarchy,
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
-import type { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
 import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
@@ -31,6 +32,8 @@ import { PinnedDisplayUnavailableError } from "../../../src/models/PinnedDisplay
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../../src/utils/execResult";
+import type { AdbCommandRunner } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -425,9 +428,9 @@ describe("observation display stamp", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const converter = new CtrlProxyHierarchy({ timer } as HierarchyDelegateContext);
-    const client = {
+    const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
-    } as unknown as AndroidCtrlProxyClient;
+    });
     const hierarchy = new ViewHierarchy(
       device,
       new FakeAdbClientFactory(adb),
@@ -472,6 +475,7 @@ describe("observation display stamp", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const fakeClient = {
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
     };
     const getInstance = spyOnIosClientInstance(fakeClient);
@@ -575,9 +579,9 @@ describe("observation display stamp", () => {
         if (index === 1) {
           throw new Error("lookup failed");
         }
-        return { stdout: outputs[index] ?? "", stderr: "" };
+        return createExecResult(outputs[index] ?? "", "");
       },
-    } as unknown as FakeAdbExecutor;
+    } satisfies AdbCommandRunner;
     const cache = new ObservedAndroidDisplayCache(timer);
     try {
       const first = await cache.resolve(device, adb);

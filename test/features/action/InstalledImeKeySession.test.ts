@@ -1,11 +1,12 @@
 import { expect, spyOn, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
+import { ImeSessionFocusLostError } from "../../../src/features/action/ImeSessionFocusLostError";
 import * as imeSession from "../../../src/features/action/InstalledImeKeySession";
 import {
   InstalledImeKeySession,
   tapFrameBoundImeKey,
 } from "../../../src/features/action/InstalledImeKeySession";
-import { KeyboardOpenIndeterminateError } from "../../../src/features/action/Keyboard";
+import { KeyboardOpenIndeterminateError } from "../../../src/features/action/KeyboardOpenIndeterminateError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeMultiUserImeAdb } from "../../fakes/FakeMultiUserImeAdb";
@@ -252,7 +253,7 @@ test.each([
   setAfterSelection(() => setSubtype(42));
   const error: unknown = await session.tapKey(target, "a").catch((error: unknown) => error);
   expect(error).toMatchObject({ reason, message });
-  expect(error).toBeInstanceOf(imeSession.ImeSessionFocusLostError);
+  expect(error).toBeInstanceOf(ImeSessionFocusLostError);
   expect(error).not.toBeInstanceOf(AggregateError);
   expect(events).toEqual([
     `select:${target}:cleanup`,
@@ -277,7 +278,7 @@ test("preserves focus loss inside a restore AggregateError and quarantines the d
   expect(error.message).toBe(restoreMessage);
   expect(error.errors).toHaveLength(2);
   expect(error.errors[0]).toMatchObject({ reason: "editorFocusLost" });
-  expect(error.errors[0]).toBeInstanceOf(imeSession.ImeSessionFocusLostError);
+  expect(error.errors[0]).toBeInstanceOf(ImeSessionFocusLostError);
   expect(error.errors[1]).toEqual(new Error("restore rejected"));
   expect(events).toEqual([
     `select:${target}:cleanup`,

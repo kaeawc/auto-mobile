@@ -9,11 +9,8 @@ import type {
 } from "../../src/models";
 import type { WakeAndUnlockResult } from "../../src/features/action/WakeAndUnlock";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  setPressButtonFactory,
-  resetPressButtonFactory,
-  setWakeAndUnlockFactory,
-  resetWakeAndUnlockFactory,
 } from "../../src/server/interactionTools";
 import {
   registerAppTools,
@@ -26,7 +23,11 @@ import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+isolateToolRegistry();
+
+const interactionDeps: InteractionToolDependencies = {};
 const appTools = createAppToolsHarness();
 const createObserveResult = (): ObserveResult => ({
   timestamp: 1,
@@ -39,14 +40,14 @@ const device: BootedDevice = { name: "fake", deviceId: "emulator-5554", platform
 
 beforeEach(() => {
   ToolRegistry.clearTools();
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   registerAppTools();
   registerUtilityTools();
   setInstalledAppResourceRefresh(async () => {});
 });
 afterEach(() => {
-  resetPressButtonFactory();
-  resetWakeAndUnlockFactory();
+  delete interactionDeps.pressButtonFactory;
+  delete interactionDeps.wakeAndUnlockFactory;
   resetInstalledAppResourceRefresh();
   appTools.clear();
 });
@@ -74,7 +75,7 @@ for (const success of [true, false]) {
       observation: createObserveResult(),
       ...(success ? {} : { error: "failed" }),
     };
-    setPressButtonFactory(() => ({ execute: async () => result }));
+    interactionDeps.pressButtonFactory = () => ({ execute: async () => result });
     await checkResponse(
       "pressButton",
       { button: "home" },
@@ -95,7 +96,7 @@ for (const success of [true, false]) {
       unlocked: success,
       ...(success ? { warning: "runner recovering" } : { error: "failed" }),
     };
-    setWakeAndUnlockFactory(() => ({ execute: async () => result }));
+    interactionDeps.wakeAndUnlockFactory = () => ({ execute: async () => result });
     await checkResponse(
       "wakeAndUnlock",
       {},

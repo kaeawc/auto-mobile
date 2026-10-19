@@ -1,5 +1,4 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -11,10 +10,8 @@ import {
 } from "../../../src/features/preferences/AppPreferences";
 import { IOS_SDK_REDACTED_VALUE } from "../../../src/features/preferences/IosPreferenceTypes";
 import { parseIosUserDefaultsPlist } from "../../../src/features/preferences/IosUserDefaultsPlist";
-import {
-  CtrlProxyServicePortChangedError,
-  IOSCtrlProxyClient,
-} from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
@@ -662,7 +659,7 @@ describe("iOS app UserDefaults resolution", () => {
     // Model the open connection this test advertises before resolving its replies.
     const socket = createSuccessWebSocketFactory(timer)("ws://fake");
     await Promise.resolve();
-    client["ws"] = socket as unknown as WebSocket;
+    client["ws"] = socket;
     const connect = spyOn(client, "ensureConnected").mockImplementation(() => {
       throw new Error("Auto-start forbidden");
     });

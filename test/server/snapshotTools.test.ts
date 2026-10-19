@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
@@ -50,9 +51,9 @@ describe("snapshot tool", () => {
     restoreOverrides = {};
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
       createCaptureProvider: () => ({
@@ -149,9 +150,9 @@ describe("snapshot tool", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = parseJsonSchemaNode(toolDefinition!.inputSchema);
     expect(schema.required).toEqual(["action"]);
-    expect(schema.properties.action.enum).toEqual(["capture", "restore"]);
+    expect(schema.properties?.action?.enum).toEqual(["capture", "restore"]);
     expect(schema.anyOf).toBeUndefined();
     expect(schema.oneOf).toBeUndefined();
     expect(schema.allOf).toBeUndefined();
@@ -354,7 +355,7 @@ describe("snapshot tool", () => {
     await expect(
       tool!.deviceAwareHandler!(device, {
         action: "restore",
-      } as any),
+      }),
     ).rejects.toThrow("snapshotName is required");
   });
 });

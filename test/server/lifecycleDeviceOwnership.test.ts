@@ -31,6 +31,9 @@ import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /** Records each platform kill and stops there, so an admitted call proves only that it got past the gate. */
 class RecordingKillDeviceManager extends FakeDeviceUtils {
@@ -466,7 +469,11 @@ describe("already-dead Android shutdown ownership", () => {
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessions, pool);
     manager.setBootedDevices("android", [device]);
-    await pool.bindOrReuseDeviceSession("holder", device.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "holder",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     manager.setBootedDevices("android", []);
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("holder");
     const reserve = pool.reserveDeviceForShutdown.bind(pool);

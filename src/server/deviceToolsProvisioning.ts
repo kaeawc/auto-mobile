@@ -35,7 +35,7 @@ import { formatToolParamError } from "./toolParamError";
 import { type DeviceCreationGate } from "../devices/deviceCreationGate";
 import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { acquireUndoneIfUndelivered, undoUndeliveredAcquisition } from "./undeliveredAcquisition";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
 import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
@@ -286,7 +286,7 @@ function capacityExhaustedProvisionError(
 export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   const { bindBootedDeviceSession, ensureCtrlProxyReady, executeDeleteDevice } = hooks;
   const provisionDeviceHandler = async (
-    input: ProvisionDeviceArgs,
+    input: Partial<ProvisionDeviceArgs>,
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
@@ -2237,37 +2237,33 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     args: ProvisionDeviceArgs,
     boot: DeviceBootResult,
   ): Promise<DeviceReadinessReservation | undefined> {
-    const daemonState = DaemonState.getInstance();
-    if (!daemonState.isInitialized()) {
+    const devicePool = defaultDaemonContext.devicePoolWrites();
+    if (!devicePool) {
       return undefined;
     }
     const resumeSessionId = restartResumeSessionForDevice(provisionSessionArgs(args), boot.device);
     if (resumeSessionId) {
-      return await daemonState
-        .getDevicePool()
-        .reserveRestartRecoveryReadiness(
-          boot.device,
-          boot.sourceImage?.name ?? boot.device.name,
-          resumeSessionId,
-        );
+      return await devicePool.reserveRestartRecoveryReadiness(
+        boot.device,
+        boot.sourceImage?.name ?? boot.device.name,
+        resumeSessionId,
+      );
     }
     // Reserving may reboot the device during readiness recovery, and the
     // readiness that follows resets the shared per-device CtrlProxy manager and
     // rewrites resource settings. Prove this client owns the device first, the
     // same way `reserveInitialDeviceForReadiness` does for startDevice.
-    return await daemonState
-      .getDevicePool()
-      .reserveDeviceForReadiness(
-        boot.device.deviceId,
-        boot.device,
-        boot.sourceImage?.name ?? boot.device.name,
-        undefined,
-        args.__oneShotCli
-          ? { oneShotCli: true }
-          : args.__mcpSessionId
-            ? { mcpSessionId: args.__mcpSessionId }
-            : undefined,
-      );
+    return await devicePool.reserveDeviceForReadiness(
+      boot.device.deviceId,
+      boot.device,
+      boot.sourceImage?.name ?? boot.device.name,
+      undefined,
+      args.__oneShotCli
+        ? { oneShotCli: true }
+        : args.__mcpSessionId
+          ? { mcpSessionId: args.__mcpSessionId }
+          : undefined,
+    );
   }
 
   async function ensureProvisionDeviceReadiness(
@@ -2596,7 +2592,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   return {
     provisionDeviceHandler: (
-      input: ProvisionDeviceArgs,
+      input: Partial<ProvisionDeviceArgs>,
       progress?: ProgressCallback,
       signal?: AbortSignal,
     ) =>

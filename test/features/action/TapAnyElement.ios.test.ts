@@ -31,7 +31,7 @@ const IOS_DEVICE: BootedDevice = {
   deviceId: "00001234-ABCD",
   platform: "ios",
   name: "test-iphone",
-} as any;
+};
 
 const makeClickableElement = (): Element =>
   ({
@@ -86,19 +86,19 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     const iosModule = await import("../../../src/features/observe/ios");
     getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosClient as any,
+      fakeIosClient,
     );
 
     displayLookup = mock(() => undefined);
-    tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient() as any, {
+    tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient(), {
       timer: fakeTimer,
       elementSelector: fakeElementSelector,
       iosVoiceOverDetector: fakeVoiceOverDetector,
       lastRenderedObservation: displayLookup,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (tapAny as any).observeScreen = fakeObserveScreen;
-    (tapAny as any).awaitIdle = fakeAwaitIdle;
-    (tapAny as any).window = fakeWindow;
   });
 
   afterEach(() => {
@@ -187,9 +187,9 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 50 }]);
     // Never call the non-existent methods from the original bug.
-    expect((fakeIosClient as any).tap).toBeUndefined();
-    expect((fakeIosClient as any).doubleTap).toBeUndefined();
-    expect((fakeIosClient as any).longPress).toBeUndefined();
+    expect("tap" in fakeIosClient).toBe(false);
+    expect("doubleTap" in fakeIosClient).toBe(false);
+    expect("longPress" in fakeIosClient).toBe(false);
   });
 
   test("doubleTap dispatches one requestDoubleTapCoordinates call at the element's center", async () => {
@@ -259,14 +259,14 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   test("VoiceOver probe indeterminate (CtrlProxy failure) + tap still routes through requestVoiceOverActivate", async () => {
     const realDetector = new DefaultIosVoiceOverDetector(fakeTimer);
     fakeIosClient.setFailureMode("voiceOverState", new Error("CtrlProxy timeout"));
-    tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient() as any, {
+    tapAny = new TapAnyElement(IOS_DEVICE, new FakeAdbClient(), {
       timer: fakeTimer,
       elementSelector: fakeElementSelector,
       iosVoiceOverDetector: realDetector,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (tapAny as any).observeScreen = fakeObserveScreen;
-    (tapAny as any).awaitIdle = fakeAwaitIdle;
-    (tapAny as any).window = fakeWindow;
 
     const result = await tapAny.execute({ action: "tap" });
 
@@ -478,13 +478,17 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   // expire mid-search even though this call would eventually have returned.
   test("search loop constrains each hierarchy refresh to its own remaining budget, not the client default", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
-    fakeIosClient.setHierarchyData({ packageName: "com.test.app", updatedAt: Date.now() });
+    fakeIosClient.setHierarchyData({
+      packageName: "com.test.app",
+      updatedAt: Date.now(),
+      hierarchy: { text: "Ready" },
+    });
     const hierarchyRequests = spyOn(fakeIosClient, "requestHierarchySync");
-    // First selectClickable call (before the search loop) reports nothing
+    // First select call (before the search loop) reports nothing
     // found; the fake element selector's default (call-through) behavior on
     // every later call keeps returning the configured clickable element, so
     // the search loop finds it on its first iteration.
-    spyOn(fakeElementSelector, "selectClickable").mockImplementationOnce(() => ({
+    spyOn(fakeElementSelector, "select").mockImplementationOnce(() => ({
       element: null,
       indexInMatches: -1,
       totalMatches: 0,
@@ -512,8 +516,8 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
   test("does not tap a hierarchy refresh that returns at the search deadline", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
-    const hierarchy = createObserveResult().viewHierarchy;
-    spyOn(fakeElementSelector, "selectClickable")
+    const hierarchy = createObserveResult().viewHierarchy ?? null;
+    spyOn(fakeElementSelector, "select")
       .mockImplementationOnce(() => ({
         element: null,
         indexInMatches: -1,
@@ -526,10 +530,10 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
         totalMatches: 1,
         strategy: "first",
       }));
-    (tapAny as any).refreshViewHierarchy = async () => {
+    tapAny.testHooks.setRefreshViewHierarchy(async () => {
       fakeTimer.advanceTime(400);
       return hierarchy;
-    };
+    });
 
     const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
 

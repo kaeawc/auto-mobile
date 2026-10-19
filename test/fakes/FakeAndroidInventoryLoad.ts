@@ -139,7 +139,7 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
         pending.reject(new Error("fake child cancelled"));
       }
     });
-    return { child: child as unknown as ChildProcess, result: pending.promise };
+    return { child, result: pending.promise };
   }
   async executeCommand(
     file: string,

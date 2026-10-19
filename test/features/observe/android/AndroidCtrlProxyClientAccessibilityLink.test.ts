@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -8,7 +9,7 @@ describe("Android semantic link activation outcomes", () => {
   const createClient = async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setScreenState(true);
     let socket!: FakeWebSocket;
     const client = AndroidCtrlProxyClient.createForTesting(

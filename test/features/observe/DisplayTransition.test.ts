@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -648,10 +649,13 @@ describe("display transitions", () => {
   test("rotation does not wipe observe cache or repeat the lock sample", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
+        "",
+      ),
+    );
     const lockRead = spyOn(adb, "getDeviceLock");
     const cache = new FakeObserveCacheStore(timer);
     const hierarchy = new FakeViewHierarchy();
@@ -721,14 +725,14 @@ describe("display transitions", () => {
     const hierarchy = new FakeViewHierarchy();
     const cache = new FakeObserveCacheStore(timer);
     adb.setCommandResponseSequence("cmd display get-displays", [
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-        stderr: "",
-      },
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-        stderr: "",
-      },
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
     ]);
     adb.setDeviceLockSequence([
       { locked: false, keyguardShowing: false },
@@ -772,10 +776,13 @@ describe("display transitions", () => {
 
   test("tapOn rejects a fresh hierarchy captured on a different sized panel", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
+    );
     const capture = {
       capture: async () => ({
         hierarchy: { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 },
@@ -809,19 +816,21 @@ describe("display transitions", () => {
     };
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state state", {
-      stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"),
-      stderr: "",
-    });
-    adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: deviceStateFixture("foldpf-print-states.txt"),
-      stderr: "",
-    });
+        "",
+      ),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(deviceStateFixture("foldpf-5-after-reset-state.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(deviceStateFixture("foldpf-print-states.txt"), ""),
+    );
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchy({
       hierarchy: { node: {} },
@@ -875,10 +884,13 @@ describe("display transitions", () => {
       },
     };
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+    );
     const capture = {
       capture: async () => ({
         hierarchy: { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },

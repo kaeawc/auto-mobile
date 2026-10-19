@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
 import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
@@ -123,14 +124,14 @@ describe("ObserveScreen skip options", () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("cmd display get-displays", [
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
-        stderr: "",
-      },
-      {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
-        stderr: "",
-      },
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+      createExecResult(
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        "",
+      ),
     ]);
     const hierarchy = new FakeViewHierarchy();
     hierarchy.configureHierarchySequence([

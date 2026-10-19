@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -56,7 +57,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
 
   const buildFakeAdb = (present: boolean = true): FakeAdbExecutor => {
     const fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
     if (present) {
       fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "device" }]);
     }

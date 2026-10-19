@@ -151,8 +151,8 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     );
     await pool.releaseDevice(device.deviceId, HOLDER);
     manager.setBootedDevices("android", []);
-    await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId));
-    await drainMicrotasks();
+    await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId) ?? undefined);
+    await drainMicrotasks(40);
     registerDeviceTools();
     manager.clearHistory();
     // A second, stopped AVD. The emulator takes the lowest free console port, so its boot lands
@@ -242,7 +242,9 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     const f = await fixture();
     f.manager.setBootedDevices("android", [f.device]);
     await f.pool.refreshDevices();
-    expect(restartResumeSessionForDevice({ __mcpSessionId: CONNECTION }, f.device)).toBe(HOLDER);
+    expect(
+      restartResumeSessionForDevice({ platform: "android", __mcpSessionId: CONNECTION }, f.device),
+    ).toBe(HOLDER);
   });
 
   test("a binding taking the device keeps priority over the fallback hold", async () => {
@@ -255,7 +257,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
           ? {
               platform: "android",
               stableDeviceId: "restart-phone",
-              holder: "free",
+              holder: "session_broker",
               scopeKey: "managed-scope",
               bindingIndex: null,
               scopeState: null,
@@ -266,7 +268,9 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     f.manager.setBootedDevices("android", [f.device]);
     await f.pool.refreshDevices();
     managed = true;
-    expect(restartResumeSessionForDevice({ __mcpSessionId: CONNECTION }, f.device)).toBeUndefined();
+    expect(
+      restartResumeSessionForDevice({ platform: "android", __mcpSessionId: CONNECTION }, f.device),
+    ).toBeUndefined();
     expect(f.internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);
   });
 });

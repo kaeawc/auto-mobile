@@ -1,3 +1,4 @@
+import { toolJson, toolStructured } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -25,6 +26,28 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 
 isolateToolRegistry();
+
+function at(value: unknown, ...path: string[]): unknown {
+  return path.reduce<unknown>(
+    (current, key) =>
+      typeof current === "object" && current !== null
+        ? Object.entries(current).find(([name]) => name === key)?.[1]
+        : undefined,
+    value,
+  );
+}
+
+function imagesOf(payload: Record<string, unknown>): unknown[] {
+  const images = payload.images;
+  if (!Array.isArray(images)) {
+    throw new Error("listDeviceImages payload has no images array");
+  }
+  return images;
+}
+
+function firstImage(response: unknown): unknown {
+  return imagesOf(toolJson(response))[0];
+}
 
 let restoreDeviceToolProviders: () => void;
 beforeEach(() => {
@@ -136,12 +159,12 @@ describe("listDeviceImages", function () {
     const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
       platform: "ios",
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(response.structuredContent).toEqual(payload);
-    expect(payload.images).toHaveLength(1);
-    expect(payload.images[0].identity.stableId).toBe("iphone-17-pro-udid");
-    expect(payload.images[0].capabilityInventory).toEqual({
+    expect(toolStructured(response)).toEqual(payload);
+    expect(imagesOf(payload)).toHaveLength(1);
+    expect(at(imagesOf(payload)[0], "identity", "stableId")).toBe("iphone-17-pro-udid");
+    expect(at(imagesOf(payload)[0], "capabilityInventory")).toEqual({
       schemaVersion: 1,
       capabilities: [
         {
@@ -188,11 +211,14 @@ describe("listDeviceImages", function () {
 
     const tool = ToolRegistry.getRegisteredTool("listDeviceImages")!;
     const response = await tool.handler({ platform: "ios" });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(payload.images[0]).not.toHaveProperty("state");
-    expect(payload.images[0].runtime.lifecycle).toEqual({ state: "configured", known: true });
-    expect(tool.outputSchema.safeParse(payload).success).toBe(true);
+    expect(imagesOf(payload)[0]).not.toHaveProperty("state");
+    expect(at(imagesOf(payload)[0], "runtime", "lifecycle")).toEqual({
+      state: "configured",
+      known: true,
+    });
+    expect(tool.outputSchema?.safeParse(payload).success).toBe(true);
   });
 
   test("omits the removed raw state alias for images without a platform state", async function () {
@@ -207,11 +233,14 @@ describe("listDeviceImages", function () {
 
     const tool = ToolRegistry.getRegisteredTool("listDeviceImages")!;
     const response = await tool.handler({ platform: "android" });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(payload.images[0]).not.toHaveProperty("state");
-    expect(payload.images[0].runtime.lifecycle).toEqual({ state: "configured", known: true });
-    expect(tool.outputSchema.safeParse(payload).success).toBe(true);
+    expect(imagesOf(payload)[0]).not.toHaveProperty("state");
+    expect(at(imagesOf(payload)[0], "runtime", "lifecycle")).toEqual({
+      state: "configured",
+      known: true,
+    });
+    expect(tool.outputSchema?.safeParse(payload).success).toBe(true);
   });
 
   test("uses the AVD-manager provenance record for Android image descriptions", async function () {
@@ -236,14 +265,14 @@ describe("listDeviceImages", function () {
     const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
       platform: "android",
     });
-    const image = JSON.parse(response.content[0].text).images[0];
+    const image = firstImage(response);
 
-    expect(image.image).toEqual({
+    expect(at(image, "image")).toEqual({
       path: "/tmp/Pixel_8.avd",
       target: "Google APIs",
       basedOn: "Android 16",
     });
-    expect(image.availabilityError).toBeNull();
+    expect(at(image, "availabilityError")).toBeNull();
     expect(image).not.toHaveProperty("path");
     expect(image).not.toHaveProperty("iosVersion");
   });
@@ -265,9 +294,9 @@ describe("listDeviceImages", function () {
     const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
       platform: "android",
     });
-    const image = JSON.parse(response.content[0].text).images[0];
+    const image = firstImage(response);
 
-    expect(image.availabilityError).toBe("AVD configuration is unreadable");
+    expect(at(image, "availabilityError")).toBe("AVD configuration is unreadable");
   });
 
   test("does not collapse a failed discovery into a complete empty inventory", async function () {
@@ -282,9 +311,9 @@ describe("listDeviceImages", function () {
     const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
       platform: "android",
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(payload.images).toEqual([]);
+    expect(imagesOf(payload)).toEqual([]);
     expect(payload.count).toBe(0);
     expect(payload.configuredInventory).toEqual({
       schemaVersion: 1,
@@ -327,9 +356,9 @@ describe("listDeviceImages", function () {
     const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
       platform: "android",
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(payload.images).toEqual([
+    expect(imagesOf(payload)).toEqual([
       expect.objectContaining({
         identity: expect.objectContaining({ stableId: "Pixel_9" }),
         name: "Pixel_9",
@@ -361,9 +390,9 @@ describe("listDeviceImages", function () {
     const response = await ToolRegistry.getRegisteredTool("listDeviceImages")!.handler({
       platform: "ios",
     });
-    const payload = JSON.parse(response.content[0].text);
+    const payload = toolJson(response);
 
-    expect(payload.images).toEqual([]);
+    expect(imagesOf(payload)).toEqual([]);
     expect(payload.count).toBe(0);
     expect(payload.configuredInventory).toEqual({
       schemaVersion: 1,

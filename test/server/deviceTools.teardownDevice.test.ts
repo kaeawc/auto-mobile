@@ -68,7 +68,9 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 isolateToolRegistry();
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
-  override async upsertActiveSession(): Promise<void> {}
+  override async upsertActiveSession(): Promise<number> {
+    return 0;
+  }
   override async replaceLivenessOwnership(): Promise<void> {}
   override async getSession(): Promise<undefined> {
     return undefined;
@@ -1324,7 +1326,7 @@ describe("deleteDevice handler", () => {
     };
     await pool.addDevice(pooledRuntime, image);
     DaemonState.getInstance().initialize(sessionManager, pool);
-    const staleManager = AndroidCtrlProxyManager.getInstance(pooledRuntime);
+    const staleManager = AndroidCtrlProxyManager.getInstanceForTesting(pooledRuntime);
     manager.setBootedDevices("android", []);
     manager.setDeviceImages("android", []);
 
@@ -3105,12 +3107,12 @@ describe("deleteDevice handler", () => {
 
   test("evicts iOS state when a cancelled destroy later succeeds", async () => {
     const timer = new FakeTimer();
-    const device: DeviceInfo = {
+    const device = {
       platform: "ios",
       name: "iPhone 16",
       deviceId: "IOS-CANCELLED-DEVICE-1",
       isRunning: false,
-    };
+    } satisfies DeviceInfo;
     const proxy = IOSCtrlProxyManager.getInstance(device);
     const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     const controller = new AbortController();
@@ -3158,12 +3160,12 @@ describe("deleteDevice handler", () => {
 
   test("evicts the CtrlProxy manager after a timed-out destroy later succeeds", async () => {
     const timer = new FakeTimer();
-    const device: DeviceInfo = {
+    const device = {
       platform: "ios",
       name: "iPhone 16",
       deviceId: "IOS-DEVICE-1",
       isRunning: false,
-    };
+    } satisfies DeviceInfo;
     const proxy = IOSCtrlProxyManager.getInstance(device);
     const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     let releaseDestroy!: () => void;
@@ -3209,12 +3211,12 @@ describe("deleteDevice handler", () => {
 
   test("does not evict the CtrlProxy manager after a timed-out destroy later rejects", async () => {
     const timer = new FakeTimer();
-    const device: DeviceInfo = {
+    const device = {
       platform: "ios",
       name: "iPhone 16",
       deviceId: "IOS-DEVICE-1",
       isRunning: false,
-    };
+    } satisfies DeviceInfo;
     const proxy = IOSCtrlProxyManager.getInstance(device);
     const forceStop = spyOn(proxy, "forceStopForShutdown").mockResolvedValue();
     let releaseDestroy!: () => void;
@@ -3450,7 +3452,7 @@ describe("deleteDevice handler", () => {
               name: provisionRequest.name,
               isRunning: false,
             },
-            resolvedSpec: provisionRequest.spec,
+            resolvedSpec: { ...provisionRequest.spec, displayCutout: "unknown" },
           };
         },
       }),
@@ -3509,7 +3511,7 @@ describe("deleteDevice handler", () => {
           return {
             created: false,
             device,
-            resolvedSpec: provisionRequest.spec,
+            resolvedSpec: { ...provisionRequest.spec, displayCutout: "unknown" },
           };
         },
       }),
@@ -3899,6 +3901,7 @@ describe("deleteDevice handler", () => {
     const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
     setDeviceToolsDependencies({
       lifecycleCoordinator: {
+        isReserved: (identity) => coordinator.isReserved(identity),
         reserve: async (identity, options) => {
           const lease = await coordinator.reserve(identity, options);
           return {

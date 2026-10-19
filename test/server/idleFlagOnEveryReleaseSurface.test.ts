@@ -264,7 +264,7 @@ const surfaces: Surface[] = [
       } as DaemonStateAccess;
       const refusal = await handleDaemonRequest(
         {
-          type: "request",
+          type: "daemon_request",
           id: "registration-surface",
           method: "daemon/registerSession",
           params: { sessionId: SESSION, clientName: "surface-test" },

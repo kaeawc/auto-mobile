@@ -97,6 +97,7 @@ import { anyDeviceReadOnlyArgShapeMatches } from "./deviceReadOnlyArgShapes";
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
+import { DiscoveryListCache } from "./proxy/DiscoveryListCache";
 import { getRemovedToolHint } from "../utils/removedTools";
 import {
   DaemonBoundSessionLostError,
@@ -877,14 +878,6 @@ export class DaemonMcpProxy {
   // UNRELATED session mid-call no longer blocks remembering the session THIS call
   // actually forwarded, while a release of the forwarded UUID still preserves.
   private readonly releaseLedger = new ReleaseEpochLedger();
-  // Monotonic counter bumped whenever a daemon push invalidates a discovery cache
-  // or the session binding mid-flight (list_changed nulls a cache; a bound-session
-  // release changes the session scope). A `tools/list` / `resources/list` captures
-  // this at forward time and, if it has advanced by completion, declines to store
-  // the now-stale response into the cache the invalidation just cleared — the next
-  // discovery refetches under the current scope (issue #4655).
-  private discoveryEpoch: number = 0;
-
   // Supplies the static tool surface for listAdvertisedTools() before a daemon
   // connection exists (issue #5879).
   private readonly staticToolDefinitionsProvider: () => ProxiedToolDefinition[];
@@ -906,10 +899,8 @@ export class DaemonMcpProxy {
   private connectedFallbackReconcile: NodeJS.Timeout | null = null;
   private connectedFallbackReconcileAttempt = 0;
 
-  // Cached definitions from daemon
-  private cachedTools: ProxiedToolDefinition[] | null = null;
-  private cachedResources: ProxiedResourceDefinition[] | null = null;
-  private cachedResourceTemplates: ProxiedResourceTemplate[] | null = null;
+  // Cached definitions from daemon, plus the discovery epoch (issue #4655)
+  private readonly discovery: DiscoveryListCache;
   private get resourceSubscriptions(): Set<string> {
     return this.resourceSubscriptionManager.resourceSubscriptions;
   }
@@ -982,6 +973,7 @@ export class DaemonMcpProxy {
       fetchList: (kind) => this.pollDaemonList(kind),
       emitListChanged: (kind) => this.announceDaemonListChanged(kind),
     });
+    this.discovery = this.createDiscoveryListCache();
     this.heartbeatLeashMs = heartbeatLeashMs(config);
     this.heartbeatIntervalMs = heartbeatIntervalMs(config);
     this.ownershipConflictLeashMs = ownershipConflictLeashMs(
@@ -1986,13 +1978,7 @@ export class DaemonMcpProxy {
   // makes a discovery request whose response is still in flight decline to
   // repopulate the cache this invalidation just cleared (issue #4655).
   private invalidateListCache(kind: ListChangedKind): void {
-    this.discoveryEpoch += 1;
-    if (kind === "tools") {
-      this.cachedTools = null;
-    } else {
-      this.cachedResources = null;
-      this.cachedResourceTemplates = null;
-    }
+    this.discovery.invalidateKind(kind);
   }
 
   // Invalidate the matching cache and re-emit a list_changed to listeners,
@@ -2255,7 +2241,7 @@ export class DaemonMcpProxy {
       if (heldHandoff) {
         heldHandoff.claimSent = false;
       }
-      this.discoveryEpoch += 1;
+      this.discovery.bumpEpoch();
       this.invalidateCache();
       return;
     }
@@ -2693,7 +2679,7 @@ export class DaemonMcpProxy {
    */
   async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
     if (this.hasLivenessLifecycleFence()) {
-      return this.cachedTools ?? this.staticToolDefinitionsProvider();
+      return this.discovery.tools ?? this.staticToolDefinitionsProvider();
     }
     if (!this.connected || !this.client) {
       this.servedStaticToolList = true;
@@ -2748,13 +2734,13 @@ export class DaemonMcpProxy {
    */
   async listAdvertisedResources(): Promise<ProxiedResourceDefinition[]> {
     if (this.hasLivenessLifecycleFence()) {
-      return this.cachedResources ?? [];
+      return this.discovery.resources ?? [];
     }
     if (this.connected && this.client) {
       return this.listResources();
     }
     this.serveResourcesColdAndConnectInBackground();
-    return this.cachedResources ?? [];
+    return this.discovery.resources ?? [];
   }
 
   /**
@@ -2763,13 +2749,13 @@ export class DaemonMcpProxy {
    */
   async listAdvertisedResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
     if (this.hasLivenessLifecycleFence()) {
-      return this.cachedResourceTemplates ?? [];
+      return this.discovery.resourceTemplates ?? [];
     }
     if (this.connected && this.client) {
       return this.listResourceTemplates();
     }
     this.serveResourcesColdAndConnectInBackground();
-    return this.cachedResourceTemplates ?? [];
+    return this.discovery.resourceTemplates ?? [];
   }
 
   // Resource discovery has no "first use that connects" equivalent — a
@@ -2895,60 +2881,11 @@ export class DaemonMcpProxy {
   async listTools(): Promise<ProxiedToolDefinition[]> {
     if (this.hasLivenessLifecycleFence()) {
       return this.listDuringLivenessFence(
-        () => this.fetchTools(true),
-        () => this.cachedTools ?? this.staticToolDefinitionsProvider(),
+        () => this.discovery.fetchTools(true),
+        () => this.discovery.tools ?? this.staticToolDefinitionsProvider(),
       );
     }
-    return this.fetchTools(this.discoveryAfterResultMintRelease());
-  }
-
-  private async fetchTools(releasedResultMint: boolean): Promise<ProxiedToolDefinition[]> {
-    // Return cached tools if available
-    if (this.cachedTools) {
-      return this.cachedTools;
-    }
-
-    try {
-      // Bind discovery to the session like callTool does. Without this, a
-      // recoverable reconnect INSIDE withRecoverableReconnect retries tools/list
-      // with empty params against the fresh UNSEEDED transport, which returns the
-      // full unfiltered tool list instead of the session-scoped one. Reusing the
-      // session-scoped params re-seeds the retry after a reconnect (issue #4610).
-      // After a result-minted session is released there is no session to bind:
-      // the connection is unbound and lists the surface that contains the
-      // getAndroid/getApple recovery tools (#9997).
-      const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = this.withToolSelectionProfile(
-        releasedResultMint ? {} : this.withBoundSessionUuid({}),
-      );
-      const result = await this.connectionRecovery.withRecoverableReconnect(
-        () =>
-          this.requireClient().callDaemonMethod(
-            "tools/list",
-            this.withToolSelectionProfile(forwardedParams),
-          ),
-        this.sessionUuidFromArgs(forwardedParams),
-        releasedResultMint,
-      );
-      const tools = result?.tools ?? [];
-      // If a list_changed or bound-session release invalidated this cache WHILE the
-      // response was in flight, the response is scoped to the now-stale binding.
-      // Return it to THIS caller but leave the cache empty so the next listTools()
-      // refetches under the current scope, instead of resurrecting the list the
-      // invalidation just cleared (issue #4655).
-      // The unbound list served after a result-minted release is not cached
-      // (like resources below): a later explicit-sessionUuid call can re-bind a
-      // surviving session without a cache invalidation, which would otherwise
-      // keep serving this unbound list under the new binding.
-      if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
-        this.cachedTools = tools;
-        this.listPoller.observe("tools", tools);
-      }
-      return tools;
-    } catch (error) {
-      logger.error(`[DaemonMcpProxy] Failed to list tools: ${error}`);
-      throw error;
-    }
+    return this.discovery.fetchTools(this.discoveryAfterResultMintRelease());
   }
 
   /**
@@ -3517,7 +3454,7 @@ export class DaemonMcpProxy {
 
   private isDeviceReadOnlyTool(name: string, args?: Record<string, unknown>): boolean {
     const definition =
-      this.cachedTools?.find((tool) => tool.name === name) ??
+      this.discovery.tools?.find((tool) => tool.name === name) ??
       this.staticToolDefinitionsProvider().find((tool) => tool.name === name);
     return (
       definition?._meta?.[DEVICE_READ_ONLY_META_KEY] === true ||
@@ -3531,7 +3468,7 @@ export class DaemonMcpProxy {
       return true;
     }
     const schema =
-      this.cachedTools?.find((definition) => definition.name === name)?.inputSchema ??
+      this.discovery.tools?.find((definition) => definition.name === name)?.inputSchema ??
       this.staticToolDefinitionsProvider().find((definition) => definition.name === name)
         ?.inputSchema;
     // Device-targeting schemas expose the device-label contract. Plain
@@ -4125,7 +4062,7 @@ export class DaemonMcpProxy {
     };
     // A terminal release changes the scope of in-flight discovery and prevents
     // its stale response from repopulating a cleared cache.
-    this.discoveryEpoch += 1;
+    this.discovery.bumpEpoch();
     this.invalidateCache();
     this.clearBoundSessionUuid();
     // Other held sessions keep depending on this keeper after the latest binding
@@ -4823,10 +4760,26 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createDiscoveryListCache(): DiscoveryListCache {
+    return new DiscoveryListCache({
+      recovery: {
+        withRecoverableReconnect: (...args) =>
+          this.connectionRecovery.withRecoverableReconnect(...args),
+      },
+      port: {
+        boundParams: (released) => (released ? {} : this.withBoundSessionUuid({})),
+        withToolSelectionProfile: (args) => this.withToolSelectionProfile(args),
+        sessionUuidFromArgs: (args) => this.sessionUuidFromArgs(args),
+        callDaemonMethod: (method, params) => this.requireClient().callDaemonMethod(method, params),
+        observeList: (kind, list) => this.listPoller.observe(kind, list),
+      },
+    });
+  }
+
   private createHandoverResolutionPort(): HandoverResolutionPort {
     return {
       bumpDiscoveryEpoch: () => {
-        this.discoveryEpoch += 1;
+        this.discovery.bumpEpoch();
       },
       invalidateCache: (...args) => this.invalidateCache(...args),
       notifyListChanged: (...args) => this.notifyListChanged(...args),
@@ -5553,7 +5506,7 @@ export class DaemonMcpProxy {
 
   private toolAcceptsSessionUuid(name: string): boolean {
     const tool =
-      this.cachedTools?.find((definition) => definition.name === name) ??
+      this.discovery.tools?.find((definition) => definition.name === name) ??
       this.staticToolDefinitionsProvider().find((definition) => definition.name === name);
     const properties = tool?.inputSchema.properties;
     return typeof properties === "object" && properties !== null && "sessionUuid" in properties;
@@ -5608,7 +5561,7 @@ export class DaemonMcpProxy {
 
   private frontendRegistersTool(name: string): boolean {
     const found =
-      this.cachedTools?.find((definition) => definition.name === name) ??
+      this.discovery.tools?.find((definition) => definition.name === name) ??
       this.staticToolDefinitionsProvider().find((definition) => definition.name === name);
     return !!found;
   }
@@ -5619,41 +5572,11 @@ export class DaemonMcpProxy {
   async listResources(): Promise<ProxiedResourceDefinition[]> {
     if (this.hasLivenessLifecycleFence()) {
       return this.listDuringLivenessFence(
-        () => this.fetchResources(true),
-        () => this.cachedResources ?? [],
+        () => this.discovery.fetchResources(true),
+        () => this.discovery.resources ?? [],
       );
     }
-    return this.fetchResources(this.discoveryAfterResultMintRelease());
-  }
-
-  private async fetchResources(releasedResultMint: boolean): Promise<ProxiedResourceDefinition[]> {
-    // Return cached resources if available
-    if (this.cachedResources) {
-      return this.cachedResources;
-    }
-
-    try {
-      const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = releasedResultMint ? {} : this.withBoundSessionUuid({});
-      const result = await this.connectionRecovery.withRecoverableReconnect(
-        () => this.requireClient().callDaemonMethod("resources/list", forwardedParams),
-        this.sessionUuidFromArgs(forwardedParams),
-        releasedResultMint,
-      );
-      const resources = result?.resources ?? [];
-      // Discard a response invalidated mid-flight rather than caching the stale
-      // scope (issue #4655); the next listResources() refetches. An unbound list
-      // after a result-minted release is never cached: re-acquiring a session
-      // does not invalidate the resource cache, so it would outlive the rebind.
-      if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
-        this.cachedResources = resources;
-        this.listPoller.observe("resources", resources);
-      }
-      return resources;
-    } catch (error) {
-      logger.error(`[DaemonMcpProxy] Failed to list resources: ${error}`);
-      throw error;
-    }
+    return this.discovery.fetchResources(this.discoveryAfterResultMintRelease());
   }
 
   /**
@@ -5662,41 +5585,11 @@ export class DaemonMcpProxy {
   async listResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
     if (this.hasLivenessLifecycleFence()) {
       return this.listDuringLivenessFence(
-        () => this.fetchResourceTemplates(true),
-        () => this.cachedResourceTemplates ?? [],
+        () => this.discovery.fetchResourceTemplates(true),
+        () => this.discovery.resourceTemplates ?? [],
       );
     }
-    return this.fetchResourceTemplates(this.discoveryAfterResultMintRelease());
-  }
-
-  private async fetchResourceTemplates(
-    releasedResultMint: boolean,
-  ): Promise<ProxiedResourceTemplate[]> {
-    // Return cached templates if available
-    if (this.cachedResourceTemplates) {
-      return this.cachedResourceTemplates;
-    }
-
-    try {
-      const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = releasedResultMint ? {} : this.withBoundSessionUuid({});
-      const result = await this.connectionRecovery.withRecoverableReconnect(
-        () => this.requireClient().callDaemonMethod("resources/list-templates", forwardedParams),
-        this.sessionUuidFromArgs(forwardedParams),
-        releasedResultMint,
-      );
-      const templates = result?.resourceTemplates ?? [];
-      // Discard a response invalidated mid-flight rather than caching the stale
-      // scope (issue #4655); the next listResourceTemplates() refetches. Not
-      // cached while unbound after a result-minted release (see listResources).
-      if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
-        this.cachedResourceTemplates = templates;
-      }
-      return templates;
-    } catch (error) {
-      logger.error(`[DaemonMcpProxy] Failed to list resource templates: ${error}`);
-      throw error;
-    }
+    return this.discovery.fetchResourceTemplates(this.discoveryAfterResultMintRelease());
   }
 
   // Route a session-scoped observation read to the session named in its URI when
@@ -5832,9 +5725,7 @@ export class DaemonMcpProxy {
    * Invalidate cached definitions (call when daemon restarts)
    */
   invalidateCache(): void {
-    this.cachedTools = null;
-    this.cachedResources = null;
-    this.cachedResourceTemplates = null;
+    this.discovery.invalidateAll();
   }
 
   /**

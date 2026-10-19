@@ -11,6 +11,7 @@
     <ID>TooGenericExceptionCaught:AutoMobileSharedUtils.kt:DeviceAvailabilityChecker$e: Exception</ID>
     <ID>TooGenericExceptionCaught:BackgroundHeartbeatManager.kt:BackgroundHeartbeatManager$error: Exception</ID>
     <ID>TooGenericExceptionCaught:DaemonLauncher.kt:DaemonConnectionProvider$e: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:DaemonSocketClient.kt:DaemonSocketClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:FailureRedactingMCPClient.kt:FailureRedactingMCPClient$e: Exception</ID>
     <ID>TooGenericExceptionCaught:HeldDeviceWaitingMCPClient.kt:HeldDeviceWaitingMCPClient$error: RuntimeException</ID>
     <ID>TooGenericExceptionCaught:PlanExecutor.kt:PlanExecutor$e: Exception</ID>

@@ -247,6 +247,7 @@ internal class DaemonSocketClient(
   private val clientBuildId: String? = DaemonLocalBuild.resolveClientBuildId(),
   private val clientEntryScript: String? = DaemonLocalBuild.resolveLocalDaemonEntryScript(),
   private val livenessOwnerToken: String = DaemonLivenessOwner.token,
+  private val responseObserver: ((DaemonResponse) -> Unit)? = null,
 ) : Closeable, DaemonToolClient {
   private val json = Json { ignoreUnknownKeys = true }
   private val requests: DaemonPendingRequests
@@ -401,9 +402,12 @@ internal class DaemonSocketClient(
         }
         try {
           val response = json.decodeFromString(serializer<DaemonResponse>(), line)
+          responseObserver?.invoke(response)
           requests.handleResponse(response)
-        } catch (e: IllegalArgumentException) {
-          println("Failed to parse daemon response: ${e.message}")
+        } catch (e: Exception) {
+          // One bad frame must not end the reader and fail every pending request in the user's
+          // test.
+          println("Failed to handle daemon response: ${e.message}")
         }
       }
     } catch (e: IOException) {

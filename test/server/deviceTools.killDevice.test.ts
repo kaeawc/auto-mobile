@@ -52,7 +52,7 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { ForcedRestartBudget } from "../../src/ctrlProxy/ForcedRestartBudget";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";

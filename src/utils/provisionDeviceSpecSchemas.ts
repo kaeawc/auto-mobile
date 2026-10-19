@@ -1,8 +1,8 @@
 import { z } from "zod/v4";
 import { androidAvdConfigurationSchema } from "../models/AndroidAvdConfiguration";
-import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
-import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
-import { DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
+import { MIN_AVD_RAM_MB } from "./android-cmdline-tools/AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidSystemImageRuntime";
+import { DISPLAY_CUTOUT_PREFERENCES } from "./displayCutout";
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const CORE_SIMULATOR_IDENTIFIER_PREFIX = "com.apple.CoreSimulator.";

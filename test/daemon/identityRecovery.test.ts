@@ -27,7 +27,7 @@ import {
   test,
 } from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ActionableError } from "../../src/models";
 import type { DaemonStatus, PidFileData, DaemonSocketPaths } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";

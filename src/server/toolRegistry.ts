@@ -42,7 +42,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
-import { executionTracker } from "./executionTracker";
+import { executionTracker } from "../daemon/executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
   applyInheritedPlanRequestParams,

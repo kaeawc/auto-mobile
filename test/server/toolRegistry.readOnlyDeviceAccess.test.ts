@@ -43,7 +43,7 @@ import {
   isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import {
   getDeviceToolsDependencies,

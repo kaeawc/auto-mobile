@@ -15,7 +15,7 @@ import {
 } from "../../src/server/deviceTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -28,7 +28,7 @@ import { setDebugPerfEnabled } from "../../src/utils/PerformanceTracker";
 import {
   clearDirectSessionDevices,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,

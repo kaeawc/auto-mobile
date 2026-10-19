@@ -1,4 +1,4 @@
-import { isDeviceLossCancellationReason } from "../daemon/emulatorLossIncident";
+import { isDeviceLossCancellationReason } from "./emulatorLossIncident";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -9,8 +9,8 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "../utils/deviceLossOutcome";
-import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
-import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { DaemonRestartPendingError } from "./daemonRestartAdmission";
+import { InputDeviceOwnedError } from "./inputDeviceOwnership";
 
 const SESSIONLESS_DEVICE_ACQUIRED_REMEDY =
   "another session acquired it while this call was in flight, so the call was cancelled. " +

@@ -5,7 +5,7 @@ import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarker
 import { DevicePool } from "../../src/daemon/devicePool";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { poolHoldFor } from "../../src/server/deviceDescription";
+import { poolHoldFor } from "../../src/daemon/deviceDescription";
 import type { BootedDevice } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

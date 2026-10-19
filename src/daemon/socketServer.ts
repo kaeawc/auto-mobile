@@ -245,7 +245,7 @@ import {
   executionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../server/executionTracker";
+} from "./executionTracker";
 import { type DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
 import {

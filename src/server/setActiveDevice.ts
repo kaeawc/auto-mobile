@@ -31,16 +31,16 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "./directSessionDeviceRegistry";
+} from "../utils/directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
 import {
   deviceAssignedToOtherSessionError,
   heldDeviceBindRefusal,
 } from "../daemon/inputDeviceOwnership";
-import { executionTracker } from "./executionTracker";
+import { executionTracker } from "../daemon/executionTracker";
 import { isTypedToolRefusal } from "./shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
-import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
+import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 

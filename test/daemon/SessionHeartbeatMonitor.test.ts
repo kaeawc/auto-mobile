@@ -9,7 +9,7 @@ import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

@@ -6,7 +6,7 @@ import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { carryToolFailureMark } from "../../../utils/toolFailureSignal";
 import { stringifyToolResponse } from "../../../utils/toolUtils";
-import { unregisterDirectSession } from "../../directSessionDeviceRegistry";
+import { unregisterDirectSession } from "../../../utils/directSessionDeviceRegistry";
 import { isDeviceSessionAcquisitionTool } from "../../deviceSessionResult";
 import type { McpServerOptions } from "../../index";
 import { ToolRegistry } from "../../toolRegistry";

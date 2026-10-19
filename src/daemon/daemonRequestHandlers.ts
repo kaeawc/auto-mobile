@@ -76,7 +76,7 @@ import {
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
 import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";

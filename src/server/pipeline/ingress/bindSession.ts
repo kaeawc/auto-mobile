@@ -6,8 +6,8 @@ import {
   getActiveDeviceSelectionFromResult,
   isDeviceSessionAcquisitionTool,
 } from "../../deviceSessionResult";
-import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
-import { executionTracker, sessionExecutionMetadataOf } from "../../executionTracker";
+import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
+import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import {
   isSessionOwnedByAnotherConnection,
   namedSessionAccess,

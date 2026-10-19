@@ -2,8 +2,8 @@ import {
   commitAcquisition,
   runWithAcquisitionReceipt,
   type AcquisitionReceipt,
-} from "../daemon/acquisitionReceipt";
-import { defaultDaemonContext } from "../daemon/daemonContext";
+} from "./acquisitionReceipt";
+import { defaultDaemonContext } from "./daemonContext";
 import { ActionableError } from "../models/ActionableError";
 import { isClientCancelled, runOutsideRequestContext } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";

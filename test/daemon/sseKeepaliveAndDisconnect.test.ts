@@ -24,7 +24,7 @@ import {
 import { notifyAdbMissingDevice } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { waitForObservation, type WaitForWithSettled } from "../../src/server/observeTools";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 

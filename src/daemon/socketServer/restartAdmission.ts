@@ -1,5 +1,5 @@
 import type { DaemonStateAccess } from "../daemonRequestHandlers";
-import { executionTracker } from "../../server/executionTracker";
+import { executionTracker } from "../executionTracker";
 import { logger } from "../../utils/logger";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import type { Timer } from "../../utils/SystemTimer";

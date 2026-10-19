@@ -10,7 +10,7 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
-import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/server/executionTracker";
+import { ExecutionTracker, sessionExecutionMetadataOf } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";

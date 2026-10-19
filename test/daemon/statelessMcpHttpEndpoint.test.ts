@@ -11,7 +11,7 @@ import {
 } from "../../src/daemon/statelessMcpHttpEndpoint";
 import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
-import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
+import type { ExecutionCancellationReason } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";

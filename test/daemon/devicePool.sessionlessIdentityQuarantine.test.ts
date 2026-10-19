@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker, executionTracker } from "../../src/daemon/executionTracker";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import {

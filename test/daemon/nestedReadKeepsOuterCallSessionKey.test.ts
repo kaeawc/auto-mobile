@@ -15,7 +15,7 @@ import {
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import type { PlatformDeviceManager } from "../../src/utils/interfaces/DeviceUtils";

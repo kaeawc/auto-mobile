@@ -4,7 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import * as forwardEvidence from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";

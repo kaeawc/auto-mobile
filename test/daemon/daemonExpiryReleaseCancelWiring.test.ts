@@ -5,7 +5,7 @@ import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledE
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 

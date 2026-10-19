@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import type { StatelessMcpHttpEndpoint } from "../../src/daemon/statelessMcpHttpEndpoint";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 

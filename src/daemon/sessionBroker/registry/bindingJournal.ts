@@ -3,7 +3,7 @@ import type { DeviceInfo } from "../../../models/index";
 import {
   androidBindingSpecSchema,
   iosBindingSpecSchema,
-} from "../../../server/provisionDeviceSpecSchemas";
+} from "../../../utils/provisionDeviceSpecSchemas";
 import {
   exponentialBackoff,
   normalizeBackoff,

@@ -66,15 +66,15 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
   class Recorder extends FakeScreenshotRecorder {
     override start() {
       captures.push(phase);
-      super.start();
+      super.start("test-observation");
     }
     override async capture() {
       captures.push(phase);
-      await super.capture();
+      await super.capture("test-observation");
     }
     override async captureFresh() {
       captures.push(phase);
-      await super.captureFresh();
+      await super.captureFresh("test-observation");
     }
     override async captureSettled(observationId: string) {
       captures.push(phase);
@@ -271,7 +271,10 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
           createSettleObserve: () => settle,
           args: name === "sendKeys" ? { commands: [{ action: "key", key: "enter" }] } : {},
         });
-        return getStructuredField<ObserveResult>(response, "observation");
+        return getStructuredField<{ observation?: ObserveResult }, "observation">(
+          response,
+          "observation",
+        );
       });
     },
   };
@@ -401,7 +404,6 @@ describe("BaseVisualChange previous observation with real ObserveScreen", () => 
     const result = await h.run("swipeOn", false, {
       direction: "up",
       lookFor: { text: "Revealed Item" },
-      maxScrolls: 2,
     });
     expect(h.captures).toEqual(["terminal"]);
     expect(result?.screenshotPath).toBe("/fake/settled.png");

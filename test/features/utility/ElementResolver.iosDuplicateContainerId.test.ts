@@ -48,7 +48,7 @@ describe("iOS container captured twice with one id (#10266)", () => {
       { elementId: "item_42", container: { elementId: "cart_A" } },
       { strategy: "unique" },
     );
-    expect(result.error).toBeUndefined();
+    expect(result.element).not.toBeNull();
     expect(result.element?.["resource-id"]).toBe("remove");
     expect(result.element?.bounds).toEqual({ left: 304, top: 343, right: 389, bottom: 378 });
   });
@@ -59,7 +59,7 @@ describe("iOS container captured twice with one id (#10266)", () => {
       { elementId: "item_42", container: { elementId: "cart_B" } },
       { strategy: "unique", intentAction: "focus-input" },
     );
-    expect(result.error).toBeUndefined();
+    expect(result.element).not.toBeNull();
     expect(result.element?.["resource-id"]).toBe("quantity");
     expect(result.element?.bounds).toEqual({ left: 12, top: 589, right: 296, bottom: 624 });
   });

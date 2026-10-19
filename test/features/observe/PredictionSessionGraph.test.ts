@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -31,10 +32,20 @@ const SESSION_A_DEVICE: NavigationDeviceRef = { deviceId: "emulator-5554", platf
 const SESSION_B_DEVICE: NavigationDeviceRef = { deviceId: "emulator-5556", platform: "android" };
 const UNBOUND_DEVICE: NavigationDeviceRef = { deviceId: "emulator-5558", platform: "android" };
 
-const observation: ObserveResult = { updatedAt: 1, viewHierarchy: { hierarchy: {} } };
+const observation: ObserveResult = buildObserveResult({
+  updatedAt: 1,
+  screenSize: { width: 1080, height: 2400 },
+  systemInsets: { top: 0, left: 0, right: 0, bottom: 0 },
+  viewHierarchy: { hierarchy: {} },
+});
 
 function interactable(text: string): Element {
-  return { text, "resource-id": text.toLowerCase(), clickable: true };
+  return {
+    text,
+    "resource-id": text.toLowerCase(),
+    clickable: true,
+    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+  };
 }
 
 describe("prediction reads follow the device's bound session graph (#10197)", () => {
@@ -79,12 +90,12 @@ describe("prediction reads follow the device's bound session graph (#10197)", ()
   }
 
   function predictiveState(buttonText: string): PredictiveUIState {
-    const state = new PredictiveUIState(resolver);
-    state["historyRepository"] = new PredictionHistoryRepository(harness.db);
     const parser = new FakeElementParser();
     parser.nextFlattenedElements = [{ element: interactable(buttonText), index: 0, depth: 0 }];
-    state["elementParser"] = parser;
-    return state;
+    return new PredictiveUIState(resolver, {
+      historyRepository: new PredictionHistoryRepository(harness.db),
+      elementParser: parser,
+    });
   }
 
   const predictedScreens = (state: PredictiveUIState, device?: NavigationDeviceRef) =>
@@ -239,7 +250,7 @@ describe("prediction outcomes are recorded on the graph that produced the predic
     // The global manager never learned any screen, as in a session-bound client.
     expect(harness.manager.getCurrentScreen()).toBeNull();
     const analyzer = new PredictionAnalyzer(history);
-    const previous: ObserveResult = {
+    const previous: ObserveResult = buildObserveResult({
       ...observation,
       predictions: {
         likelyActions: [
@@ -253,7 +264,7 @@ describe("prediction outcomes are recorded on the graph that produced the predic
         ],
         interactableElements: [],
       },
-    };
+    });
 
     await analyzer.recordOutcomeForAction(previous, observation, context!);
 

@@ -184,6 +184,7 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
     const controller = new AbortController();
     const seen: TapCoordinatesRequest[] = [];
     const client: IosCoordinateTapClient = {
+      requestDoubleTapCoordinates: async () => ({ success: true }),
       requestTapCoordinates: async (...args) => {
         seen.push(args[0]);
         return { success: true };
@@ -404,7 +405,7 @@ describe("tapAt on iOS (#9971)", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult({
       ...observation(100, 200, "epoch:1"),
-      display: { key: "0", role: "unknown", generation: 0 },
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     });
     const unusedAndroid = { requestTapCoordinates: async () => ({ success: true }) };
     const tapAt = new TapAtCoordinate(IOS_DEVICE, new FakeAdbExecutor(), {

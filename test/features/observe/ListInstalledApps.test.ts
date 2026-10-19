@@ -94,7 +94,7 @@ describe("ListInstalledApps", function () {
       const originalListUsers = fakeAdb.listUsers.bind(fakeAdb);
       fakeAdb.listUsers = async (signal?: AbortSignal) => {
         listUsersSignal = signal;
-        return originalListUsers(signal);
+        return originalListUsers();
       };
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult("", ""));

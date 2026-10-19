@@ -96,10 +96,7 @@ export function harness({
     requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
   });
   ctrl.setSupportedCommands(route === "ctrlproxy" ? ["gesture_display_id_v1"] : []);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    // @ts-expect-error -- Fake supplies the client methods exercised by this harness.
-    ctrl,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
   const observe = new FakeObserveScreen();
   const detector = new FakeAccessibilityDetector();
   const talkback = spyOn(TalkBackSwipeExecutor.prototype, "executeSwipeGesture");

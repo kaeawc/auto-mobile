@@ -126,7 +126,7 @@ describe("DeviceServiceClient shared methods", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     try {
       client.bindSession("shared-methods-session-a");

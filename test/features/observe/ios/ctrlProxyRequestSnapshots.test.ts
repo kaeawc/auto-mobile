@@ -152,7 +152,9 @@ async function withClient(
     h.context.timer,
   );
   const context = spyOn(client, "createDelegateContext").mockReturnValue(h.context);
-  const gate = spyOn(client, "sdkCapabilityGate").mockResolvedValue(null);
+  const gate = spyOn(client.getSdkCapabilityTestHooks(), "sdkCapabilityGate").mockResolvedValue(
+    null,
+  );
   const send = spyOn(client, "sendMessage").mockImplementation((data) => {
     h.sent.push(data);
     return true;
@@ -170,7 +172,8 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "get_sdk_capabilities",
     builder: "IOSCtrlProxyClient.requestSdkCapabilities",
-    invoke: (h) => withClient(h, (client) => client["requestSdkCapabilities"](-1)),
+    invoke: (h) =>
+      withClient(h, (client) => client.getSdkCapabilityTestHooks().requestSdkCapabilities(-1)),
   },
   {
     name: "request_activate_accessibility_link",
@@ -288,7 +291,14 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_pinch",
     builder: "SharedGestureDelegate.requestPinch (via CtrlProxyGestures)",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestPinch(160.5, 320.25, 80.5, 200.75, 45.5, 275),
+      new CtrlProxyGestures(h.context).requestPinch({
+        centerX: 160.5,
+        centerY: 320.25,
+        distanceStart: 80.5,
+        distanceEnd: 200.75,
+        rotationDegrees: 45.5,
+        duration: 275,
+      }),
   },
   {
     name: "request_path_gesture",
@@ -833,7 +843,15 @@ describe("iOS integer millisecond request boundary", () => {
       {
         name: "pinch",
         builder: "pinch",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestPinch(1, 2, 3, 4, 0.5, 250.5),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestPinch({
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0.5,
+            duration: 250.5,
+          }),
       },
       {
         name: "multi",

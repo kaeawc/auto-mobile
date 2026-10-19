@@ -75,9 +75,11 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
       8765,
       (url) => new FakeWebSocket(url, "none", 0, fakeTimer),
       fakeTimer,
-      undefined,
-      undefined,
-      notifier,
+      {
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: notifier,
+      },
     );
 
     // Establish a real (fake) socket so close() has a live socket to tear down.
@@ -109,9 +111,11 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
         return socket;
       },
       fakeTimer,
-      undefined,
-      undefined,
-      notifier,
+      {
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: notifier,
+      },
     );
 
     const connected = await client.ensureConnected();

@@ -123,7 +123,20 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       name: "pinch",
       setResult: (proxy, result) => proxy.setPinchResult(result),
       send: (proxy, onDispatch) =>
-        proxy.requestPinch(1, 2, 3, 4, 0, 300, 5000, undefined, undefined, onDispatch),
+        proxy.requestPinch(
+          {
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0,
+            duration: 300,
+            timeoutMs: 5000,
+            perf: undefined,
+            signal: undefined,
+          },
+          onDispatch,
+        ),
     },
   ];
 
@@ -247,9 +260,22 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       let dispatches = 0;
 
       await expect(
-        proxy.requestPinch(1, 2, 10, 20, 0, 300, 5000, undefined, aborted(), () => {
-          dispatches++;
-        }),
+        proxy.requestPinch(
+          {
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 10,
+            distanceEnd: 20,
+            rotationDegrees: 0,
+            duration: 300,
+            timeoutMs: 5000,
+            perf: undefined,
+            signal: aborted(),
+          },
+          () => {
+            dispatches++;
+          },
+        ),
       ).rejects.toBe(reason);
 
       expect(dispatches).toBe(0);

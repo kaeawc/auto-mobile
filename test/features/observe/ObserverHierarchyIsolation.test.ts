@@ -850,12 +850,14 @@ test.each(["android", "ios"] as const)(
             8765,
             createInstantFailureWebSocketFactory(timer),
             timer,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            true,
+            {
+              serviceManagerFactory: undefined,
+              bootedDeviceLister: undefined,
+              deviceConnectionLostNotifier: undefined,
+              sdkEventIngestor: undefined,
+              retryExecutor: undefined,
+              options: true,
+            },
           );
     const clientClass = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
     const originalFactory = Reflect.get(clientClass, "createForObservationRead");
@@ -1127,18 +1129,14 @@ test("unowned physical iOS screenshot uses and closes a real transient client", 
   Reflect.set(daemon, "sessionManager", {});
   Reflect.set(daemon, "devicePool", { getDevice: () => ({ sessionId: undefined }) });
   Reflect.set(daemon, "deviceSessionRegistry", {});
-  const client = IOSCtrlProxyClient.createForTesting(
-    device,
-    8765,
-    sockets.factory,
-    timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
-  );
+  const client = IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer, {
+    serviceManagerFactory: undefined,
+    bootedDeviceLister: undefined,
+    deviceConnectionLostNotifier: undefined,
+    sdkEventIngestor: undefined,
+    retryExecutor: undefined,
+    options: true,
+  });
   const originalFactory = IOSCtrlProxyClient.createForObservationRead;
   IOSCtrlProxyClient.createForObservationRead = () => client;
   const close = spyOn(client, "close");

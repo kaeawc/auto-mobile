@@ -274,10 +274,12 @@ async function pinch(scenario: Scenario): Promise<Outcome> {
     });
     return {
       ...result,
-      gestures: dispatch.mock.calls.map(([x, y]: Parameters<typeof client.requestPinch>) => ({
-        x,
-        y,
-      })),
+      gestures: dispatch.mock.calls.map(
+        ([{ centerX: x, centerY: y }]: Parameters<typeof client.requestPinch>) => ({
+          x,
+          y,
+        }),
+      ),
     };
   } finally {
     dispatch.mockRestore();

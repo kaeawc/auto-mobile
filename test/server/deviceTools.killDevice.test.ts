@@ -3746,13 +3746,15 @@ describe("killDevice handler", () => {
         return new FakeWebSocket(url, "none", 0, timer);
       },
       timer,
-      () =>
-        ({
-          getForcedRestartBudget: () => restartBudget,
-          forceRestart: async () => {
-            restarts++;
-          },
-        }) as never,
+      {
+        serviceManagerFactory: () =>
+          ({
+            getForcedRestartBudget: () => restartBudget,
+            forceRestart: async () => {
+              restarts++;
+            },
+          }) as never,
+      },
     );
     IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({

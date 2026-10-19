@@ -71,12 +71,14 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         8765,
         createSuccessWebSocketFactory(timer),
         timer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { messageEffects: effects },
+        {
+          serviceManagerFactory: undefined,
+          bootedDeviceLister: undefined,
+          deviceConnectionLostNotifier: undefined,
+          sdkEventIngestor: undefined,
+          retryExecutor: undefined,
+          options: { messageEffects: effects },
+        },
       );
       void client.connectionTestHooks.deliverMessage(
         JSON.stringify({

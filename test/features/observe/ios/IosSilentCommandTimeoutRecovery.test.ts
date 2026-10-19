@@ -41,7 +41,7 @@ describe("IOSCtrlProxyClient silent command timeout recovery (#11247)", () => {
       8765,
       createSuccessWebSocketFactory(timer, pongMode),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     expect(await client.ensureConnected()).toBe(true);
     // Commands follow the handshake; the handshake itself is the last proof of life.

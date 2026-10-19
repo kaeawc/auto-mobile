@@ -155,13 +155,9 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
   test("retains metadata when the observation-stream push is suppressed", async () => {
     await startStreamServer();
     const requestId = "req-suppressed-1";
-    const client = ctrlProxyClient as unknown as {
-      hierarchyObservationStreamSuppressions: Map<string, unknown>;
-    };
-    client.hierarchyObservationStreamSuppressions.set(
-      requestId,
-      fakeTimer.setTimeout(() => {}, 10_000),
-    );
+    ctrlProxyClient
+      .getObservationStreamTestHooks()
+      .suppressHierarchyObservationStreamPush(requestId, 10_000);
 
     receiveHierarchy(
       {
@@ -175,7 +171,9 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       requestId,
     );
 
-    expect(client.hierarchyObservationStreamSuppressions.has(requestId)).toBe(false);
+    expect(ctrlProxyClient.getObservationStreamTestHooks().suppressedRequestIds()).not.toContain(
+      requestId,
+    );
     expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual({
       nativeScale: 3.144,
       pixelWidth: 1179,

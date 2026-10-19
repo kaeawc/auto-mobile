@@ -86,7 +86,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      serviceManagerFactory,
+      { serviceManagerFactory: serviceManagerFactory },
     );
 
     // Trigger 5 connection failures
@@ -116,7 +116,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       (url) => defaultWebSocketFactory(url),
       fakeTimer,
-      () => fakeManager,
+      { serviceManagerFactory: () => fakeManager },
     );
 
     for (let i = 0; i < 4; i++) {
@@ -146,7 +146,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       (url) => (++dials === 1 ? failOnce(url) : defaultWebSocketFactory(url)),
       fakeTimer,
-      () => fakeManager,
+      { serviceManagerFactory: () => fakeManager },
     );
 
     await expect(client.ensureConnected()).rejects.toBeInstanceOf(
@@ -167,7 +167,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      serviceManagerFactory,
+      { serviceManagerFactory: serviceManagerFactory },
     );
 
     // Trigger the first restart at failure #3.
@@ -210,7 +210,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       (url) => (reconnectWorks ? succeeds(url) : failed(url)),
       fakeTimer,
-      () => fakeManager,
+      { serviceManagerFactory: () => fakeManager },
     );
     for (const [attempt, delay] of [0, 30_000, 60_000].entries()) {
       fakeTimer.advanceTime(delay);
@@ -246,7 +246,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       (url) => (reconnectWorks ? succeeds(url) : failed(url)),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(20_000)).toBe("failed");
@@ -275,7 +275,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     for (const [attempt, delay] of [0, 30_000, 60_000].entries()) {
       timer.advanceTime(delay);
@@ -306,7 +306,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(20_000)).toBe("failed");
@@ -326,7 +326,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     client.ensureRecoveryStarted();
     for (let i = 0; i < 8; i++) {
@@ -361,7 +361,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     client.ensureRecoveryStarted();
     for (let i = 0; i < 8; i++) {
@@ -371,7 +371,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     const waiting = client.awaitRecovery(20_000);
     expect(await client.ensureConnected()).toBe(true);
     await timer.advanceTimeAsync(2000);
-    expect((client as any).pendingRestartToken).toBeDefined();
+    expect(client.getRunnerRecoveryTestHooks().diagnostics().pendingRestartToken).toBeDefined();
     sockets[0]!.terminate();
     await new Promise<void>((resolve) => setImmediate(resolve));
     releaseRestart!();
@@ -410,7 +410,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     client.ensureRecoveryStarted();
     for (let i = 0; i < 8; i++) {
@@ -443,7 +443,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return socket;
       },
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     let reads = 0;
     const hierarchySpy = spyOn(client, "getLatestHierarchy").mockImplementation(async () => {
@@ -475,26 +475,27 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      () => createFakeManager(timer),
-      () =>
-        new Promise<BootedDevice[]>((resolve) => {
-          releases.push(() => resolve([]));
-        }),
+      {
+        serviceManagerFactory: () => createFakeManager(timer),
+        bootedDeviceLister: () =>
+          new Promise<BootedDevice[]>((resolve) => {
+            releases.push(() => resolve([]));
+          }),
+      },
     );
     const internals = client as any;
     client.ensureRecoveryStarted();
     const first = internals.recoveryPromise;
     expect(releases).toHaveLength(1);
     // Model replacement before the first boot probe's completion settles.
-    internals.isRequestingServiceRestart = false;
-    internals.recoveryPromise = null;
+    client.getRunnerRecoveryTestHooks().resetInFlightForTesting();
     client.ensureRecoveryStarted();
     const second = internals.recoveryPromise;
     expect(releases).toHaveLength(2);
     releases[0]!();
     await first;
     expect(internals.recoveryPromise).toBe(second);
-    expect(internals.isRequestingServiceRestart).toBe(true);
+    expect(client.getRunnerRecoveryTestHooks().diagnostics().isRequestingServiceRestart).toBe(true);
     releases[1]!();
     await second;
   });
@@ -517,7 +518,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return failingFactory(url);
       },
       fakeTimer,
-      () => fakeManager,
+      { serviceManagerFactory: () => fakeManager },
     );
 
     expect(await client.ensureConnected()).toBe(true);
@@ -552,15 +553,17 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       (url) => (reconnectWorks ? succeeds(url) : failed(url)),
       timer,
-      () => manager,
-      () => {
-        if (!holdNextBootCheck) {
-          return Promise.resolve([testDevice]);
-        }
-        holdNextBootCheck = false;
-        return new Promise<BootedDevice[]>((resolve) => {
-          releaseBootCheck = () => resolve([testDevice]);
-        });
+      {
+        serviceManagerFactory: () => manager,
+        bootedDeviceLister: () => {
+          if (!holdNextBootCheck) {
+            return Promise.resolve([testDevice]);
+          }
+          holdNextBootCheck = false;
+          return new Promise<BootedDevice[]>((resolve) => {
+            releaseBootCheck = () => resolve([testDevice]);
+          });
+        },
       },
     );
     // Failed dials against the retired port queue a restart whose boot check
@@ -598,11 +601,13 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         return socket;
       },
       timer,
-      () => manager,
-      () =>
-        new Promise<BootedDevice[]>((resolve) => {
-          releases.push(() => resolve([testDevice]));
-        }),
+      {
+        serviceManagerFactory: () => manager,
+        bootedDeviceLister: () =>
+          new Promise<BootedDevice[]>((resolve) => {
+            releases.push(() => resolve([testDevice]));
+          }),
+      },
     );
     expect(await client.ensureConnected()).toBe(true);
     client.ensureRecoveryStarted();
@@ -624,7 +629,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       createSuccessWebSocketFactory(timer),
       timer,
-      () => manager,
+      { serviceManagerFactory: () => manager },
     );
     expect(await client.ensureConnected()).toBe(true);
     client.ensureRecoveryStarted();
@@ -644,7 +649,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      serviceManagerFactory,
+      { serviceManagerFactory: serviceManagerFactory },
     );
 
     // Only 2 failures — below threshold of 3
@@ -690,7 +695,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        (_device: BootedDevice) => manager,
+        { serviceManagerFactory: (_device: BootedDevice) => manager },
       );
 
       await driveFailuresPastThreshold(client, fakeTimer);
@@ -713,7 +718,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        (_device: BootedDevice) => manager,
+        { serviceManagerFactory: (_device: BootedDevice) => manager },
       );
 
       await driveFailuresPastThreshold(client, fakeTimer);
@@ -746,7 +751,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        () => manager,
+        { serviceManagerFactory: () => manager },
       );
 
       for (const delay of [0, 30_000, 60_000]) {
@@ -781,14 +786,14 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        factory,
+        { serviceManagerFactory: factory },
       );
       const second = IOSCtrlProxyClient.createForTesting(
         testDevice,
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        factory,
+        { serviceManagerFactory: factory },
       );
       try {
         await driveFailuresPastThreshold(client, fakeTimer);
@@ -812,8 +817,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        () => manager,
-        () => bootedDeviceLister(),
+        { serviceManagerFactory: () => manager, bootedDeviceLister: () => bootedDeviceLister() },
       );
       await driveFailuresPastThreshold(client, fakeTimer);
       expect(manager.getCallCount("forceRestart")).toBe(0);
@@ -833,9 +837,11 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        () => manager,
-        async () => {
-          throw new Error("simctl unavailable");
+        {
+          serviceManagerFactory: () => manager,
+          bootedDeviceLister: async () => {
+            throw new Error("simctl unavailable");
+          },
         },
       );
       client.ensureRecoveryStarted();
@@ -859,8 +865,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        () => manager,
-        () => discovery,
+        { serviceManagerFactory: () => manager, bootedDeviceLister: () => discovery },
       );
       expect(await client.awaitRecovery(20_000)).toBe("not_recovering");
       client.ensureRecoveryStarted();
@@ -882,7 +887,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createSuccessWebSocketFactory(fakeTimer),
         fakeTimer,
-        () => manager,
+        { serviceManagerFactory: () => manager },
       );
       expect(await client.ensureConnected()).toBe(true);
       expect(manager.getForcedRestartBudget().snapshot().state).toBe("suspended");
@@ -901,7 +906,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        (_device: BootedDevice) => manager,
+        { serviceManagerFactory: (_device: BootedDevice) => manager },
       );
 
       await driveFailuresPastThreshold(client, fakeTimer);
@@ -926,7 +931,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer,
-        (_device: BootedDevice) => manager,
+        { serviceManagerFactory: (_device: BootedDevice) => manager },
       );
 
       await driveFailuresPastThreshold(client, fakeTimer);

@@ -176,19 +176,19 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     displayId?: number,
     beforeSend?: () => void,
   ): Promise<A11yPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
-      signal,
-      displayId,
-      beforeSend,
-    );
+    return this.gestures.requestPinch({
+      centerX: centerX,
+      centerY: centerY,
+      distanceStart: distanceStart,
+      distanceEnd: distanceEnd,
+      rotationDegrees: rotationDegrees,
+      duration: duration,
+      timeoutMs: timeoutMs,
+      perf: perf,
+      signal: signal,
+      displayId: displayId,
+      beforeSend: beforeSend,
+    });
   }
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,

@@ -185,7 +185,18 @@ const methods: Method[] = [
   {
     name: "pinch",
     signal: true,
-    invoke: (h, signal) => h.client["gestures"].requestPinch(1, 2, 3, 4, 0, 20, 50, perf, signal),
+    invoke: (h, signal) =>
+      h.client["gestures"].requestPinch({
+        centerX: 1,
+        centerY: 2,
+        distanceStart: 3,
+        distanceEnd: 4,
+        rotationDegrees: 0,
+        duration: 20,
+        timeoutMs: 50,
+        perf: perf,
+        signal: signal,
+      }),
   },
   {
     name: "two finger swipe",

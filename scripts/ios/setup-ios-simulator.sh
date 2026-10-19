@@ -197,8 +197,9 @@ get_available_ios_versions() {
 # a function name in a condition.
 RUN_STATUS=0
 run_capture_status() {
-    RUN_STATUS=0
-    "$@" || RUN_STATUS=$?
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
 }
 
 # shellcheck disable=SC2329,SC2317 # invoked through run_capture_status

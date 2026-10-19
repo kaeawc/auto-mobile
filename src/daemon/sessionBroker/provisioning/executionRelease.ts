@@ -58,7 +58,7 @@ import {
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
 } from "../registry/registryRetryPacing";
-import { DefaultRetryExecutor, type RetryExecutor } from "../../../utils/retry/RetryExecutor";
+import { DefaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import type { Timer } from "../../../utils/SystemTimer";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../models/managedExecutionLiveness";
 import {
@@ -71,12 +71,13 @@ import {
   defaultBindingExecOwnerLiveness,
   inFlightBindingReservations,
 } from "../registry/ownerLiveness";
+import { BindingOwnerClearer } from "./bindingOwnerClearer";
+import { RegistryStepRetrier } from "./registryStepRetrier";
 import type { BindingJournalInFlight } from "../registry/bindingJournal";
 import { journalOwnersEqual } from "../registry/bindingRegistry";
 import type {
   BindingAssignmentRecord,
   BindingAssignmentState,
-  BindingExecOwner,
   BindingExecOwnerLiveness,
   BindingKey,
   BindingPlatform,
@@ -305,15 +306,13 @@ export class BrokerExecutionRelease {
   private readonly closing = new AbortController();
   private settler: BindingProcessIdentity | undefined;
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
-  private readonly registryRetryBackoff: BackoffPolicy;
-  private readonly registryRetry: RetryExecutor;
+  private readonly retrier: RegistryStepRetrier;
+  private readonly ownerClearer: BindingOwnerClearer;
   private readonly recoveryPacing: RegistryRetryPacing;
   private recovery: Promise<BindingAssignmentRecord[]> | undefined;
   private readonly ownerHolds: ManagedExecutionOwnerHolds;
   /** Holders per session id, so one drain's release never drops another's hold. */
   private readonly ownerHoldCounts = new Map<string, number>();
-  /** Failed owner clears being retried, one per binding and session ({@link retryOwnerClear}). */
-  private readonly ownerClearRetries = new Set<string>();
 
   constructor(private readonly options: BrokerExecutionReleaseOptions) {
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
@@ -323,9 +322,6 @@ export class BrokerExecutionRelease {
     this.settlementCapMs = options.settlementCapMs ?? MANAGED_EXECUTION_SETTLEMENT_CAP_MS;
     this.settlementSlowPollMs =
       options.settlementSlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS;
-    this.registryRetryBackoff =
-      options.registryRetryBackoff ?? MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF;
-    this.registryRetry = new DefaultRetryExecutor(options.timer);
     this.recoveryPacing = new RegistryRetryPacing({
       timer: options.timer,
       initialDelayMs: MANAGED_SETTLED_BINDING_RECOVERY_RETRY_INITIAL_DELAY_MS,
@@ -333,6 +329,30 @@ export class BrokerExecutionRelease {
       maxBlockedWaitMs: MANAGED_SETTLED_BINDING_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
     });
     this.ownerHolds = options.ownerHolds ?? inFlightBindingReservations;
+    this.retrier = new RegistryStepRetrier({
+      timer: options.timer,
+      registryRetry: new DefaultRetryExecutor(options.timer),
+      recoveryPacing: this.recoveryPacing,
+      backoff: options.registryRetryBackoff ?? MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
+      closing: this.closing.signal,
+      isClosed: () => this.closed,
+      warn: (message, error) => this.warn(message, error),
+      settlementCapMs: this.settlementCapMs,
+      settlementSlowPollMs: this.settlementSlowPollMs,
+      recoveryTurnBudgetMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+      recoveryWarnAfterMs: MANAGED_SETTLED_BINDING_RECOVERY_WARN_AFTER_MS,
+    });
+    this.ownerClearer = new BindingOwnerClearer({
+      timer: options.timer,
+      retrier: this.retrier,
+      isExecOwnerLive: this.isExecOwnerLive,
+      isSessionLive: (sessionId) => this.options.sessions.isSessionLive(sessionId),
+      isClosed: () => this.closed,
+      warn: (message, error) => this.warn(message, error),
+      track: (task) => this.track(task),
+      settlementCapMs: this.settlementCapMs,
+      settlementPollMs: this.settlementPollMs,
+    });
   }
 
   /**
@@ -399,7 +419,7 @@ export class BrokerExecutionRelease {
   }
 
   private async recoverSettledBindingsUntilReady(): Promise<BindingAssignmentRecord[]> {
-    const result = await this.retryRegistryStep(
+    const result = await this.retrier.run(
       "Recovering settled bindings",
       Infinity,
       async () => {
@@ -624,7 +644,7 @@ export class BrokerExecutionRelease {
       // or a second daemon), which this daemon reads as live for as long as that process runs.
       // Only a record this daemon wrote is dead by its ended session (#11339), and which one it
       // is cannot be known without the lookup. Settled work needs no hold meanwhile.
-      const found = await this.retryRegistryStep(
+      const found = await this.retrier.run(
         `Finding the bindings of released session ${sessionId}`,
         this.options.timer.now() + this.settlementCapMs,
         async () => {
@@ -898,7 +918,7 @@ export class BrokerExecutionRelease {
     const marks: SettlingMarks = { ...first, marked: [], owed: [...owed] };
     const settled = (): boolean => this.isSettled(sessionId, deviceId);
     try {
-      await this.retryRegistryStep(
+      await this.retrier.run(
         `Marking the bindings of released session ${sessionId} settling`,
         this.options.timer.now() + this.settlementCapMs,
         async () => {
@@ -1002,7 +1022,7 @@ export class BrokerExecutionRelease {
    * fence comes first. A clear that throws leaves a record that is dead by liveness once the
    * drain's hold ends, which pins nothing in this daemon (#11339). It still names this running
    * process, which every other daemon on the host reads as live, so the clear is retried until it
-   * lands ({@link retryOwnerClear}, #11545).
+   * lands ({@link BindingOwnerClearer.retry}, #11545).
    */
   private async releaseOwnership(
     registry: ManagedExecutionBindingRegistry,
@@ -1021,7 +1041,7 @@ export class BrokerExecutionRelease {
     return results.flatMap((result, index) => {
       if (result.status === "rejected") {
         failures.push({ ...bindingKeyOf(held[index]), error: errorMessage(result.reason) });
-        this.track(this.retryOwnerClear(registry, bindingKeyOf(held[index]), sessionId));
+        this.track(this.ownerClearer.retry(registry, bindingKeyOf(held[index]), sessionId));
         return [toEvidence(held[index], false)];
       }
       const current = result.value.assignment ?? held[index];
@@ -1127,7 +1147,7 @@ export class BrokerExecutionRelease {
     binding: MarkedBinding,
     deadline: number,
   ): Promise<"done" | "owner_live"> {
-    const restored = await this.retryRegistryStep(
+    const restored = await this.retrier.run(
       `Returning settled binding ${binding.key.scopeKey}/${binding.key.bindingIndex} to ready`,
       deadline,
       () => this.restoreReadyOnce(registry, binding),
@@ -1151,7 +1171,7 @@ export class BrokerExecutionRelease {
       await this.closeSupersededEntry(registry, binding, current);
       return "done";
     }
-    if (!(await this.clearLeftoverOwner(registry, binding, current.execOwner))) {
+    if (!(await this.ownerClearer.clearLeftover(registry, binding.key, current.execOwner))) {
       // Still this watcher's to settle: the entry stays open and guarded in flight.
       return "owner_live";
     }
@@ -1162,253 +1182,6 @@ export class BrokerExecutionRelease {
           `could not return to ready: ${updated.kind}`,
       );
     }
-    return "done";
-  }
-
-  /**
-   * Run one registry step of the drain, retrying while it throws (#11616). Retries follow the
-   * injected backoff until `deadline` (the settlement cap) and the slow re-check cadence after
-   * it, so a busy registry is never hammered and the step still lands whenever the registry
-   * recovers. It stops, without a further registry call, when this daemon closes or when
-   * `stopWhen` says the step is no longer needed; `done: false` then tells the caller the step
-   * did NOT happen, so it must not go on as if it had.
-   */
-  private async retryRegistryStep<T>(
-    what: string,
-    deadline: number,
-    step: () => Promise<T>,
-    stopWhen?: () => boolean,
-    schedule?: { fastRecovery: true },
-  ): Promise<{ done: true; value: T } | { done: false }> {
-    if (schedule?.fastRecovery) {
-      return this.retryRecoveryStep(what, step);
-    }
-    const { timer } = this.options;
-    let warnedPastCap = false;
-    const result = await this.registryRetry.execute(step, {
-      maxAttempts: Number.MAX_SAFE_INTEGER,
-      signal: this.closing.signal,
-      shouldRetry: () => !(stopWhen?.() ?? false),
-      delays: (attempt) =>
-        timer.now() >= deadline
-          ? this.settlementSlowPollMs
-          : this.registryRetryBackoff.delayForAttempt(attempt),
-      onRetry: (error, attempt, delayMs) => {
-        if (attempt === 1) {
-          this.warn(
-            `[BrokerExecutionRelease] ${what} failed; retrying in ${delayMs}ms: ${error.message}`,
-            error,
-          );
-        }
-        if (timer.now() >= deadline && !warnedPastCap) {
-          warnedPastCap = true;
-          this.warn(
-            `[BrokerExecutionRelease] ${what} has kept failing past the ` +
-              `${this.settlementCapMs}ms settlement cap; it is retried every ` +
-              `${this.settlementSlowPollMs}ms until the registry recovers. ` +
-              "a daemon restart (its settled-binding recovery) also recovers the binding: " +
-              error.message,
-            error,
-          );
-        }
-      },
-      expectedFailure: { reason: "the drain reports why it stopped retrying a registry step" },
-    });
-    if (result.success) {
-      return { done: true, value: result.value as T };
-    }
-    if (!this.closed) {
-      this.warn(
-        `[BrokerExecutionRelease] ${what} failed and is no longer needed, so it is not ` +
-          `retried: ${errorMessage(result.error)}`,
-        result.error,
-      );
-    }
-    return { done: false };
-  }
-
-  /** Startup recovery bounds each shared turn, retaining late reads; drain defaults stay unchanged. */
-  private async retryRecoveryStep<T>(
-    what: string,
-    step: () => Promise<T>,
-  ): Promise<{ done: true; value: T } | { done: false }> {
-    const sinceMs = this.options.timer.now();
-    let attempts = 0;
-    let warned = false;
-    let pending: Promise<T> | undefined;
-    while (!this.closed) {
-      attempts++;
-      try {
-        const value = await this.recoveryPacing.run(
-          async () => {
-            let timedOut = false;
-            try {
-              return await raceWithDeadline(
-                () => {
-                  pending ??= step();
-                  return pending;
-                },
-                {
-                  timer: this.options.timer,
-                  timeoutMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
-                  signal: this.closing.signal,
-                  label: what,
-                  onTimeout: () => {
-                    timedOut = true;
-                  },
-                },
-              );
-            } finally {
-              // A timed-out read may already have landed; consume it on the next shared turn.
-              if (!timedOut) {
-                pending = undefined;
-              }
-            }
-          },
-          () => true,
-        );
-        if (this.closed) {
-          return { done: false };
-        }
-        if (attempts > 1) {
-          logger.info(
-            `[BrokerExecutionRelease] ${what} resolved after ${this.options.timer.now() - sinceMs} ms (${attempts} attempts)`,
-          );
-        }
-        return { done: true, value };
-      } catch (error) {
-        // Contention leaves recovery owed; shutdown safely leaves it to the next daemon.
-        if (this.closed) {
-          return { done: false };
-        }
-        logger.debug(`[BrokerExecutionRelease] ${what} failed: ${errorMessage(error)}`, error);
-        if (
-          !warned &&
-          this.options.timer.now() - sinceMs > MANAGED_SETTLED_BINDING_RECOVERY_WARN_AFTER_MS
-        ) {
-          warned = true;
-          this.warn(
-            `[BrokerExecutionRelease] ${what} still failing after ${this.options.timer.now() - sinceMs} ms (${attempts} attempts): ${errorMessage(error)}`,
-            error,
-          );
-        }
-      }
-      try {
-        await this.recoveryPacing.wait(this.recoveryPacing.delay(attempts));
-      } catch (error) {
-        // Closing cancels the wait; the next daemon owns startup recovery.
-        if (!this.closed) {
-          logger.debug(
-            `[BrokerExecutionRelease] Recovery retry wait cancelled: ${errorMessage(error)}`,
-            error,
-          );
-        }
-        return { done: false };
-      }
-    }
-    return { done: false };
-  }
-
-  /**
-   * The owner record still on a settled binding at its marked binding (#11545). A `settling` binding
-   * accepts no claim, so the record predates the mark: it is the released session's own, left by
-   * an owner clear that failed (a busy registry). Dead by liveness, the clear is retried and the
-   * binding may return to `ready` either way, where a dead record pins nothing (#11339). A live owner
-   * is never cleared. Resolves to whether the binding may be restored.
-   */
-  private async clearLeftoverOwner(
-    registry: ManagedExecutionBindingRegistry,
-    binding: MarkedBinding,
-    owner: BindingExecOwner | null,
-  ): Promise<boolean> {
-    if (owner === null) {
-      return true;
-    }
-    if (this.isExecOwnerLive(owner)) {
-      return false;
-    }
-    try {
-      await registry.releaseExecution(binding.key, owner.sessionUuid);
-    } catch (error) {
-      this.warn(
-        `[BrokerExecutionRelease] Retrying the owner clear of binding ${binding.key.scopeKey}/` +
-          `${binding.key.bindingIndex} for ended session ${owner.sessionUuid} failed; the binding still ` +
-          `returns to ready and the clear is retried: ${errorMessage(error)}`,
-        error,
-      );
-      this.track(this.retryOwnerClear(registry, binding.key, owner.sessionUuid));
-    }
-    return true;
-  }
-
-  /**
-   * Retry an owner clear that threw until it lands (#11545). The record it left names this
-   * running process: this daemon reads it dead by its ended session, but every other daemon on
-   * the host reads it live by process and answers `binding_in_use` for as long as this one runs, so
-   * one busy write would pin the binding to them. The first retry waits one poll (the registry was
-   * busy a moment ago); a registry step that throws is retried like every other step of the
-   * drain, past the settlement cap at the slow cadence, and stops when this daemon closes.
-   *
-   * Only the ended session's own dead record is cleared. A record that is gone or names another
-   * session ends the retry. One that reads live (this daemon holds the session id again, or a
-   * drain still holds it) is re-checked at the fast cadence until the settlement cap and then
-   * left to that holder, whose own release clears it.
-   */
-  private async retryOwnerClear(
-    registry: ManagedExecutionBindingRegistry,
-    key: BindingKey,
-    sessionId: string,
-  ): Promise<void> {
-    const id = `${key.scopeKey}/${key.bindingIndex}/${sessionId}`;
-    if (this.closed || this.ownerClearRetries.has(id)) {
-      return;
-    }
-    this.ownerClearRetries.add(id);
-    const { timer } = this.options;
-    const deadline = timer.now() + this.settlementCapMs;
-    try {
-      for (;;) {
-        await timer.sleep(this.settlementPollMs);
-        if (this.closed) {
-          return;
-        }
-        const cleared = await this.retryRegistryStep(
-          `Clearing the owner of binding ${key.scopeKey}/${key.bindingIndex} for ended session ${sessionId}`,
-          deadline,
-          () => this.clearEndedOwnerOnce(registry, key, sessionId),
-        );
-        if (
-          !cleared.done ||
-          cleared.value === "done" ||
-          timer.now() + this.settlementPollMs > deadline
-        ) {
-          return;
-        }
-      }
-    } finally {
-      this.ownerClearRetries.delete(id);
-    }
-  }
-
-  /**
-   * One attempt of {@link retryOwnerClear}; throws when the registry does. Nothing is awaited
-   * between the liveness check and the clear, so a session this daemon comes to hold again is
-   * either seen live here or claims the binding after the clear was issued.
-   */
-  private async clearEndedOwnerOnce(
-    registry: ManagedExecutionBindingRegistry,
-    key: BindingKey,
-    sessionId: string,
-  ): Promise<"done" | "owner_live"> {
-    const owner = (await registry.getAssignment(key))?.execOwner ?? null;
-    // Closed during the read: no write follows; the record dies with this process.
-    if (owner === null || owner.sessionUuid !== sessionId || this.closed) {
-      return "done";
-    }
-    if (this.options.sessions.isSessionLive(sessionId) || this.isExecOwnerLive(owner)) {
-      return "owner_live";
-    }
-    await registry.releaseExecution(key, sessionId);
     return "done";
   }
 

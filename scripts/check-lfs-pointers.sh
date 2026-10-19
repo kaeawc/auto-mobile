@@ -73,9 +73,9 @@ check_jj_revision() {
   done < "$attributes_output"
 }
 
-# shellcheck disable=SC1091 # Resolved relative to this script's location.
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
-if vcs_uses_jj; then
+if [[ -d .jj && ! -e .git ]]; then
   rev="${1:-@}"
   check_jj_revision "$rev"
 else

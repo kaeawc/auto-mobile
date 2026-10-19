@@ -857,7 +857,7 @@ export class DevicePool {
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
   private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
-  private readonly idleDeviceReaper: IdleDeviceReaper;
+  private idleDeviceReaper: IdleDeviceReaper;
   private readonly autolockManager: DeviceAutolockManager;
   private readonly disconnectHandler: DeviceDisconnectHandler;
   private readonly androidRebootCoordinator: AndroidRebootCoordinator;
@@ -917,8 +917,8 @@ export class DevicePool {
   }
 
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
-  private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
-  private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly managedExecutionOwnership: DevicePoolDependencies["managedExecutionOwnership"];
   private readonly bindingExclusion: BindingExclusion | undefined;
   /** Devices held for the persisted rows restart recovery is working through (#11294). */
@@ -8765,6 +8765,18 @@ export class DevicePool {
           this.completeEmulatorLossRecovery = replacement;
         },
       ),
+      /** Swaps the host-facing collaborators a daemon-built pool captured at construction. */
+      installHostCollaborators: (collaborators: {
+        deviceManager: PlatformDeviceManager;
+        foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+        iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+      }): void => {
+        this.deviceManager = collaborators.deviceManager;
+        this.foreignDeviceOwnership = collaborators.foreignDeviceOwnership;
+        this.iosForeignDeviceOwnership = collaborators.iosForeignDeviceOwnership;
+        // The reaper captured the previous device manager when the pool was built.
+        this.idleDeviceReaper = this.createIdleDeviceReaper();
+      },
       setDeviceManager: (manager: PlatformDeviceManager): void => {
         this.deviceManager = manager;
       },

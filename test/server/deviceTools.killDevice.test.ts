@@ -3426,12 +3426,14 @@ describe("killDevice handler", () => {
     const deferredStop = new Promise<void>((_, reject) => {
       rejectStop = reject;
     });
-    const originalGetInstance = IOSCtrlProxyManager.getInstance;
-    (
-      IOSCtrlProxyManager as unknown as {
-        getInstance: typeof IOSCtrlProxyManager.getInstance;
-      }
-    ).getInstance = () => ({ stop: () => deferredStop }) as never;
+    const stopSpy = spyOn(
+      IOSCtrlProxyManager.getInstance({
+        name: image.name,
+        platform: "ios",
+        deviceId: image.deviceId!,
+      }),
+      "stop",
+    ).mockImplementation(() => deferredStop);
     try {
       setDeviceToolsDependencies({
         deviceManagerFactory: () => successfulManager,
@@ -3476,11 +3478,7 @@ describe("killDevice handler", () => {
       expect(IOSCtrlProxyManager.isDeviceRetired(device.deviceId)).toBe(true);
       expect(IOSCtrlProxyClient.getInstance(device)).toBe(retired);
     } finally {
-      (
-        IOSCtrlProxyManager as unknown as {
-          getInstance: typeof IOSCtrlProxyManager.getInstance;
-        }
-      ).getInstance = originalGetInstance;
+      stopSpy.mockRestore();
     }
   });
 

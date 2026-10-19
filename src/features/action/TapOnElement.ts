@@ -3889,14 +3889,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       getAccessibilityHierarchy: () =>
         resolvedHierarchy
           ? Promise.resolve(resolvedHierarchy)
-          : this.accessibilityService.getAccessibilityHierarchy(
-              undefined,
-              undefined,
-              true,
-              undefined,
-              true,
+          : this.accessibilityService.getAccessibilityHierarchy(undefined, {
+              skipWaitForFresh: true,
+              disableAllFiltering: true,
               signal,
-            ),
+            }),
     });
   }
 
@@ -3929,14 +3926,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         selected: element,
         // Fresh and unfiltered, like the target guard: the cached tree may predate the miss.
         readHierarchy: () =>
-          this.accessibilityService.getAccessibilityHierarchy(
-            undefined,
-            undefined,
-            true,
-            undefined,
-            true,
+          this.accessibilityService.getAccessibilityHierarchy(undefined, {
+            skipWaitForFresh: true,
+            disableAllFiltering: true,
             signal,
-          ),
+          }),
       });
       // The hierarchy reader turns cancellation into null; never degrade it to a press.
       throwIfAborted(signal);

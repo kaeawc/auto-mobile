@@ -110,6 +110,29 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition (SC2310).
+RUN_STATUS=0
+run_capture_status() {
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
+}
+
+# Like run_capture_status, for a function whose stdout is wanted: run it in a
+# subshell (as `$(...)` would) and record its output in CAPTURED_OUTPUT and its
+# exit status in RUN_STATUS.
+CAPTURED_OUTPUT=""
+run_capture_output() {
+    local capture_file
+    capture_file=$(mktemp)
+    RUN_STATUS=0
+    ("$@") >"${capture_file}" || RUN_STATUS=$?
+    CAPTURED_OUTPUT=$(<"${capture_file}")
+    rm -f "${capture_file}"
+}
+
 # Stop a process tree after first freezing it. Killing only a background Bash
 # subshell leaves its active `bun` child running as an orphan, so capture each
 # descendant before any parent can exit and re-parent it.
@@ -121,7 +144,8 @@ terminate_process_tree() {
 
     local children=()
     local child
-    if command_exists pgrep; then
+    run_capture_status command_exists pgrep
+    if (( RUN_STATUS == 0 )); then
         while IFS= read -r child; do
             [[ -n "${child}" ]] && children+=("${child}")
         done < <(pgrep -P "${pid}" . 2>/dev/null || true)
@@ -322,18 +346,23 @@ android_platform_install_advice() {
     local libs_toml="$2"
 
     local compile_sdk
-    if compile_sdk=$(read_required_compile_sdk "${libs_toml}"); then
+    run_capture_output read_required_compile_sdk "${libs_toml}"
+    compile_sdk="${CAPTURED_OUTPUT}"
+    if (( RUN_STATUS == 0 )); then
         :
     else
         return 1
     fi
 
-    if android_platform_installed "${android_home}" "${compile_sdk}"; then
+    run_capture_status android_platform_installed "${android_home}" "${compile_sdk}"
+    if (( RUN_STATUS == 0 )); then
         return 0
     fi
 
     local sdkmanager_path
-    if sdkmanager_path=$(find_sdkmanager "${android_home}"); then
+    run_capture_output find_sdkmanager "${android_home}"
+    sdkmanager_path="${CAPTURED_OUTPUT}"
+    if (( RUN_STATUS == 0 )); then
         printf '"%s" "platforms;android-%s"\n' "${sdkmanager_path}" "${compile_sdk}"
     else
         printf 'sdkmanager "platforms;android-%s"\n' "${compile_sdk}"
@@ -411,9 +440,13 @@ get_running_daemon_version() {
         return 0
     fi
 
-    if command_exists jq; then
+    run_capture_status command_exists jq
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists python3
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         jq -r '.version // empty' "${pid_file}" 2>/dev/null || echo ""
-    elif command_exists python3; then
+    elif (( cond_2 == 0 )); then
         python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("version", ""))' "${pid_file}" 2>/dev/null || echo ""
     else
         # Fallback: grep for version field
@@ -425,7 +458,8 @@ get_running_daemon_version() {
 # Get the package version from package.json (the version we're installing)
 get_package_version() {
     if [[ "${IS_REPO}" == "true" ]] && [[ -f "${PROJECT_ROOT}/package.json" ]]; then
-        if command_exists jq; then
+        run_capture_status command_exists jq
+        if (( RUN_STATUS == 0 )); then
             jq -r '.version // empty' "${PROJECT_ROOT}/package.json" 2>/dev/null || echo ""
         else
             grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "${PROJECT_ROOT}/package.json" 2>/dev/null | \
@@ -443,7 +477,8 @@ is_claude_cli_installed() {
 
 # Check if auto-mobile marketplace plugin is already installed
 is_claude_marketplace_installed() {
-    if ! command_exists claude; then
+    run_capture_status command_exists claude
+    if (( RUN_STATUS != 0 )); then
         return 1
     fi
     # Check if auto-mobile marketplace is in the list
@@ -454,15 +489,18 @@ is_claude_marketplace_installed() {
 
 # Perform early detection of installed components (fast checks only, before gum)
 detect_existing_setup() {
-    if is_cli_installed; then
+    run_capture_status is_cli_installed
+    if (( RUN_STATUS == 0 )); then
         CLI_ALREADY_INSTALLED=true
     fi
 
-    if is_daemon_running; then
+    run_capture_status is_daemon_running
+    if (( RUN_STATUS == 0 )); then
         DAEMON_ALREADY_RUNNING=true
     fi
 
-    if is_claude_cli_installed; then
+    run_capture_status is_claude_cli_installed
+    if (( RUN_STATUS == 0 )); then
         CLAUDE_CLI_INSTALLED=true
         # Note: marketplace check is deferred to after gum is available (slow network call)
     fi
@@ -589,7 +627,8 @@ execute() {
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         DRY_RUN_LOG+=("[DRY-RUN] ${description}")
-        if command_exists gum; then
+        run_capture_status command_exists gum
+        if (( RUN_STATUS == 0 )); then
             gum log --level info "[DRY-RUN] Would: ${description}"
         else
             printf '[DRY-RUN] Would: %s\n' "${description}"
@@ -607,7 +646,8 @@ execute_spinner() {
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         DRY_RUN_LOG+=("[DRY-RUN] ${title}")
-        if command_exists gum; then
+        run_capture_status command_exists gum
+        if (( RUN_STATUS == 0 )); then
             gum log --level info "[DRY-RUN] Would: ${title}"
         else
             printf '[DRY-RUN] Would: %s\n' "${title}"
@@ -990,11 +1030,15 @@ download_file() {
     local url="$1"
     local destination="$2"
 
-    if command_exists curl; then
+    run_capture_status command_exists curl
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists wget
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         curl --fail --show-error --silent --location \
             --retry 3 --retry-delay 2 --retry-all-errors \
             "${url}" -o "${destination}"
-    elif command_exists wget; then
+    elif (( cond_2 == 0 )); then
         wget --quiet --tries=3 --waitretry=2 -O "${destination}" "${url}"
     else
         return 1
@@ -1004,11 +1048,15 @@ download_file() {
 fetch_gum_version() {
     local version=""
 
-    if command_exists curl; then
+    run_capture_status command_exists curl
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists wget
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         version=$(curl -s "https://api.github.com/repos/charmbracelet/gum/releases/latest" \
             | sed -nE 's/.*"tag_name": "v?([^"]+)".*/\1/p' \
             | sed -n '1p')
-    elif command_exists wget; then
+    elif (( cond_2 == 0 )); then
         version=$(wget -qO- "https://api.github.com/repos/charmbracelet/gum/releases/latest" \
             | sed -nE 's/.*"tag_name": "v?([^"]+)".*/\1/p' \
             | sed -n '1p')
@@ -1070,7 +1118,11 @@ install_bundled_gum() {
             ;;
     esac
 
-    if ! command_exists curl && ! command_exists wget; then
+    run_capture_status command_exists curl
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists wget
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 != 0 )) && (( cond_2 != 0 )); then
         plain_error "Missing curl or wget; install one to download gum."
         return 1
     fi
@@ -1083,7 +1135,8 @@ install_bundled_gum() {
     temp_dir=$(mktemp -d)
     local archive_path="${temp_dir}/gum.tar.gz"
 
-    if ! download_file "${download_url}" "${archive_path}"; then
+    run_capture_status download_file "${download_url}" "${archive_path}"
+    if (( RUN_STATUS != 0 )); then
         plain_error "Failed to download gum from ${download_url}"
         rm -rf "${temp_dir}"
         return 1
@@ -1122,14 +1175,16 @@ install_gum() {
         return 1
     fi
 
-    if command_exists brew; then
+    run_capture_status command_exists brew
+    if (( RUN_STATUS == 0 )); then
         plain_info "Installing gum with Homebrew..."
         brew install gum
         return 0
     fi
 
     if [[ "${os}" == "linux" ]]; then
-        if install_gum_linux; then
+        run_capture_status install_gum_linux
+        if (( RUN_STATUS == 0 )); then
             return 0
         fi
     fi
@@ -1139,13 +1194,15 @@ install_gum() {
 
 ensure_gum() {
     # 1. Check bundled gum first (preferred)
-    if is_bundled_gum_current; then
+    run_capture_status is_bundled_gum_current
+    if (( RUN_STATUS == 0 )); then
         export PATH="${GUM_INSTALL_DIR}:${PATH}"
         return 0
     fi
 
     # 2. Check system gum
-    if command_exists gum; then
+    run_capture_status command_exists gum
+    if (( RUN_STATUS == 0 )); then
         return 0
     fi
 
@@ -1163,24 +1220,29 @@ ensure_gum() {
     local arch
     arch=$(detect_arch)
 
-    if [[ "${NON_INTERACTIVE}" == "true" ]] || ! has_controlling_tty; then
+    run_capture_status has_controlling_tty
+    if [[ "${NON_INTERACTIVE}" == "true" ]] || (( RUN_STATUS != 0 )); then
         # In non-interactive mode or when no controlling terminal is available, just install bundled gum
         plain_info "Installing bundled gum ${GUM_VERSION}..."
-        if ! install_bundled_gum "${os}" "${arch}"; then
+        run_capture_status install_bundled_gum "${os}" "${arch}"
+        if (( RUN_STATUS != 0 )); then
             plain_error "gum installation failed."
             exit 1
         fi
     else
-        if ! prompt_confirm_plain "Install gum ${GUM_VERSION} to ${GUM_INSTALL_DIR}?"; then
+        run_capture_status prompt_confirm_plain "Install gum ${GUM_VERSION} to ${GUM_INSTALL_DIR}?"
+        if (( RUN_STATUS != 0 )); then
             plain_error "gum is required to continue."
             exit 1
         fi
 
         # Try bundled install first
-        if ! install_bundled_gum "${os}" "${arch}"; then
+        run_capture_status install_bundled_gum "${os}" "${arch}"
+        if (( RUN_STATUS != 0 )); then
             # Fall back to system package manager
             plain_warn "Bundled install failed, trying system package manager..."
-            if ! install_gum; then
+            run_capture_status install_gum
+            if (( RUN_STATUS != 0 )); then
                 plain_error "gum installation failed."
                 exit 1
             fi
@@ -1188,7 +1250,8 @@ ensure_gum() {
     fi
 
     # Verify gum is now available
-    if ! command_exists gum; then
+    run_capture_status command_exists gum
+    if (( RUN_STATUS != 0 )); then
         plain_error "gum is still not available on PATH."
         exit 1
     fi
@@ -1210,7 +1273,8 @@ install_gum_linux() {
     local -a sudo_cmd=()
 
     if [[ "${EUID}" -ne 0 ]]; then
-        if command_exists sudo; then
+        run_capture_status command_exists sudo
+        if (( RUN_STATUS == 0 )); then
             sudo_cmd=(sudo)
         else
             plain_warn "sudo not available; falling back to manual gum install."
@@ -1218,7 +1282,19 @@ install_gum_linux() {
         fi
     fi
 
-    if command_exists apt-get; then
+    run_capture_status command_exists apt-get
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists dnf
+    cond_2="${RUN_STATUS}"
+    run_capture_status command_exists yum
+    cond_3="${RUN_STATUS}"
+    run_capture_status command_exists pacman
+    cond_4="${RUN_STATUS}"
+    run_capture_status command_exists zypper
+    cond_5="${RUN_STATUS}"
+    run_capture_status command_exists apk
+    cond_6="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         plain_info "Installing gum with apt-get..."
         if ! ${sudo_cmd[@]+"${sudo_cmd[@]}"} apt-get update; then
             plain_warn "apt-get update failed; falling back to manual gum install."
@@ -1228,31 +1304,31 @@ install_gum_linux() {
             return 0
         fi
         plain_warn "apt-get install failed; falling back to manual gum install."
-    elif command_exists dnf; then
+    elif (( cond_2 == 0 )); then
         plain_info "Installing gum with dnf..."
         if ${sudo_cmd[@]+"${sudo_cmd[@]}"} dnf install -y gum; then
             return 0
         fi
         plain_warn "dnf install failed; falling back to manual gum install."
-    elif command_exists yum; then
+    elif (( cond_3 == 0 )); then
         plain_info "Installing gum with yum..."
         if ${sudo_cmd[@]+"${sudo_cmd[@]}"} yum install -y gum; then
             return 0
         fi
         plain_warn "yum install failed; falling back to manual gum install."
-    elif command_exists pacman; then
+    elif (( cond_4 == 0 )); then
         plain_info "Installing gum with pacman..."
         if ${sudo_cmd[@]+"${sudo_cmd[@]}"} pacman -S --noconfirm gum; then
             return 0
         fi
         plain_warn "pacman install failed; falling back to manual gum install."
-    elif command_exists zypper; then
+    elif (( cond_5 == 0 )); then
         plain_info "Installing gum with zypper..."
         if ${sudo_cmd[@]+"${sudo_cmd[@]}"} zypper --non-interactive install gum; then
             return 0
         fi
         plain_warn "zypper install failed; falling back to manual gum install."
-    elif command_exists apk; then
+    elif (( cond_6 == 0 )); then
         plain_info "Installing gum with apk..."
         if ${sudo_cmd[@]+"${sudo_cmd[@]}"} apk add --no-cache gum; then
             return 0
@@ -1338,9 +1414,13 @@ BOUNDED_CMD_PREFIX=()
 resolve_bounded_cmd_prefix() {
     local secs="$1"
     BOUNDED_CMD_PREFIX=()
-    if command_exists timeout; then
+    run_capture_status command_exists timeout
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists gtimeout
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         BOUNDED_CMD_PREFIX=(timeout -k "${BOUNDED_KILL_GRACE_SECONDS}" "${secs}")
-    elif command_exists gtimeout; then
+    elif (( cond_2 == 0 )); then
         BOUNDED_CMD_PREFIX=(gtimeout -k "${BOUNDED_KILL_GRACE_SECONDS}" "${secs}")
     fi
 }
@@ -1638,7 +1718,8 @@ spin_check() {
     local label="$1"
     local check_cmd="$2"
 
-    if run_spinner "${label}" bash -c "${check_cmd}"; then
+    run_capture_status run_spinner "${label}" bash -c "${check_cmd}"
+    if (( RUN_STATUS == 0 )); then
         log_info "${label}: ok"
         return 0
     fi
@@ -1683,7 +1764,8 @@ play_logo_animation() {
     local delay=0.045
 
     # Check terminal capabilities
-    if ! command_exists tput || [[ ! -t 1 ]]; then
+    run_capture_status command_exists tput
+    if (( RUN_STATUS != 0 )) || [[ ! -t 1 ]]; then
         echo ""
         echo -e "${line1}"
         echo -e "${line2}"
@@ -1791,7 +1873,8 @@ is_windsurf_installed() {
 is_vscode_installed() {
     local os
     os=$(detect_os)
-    if command_exists code; then
+    run_capture_status command_exists code
+    if (( RUN_STATUS == 0 )); then
         return 0
     elif [[ "${os}" == "macos" && -d "/Applications/Visual Studio Code.app" ]]; then
         return 0
@@ -1842,10 +1925,12 @@ detect_mcp_clients() {
     # Claude Code uses ~/.claude.json for user scope and .mcp.json for the
     # shared project scope. .claude/settings*.json configures Claude behavior,
     # not MCP servers, so the installer deliberately leaves those files alone.
-    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && is_claude_code_installed; then
+    run_capture_status is_claude_code_installed
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && (( RUN_STATUS == 0 )); then
         add_mcp_client "Claude Code (User)" "${HOME}/.claude.json" "json" "global"
     fi
-    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && is_claude_code_installed; then
+    run_capture_status is_claude_code_installed
+    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && (( RUN_STATUS == 0 )); then
         add_mcp_client "Claude Code (Project)" "${MCP_PROJECT_ROOT}/.mcp.json" "json" "local"
     fi
 
@@ -1881,7 +1966,8 @@ detect_mcp_clients() {
 
     # VS Code - check for VS Code installation
     local vscode_installed=false
-    if command_exists code; then
+    run_capture_status command_exists code
+    if (( RUN_STATUS == 0 )); then
         vscode_installed=true
     elif [[ "${os}" == "macos" && -d "/Applications/Visual Studio Code.app" ]]; then
         vscode_installed=true
@@ -1894,10 +1980,12 @@ detect_mcp_clients() {
     fi
 
     # Codex (OpenAI) supports both user and trusted project config layers.
-    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && is_codex_user_installed; then
+    run_capture_status is_codex_user_installed
+    if [[ "${MCP_CONFIG_SCOPE}" != "project" ]] && (( RUN_STATUS == 0 )); then
         add_mcp_client "Codex (User)" "${HOME}/.codex/config.toml" "toml" "global"
     fi
-    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && is_codex_installed; then
+    run_capture_status is_codex_installed
+    if [[ "${MCP_CONFIG_SCOPE}" == "project" ]] && [[ -n "${MCP_PROJECT_ROOT}" ]] && (( RUN_STATUS == 0 )); then
         add_mcp_client "Codex (Project)" "${MCP_PROJECT_ROOT}/.codex/config.toml" "toml" "local"
     fi
 
@@ -2009,7 +2097,8 @@ select_mcp_clients() {
     local clients_without_auto_mobile=()
 
     while IFS= read -r client; do
-        if client_has_auto_mobile "${client}"; then
+        run_capture_status client_has_auto_mobile "${client}"
+        if (( RUN_STATUS == 0 )); then
             clients_with_auto_mobile+=("${client}")
         else
             clients_without_auto_mobile+=("${client}")
@@ -2025,7 +2114,8 @@ select_mcp_clients() {
         path=$(get_client_config_path "${client}")
         local status_marker=""
         if [[ -f "${path}" ]]; then
-            if client_has_auto_mobile "${client}"; then
+            run_capture_status client_has_auto_mobile "${client}"
+            if (( RUN_STATUS == 0 )); then
                 status_marker=" (auto-mobile configured)"
             else
                 status_marker=" (config exists)"
@@ -2114,10 +2204,14 @@ validate_json() {
         return 1
     fi
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists jq
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "${file}" 2>/dev/null
         return $?
-    elif command_exists jq; then
+    elif (( cond_2 == 0 )); then
         jq empty "${file}" 2>/dev/null
         return $?
     fi
@@ -2134,12 +2228,17 @@ get_existing_mcp_servers() {
         return 0
     fi
 
-    if ! validate_json "${config_file}"; then
+    run_capture_status validate_json "${config_file}"
+    if (( RUN_STATUS != 0 )); then
         echo "{}"
         return 1
     fi
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists jq
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         python3 -c '
 import json, sys
 try:
@@ -2149,7 +2248,7 @@ try:
 except Exception:
     print("{}")
 ' "${config_file}"
-    elif command_exists jq; then
+    elif (( cond_2 == 0 )); then
         jq -r '.mcpServers // {}' "${config_file}" 2>/dev/null || echo "{}"
     else
         echo "{}"
@@ -2195,13 +2294,18 @@ merge_mcp_config() {
     fi
 
     # Handle invalid JSON
-    if ! validate_json "${config_file}"; then
+    run_capture_status validate_json "${config_file}"
+    if (( RUN_STATUS != 0 )); then
         log_warn "Invalid JSON in ${config_file}, will create fresh config"
         echo "{\"mcpServers\":{\"auto-mobile\":${auto_mobile_config}}}"
         return 0
     fi
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists jq
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         python3 -c '
 import json, sys
 
@@ -2227,7 +2331,7 @@ existing["mcpServers"]["auto-mobile"] = new_auto_mobile
 
 sys.stdout.buffer.write(json.dumps(existing, indent=2, ensure_ascii=False).encode("utf-8") + b"\n")
 ' "${config_file}" "${auto_mobile_config}"
-    elif command_exists jq; then
+    elif (( cond_2 == 0 )); then
         jq --argjson new "${auto_mobile_config}" '.mcpServers["auto-mobile"] = $new' "${config_file}"
     else
         log_error "Neither python3 nor jq available for JSON manipulation"
@@ -2246,7 +2350,8 @@ merge_toml_config() {
         return 0
     fi
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    if (( RUN_STATUS == 0 )); then
         python3 -c '
 import sys
 
@@ -2398,13 +2503,19 @@ install_yq() {
         fi
     fi
 
-    if [[ "${os}" == "macos" ]] && command_exists brew; then
-        if ! run_bounded_install "Installing yq via Homebrew" brew install yq; then
+    run_capture_status command_exists brew
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists go
+    cond_2="${RUN_STATUS}"
+    if [[ "${os}" == "macos" ]] && (( cond_1 == 0 )); then
+        run_capture_status run_bounded_install "Installing yq via Homebrew" brew install yq
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to install yq"
             return 1
         fi
-    elif command_exists go; then
-        if ! run_bounded_install "Installing yq via go install" go install github.com/mikefarah/yq/v4@latest; then
+    elif (( cond_2 == 0 )); then
+        run_capture_status run_bounded_install "Installing yq via go install" go install github.com/mikefarah/yq/v4@latest
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to install yq"
             return 1
         fi
@@ -2418,13 +2529,19 @@ install_yq() {
         local install_dir="${HOME}/.local/bin"
         mkdir -p "${install_dir}"
 
-        if command_exists curl; then
-            if ! run_spinner "Downloading yq" curl -fsSL "${yq_url}" -o "${install_dir}/yq"; then
+        run_capture_status command_exists curl
+        cond_1="${RUN_STATUS}"
+        run_capture_status command_exists wget
+        cond_2="${RUN_STATUS}"
+        if (( cond_1 == 0 )); then
+            run_capture_status run_spinner "Downloading yq" curl -fsSL "${yq_url}" -o "${install_dir}/yq"
+            if (( RUN_STATUS != 0 )); then
                 log_error "Failed to download yq"
                 return 1
             fi
-        elif command_exists wget; then
-            if ! run_spinner "Downloading yq" wget -qO "${install_dir}/yq" "${yq_url}"; then
+        elif (( cond_2 == 0 )); then
+            run_capture_status run_spinner "Downloading yq" wget -qO "${install_dir}/yq" "${yq_url}"
+            if (( RUN_STATUS != 0 )); then
                 log_error "Failed to download yq"
                 return 1
             fi
@@ -2437,7 +2554,8 @@ install_yq() {
         export PATH="${install_dir}:${PATH}"
     fi
 
-    if command_exists yq; then
+    run_capture_status command_exists yq
+    if (( RUN_STATUS == 0 )); then
         log_info "yq installed: $(yq --version 2>&1 | head -1)"
         return 0
     else
@@ -2448,7 +2566,8 @@ install_yq() {
 
 # Ensure yq is available, installing if needed
 ensure_yq() {
-    if is_yq_installed; then
+    run_capture_status is_yq_installed
+    if (( RUN_STATUS == 0 )); then
         return 0
     fi
     install_yq
@@ -2510,7 +2629,8 @@ merge_mcp_config_yaml() {
     fi
 
     # Use yq to merge the configs
-    if ! command_exists yq; then
+    run_capture_status command_exists yq
+    if (( RUN_STATUS != 0 )); then
         log_error "yq required for YAML configuration"
         return 1
     fi
@@ -2558,17 +2678,23 @@ update_mcp_client_config() {
     # Generate merged config based on format
     local new_content
     if [[ "${format}" == "yaml" ]]; then
-        if ! new_content=$(merge_mcp_config_yaml "${config_path}" "${auto_mobile_config}"); then
+        run_capture_output merge_mcp_config_yaml "${config_path}" "${auto_mobile_config}"
+        new_content="${CAPTURED_OUTPUT}"
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to generate YAML config for ${client_name}"
             return 1
         fi
     elif [[ "${format}" == "toml" ]]; then
-        if ! new_content=$(merge_toml_config "${config_path}" "${auto_mobile_config}"); then
+        run_capture_output merge_toml_config "${config_path}" "${auto_mobile_config}"
+        new_content="${CAPTURED_OUTPUT}"
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to generate TOML config for ${client_name}"
             return 1
         fi
     else
-        if ! new_content=$(merge_mcp_config "${config_path}" "${auto_mobile_config}"); then
+        run_capture_output merge_mcp_config "${config_path}" "${auto_mobile_config}"
+        new_content="${CAPTURED_OUTPUT}"
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to generate config for ${client_name}"
             return 1
         fi
@@ -2674,7 +2800,8 @@ configure_selected_mcp_clients() {
 
         if [[ "${format}" == "yaml" ]]; then
             # Ensure yq is available for YAML processing
-            if ! ensure_yq; then
+            run_capture_status ensure_yq
+            if (( RUN_STATUS != 0 )); then
                 log_warn "YAML configuration for ${client} requires yq. Skipping."
                 log_info "Manual configuration required for: ${config_path}"
                 continue
@@ -2692,11 +2819,15 @@ configure_selected_mcp_clients() {
 resolve_ide_plugin_url() {
     local url=""
 
-    if command_exists curl; then
+    run_capture_status command_exists curl
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists wget
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         url=$(curl -fsSL "https://api.github.com/repos/kaeawc/auto-mobile/releases/latest" 2>/dev/null \
             | sed -nE 's/.*"browser_download_url": "([^"]*auto-mobile-ide-plugin[^"]*\.zip)".*/\1/p' \
             | head -n 1 || true)
-    elif command_exists wget; then
+    elif (( cond_2 == 0 )); then
         url=$(wget -qO- "https://api.github.com/repos/kaeawc/auto-mobile/releases/latest" 2>/dev/null \
             | sed -nE 's/.*"browser_download_url": "([^"]*auto-mobile-ide-plugin[^"]*\.zip)".*/\1/p' \
             | head -n 1 || true)
@@ -2993,7 +3124,8 @@ resolve_desktop_app_release_asset() {
     local release_json="$1"
     local suffix="$2"
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    if (( RUN_STATUS == 0 )); then
         printf '%s' "${release_json}" | python3 -c '
 import json
 import sys
@@ -3259,7 +3391,8 @@ resolve_auto_mobile_command() {
         return 0
     fi
 
-    if command_exists bunx; then
+    run_capture_status command_exists bunx
+    if (( RUN_STATUS == 0 )); then
         AUTO_MOBILE_CMD=("bunx" "@kaeawc/auto-mobile@latest")
         return 0
     fi
@@ -3268,7 +3401,8 @@ resolve_auto_mobile_command() {
 }
 
 ensure_auto_mobile_command() {
-    if resolve_auto_mobile_command; then
+    run_capture_status resolve_auto_mobile_command
+    if (( RUN_STATUS == 0 )); then
         return 0
     fi
 
@@ -3277,7 +3411,8 @@ ensure_auto_mobile_command() {
 }
 
 run_auto_mobile_cli() {
-    if ! ensure_auto_mobile_command; then
+    run_capture_status ensure_auto_mobile_command
+    if (( RUN_STATUS != 0 )); then
         return 1
     fi
 
@@ -3287,7 +3422,8 @@ run_auto_mobile_cli() {
 extract_device_ids() {
     local raw="$1"
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    if (( RUN_STATUS == 0 )); then
         python3 -c 'import json,sys
 raw=sys.stdin.read()
 try:
@@ -3316,7 +3452,8 @@ for device in devices:
         return $?
     fi
 
-    if command_exists jq; then
+    run_capture_status command_exists jq
+    if (( RUN_STATUS == 0 )); then
         echo "${raw}" | jq -r '.content[0].text | fromjson | .devices[]? | .deviceId' 2>/dev/null
         return 0
     fi
@@ -3327,7 +3464,8 @@ for device in devices:
 extract_device_images() {
     local raw="$1"
 
-    if command_exists python3; then
+    run_capture_status command_exists python3
+    if (( RUN_STATUS == 0 )); then
         python3 -c 'import json,sys
 raw=sys.stdin.read()
 try:
@@ -3358,7 +3496,8 @@ for image in images:
         return $?
     fi
 
-    if command_exists jq; then
+    run_capture_status command_exists jq
+    if (( RUN_STATUS == 0 )); then
         echo "${raw}" | jq -r '.content[0].text | fromjson | .images[]? | if type == "object" then (.name // .deviceId // empty) else . end' 2>/dev/null
         return 0
     fi
@@ -3371,7 +3510,8 @@ ensure_mcp_daemon() {
         return 0
     fi
 
-    if ! start_mcp_daemon; then
+    run_capture_status start_mcp_daemon
+    if (( RUN_STATUS != 0 )); then
         return 1
     fi
 
@@ -3382,7 +3522,8 @@ migrate_npm_global_auto_mobile() {
     # Detect and remove stale npm global install of auto-mobile.
     # Old versions were installed via "npm install -g @kaeawc/auto-mobile".
     # This must be cleaned up so the npm binary doesn't shadow the bun one.
-    if ! command_exists npm; then
+    run_capture_status command_exists npm
+    if (( RUN_STATUS != 0 )); then
         return 0
     fi
 
@@ -3412,13 +3553,15 @@ install_auto_mobile_cli() {
     # Clean up any stale npm global install before proceeding
     migrate_npm_global_auto_mobile
 
-    if command_exists auto-mobile; then
+    run_capture_status command_exists auto-mobile
+    if (( RUN_STATUS == 0 )); then
         log_info "AutoMobile CLI already installed."
         return 0
     fi
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        if command_exists bun; then
+        run_capture_status command_exists bun
+        if (( RUN_STATUS == 0 )); then
             DRY_RUN_LOG+=("[DRY-RUN] Install AutoMobile CLI with Bun")
             log_info "[DRY-RUN] Would install AutoMobile CLI with: bun add -g @kaeawc/auto-mobile@latest"
         else
@@ -3428,7 +3571,8 @@ install_auto_mobile_cli() {
         return 0
     fi
 
-    if command_exists bun; then
+    run_capture_status command_exists bun
+    if (( RUN_STATUS == 0 )); then
         local install_output
         local install_status=0
         install_output=$(bun add -g @kaeawc/auto-mobile@latest 2>&1) || install_status=$?
@@ -3501,7 +3645,8 @@ install_ide_plugin() {
         mkdir -p "${IDE_PLUGIN_DIR}"
     fi
 
-    if ! command_exists unzip; then
+    run_capture_status command_exists unzip
+    if (( RUN_STATUS != 0 )); then
         log_error "unzip is required to install the IDE plugin."
         return 1
     fi
@@ -3517,8 +3662,9 @@ install_ide_plugin() {
         fi
 
         build_log_path=$(mktemp)
-        if ! run_with_progress "Building IDE plugin" \
-            bash -c "cd \"${PROJECT_ROOT}/android/ide-plugin\" && ./gradlew buildPlugin >\"${build_log_path}\" 2>&1"; then
+        run_capture_status run_with_progress "Building IDE plugin" \
+            bash -c "cd \"${PROJECT_ROOT}/android/ide-plugin\" && ./gradlew buildPlugin >\"${build_log_path}\" 2>&1"
+        if (( RUN_STATUS != 0 )); then
             log_error "IDE plugin build failed. Logs: ${build_log_path}"
             return 1
         fi
@@ -3537,16 +3683,22 @@ install_ide_plugin() {
         temp_dir=$(mktemp -d)
         plugin_zip="${temp_dir}/auto-mobile-ide-plugin.zip"
 
-        if command_exists curl; then
-            if ! run_download_with_progress "Downloading IDE plugin" \
-                curl -fsSL "${IDE_PLUGIN_ZIP_URL}" -o "${plugin_zip}"; then
+        run_capture_status command_exists curl
+        cond_1="${RUN_STATUS}"
+        run_capture_status command_exists wget
+        cond_2="${RUN_STATUS}"
+        if (( cond_1 == 0 )); then
+            run_capture_status run_download_with_progress "Downloading IDE plugin" \
+                curl -fsSL "${IDE_PLUGIN_ZIP_URL}" -o "${plugin_zip}"
+            if (( RUN_STATUS != 0 )); then
                 log_error "Failed to download IDE plugin."
                 rm -rf "${temp_dir}"
                 return 1
             fi
-        elif command_exists wget; then
-            if ! run_download_with_progress "Downloading IDE plugin" \
-                wget -qO "${plugin_zip}" "${IDE_PLUGIN_ZIP_URL}"; then
+        elif (( cond_2 == 0 )); then
+            run_capture_status run_download_with_progress "Downloading IDE plugin" \
+                wget -qO "${plugin_zip}" "${IDE_PLUGIN_ZIP_URL}"
+            if (( RUN_STATUS != 0 )); then
                 log_error "Failed to download IDE plugin."
                 rm -rf "${temp_dir}"
                 return 1
@@ -3560,7 +3712,8 @@ install_ide_plugin() {
 
     local plugin_name="auto-mobile-ide-plugin"
     rm -rf "${IDE_PLUGIN_DIR:?}/${plugin_name:?}"
-    if ! run_spinner "Installing IDE plugin" unzip -q "${plugin_zip}" -d "${IDE_PLUGIN_DIR}"; then
+    run_capture_status run_spinner "Installing IDE plugin" unzip -q "${plugin_zip}" -d "${IDE_PLUGIN_DIR}"
+    if (( RUN_STATUS != 0 )); then
         log_error "Failed to unzip IDE plugin."
         return 1
     fi
@@ -3587,7 +3740,8 @@ migrate_stale_daemon() {
         return 0
     fi
 
-    if ! is_daemon_running; then
+    run_capture_status is_daemon_running
+    if (( RUN_STATUS != 0 )); then
         return 0
     fi
 
@@ -3623,7 +3777,8 @@ migrate_stale_daemon() {
         return 0
     fi
 
-    if ! resolve_auto_mobile_command; then
+    run_capture_status resolve_auto_mobile_command
+    if (( RUN_STATUS != 0 )); then
         log_warn "Cannot restart daemon: bunx not available. Restart manually after install."
         return 0
     fi
@@ -3645,7 +3800,8 @@ migrate_stale_daemon() {
 }
 
 start_mcp_daemon() {
-    if ! resolve_auto_mobile_command; then
+    run_capture_status resolve_auto_mobile_command
+    if (( RUN_STATUS != 0 )); then
         log_error "AutoMobile CLI not available. Install bun (https://bun.sh) and ensure bunx is on PATH."
         return 1
     fi
@@ -3749,19 +3905,26 @@ _install_system_package() {
 
     case "${os}" in
         macos)
-            if command_exists brew; then
+            run_capture_status command_exists brew
+            if (( RUN_STATUS == 0 )); then
                 install_cmd="brew install ${pkg}"
                 skip_hint="brew install ${pkg}"
             fi
             ;;
         linux)
-            if command_exists apt-get; then
+            run_capture_status command_exists apt-get
+            cond_1="${RUN_STATUS}"
+            run_capture_status command_exists dnf
+            cond_2="${RUN_STATUS}"
+            run_capture_status command_exists pacman
+            cond_3="${RUN_STATUS}"
+            if (( cond_1 == 0 )); then
                 install_cmd="sudo apt-get update -qq && sudo apt-get install -y -qq ${apt_pkg}"
                 skip_hint="sudo apt-get install ${apt_pkg}"
-            elif command_exists dnf; then
+            elif (( cond_2 == 0 )); then
                 install_cmd="sudo dnf install -y ${apt_pkg}"
                 skip_hint="sudo dnf install ${apt_pkg}"
-            elif command_exists pacman; then
+            elif (( cond_3 == 0 )); then
                 install_cmd="sudo pacman -S --noconfirm ${apt_pkg}"
                 skip_hint="sudo pacman -S ${apt_pkg}"
             fi
@@ -3782,7 +3945,8 @@ _install_system_package() {
     fi
 
     log_info "Installing ${pkg} (${description})..."
-    if run_bounded_install "Installing ${pkg}" bash -c "${install_cmd}"; then
+    run_capture_status run_bounded_install "Installing ${pkg}" bash -c "${install_cmd}"
+    if (( RUN_STATUS == 0 )); then
         CHANGES_MADE=true
         return 0
     fi
@@ -3796,9 +3960,10 @@ install_runtime_deps() {
     # CI can opt out via AUTOMOBILE_INSTALL_SKIP_FFMPEG=true: ffmpeg is a large,
     # slow dependency (its install has timed out the installer check) and video
     # recording is not exercised by the installer validation jobs.
+    run_capture_status command_exists ffmpeg
     if [[ "${AUTOMOBILE_INSTALL_SKIP_FFMPEG:-false}" == "true" ]]; then
         log_info "Skipping ffmpeg install (AUTOMOBILE_INSTALL_SKIP_FFMPEG=true) — video recording will be unavailable"
-    elif ! command_exists ffmpeg; then
+    elif (( RUN_STATUS != 0 )); then
         _install_system_package "ffmpeg" "required for video recording"
     fi
 }
@@ -3825,7 +3990,8 @@ _brew_formula_listed() {
 }
 
 _install_dev_tools_brew() {
-    if ! command_exists brew; then
+    run_capture_status command_exists brew
+    if (( RUN_STATUS != 0 )); then
         log_warn "Homebrew not found — skipping dev tool installation"
         return 0
     fi
@@ -3876,10 +4042,11 @@ _install_dev_tools_brew() {
     # processes would contend for the same lock. One invocation avoids repeated
     # startup work and lets Homebrew schedule the complete dependency set.
     local brew_status=0
-    if run_bounded_install "Installing ${#to_install[@]} development tools" brew install ${to_install[@]+"${to_install[@]}"}; then
+    run_capture_status run_bounded_install "Installing ${#to_install[@]} development tools" brew install ${to_install[@]+"${to_install[@]}"}
+    if (( RUN_STATUS == 0 )); then
         :
     else
-        brew_status=$?
+        brew_status="${RUN_STATUS}"
     fi
 
     local installed_after
@@ -3910,7 +4077,8 @@ _install_dev_tools_brew() {
 }
 
 _install_dev_tools_apt() {
-    if ! command_exists apt-get; then
+    run_capture_status command_exists apt-get
+    if (( RUN_STATUS != 0 )); then
         log_warn "apt-get not found — skipping dev tool installation"
         return 0
     fi
@@ -3947,13 +4115,15 @@ _install_dev_tools_apt() {
     # Update the package index once. A stale index is survivable — the per-package installs below report their
     # own failures — but the update must still be bounded, since it is an
     # apt-get like any other and can stall the same way.
-    if run_bounded_install "Updating package index" sudo apt-get update -qq; then
+    run_capture_status run_bounded_install "Updating package index" sudo apt-get update -qq
+    if (( RUN_STATUS == 0 )); then
         :
     fi
 
     local missing=0
     for pkg in ${to_install[@]+"${to_install[@]}"}; do
-        if run_bounded_install "Installing ${pkg}" sudo apt-get install -y -qq "${pkg}"; then
+        run_capture_status run_bounded_install "Installing ${pkg}" sudo apt-get install -y -qq "${pkg}"
+        if (( RUN_STATUS == 0 )); then
             CHANGES_MADE=true
         else
             log_warn "Failed to install ${pkg}"
@@ -3974,7 +4144,8 @@ handle_bun_setup() {
     if [[ "${BUN_INSTALLED}" == "true" ]] && [[ -n "${REQUIRED_BUN_VERSION}" ]]; then
         local current_bun_version
         current_bun_version=$(bun --version 2>/dev/null || true)
-        if [[ -n "${current_bun_version}" ]] && ! version_gte "${current_bun_version}" "${REQUIRED_BUN_VERSION}"; then
+        run_capture_status version_gte "${current_bun_version}" "${REQUIRED_BUN_VERSION}"
+        if [[ -n "${current_bun_version}" ]] && (( RUN_STATUS != 0 )); then
             log_warn "Bun v${current_bun_version} found but v${REQUIRED_BUN_VERSION} required"
             BUN_INSTALLED=false
         fi
@@ -3986,8 +4157,10 @@ handle_bun_setup() {
 
     # If INSTALL_BUN was explicitly set (e.g., by development preset), skip Yes/No confirmation
     if [[ "${INSTALL_BUN}" == "true" ]]; then
-        if install_bun "true"; then
-            if command_exists bun; then
+        run_capture_status install_bun "true"
+        if (( RUN_STATUS == 0 )); then
+            run_capture_status command_exists bun
+            if (( RUN_STATUS == 0 )); then
                 BUN_INSTALLED=true
                 CHANGES_MADE=true
             fi
@@ -3997,8 +4170,10 @@ handle_bun_setup() {
 
     # Otherwise, prompt the user (install_bun handles the Yes/No prompt)
     if [[ "${NON_INTERACTIVE}" != "true" ]]; then
-        if install_bun; then
-            if command_exists bun; then
+        run_capture_status install_bun
+        if (( RUN_STATUS == 0 )); then
+            run_capture_status command_exists bun
+            if (( RUN_STATUS == 0 )); then
                 BUN_INSTALLED=true
                 CHANGES_MADE=true
             fi
@@ -4083,11 +4258,15 @@ check_npm_registry() {
     # Quick probe: fetch the package metadata from the public registry.
     # A 2-second timeout keeps this fast on healthy networks.
     local registry_ok=false
-    if command_exists curl; then
+    run_capture_status command_exists curl
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists wget
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
         if curl -sfSL --max-time 2 "https://registry.npmjs.org/@kaeawc/auto-mobile/latest" >/dev/null 2>&1; then
             registry_ok=true
         fi
-    elif command_exists wget; then
+    elif (( cond_2 == 0 )); then
         if wget -q --timeout=2 -O /dev/null "https://registry.npmjs.org/@kaeawc/auto-mobile/latest" 2>/dev/null; then
             registry_ok=true
         fi
@@ -4131,12 +4310,14 @@ ios_log_heading() {
 }
 
 ios_check_xcode() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         log_warn "iOS setup requires macOS."
         return 1
     fi
 
-    if spin_check "Checking Xcode" "command -v xcodebuild >/dev/null 2>&1"; then
+    run_capture_status spin_check "Checking Xcode" "command -v xcodebuild >/dev/null 2>&1"
+    if (( RUN_STATUS == 0 )); then
         local xcode_version
         xcode_version=$(xcodebuild -version 2>/dev/null | head -1 || true)
         if [[ -n "${xcode_version}" ]]; then
@@ -4152,7 +4333,8 @@ ios_check_xcode() {
 }
 
 ios_install_command_line_tools() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 1
     fi
 
@@ -4162,7 +4344,8 @@ ios_install_command_line_tools() {
     fi
 
     if gum confirm "Command Line Tools missing. Install now?"; then
-        if execute "Install Command Line Tools" xcode-select --install; then
+        run_capture_status execute "Install Command Line Tools" xcode-select --install
+        if (( RUN_STATUS == 0 )); then
             log_info "Command Line Tools installer started."
             log_info "Complete the installer prompt, then re-run this setup."
             return 0
@@ -4176,11 +4359,13 @@ ios_install_command_line_tools() {
 }
 
 ios_check_command_line_tools() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 1
     fi
 
-    if spin_check "Checking Command Line Tools" "xcode-select -p >/dev/null 2>&1"; then
+    run_capture_status spin_check "Checking Command Line Tools" "xcode-select -p >/dev/null 2>&1"
+    if (( RUN_STATUS == 0 )); then
         local developer_dir
         developer_dir=$(xcode-select -p 2>/dev/null || true)
         if [[ -n "${developer_dir}" ]]; then
@@ -4206,7 +4391,8 @@ start_ios_runtime_probe() {
     fi
 
     IOS_RUNTIME_PROBE_FILE=$(mktemp "${TMPDIR:-/tmp}/auto-mobile-ios-runtimes.XXXXXX")
-    if command_exists perl; then
+    run_capture_status command_exists perl
+    if (( RUN_STATUS == 0 )); then
         # A dedicated process group lets the timeout signal every helper in one
         # operation while this shell still waits for and reaps the direct child.
         perl -MPOSIX=setsid -e 'setsid() or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n"' \
@@ -4290,7 +4476,8 @@ ios_get_installed_runtimes() {
     local runtimes=""
 
     if runtime_output=$(xcrun simctl list runtimes -j 2>/dev/null); then
-        if command_exists python3; then
+        run_capture_status command_exists python3
+        if (( RUN_STATUS == 0 )); then
             runtimes=$(python3 -c '
 import json, sys
 data=json.loads(sys.stdin.read())
@@ -4325,11 +4512,13 @@ print("\n".join(runtimes))
 }
 
 ios_show_available_runtimes() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 1
     fi
 
-    if command_exists xcodebuild; then
+    run_capture_status command_exists xcodebuild
+    if (( RUN_STATUS == 0 )); then
         if xcodebuild -downloadPlatform iOS -list 2>/dev/null; then
             return 0
         fi
@@ -4373,7 +4562,8 @@ ios_prompt_download_runtimes() {
             ios_download_runtime
             ;;
         "Choose runtime version")
-            if ios_show_available_runtimes; then
+            run_capture_status ios_show_available_runtimes
+            if (( RUN_STATUS == 0 )); then
                 local version
                 version=$(gum input --prompt "Runtime build version (e.g. 21E213): " --value "")
                 if [[ -n "${version}" ]]; then
@@ -4402,16 +4592,19 @@ ios_prompt_download_runtimes() {
 }
 
 ios_check_simulator_runtimes() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 1
     fi
 
-    if ! command_exists xcrun; then
+    run_capture_status command_exists xcrun
+    if (( RUN_STATUS != 0 )); then
         log_warn "xcrun not available. Install Xcode Command Line Tools."
         return 1
     fi
 
-    if ! ios_get_installed_runtimes; then
+    run_capture_status ios_get_installed_runtimes
+    if (( RUN_STATUS != 0 )); then
         log_warn "No iOS simulator runtimes available."
         ios_prompt_download_runtimes
         return 1
@@ -4424,7 +4617,8 @@ ios_check_simulator_runtimes() {
 }
 
 ios_check_ctrl_proxy_build() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 1
     fi
 
@@ -4440,7 +4634,8 @@ ios_check_ctrl_proxy_build() {
         return 1
     fi
 
-    if run_spinner "Validating CtrlProxy iOS project" bash -c "cd \"${xctest_dir}\" && xcodebuild -list -json >/dev/null 2>&1"; then
+    run_capture_status run_spinner "Validating CtrlProxy iOS project" bash -c "cd \"${xctest_dir}\" && xcodebuild -list -json >/dev/null 2>&1"
+    if (( RUN_STATUS == 0 )); then
         log_info "CtrlProxy iOS project detected. AutoMobile will build on demand."
         return 0
     fi
@@ -4450,19 +4645,22 @@ ios_check_ctrl_proxy_build() {
 }
 
 run_ios_setup() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         log_warn "iOS setup skipped (macOS required)."
         return 0
     fi
 
     ios_log_heading
 
-    if ! ios_check_xcode; then
+    run_capture_status ios_check_xcode
+    if (( RUN_STATUS != 0 )); then
         log_warn "Skipping iOS setup because Xcode is missing."
         return 0
     fi
 
-    if ! ios_check_command_line_tools; then
+    run_capture_status ios_check_command_line_tools
+    if (( RUN_STATUS != 0 )); then
         ios_install_command_line_tools
     fi
 
@@ -4475,14 +4673,18 @@ run_ios_setup() {
 # Check and offer to install libimobiledevice tools for physical iOS device support.
 # Requires: libusbmuxd (iproxy), libimobiledevice (idevice_id), ideviceinstaller
 ios_check_physical_device_tools() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 0
     fi
 
     local missing_tools=()
-    command_exists iproxy          || missing_tools+=("iproxy (libusbmuxd)")
-    command_exists idevice_id      || missing_tools+=("idevice_id (libimobiledevice)")
-    command_exists ideviceinstaller || missing_tools+=("ideviceinstaller")
+    run_capture_status command_exists iproxy
+    (( RUN_STATUS == 0 )) || missing_tools+=("iproxy (libusbmuxd)")
+    run_capture_status command_exists idevice_id
+    (( RUN_STATUS == 0 )) || missing_tools+=("idevice_id (libimobiledevice)")
+    run_capture_status command_exists ideviceinstaller
+    (( RUN_STATUS == 0 )) || missing_tools+=("ideviceinstaller")
 
     if [[ ${#missing_tools[@]} -eq 0 ]]; then
         log_info "Physical iOS device tools: all present"
@@ -4491,7 +4693,8 @@ ios_check_physical_device_tools() {
 
     log_warn "Missing physical iOS device tools: ${missing_tools[*]}"
 
-    if ! command_exists brew; then
+    run_capture_status command_exists brew
+    if (( RUN_STATUS != 0 )); then
         log_info "Install with: brew install libusbmuxd ideviceinstaller"
         return 0
     fi
@@ -4508,12 +4711,14 @@ ios_check_physical_device_tools() {
 
 _install_libimobiledevice_tools() {
     # ideviceinstaller depends on libimobiledevice; libusbmuxd provides iproxy
-    if run_bounded_install "Installing libusbmuxd" brew install libusbmuxd; then
+    run_capture_status run_bounded_install "Installing libusbmuxd" brew install libusbmuxd
+    if (( RUN_STATUS == 0 )); then
         CHANGES_MADE=true
     else
         log_warn "libusbmuxd install failed — iproxy will be unavailable"
     fi
-    if run_bounded_install "Installing ideviceinstaller" brew install ideviceinstaller; then
+    run_capture_status run_bounded_install "Installing ideviceinstaller" brew install ideviceinstaller
+    if (( RUN_STATUS == 0 )); then
         CHANGES_MADE=true
     else
         log_warn "ideviceinstaller install failed — physical device app install will be unavailable"
@@ -4523,14 +4728,18 @@ _install_libimobiledevice_tools() {
 # Report or install physical device tools depending on preset.
 # In development/local-dev presets, offers to install. Otherwise just reports.
 ios_report_physical_device_tools() {
-    if [[ "$(detect_os)" != "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" != "macos" ]]; then
         return 0
     fi
 
     local missing_tools=()
-    command_exists iproxy          || missing_tools+=("iproxy")
-    command_exists idevice_id      || missing_tools+=("idevice_id")
-    command_exists ideviceinstaller || missing_tools+=("ideviceinstaller")
+    run_capture_status command_exists iproxy
+    (( RUN_STATUS == 0 )) || missing_tools+=("iproxy")
+    run_capture_status command_exists idevice_id
+    (( RUN_STATUS == 0 )) || missing_tools+=("idevice_id")
+    run_capture_status command_exists ideviceinstaller
+    (( RUN_STATUS == 0 )) || missing_tools+=("ideviceinstaller")
 
     if [[ ${#missing_tools[@]} -eq 0 ]]; then
         log_info "Physical iOS device tools: all present"
@@ -4538,7 +4747,8 @@ ios_report_physical_device_tools() {
     fi
 
     # In development preset, offer to install
-    if [[ "${INSTALL_DEV_TOOLS}" == "true" ]] && command_exists brew; then
+    run_capture_status command_exists brew
+    if [[ "${INSTALL_DEV_TOOLS}" == "true" ]] && (( RUN_STATUS == 0 )); then
         ios_check_physical_device_tools
     else
         log_info "Physical iOS device tools not installed: ${missing_tools[*]} (needed for USB-connected iPhones only)"
@@ -4556,14 +4766,16 @@ collect_choices() {
     # Check if IDE plugin is available in latest release
     if [[ "${platform_choice}" == "Android" || "${platform_choice}" == "Both" ]]; then
         local ide_plugin_url
-        ide_plugin_url=$(resolve_ide_plugin_url || true)
+        run_capture_output resolve_ide_plugin_url
+        ide_plugin_url="${CAPTURED_OUTPUT}"
         if [[ -n "${ide_plugin_url}" ]]; then
             if gum confirm "Install AutoMobile IntelliJ/Android Studio plugin?"; then
                 INSTALL_IDE_PLUGIN=true
                 IDE_PLUGIN_METHOD="release"
                 IDE_PLUGIN_ZIP_URL="${ide_plugin_url}"
 
-                IDE_PLUGIN_DIR=$(detect_ide_plugins_dir || true)
+                run_capture_output detect_ide_plugins_dir
+                IDE_PLUGIN_DIR="${CAPTURED_OUTPUT}"
                 if [[ -z "${IDE_PLUGIN_DIR}" ]]; then
                     IDE_PLUGIN_DIR=$(gum input --prompt "IDE plugins directory: " --value "")
                 fi
@@ -4600,7 +4812,8 @@ resolve_android_sdk_root() {
         return 0
     fi
 
-    if [[ "$(detect_os)" == "macos" ]]; then
+    run_capture_output detect_os
+    if [[ "${CAPTURED_OUTPUT}" == "macos" ]]; then
         echo "${HOME}/Library/Android/sdk"
     else
         echo "${HOME}/Android/Sdk"
@@ -4613,16 +4826,22 @@ install_bun_curl() {
     local installer_path="${temp_dir}/bun-install.sh"
     local log_path="${temp_dir}/bun-install.log"
 
-    if command_exists curl; then
-        if ! run_spinner "Downloading Bun installer" \
-            curl -fsSL "https://bun.sh/install" -o "${installer_path}"; then
+    run_capture_status command_exists curl
+    cond_1="${RUN_STATUS}"
+    run_capture_status command_exists wget
+    cond_2="${RUN_STATUS}"
+    if (( cond_1 == 0 )); then
+        run_capture_status run_spinner "Downloading Bun installer" \
+            curl -fsSL "https://bun.sh/install" -o "${installer_path}"
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to download Bun installer."
             rm -rf "${temp_dir}"
             return 1
         fi
-    elif command_exists wget; then
-        if ! run_spinner "Downloading Bun installer" \
-            wget -qO "${installer_path}" "https://bun.sh/install"; then
+    elif (( cond_2 == 0 )); then
+        run_capture_status run_spinner "Downloading Bun installer" \
+            wget -qO "${installer_path}" "https://bun.sh/install"
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to download Bun installer."
             rm -rf "${temp_dir}"
             return 1
@@ -4635,7 +4854,8 @@ install_bun_curl() {
 
     chmod +x "${installer_path}"
 
-    if ! run_with_progress "Installing Bun" bash -c "bash \"${installer_path}\" >\"${log_path}\" 2>&1"; then
+    run_capture_status run_with_progress "Installing Bun" bash -c "bash \"${installer_path}\" >\"${log_path}\" 2>&1"
+    if (( RUN_STATUS != 0 )); then
         log_error "Bun installation failed. Logs: ${log_path}"
         return 1
     fi
@@ -4649,13 +4869,15 @@ install_bun_homebrew() {
     # Add the oven-sh/bun tap if not already added
     local tap_output
     if ! tap_output=$(brew tap 2>/dev/null) || [[ "${tap_output}" != *"oven-sh/bun"* ]]; then
-        if ! run_bounded_install "Adding Homebrew tap oven-sh/bun" brew tap oven-sh/bun; then
+        run_capture_status run_bounded_install "Adding Homebrew tap oven-sh/bun" brew tap oven-sh/bun
+        if (( RUN_STATUS != 0 )); then
             log_error "Failed to add Homebrew tap."
             return 1
         fi
     fi
 
-    if ! run_bounded_install "Installing Bun via Homebrew" brew install oven-sh/bun/bun; then
+    run_capture_status run_bounded_install "Installing Bun via Homebrew" brew install oven-sh/bun/bun
+    if (( RUN_STATUS != 0 )); then
         log_error "Bun installation via Homebrew failed."
         return 1
     fi
@@ -4673,7 +4895,8 @@ install_bun() {
     # Build list of available installation methods
     local options=()
     options+=("Official installer (curl | bash)")
-    if [[ "${os}" == "macos" ]] && command_exists brew; then
+    run_capture_status command_exists brew
+    if [[ "${os}" == "macos" ]] && (( RUN_STATUS == 0 )); then
         options+=("Homebrew (brew install)")
     fi
 
@@ -4712,10 +4935,12 @@ install_bun() {
     local install_status=0
     case "${install_method}" in
         homebrew)
-            install_bun_homebrew || install_status=$?
+            run_capture_status install_bun_homebrew
+            install_status="${RUN_STATUS}"
             ;;
         *)
-            install_bun_curl || install_status=$?
+            run_capture_status install_bun_curl
+            install_status="${RUN_STATUS}"
             ;;
     esac
 
@@ -4723,7 +4948,8 @@ install_bun() {
         return 1
     fi
 
-    if command_exists bun; then
+    run_capture_status command_exists bun
+    if (( RUN_STATUS == 0 )); then
         log_info "Bun installed: $(bun --version)"
     else
         log_warn "Bun installed but not on PATH. Restart your shell or add bun to PATH."
@@ -4763,12 +4989,14 @@ apply_preset() {
             INSTALL_DEV_TOOLS=true
             # IDE plugin only installed if available in release
             local ide_url
-            ide_url=$(resolve_ide_plugin_url || true)
+            run_capture_output resolve_ide_plugin_url
+            ide_url="${CAPTURED_OUTPUT}"
             if [[ -n "${ide_url}" ]]; then
                 INSTALL_IDE_PLUGIN=true
                 IDE_PLUGIN_METHOD="release"
                 IDE_PLUGIN_ZIP_URL="${ide_url}"
-                IDE_PLUGIN_DIR=$(detect_ide_plugins_dir || true)
+                run_capture_output detect_ide_plugins_dir
+                IDE_PLUGIN_DIR="${CAPTURED_OUTPUT}"
             else
                 INSTALL_IDE_PLUGIN=false
             fi
@@ -4812,7 +5040,8 @@ client_base_has_config() {
         local entry_name
         entry_name=$(echo "${entry}" | cut -d'|' -f1)
         if [[ "${entry_name}" == "${base_name}"* ]]; then
-            if client_has_auto_mobile "${entry_name}"; then
+            run_capture_status client_has_auto_mobile "${entry_name}"
+            if (( RUN_STATUS == 0 )); then
                 return 0
             fi
         fi
@@ -4840,7 +5069,8 @@ select_preset() {
     fi
 
     while IFS= read -r client; do
-        if client_has_auto_mobile "${client}"; then
+        run_capture_status client_has_auto_mobile "${client}"
+        if (( RUN_STATUS == 0 )); then
             has_existing_config=true
             break
         fi
@@ -4869,7 +5099,8 @@ select_preset() {
             recommendation=" — recommended"
         fi
 
-        if client_has_auto_mobile "${client}"; then
+        run_capture_status client_has_auto_mobile "${client}"
+        if (( RUN_STATUS == 0 )); then
             options+=("${client}${recommendation} — already configured")
         else
             options+=("${client}${recommendation} — add AutoMobile to ${config_path}")
@@ -4960,18 +5191,20 @@ main() {
     gum style --bold "Current Setup"
 
     # Check Bun
-    if spin_check "Checking Bun" "command -v bun >/dev/null 2>&1"; then
+    run_capture_status spin_check "Checking Bun" "command -v bun >/dev/null 2>&1"
+    if (( RUN_STATUS == 0 )); then
         BUN_INSTALLED=true
     else
         BUN_INSTALLED=false
     fi
 
     # Check runtime dependencies
-    spin_check "Checking ffmpeg" "command -v ffmpeg >/dev/null 2>&1" || true
+    run_capture_status spin_check "Checking ffmpeg" "command -v ffmpeg >/dev/null 2>&1"
 
     # Check Android SDK
     local adb_check="command -v adb >/dev/null 2>&1 || [[ -x \"${ANDROID_HOME:-}/platform-tools/adb\" ]] || [[ -x \"${ANDROID_SDK_ROOT:-}/platform-tools/adb\" ]] || [[ -x \"${HOME}/Library/Android/sdk/platform-tools/adb\" ]] || [[ -x \"${HOME}/Android/Sdk/platform-tools/adb\" ]]"
-    if spin_check "Checking Android SDK (adb)" "${adb_check}"; then
+    run_capture_status spin_check "Checking Android SDK (adb)" "${adb_check}"
+    if (( RUN_STATUS == 0 )); then
         ANDROID_SDK_DETECTED=true
         ANDROID_SETUP_OK=true
 
@@ -5010,13 +5243,16 @@ main() {
             # installer edit.
             local libs_toml="${PROJECT_ROOT}/android/gradle/libs.versions.toml"
             local compile_sdk install_advice platform_status
-            compile_sdk=$(read_required_compile_sdk "${libs_toml}" 2>/dev/null || true)
+            run_capture_output read_required_compile_sdk "${libs_toml}" 2>/dev/null
+            compile_sdk="${CAPTURED_OUTPUT}"
             # Capture status via `if` so `set -e` doesn't abort on the non-zero
             # (missing/unknown) return codes, which are expected signals here.
-            if install_advice=$(android_platform_install_advice "${detected_android_home}" "${libs_toml}"); then
+            run_capture_output android_platform_install_advice "${detected_android_home}" "${libs_toml}"
+            install_advice="${CAPTURED_OUTPUT}"
+            if (( RUN_STATUS == 0 )); then
                 platform_status=0
             else
-                platform_status=$?
+                platform_status="${RUN_STATUS}"
             fi
             if [[ "${platform_status}" -eq 0 ]]; then
                 log_info "Checking Android SDK platform (android-${compile_sdk}): ok"
@@ -5065,7 +5301,8 @@ main() {
     # Check iOS setup (macOS only)
     if [[ "${os}" == "macos" ]]; then
         # Check Xcode
-        if spin_check "Checking Xcode" "command -v xcodebuild >/dev/null 2>&1"; then
+        run_capture_status spin_check "Checking Xcode" "command -v xcodebuild >/dev/null 2>&1"
+        if (( RUN_STATUS == 0 )); then
             local xcode_version
             xcode_version=$(xcodebuild -version 2>/dev/null | head -1 || true)
             if [[ -n "${xcode_version}" ]]; then
@@ -5073,7 +5310,8 @@ main() {
             fi
 
             # Check Command Line Tools
-            if spin_check "Checking Command Line Tools" "xcode-select -p >/dev/null 2>&1"; then
+            run_capture_status spin_check "Checking Command Line Tools" "xcode-select -p >/dev/null 2>&1"
+            if (( RUN_STATUS == 0 )); then
                 local clt_path
                 clt_path=$(xcode-select -p 2>/dev/null || true)
                 log_info "Command Line Tools path: ${clt_path}"
@@ -5084,7 +5322,7 @@ main() {
                 start_ios_runtime_probe
 
                 # Check devicectl (Xcode 15+ physical device control)
-                spin_check "Checking devicectl" "xcrun devicectl --version >/dev/null 2>&1" || true
+                run_capture_status spin_check "Checking devicectl" "xcrun devicectl --version >/dev/null 2>&1"
 
                 IOS_SETUP_OK=true
             fi
@@ -5092,9 +5330,12 @@ main() {
 
         # Check libimobiledevice tools (only needed for physical iOS devices over USB)
         local ios_usb_missing=()
-        command_exists iproxy          || ios_usb_missing+=("iproxy")
-        command_exists idevice_id      || ios_usb_missing+=("idevice_id")
-        command_exists ideviceinstaller || ios_usb_missing+=("ideviceinstaller")
+        run_capture_status command_exists iproxy
+        (( RUN_STATUS == 0 )) || ios_usb_missing+=("iproxy")
+        run_capture_status command_exists idevice_id
+        (( RUN_STATUS == 0 )) || ios_usb_missing+=("idevice_id")
+        run_capture_status command_exists ideviceinstaller
+        (( RUN_STATUS == 0 )) || ios_usb_missing+=("ideviceinstaller")
         if [[ ${#ios_usb_missing[@]} -eq 0 ]]; then
             log_info "Checking physical iOS device tools: ok"
         else
@@ -5119,7 +5360,8 @@ main() {
     # Check Claude CLI and marketplace
     if [[ "${CLAUDE_CLI_INSTALLED}" == "true" ]]; then
         # Check marketplace plugin (deferred from early detection because it's a slow network call)
-        if spin_check "Checking Claude marketplace plugin" "marketplace_output=\$(claude plugin marketplace list 2>/dev/null) || exit 1; [[ \"\${marketplace_output}\" == *'auto-mobile'* ]]"; then
+        run_capture_status spin_check "Checking Claude marketplace plugin" "marketplace_output=\$(claude plugin marketplace list 2>/dev/null) || exit 1; [[ \"\${marketplace_output}\" == *'auto-mobile'* ]]"
+        if (( RUN_STATUS == 0 )); then
             CLAUDE_MARKETPLACE_INSTALLED=true
             log_info "Claude CLI: installed (marketplace plugin installed)"
         else
@@ -5158,7 +5400,8 @@ main() {
     else
         # Interactive mode - offer preset selection
         show_installation_progress 2
-        if ! select_preset; then
+        run_capture_status select_preset
+        if (( RUN_STATUS != 0 )); then
             # A missing MCP client is a terminal condition; continuing would
             # present unrelated platform and CLI prompts after this error.
             exit 1
@@ -5243,7 +5486,8 @@ main() {
 
     # Verify bunx is available before writing configs that depend on it.
     # If bun installation failed, don't rewrite working npx configs to bunx.
-    if [[ "${CONFIGURE_MCP_CLIENTS}" == "true" ]] && ! command_exists bunx; then
+    run_capture_status command_exists bunx
+    if [[ "${CONFIGURE_MCP_CLIENTS}" == "true" ]] && (( RUN_STATUS != 0 )); then
         log_error "Bun is not available. Skipping MCP config updates to avoid breaking existing setup."
         log_error "Install bun (https://bun.sh) and re-run the installer."
         CONFIGURE_MCP_CLIENTS=false
@@ -5288,13 +5532,15 @@ main() {
                 codex_target="Codex (Project)"
             fi
             local claude_code_entry
-            claude_code_entry=$(find_client_entry "${claude_code_target}" 2>/dev/null || echo "")
+            run_capture_output find_client_entry "${claude_code_target}" 2>/dev/null
+            claude_code_entry="${CAPTURED_OUTPUT}"
             if [[ -n "${claude_code_entry}" ]]; then
                 SELECTED_MCP_CLIENTS=("${claude_code_target}")
                 configure_selected_mcp_clients
             else
                 local codex_entry
-                codex_entry=$(find_client_entry "${codex_target}" 2>/dev/null || echo "")
+                run_capture_output find_client_entry "${codex_target}" 2>/dev/null
+                codex_entry="${CAPTURED_OUTPUT}"
                 if [[ -n "${codex_entry}" ]]; then
                     SELECTED_MCP_CLIENTS=("${codex_target}")
                     configure_selected_mcp_clients
@@ -5303,7 +5549,8 @@ main() {
                 fi
             fi
         else
-            if select_mcp_clients; then
+            run_capture_status select_mcp_clients
+            if (( RUN_STATUS == 0 )); then
                 configure_selected_mcp_clients
             fi
         fi
@@ -5311,7 +5558,8 @@ main() {
 
     # bun install (for local-dev preset)
     if [[ "${RUN_NPM_INSTALL}" == "true" ]] && [[ "${IS_REPO}" == "true" ]]; then
-        if ! execute_spinner "Running bun install" bash -c "cd '${PROJECT_ROOT}' && bun install"; then
+        run_capture_status execute_spinner "Running bun install" bash -c "cd '${PROJECT_ROOT}' && bun install"
+        if (( RUN_STATUS != 0 )); then
             log_warn "bun install failed"
         fi
     fi
@@ -5368,7 +5616,8 @@ main() {
     # CLI installation
     show_installation_progress 7
     if [[ "${INSTALL_DESKTOP_APP}" == "true" ]]; then
-        if ! install_desktop_app; then
+        run_capture_status install_desktop_app
+        if (( RUN_STATUS != 0 )); then
             if [[ "${DESKTOP_APP_EXPLICITLY_REQUESTED}" == "true" ]]; then
                 log_error "Desktop app installation was requested and did not complete."
                 return 1

@@ -2033,7 +2033,7 @@ describe("Offscreen Node Filtering", function () {
         getAccessibilityHierarchy: async (...args: unknown[]) => {
           reads++;
           if (reads === 2) {
-            expect(args[6]).toBe(MIN_RECOVERY_REFETCH_BUDGET_MS);
+            expect(args[1]).toMatchObject({ timeoutMs: MIN_RECOVERY_REFETCH_BUDGET_MS });
             return { hierarchy: { node: { $: { text: "Recovered" } } } };
           }
           return null;

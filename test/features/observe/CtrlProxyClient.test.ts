@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import type { CtrlSocket } from "../../../src/features/observe/shared/types";
 import {
   afterAll,
@@ -70,6 +71,7 @@ import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/Sta
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { typedFrameSchema } from "../../helpers/wireMessageSchemas";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -147,31 +149,33 @@ describe("AndroidCtrlProxyClient", function () {
 
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
-    fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     // Cached hierarchy liveness checks use process records; default cached test
     // fixtures represent a still-running app unless a test explicitly overrides it.
-    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
-      stdout: [
-        "1234:com.example.app/u0a123",
-        "1235:com.example/u0a123",
-        "1236:com.example.sdk/u0a123",
-        "1237:com.example.noneofthesdk/u0a123",
-        "1238:com.example.nosdk/u0a123",
-        "1239:com.example.new/u0a123",
-        "1240:com.example.remove/u0a123",
-        "1241:com.example.all/u0a123",
-        "1242:com.google.android.deskclock/u0a123",
-        "1243:com.test.app/u0a123",
-      ].join("\n"),
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(
+      "shell dumpsys activity processes",
+      createExecResult(
+        [
+          "1234:com.example.app/u0a123",
+          "1235:com.example/u0a123",
+          "1236:com.example.sdk/u0a123",
+          "1237:com.example.noneofthesdk/u0a123",
+          "1238:com.example.nosdk/u0a123",
+          "1239:com.example.new/u0a123",
+          "1240:com.example.remove/u0a123",
+          "1241:com.example.all/u0a123",
+          "1242:com.google.android.deskclock/u0a123",
+          "1243:com.test.app/u0a123",
+        ].join("\n"),
+        "",
+      ),
+    );
     fakeAdb.setScreenState(true);
 
     // Create test device
     testDevice = {
       deviceId: "test-device",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 
@@ -360,6 +364,7 @@ describe("AndroidCtrlProxyClient", function () {
     isSystem: false,
     requestedPermissions: [],
     grantedPermissions: {},
+    totalTimeMs: 0,
     ...(versionCode === undefined ? {} : { versionCode }),
   });
 
@@ -424,7 +429,7 @@ describe("AndroidCtrlProxyClient", function () {
       }
     }
     const gatedAdb = new GatedForwardAdb();
-    gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    gatedAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
     const factory = (url: string): CtrlSocket => {
@@ -563,7 +568,7 @@ describe("AndroidCtrlProxyClient", function () {
 
   const getScreenshotUpdates = async (socket: FakeSocket): Promise<ScreenshotUpdateMessage[]> =>
     socket
-      .getWrittenMessages<ScreenshotUpdateMessage>()
+      .getWrittenMessages(typedFrameSchema)
       .filter((message) => message.type === "screenshot_update");
 
   const expectSingleScreenshotUpdate = async (
@@ -607,10 +612,7 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   const setAdbPngScreenshotResponse = (screenshotBase64: string = pngFrame(1, 1)): void => {
-    fakeAdb.setCommandResponse("screencap -p", {
-      stdout: `${screenshotBase64}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult(`${screenshotBase64}\n`, ""));
   };
 
   const forwardScreenshotBinding = (
@@ -677,10 +679,7 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
-    fakeAdb.setCommandResponse("screencap -p", {
-      stdout: `${pngFrame(1, 1)}\n`,
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult(`${pngFrame(1, 1)}\n`, ""));
 
     const result = await accessibilityServiceClient.captureScreenshotForObservationStream();
 
@@ -4125,8 +4124,8 @@ describe("AndroidCtrlProxyClient", function () {
         timer: testTimer,
       });
       const DIGEST = "a".repeat(64);
-      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
-      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      fakeAdb.setCommandResponse("pm path", createExecResult("package:/a/base.apk", ""));
+      fakeAdb.setCommandResponse("sha256sum", createExecResult(`${DIGEST}  /a/base.apk`, ""));
       const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue(
         packageInfoResult(true, 5),
       );
@@ -4203,8 +4202,8 @@ describe("AndroidCtrlProxyClient", function () {
         timer: testTimer,
       });
       const DIGEST = "b".repeat(64);
-      fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
-      fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
+      fakeAdb.setCommandResponse("pm path", createExecResult("package:/a/base.apk", ""));
+      fakeAdb.setCommandResponse("sha256sum", createExecResult(`${DIGEST}  /a/base.apk`, ""));
       let releasePackageInfo: () => void = () => {};
       const pkgSpy = spyOn(testClient, "requestPackageInfo").mockImplementation(
         () =>
@@ -4747,7 +4746,7 @@ describe("AndroidCtrlProxyClient", function () {
     });
 
     test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function () {
-      fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult(`${serverPort}`, ""));
 
       // Screen off: the connection succeeds (so the fresh-data wait is actually entered), but no
       // hierarchy is ever pushed, so waitForFreshData can only exit via the periodic screen check

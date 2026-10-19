@@ -67,7 +67,14 @@ describe("iOS CtrlProxyGestures", () => {
     const gestures = new CtrlProxyGestures(context);
 
     const { sentMsg, result } = await callAndResolve(sent, context.requestManager, () =>
-      gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450),
+      gestures.requestMultiFingerSwipe({
+        x1: 10,
+        y1: 20,
+        x2: 30,
+        y2: 40,
+        fingerCount: 3,
+        duration: 450,
+      }),
     );
 
     expect(sentMsg.type).toBe("request_multi_finger_swipe");
@@ -81,7 +88,16 @@ describe("iOS CtrlProxyGestures", () => {
     const gestures = new CtrlProxyGestures(context);
 
     const { sentMsg } = await callAndResolve(sent, requestManager, () =>
-      gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450, 5000, undefined, 30.5),
+      gestures.requestMultiFingerSwipe({
+        x1: 10,
+        y1: 20,
+        x2: 30,
+        y2: 40,
+        fingerCount: 3,
+        duration: 450,
+        timeoutMs: 5000,
+        fingerSpacing: 30.5,
+      }),
     );
 
     expect(sentMsg.offset).toBe(30.5);

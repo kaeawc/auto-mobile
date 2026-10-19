@@ -166,13 +166,10 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
   }
 
   async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
-    return this.accessibilityService.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      undefined,
-      true,
-    );
+    return this.accessibilityService.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: false,
+      disableAllFiltering: true,
+    });
   }
 
   async requestTraversalOrder(): Promise<TraversalOrderResult> {

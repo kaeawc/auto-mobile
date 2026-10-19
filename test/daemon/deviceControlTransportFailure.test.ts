@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { describe, expect, test } from "bun:test";
 import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
@@ -14,10 +15,10 @@ import { ToolRegistry, ToolRegistryClass } from "../../src/server/toolRegistry";
 describe("device-control transport failure wire type", () => {
   test("replay safety comes from the registered recovery capability and clears with the registry", () => {
     const handler = async () => ({ content: [] });
-    ToolRegistry.register("safeProbe", "read-only probe", {}, handler, {
+    ToolRegistry.register("safeProbe", "read-only probe", z.object({}), handler, {
       transportRecovery: "replay",
     });
-    ToolRegistry.register("unsafeProbe", "changes state", {}, handler);
+    ToolRegistry.register("unsafeProbe", "changes state", z.object({}), handler);
     try {
       expect(isReplaySafeToolName("safeProbe")).toBe(true);
       expect(isReplaySafeToolName("unsafeProbe")).toBe(false);
@@ -31,11 +32,11 @@ describe("device-control transport failure wire type", () => {
   test("clearing another registry preserves the singleton's observe replay permission", () => {
     const handler = async () => ({ content: [] });
     const otherRegistry = new ToolRegistryClass();
-    ToolRegistry.registerDeviceAware("observe", "Read device state", {}, handler, {
+    ToolRegistry.registerDeviceAware("observe", "Read device state", z.object({}), handler, {
       transportRecovery: "replay",
     });
     try {
-      otherRegistry.registerDeviceAware("observe", "Other device state", {}, handler);
+      otherRegistry.registerDeviceAware("observe", "Other device state", z.object({}), handler);
       otherRegistry.clearTools();
       expect(isReplaySafeToolName("observe")).toBe(true);
     } finally {

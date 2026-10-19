@@ -36,8 +36,6 @@ function fixture() {
     inputRouteClock: (request, input) => server["inputRouteClock"](request, input),
     remainingInputBudgetMs: (toolName, origin, queueEnterMs, totalTimeoutMs) =>
       server["remainingInputBudgetMs"](toolName, origin, queueEnterMs, totalTimeoutMs),
-    requireLiveInputAttempt: (signal, deviceId, frameContext, label) =>
-      server["requireLiveInputAttempt"](signal, deviceId, frameContext, label),
   };
   return { timer, preamble };
 }
@@ -54,13 +52,16 @@ const INPUT_METHODS = [
 ] as const;
 
 describe("input/* request preamble (#11814)", () => {
-  test.each(INPUT_METHODS)("%s: remaining budget is the total minus the queue wait", (method) => {
-    const { timer, preamble } = fixture();
-    timer.advanceTime(100);
-    expect(preamble.remainingInputBudgetMs(method, "origin", 40, 1000)).toBe(940);
-  });
+  test.each([...INPUT_METHODS])(
+    "%s: remaining budget is the total minus the queue wait",
+    (method) => {
+      const { timer, preamble } = fixture();
+      timer.advanceTime(100);
+      expect(preamble.remainingInputBudgetMs(method, "origin", 40, 1000)).toBe(940);
+    },
+  );
 
-  test.each(INPUT_METHODS)("%s: spent budget refuses with the queue-wait detail", (method) => {
+  test.each([...INPUT_METHODS])("%s: spent budget refuses with the queue-wait detail", (method) => {
     const { timer, preamble } = fixture();
     timer.advanceTime(1500);
     let caught: unknown;

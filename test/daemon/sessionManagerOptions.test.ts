@@ -28,12 +28,12 @@ const OWNED_BY_STATE_RESTORE: Record<string, string> = {
   rotationRestoreBackoff: "rotationRestoreBackoff",
 };
 
-function field<T>(manager: SessionManager, name: string): T {
+function field(manager: SessionManager, name: string): unknown {
   const owned = OWNED_BY_STATE_RESTORE[name];
   if (owned === undefined) {
-    return Reflect.get(manager, name) as T;
+    return Reflect.get(manager, name);
   }
-  return Reflect.get(Reflect.get(manager, "stateRestore") as object, owned) as T;
+  return Reflect.get(Reflect.get(manager, "stateRestore") as object, owned);
 }
 
 afterEach(() => {

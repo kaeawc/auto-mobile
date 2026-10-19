@@ -30,7 +30,7 @@ class ReadFailureRegistry implements BindingResourceRegistry {
     }
     return this.registry.listOpenBindingJournal();
   }
-  async snapshotBindingResources() {
+  async snapshotBindingResources(): Promise<never> {
     throw new Error(`${this.failAt} unavailable`);
   }
   async snapshotManagedDevices() {
@@ -77,7 +77,7 @@ class SnapshotRaceRegistry implements BindingResourceRegistry {
       ...before.filter(
         (device) => device.holder === "session_broker" && device.scopeState !== null,
       ),
-      ...after.filter((device) => device.holder === "free" || device.scopeState === null),
+      ...after.filter((device) => device.scopeState === null),
     ];
   }
   findDeviceHolder(platform: BindingPlatform, stableDeviceId: string) {
@@ -417,7 +417,13 @@ describe("binding total-resource budget", () => {
   test("exhaustion exposes assigned idle rows and orphan while retained stays empty", async () => {
     await assignBindingDevice(registry, "android", "idle-a", "a");
     await assignBindingDevice(registry, "ios", "idle-b", "b");
-    inventory.devices.push({ platform: "android", name: "ambroker-orphan", deviceId: "orphan-id" });
+    inventory.devices.push({
+      platform: "android",
+      name: "ambroker-orphan",
+      deviceId: "orphan-id",
+      isRunning: false,
+      isRunningStateKnown: false,
+    });
     const mine = await creation("amslot-new");
     const result = await budget(2).admitCreation({ journalEntryId: mine.id });
     expect(result).toMatchObject({
@@ -616,7 +622,17 @@ describe("binding total-resource budget", () => {
         list: async (platform) =>
           platform === "ios"
             ? { complete: false, devices: [], toolchain: "not_installed" }
-            : { complete: true, devices: [{ platform: "android", name: "ambroker-orphan" }] },
+            : {
+                complete: true,
+                devices: [
+                  {
+                    platform: "android",
+                    name: "ambroker-orphan",
+                    isRunning: false,
+                    isRunningStateKnown: false,
+                  },
+                ],
+              },
       },
     });
     const entry = await creation("amslot-new");
@@ -645,7 +661,8 @@ describe("binding total-resource budget", () => {
           ...(await registry.snapshotBindingResources()),
           openJournal: [],
         }),
-        findDeviceHolder: (platform, id) => registry.findDeviceHolder(platform, id),
+        findDeviceHolder: (platform: BindingPlatform, id: string) =>
+          registry.findDeviceHolder(platform, id),
       }),
       policy: { limit: () => 1 },
     });

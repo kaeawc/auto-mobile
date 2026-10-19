@@ -166,7 +166,16 @@ const methods: RequestMethod[] = [
   {
     name: "requestSwipe",
     invoke: (h, s) =>
-      h.client.requestSwipe(1, 2, 3, 4, 100, LONG_TIMEOUT_MS, perf, undefined, undefined, s),
+      h.client.requestSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 100,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestTapCoordinates",
@@ -179,7 +188,18 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestDrag",
-    invoke: (h, s) => h.client.requestDrag(1, 2, 3, 4, 10, 100, 10, LONG_TIMEOUT_MS, undefined, s),
+    invoke: (h, s) =>
+      h.client.requestDrag({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        pressDurationMs: 10,
+        dragDurationMs: 100,
+        holdDurationMs: 10,
+        timeoutMs: LONG_TIMEOUT_MS,
+        signal: s,
+      }),
   },
   {
     name: "requestPinch",

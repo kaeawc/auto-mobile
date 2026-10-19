@@ -698,7 +698,7 @@ export class Daemon {
   // Start of each candidate's current transitional-state episode (#11090, #11592):
   // adb offline/unauthorized and simctl Booting/Shutting Down sweeps run against
   // OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
-  private offlineEpisodes = new Map<string, OfflineEpisode>();
+  protected offlineEpisodes = new Map<string, OfflineEpisode>();
   private stoppingRecordings: Set<string> = new Set();
   private observerSessionRegistry: ObserverSessionRegistry;
   private sessionManager: SessionManager;

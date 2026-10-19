@@ -255,13 +255,29 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_swipe",
     builder: "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
-    invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(10.5, 20.25, 300.75, 401.5, 275),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestSwipe({
+        x1: 10.5,
+        y1: 20.25,
+        x2: 300.75,
+        y2: 401.5,
+        duration: 275,
+      }),
   },
   {
     name: "request_drag",
     builder: "SharedGestureDelegate.requestDrag (via CtrlProxyGestures)",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestDrag(11.5, 22.25, 33.75, 44.5, 350, 900, 150, 5000),
+      new CtrlProxyGestures(h.context).requestDrag({
+        x1: 11.5,
+        y1: 22.25,
+        x2: 33.75,
+        y2: 44.5,
+        pressDurationMs: 350,
+        dragDurationMs: 900,
+        holdDurationMs: 150,
+        timeoutMs: 5000,
+      }),
   },
   {
     name: "request_pinch",
@@ -289,17 +305,16 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_multi_finger_swipe",
     builder: "CtrlProxyGestures.requestMultiFingerSwipe",
     invoke: (h) =>
-      new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
-        15.5,
-        25.25,
-        35.75,
-        46.5,
-        3,
-        450,
-        5000,
-        undefined,
-        24.5,
-      ),
+      new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+        x1: 15.5,
+        y1: 25.25,
+        x2: 35.75,
+        y2: 46.5,
+        fingerCount: 3,
+        duration: 450,
+        timeoutMs: 5000,
+        fingerSpacing: 24.5,
+      }),
   },
   {
     name: "request_set_text",
@@ -781,12 +796,29 @@ describe("iOS integer millisecond request boundary", () => {
         name: "drag",
         builder: "drag",
         invoke: (h) =>
-          new CtrlProxyGestures(h.context).requestDrag(1, 2, 3, 4, 600.5, 1500.4, 0.4, 5000),
+          new CtrlProxyGestures(h.context).requestDrag({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            pressDurationMs: 600.5,
+            dragDurationMs: 1500.4,
+            holdDurationMs: 0.4,
+            timeoutMs: 5000,
+          }),
       },
       {
         name: "swipe",
         builder: "swipe",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(1, 2, 3, 4, 250.5, 1500.4),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestSwipe({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            duration: 250.5,
+            timeoutMs: 1500.4,
+          }),
       },
       {
         name: "pinch",
@@ -797,7 +829,14 @@ describe("iOS integer millisecond request boundary", () => {
         name: "multi",
         builder: "multi",
         invoke: (h) =>
-          new CtrlProxyGestures(h.context).requestMultiFingerSwipe(1, 2, 3, 4, 3, 250.5),
+          new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            fingerCount: 3,
+            duration: 250.5,
+          }),
       },
     ];
     for (const spec of specs) {

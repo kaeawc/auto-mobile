@@ -40,7 +40,6 @@ const FORCE_STOP = `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`;
 const testDevice: BootedDevice = {
   deviceId: "test-device",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 

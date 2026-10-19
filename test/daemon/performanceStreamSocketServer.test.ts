@@ -17,6 +17,8 @@ import type {
 import { STREAM_LIMIT_MAX } from "../../src/daemon/streamQueryNormalizers";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { performanceStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";
+import type { PerformanceStreamResponseFrame } from "../helpers/wireMessageSchemas";
 
 /**
  * Records the query the server hands the repository so the normalization of
@@ -42,11 +44,11 @@ class TestablePerformanceStreamSocketServer extends PerformanceStreamSocketServe
   }
 
   /** Send `wire` (any JSON-serializable frame) through the real line path and return the reply. */
-  async sendRawForTest(wire: unknown): Promise<PerformanceStreamSocketResponse | undefined> {
+  async sendRawForTest(wire: unknown): Promise<PerformanceStreamResponseFrame | undefined> {
     const socket = new FakeSocket<PerformanceStreamSocketResponse>();
     await this.processLine(socket, JSON.stringify(wire));
     await this.pendingBySocket.get(socket);
-    return socket.getWrittenMessages<PerformanceStreamSocketResponse>().at(-1);
+    return socket.getWrittenMessages(performanceStreamResponseFrameSchema).at(-1);
   }
 }
 

@@ -335,7 +335,7 @@ describe("release reasons are classified alike on every path", () => {
     }
   });
 
-  test.each(EVERY_REASON)(
+  test.each([...EVERY_REASON])(
     "%s: a not-found heartbeat fences exactly when the notification does",
     async (reason) => {
       // An answer that ends the session is about that session, on a connection that works:
@@ -1317,7 +1317,11 @@ describe("decideNotFoundAnswer", () => {
   // A handoff the session was not told of before opens its one window now, also when an earlier
   // handoff's window is still open or long over.
   test.each(RECOVERABLE)("a new handoff (%s) opens one window", (releaseReason) => {
-    const opened = { kind: "awaited", windowSince: NOW, handoff: handoffOf(releaseReason) };
+    const opened = {
+      kind: "awaited" as const,
+      windowSince: NOW,
+      handoff: handoffOf(releaseReason),
+    };
     for (const state of statesWith([UNREHYDRATED_HANDOFF, "release:another-handoff"])) {
       const open = NOW - state.windowSince! < W;
       // Outside any window the latest binding first asks a connection that had answered again.
@@ -1334,7 +1338,7 @@ describe("decideNotFoundAnswer", () => {
   });
 
   test("no reason opens the unrehydrated window only as the first answer on a connection just made", () => {
-    const opened = { kind: "awaited", windowSince: NOW, handoff: UNREHYDRATED_HANDOFF };
+    const opened = { kind: "awaited" as const, windowSince: NOW, handoff: UNREHYDRATED_HANDOFF };
     for (const mayAskAgain of [false, true]) {
       for (const windowSince of [undefined, NOW - W]) {
         const handoffs = new Set(windowSince === undefined ? [] : ["release:daemon-restart"]);

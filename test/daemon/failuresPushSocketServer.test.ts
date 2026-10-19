@@ -9,6 +9,7 @@ import {
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
+import { failurePushFrameSchema } from "../helpers/wireMessageSchemas";
 
 /**
  * Wraps FailuresPushSocketServer so tests can inject fake sockets and drive the
@@ -53,8 +54,8 @@ class TestableFailuresPushSocketServer extends FailuresPushSocketServer {
   }
 }
 
-function pushed(socket: FakeSocket): Array<{ type: string; data: FailureNotificationPush }> {
-  return socket.getWrittenMessages<{ type: string; data: FailureNotificationPush }>();
+function pushed(socket: FakeSocket) {
+  return socket.getWrittenMessages(failurePushFrameSchema);
 }
 
 function notification(overrides: Partial<FailureNotificationPush> = {}): FailureNotificationPush {

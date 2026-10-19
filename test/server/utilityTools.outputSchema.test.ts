@@ -1,3 +1,4 @@
+import { toolIsError, toolJson, toolStructured, toolText } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import {
@@ -63,9 +64,9 @@ describe("utility tool output schemas (#11830)", () => {
       timeZone: "UTC",
     });
     const expected = { success: true, changes: { timeZone: "UTC" }, intentBroadcast: true };
-    expect(response.content[0].text).toBe(JSON.stringify(expected));
-    expect(response.isError).toBeUndefined();
-    expect(changeLocalizationResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolText(response)).toBe(JSON.stringify(expected));
+    expect(toolIsError(response)).toBe(false);
+    expect(changeLocalizationResultSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 
   test("changeLocalization failure keeps isError and the payload and validates", async () => {
@@ -73,11 +74,11 @@ describe("utility tool output schemas (#11830)", () => {
     const response = await ToolRegistry.getTool("changeLocalization")!.deviceAwareHandler!(device, {
       timeZone: "UTC",
     });
-    expect(response.content[0].text).toBe(
+    expect(toolText(response)).toBe(
       JSON.stringify({ success: false, changes: {}, intentBroadcast: false, error: "nope" }),
     );
-    expect(response.isError).toBe(true);
-    expect(changeLocalizationResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolIsError(response)).toBe(true);
+    expect(changeLocalizationResultSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 
   test("changeLocalization accepts iOS live changes and locale metadata", () => {
@@ -96,11 +97,11 @@ describe("utility tool output schemas (#11830)", () => {
 
   test("displayConfig read keeps the text payload and validates", async () => {
     const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {});
-    expect(response.content[0].text).toBe(
+    expect(toolText(response)).toBe(
       JSON.stringify({ message: "Read display configuration", ...displayResult }),
     );
-    expect(response.isError).toBeUndefined();
-    expect(displayConfigResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolIsError(response)).toBe(false);
+    expect(displayConfigResultSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 
   test("displayConfig failure keeps isError and validates", async () => {
@@ -112,9 +113,9 @@ describe("utility tool output schemas (#11830)", () => {
       error: "unsupported",
     };
     const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {});
-    expect(response.isError).toBe(true);
-    expect(JSON.parse(response.content[0].text!).message).toBe("unsupported");
-    expect(displayConfigResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolIsError(response)).toBe(true);
+    expect(toolJson(response).message).toBe("unsupported");
+    expect(displayConfigResultSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 
   test("setActiveDevice accepts a pinned, cleared and absent displayPin", () => {

@@ -493,14 +493,11 @@ describe("TapOnElement extended selectors", () => {
           );
           expect(read).toHaveBeenCalledTimes(raw ? 0 : 1);
           if (!raw) {
-            expect(read).toHaveBeenCalledWith(
-              undefined,
-              undefined,
-              true,
-              undefined,
-              true,
-              controller.signal,
-            );
+            expect(read).toHaveBeenCalledWith(undefined, {
+              skipWaitForFresh: true,
+              disableAllFiltering: true,
+              signal: controller.signal,
+            });
           }
           expect(proxy.getActionHistory()).toHaveLength(1);
         } finally {
@@ -612,7 +609,10 @@ describe("TapOnElement extended selectors", () => {
       const read = spyOn(proxy, "getAccessibilityHierarchy");
       try {
         await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
-        expect(read).toHaveBeenCalledWith(undefined, undefined, true, undefined, true, undefined);
+        expect(read).toHaveBeenCalledWith(undefined, {
+          skipWaitForFresh: true,
+          disableAllFiltering: true,
+        });
         expect(proxy.getActionHistory()).toEqual([
           { action: "long_click", resourceId: uniqueIdElement["resource-id"], timeoutMs: 5000 },
         ]);

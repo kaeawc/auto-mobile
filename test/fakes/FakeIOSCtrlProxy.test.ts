@@ -109,7 +109,15 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       name: "swipe",
       setResult: (proxy, result) => proxy.setSwipeResult(result),
       send: (proxy, onDispatch) =>
-        proxy.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, undefined, onDispatch),
+        proxy.requestSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          duration: 300,
+          timeoutMs: 5000,
+          onDispatch,
+        }),
     },
     {
       name: "pinch",
@@ -209,8 +217,17 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       let dispatches = 0;
 
       await expect(
-        proxy.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, aborted(), () => {
-          dispatches++;
+        proxy.requestSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          duration: 300,
+          timeoutMs: 5000,
+          signal: aborted(),
+          onDispatch: () => {
+            dispatches++;
+          },
         }),
       ).rejects.toBe(reason);
 
@@ -236,17 +253,15 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       const proxy = new FakeIOSCtrlProxy();
       const controller = new AbortController();
       proxy.setSwipeResult({ success: false, error: "not connected", dispatched: false });
-      const pending = proxy.requestSwipe(
-        1,
-        2,
-        3,
-        4,
-        300,
-        5000,
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const pending = proxy.requestSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 300,
+        timeoutMs: 5000,
+        signal: controller.signal,
+      });
       controller.abort(reason);
 
       await expect(pending).rejects.toBe(reason);
@@ -256,7 +271,15 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       const proxy = new FakeIOSCtrlProxy();
       const signal = new AbortController().signal;
 
-      const result = await proxy.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, signal);
+      const result = await proxy.requestSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 300,
+        timeoutMs: 5000,
+        signal,
+      });
 
       expect(result).toMatchObject({ success: true, dispatched: true, acknowledged: true });
     });
@@ -270,20 +293,18 @@ describe("FakeIOSCtrlProxy multi-finger swipe dispatch", () => {
     onDispatch?: () => void,
     beforeSend?: () => void,
   ) =>
-    proxy.requestMultiFingerSwipe(
-      1,
-      2,
-      3,
-      4,
-      3,
-      300,
-      undefined,
-      undefined,
-      10,
+    proxy.requestMultiFingerSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      fingerCount: 3,
+      duration: 300,
+      fingerSpacing: 10,
       signal,
       onDispatch,
       beforeSend,
-    );
+    });
 
   test("runs the display fence before recording the gesture and reports onDispatch", async () => {
     const proxy = new FakeIOSCtrlProxy();

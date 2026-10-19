@@ -121,7 +121,7 @@ describe("device binding writers current behavior (#11802)", () => {
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await arrangeHarness();
@@ -166,18 +166,18 @@ describe("device binding writers current behavior (#11802)", () => {
 
   const initial: Binding = {
     sessionId: null,
-    status: "idle",
-    bindingStatus: "idle",
-    health: "ok",
+    status: "idle" as const,
+    bindingStatus: "idle" as const,
+    health: "ok" as const,
     errorCount: 0,
     assignmentCount: 0,
     lastUsedAt: 1000,
   };
   const owned: Binding = {
     sessionId: "owner",
-    status: "busy",
-    bindingStatus: "busy",
-    health: "ok",
+    status: "busy" as const,
+    bindingStatus: "busy" as const,
+    health: "ok" as const,
     errorCount: 0,
     assignmentCount: 1,
     lastUsedAt: 1001,
@@ -208,13 +208,19 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
         });
         expect(changes.map((change) => change.binding)).toEqual([
           owned,
-          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+          {
+            ...owned,
+            sessionId: null,
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
+          },
         ]);
       },
     },
@@ -249,9 +255,9 @@ describe("device binding writers current behavior (#11802)", () => {
           expect(binding(captured)).toEqual({
             ...owned,
             sessionId: null,
-            status: "idle",
-            bindingStatus: "idle",
-            health: "ok",
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
           });
           const rebound = { ...owned, lastUsedAt: 1002 };
           expect(binding(pool.getDevice(replacement.deviceId)!)).toEqual(rebound);
@@ -259,7 +265,13 @@ describe("device binding writers current behavior (#11802)", () => {
           expect(changes.map((change) => change.binding)).toEqual([
             owned,
             { ...owned, errorCount: 1 },
-            { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+            {
+              ...owned,
+              sessionId: null,
+              status: "idle" as const,
+              bindingStatus: "idle" as const,
+              health: "ok" as const,
+            },
             rebound,
           ]);
         } finally {
@@ -281,9 +293,9 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
         });
         expect(binding(pool.getDevice(bystander.deviceId)!)).toEqual({
           ...owned,
@@ -307,7 +319,13 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(pool.getDevice(original.deviceId)?.autolockSessionId).toBeUndefined();
         expect(changes.map((change) => change.binding)).toEqual([
           locked,
-          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
+          {
+            ...owned,
+            sessionId: null,
+            status: "idle" as const,
+            bindingStatus: "idle" as const,
+            health: "ok" as const,
+          },
         ]);
       },
     },
@@ -323,9 +341,9 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(binding(captured)).toEqual({
           ...owned,
           sessionId: null,
-          status: "idle",
-          bindingStatus: "idle",
-          health: "ok",
+          status: "idle" as const,
+          bindingStatus: "idle" as const,
+          health: "ok" as const,
           errorCount: 1,
         });
         expect(pool.getDevice(original.deviceId)).toBeNull();
@@ -444,9 +462,9 @@ describe("device binding writers current behavior (#11802)", () => {
       const departed = {
         ...owned,
         sessionId: null,
-        status: "idle",
-        bindingStatus: "idle",
-        health: "ok",
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
         errorCount: 1,
       };
       const rebound = {
@@ -476,8 +494,8 @@ describe("device binding writers current behavior (#11802)", () => {
         }
         const failed = {
           ...(bound ? owned : initial),
-          status: "error",
-          health: "error",
+          status: "error" as const,
+          health: "error" as const,
           errorCount: 5,
         };
         expect(binding(pool.getDevice(original.deviceId)!)).toEqual(failed);
@@ -508,9 +526,9 @@ describe("device binding writers current behavior (#11802)", () => {
       const detached = {
         ...owned,
         sessionId: null,
-        status: "idle",
-        bindingStatus: "idle",
-        health: "ok",
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
         errorCount: 1,
       };
       expect(binding(captured)).toEqual(detached);
@@ -556,7 +574,12 @@ describe("device binding writers current behavior (#11802)", () => {
       utils.setBootedDevices("android", [bystander]);
       await liveness.evictMissingPooledDevice(captured, "absent");
       const detached = { ...owned, sessionId: null, errorCount: 1 };
-      const removed = { ...detached, status: "idle", bindingStatus: "idle", health: "ok" };
+      const removed = {
+        ...detached,
+        status: "idle" as const,
+        bindingStatus: "idle" as const,
+        health: "ok" as const,
+      };
       expect(changes.map((change) => change.binding)).toEqual([detached, removed]);
       expect(binding(captured)).toEqual(removed);
       expect(manager.getSessionForDevice(original.deviceId)).toBeNull();
@@ -590,8 +613,8 @@ describe("device binding writers current behavior (#11802)", () => {
           await incidentStarted.promise;
           expect(binding(captured)).toEqual({
             ...initial,
-            status: "error",
-            health: "error",
+            status: "error" as const,
+            health: "error" as const,
             errorCount: 1,
           });
           expect(changes.map((change) => change.binding)).toEqual([

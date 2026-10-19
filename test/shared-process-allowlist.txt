@@ -476,7 +476,6 @@ test/features/action/DragPath.test.ts
 test/features/action/ExecuteGesture.iosSwipe.test.ts
 test/features/action/FieldTypeDetector.test.ts
 test/features/action/GrantAndroidPermissions.test.ts
-test/features/action/HandleIntentChooser.test.ts
 test/features/action/InstallApp.signingGuard.test.ts
 test/features/action/IosDoubleTap.test.ts
 test/features/action/IosLockScreenUnlocker.realSwipe.test.ts
@@ -758,7 +757,6 @@ test/features/observe/audits/AccessibilityAuditorContrastCap.test.ts
 test/features/observe/audits/AccessibilityAuditorOutput.test.ts
 test/features/observe/audits/AccessibilityStateDetector.test.ts
 test/features/observe/audits/ContrastPixelReviewAudit.test.ts
-test/features/observe/audits/SafeAreaAuditor.test.ts
 test/features/observe/cache/observeCacheRecentEntryParity.test.ts
 test/features/observe/collectors/HierarchyCollector.test.ts
 test/features/observe/collectors/PlatformObservationTraits.test.ts
@@ -985,6 +983,7 @@ test/features/webrtc/RtpH264TrackWriter.packetBoundary.test.ts
 test/features/webrtc/RtpH264TrackWriter.test.ts
 test/features/webrtc/RtpPcmuTrackWriter.test.ts
 test/features/webrtc/VideoServerStreamParser.test.ts
+test/features/webrtc/WebRtcPublisher.trickle.test.ts
 test/features/webrtc/WhipClient.test.ts
 test/features/webrtc/androidH264CaptureSourceFactory.test.ts
 test/features/webrtc/h264.test.ts
@@ -992,6 +991,7 @@ test/features/webrtc/h264CaptureSourceFactory.test.ts
 test/features/webrtc/h264Level.property.test.ts
 test/features/webrtc/h264Level.test.ts
 test/features/webrtc/h264Level42ScaleGolden.test.ts
+test/features/webrtc/h264ProfileNegotiation.test.ts
 test/features/webrtc/processSpawner.test.ts
 test/features/webrtc/qualityPresets.test.ts
 test/features/webrtc/trickleIce.property.test.ts

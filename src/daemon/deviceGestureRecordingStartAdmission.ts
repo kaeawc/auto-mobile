@@ -1,4 +1,4 @@
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import {
   assertInputRequesterHoldsDevice,
   InputDeviceOwnedError,
@@ -14,11 +14,10 @@ export function deviceGestureRecordingStartOwnershipRefusal(
   requesterSessionUuid: string | undefined,
   requireHeldSession = false,
 ) {
-  const state = DaemonState.getInstance();
-  if (!state.isInitialized()) {
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!sessionManager) {
     return undefined;
   }
-  const sessionManager = state.getSessionManager();
   const ownerSessionUuid = deviceId
     ? (sessionManager.getSessionForDevice(deviceId) ?? undefined)
     : undefined;

@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { statusOf } from "../../src/daemon/deviceBinding";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -18,7 +18,7 @@ describe("DevicePool idle selection Android presence sweep", () => {
     (deviceId, index) => ({ name: `Pixel ${index}`, platform: "android" as const, deviceId }),
   );
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
@@ -28,7 +28,19 @@ describe("DevicePool idle selection Android presence sweep", () => {
     });
     fakeDeviceUtils.setBootedDevices("android", emulators);
     await pool.initializeWithDevices(emulators);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    it(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     timer.clearAllTimers?.();
@@ -41,19 +53,19 @@ describe("DevicePool idle selection Android presence sweep", () => {
     return await pool.assignDeviceToSession("session-1", "android");
   }
 
-  it("takes one sweep when the first candidate is live", async () => {
+  arranged("takes one sweep when the first candidate is live", async () => {
     await assignWithLiveDevices(4);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices")).toBe(1);
   });
 
-  it("takes one sweep regardless of how many stale candidates it rejects", async () => {
+  arranged("takes one sweep regardless of how many stale candidates it rejects", async () => {
     const deviceId = await assignWithLiveDevices(1);
 
     expect(deviceId).toBe("emulator-5560");
     expect(fakeDeviceUtils.getCallCount("getBootedDevices")).toBe(1);
   });
 
-  it("skips absent candidates until fenced refresh misses confirm eviction", async () => {
+  arranged("skips absent candidates until fenced refresh misses confirm eviction", async () => {
     await assignWithLiveDevices(1);
 
     const pooledIds = pool.getAllDevices().map((device) => device.id);

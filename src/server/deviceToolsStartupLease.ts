@@ -1,5 +1,5 @@
 import { ActionableError } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool } from "../daemon/devicePool";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
@@ -9,7 +9,6 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import {
   StartDeviceArgs,
-  getStartDevicePool,
   isUnknownAndroidRuntimeName,
   runWithinShutdownDeadline,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
@@ -125,7 +124,7 @@ export async function reserveAndroidStartupLease(
   if (args.platform !== "android") {
     return undefined;
   }
-  const devicePool = getStartDevicePool(DaemonState.getInstance());
+  const devicePool = defaultDaemonContext.fullDevicePool();
   if (!devicePool) {
     return undefined;
   }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeGestureExecutor } from "../../fakes/FakeGestureExecutor";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -637,9 +638,9 @@ describe("selector tools retry once after a fold", () => {
   const restores: Array<{ mockRestore(): void }> = [];
   beforeEach(() => {
     restores.push(
-      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager),
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
+      ),
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy()),
     );
   });
@@ -750,9 +751,9 @@ describe("swipeOn lookFor and auto-target retry once after a fold", () => {
     h.observe.setObserveResult(fresh);
     restores.push(
       spyOn(h.observe, "getMostRecentCachedObserveResult").mockImplementation(async () => h.screen),
-      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager),
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
+      ),
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(h.timer)),
     );
     const gesture = new FakeGestureExecutor();

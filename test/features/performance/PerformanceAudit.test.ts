@@ -172,12 +172,10 @@ describe("PerformanceAudit.generateDiagnostics - top contributors", function () 
     cpuStatsRaw: null,
   });
 
-  const generate = (metrics: Record<string, unknown>, violations: TestViolation[]): string =>
-    (
-      audit as unknown as {
-        generateDiagnostics: (m: unknown, v: TestViolation[]) => string;
-      }
-    ).generateDiagnostics(metrics, violations);
+  const generate = (
+    metrics: Parameters<PerformanceAudit["generateDiagnostics"]>[0],
+    violations: Parameters<PerformanceAudit["generateDiagnostics"]>[1],
+  ): string => audit.generateDiagnostics(metrics, violations);
 
   /** The lines rendered between "Top contributors:" and the next section. */
   const contributorLines = (diagnostics: string): string[] => {

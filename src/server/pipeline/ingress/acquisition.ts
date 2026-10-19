@@ -1,4 +1,4 @@
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import { ActionableError } from "../../../models";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -32,7 +32,7 @@ import {
  * `cleanupExpiredSessions`), which is the backstop this path relies on.
  */
 export function failCancelledAcquisition(acquiredSessionUuid: string): never {
-  if (!DaemonState.getInstance().isInitialized()) {
+  if (!defaultDaemonContext.isInitialized()) {
     // Direct (non-daemon) mode has no SessionManager and no reap, and it has no
     // reuse path either: `bindBootedDeviceSession` always mints a fresh UUID and
     // registers a process-local mapping, so dropping that mapping needs no

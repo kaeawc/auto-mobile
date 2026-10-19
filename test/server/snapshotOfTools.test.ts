@@ -2,9 +2,9 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { registerSnapshotOfTools, snapshotOfSchema } from "../../src/server/snapshotOfTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -29,12 +29,7 @@ const hierarchy: ViewHierarchyResult = {
 };
 
 describe("snapshotOf tool", () => {
-  const paths: string[] = [];
-  afterEach(async () => {
-    for (const dir of paths.splice(0)) {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
-  });
+  const scratch = useScratchRoot("snapshotOfTools-");
 
   test("requires exactly one source", () => {
     expect(snapshotOfSchema.safeParse({}).success).toBe(false);
@@ -114,8 +109,7 @@ describe("snapshotOf tool", () => {
   );
 
   test("captures once, writes secure PNG, and returns metadata without bytes", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-of-test-"));
-    paths.push(dir);
+    const dir = scratch.next();
     const image = new FakeImageBackend();
     image.setMetadataResult({ width: 4, height: 4, format: "png", size: 8 });
     image.setExecuteResult(Buffer.from("png-crop"));

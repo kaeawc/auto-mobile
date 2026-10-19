@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { BROKER_LIFECYCLE_TOOLS } from "../daemon/sessionBroker/lifecycleTools";
 import { currentBindingReconciler } from "../daemon/sessionBroker/provisioning/exclusion";
 import { computeBindingScopeKey } from "../daemon/sessionBroker/registry/bindingRegistry";
@@ -15,6 +15,20 @@ export interface SessionBrokerToolGateState {
   getSessionBrokerService(): { broker: Pick<SessionBroker, "hasActiveSession"> } | undefined;
 }
 
+function gateStateFrom(
+  context: Pick<
+    DaemonContext,
+    "isSessionBrokerMode" | "isInitialized" | "requireSessionManager" | "sessionBrokerService"
+  >,
+): SessionBrokerToolGateState {
+  return {
+    isSessionBrokerMode: () => context.isSessionBrokerMode(),
+    isInitialized: () => context.isInitialized(),
+    getSessionManager: () => context.requireSessionManager(),
+    getSessionBrokerService: () => context.sessionBrokerService(),
+  };
+}
+
 /**
  * In broker mode every device operation belongs to a live granted session. Inventory and
  * connection-only tools stay available, but neither a generic connection nor a nested plan can
@@ -25,7 +39,7 @@ export async function assertSessionBrokerToolCall(
   toolName: string,
   requiresDevice: boolean,
   args: Record<string, unknown>,
-  state: SessionBrokerToolGateState = DaemonState.getInstance(),
+  state: SessionBrokerToolGateState = gateStateFrom(defaultDaemonContext),
 ): Promise<void> {
   if (!state.isSessionBrokerMode()) {
     return;

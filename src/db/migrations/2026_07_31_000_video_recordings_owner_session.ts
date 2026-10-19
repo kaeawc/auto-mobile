@@ -11,7 +11,7 @@ import { sql, type Kysely } from "kysely";
  * that owner — so this migration hardens new recordings without orphaning the
  * existing archive.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   const existingColumn = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('video_recordings')
     WHERE name = 'owner_session_uuid'
@@ -32,7 +32,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropIndex("idx_video_recordings_owner_session").execute();
 
   await db.schema.alterTable("video_recordings").dropColumn("owner_session_uuid").execute();

@@ -1,3 +1,4 @@
+import { isDaemonResponse } from "./parseDaemonResponseLine";
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import {
@@ -80,6 +81,7 @@ export function createFakeDaemonState(
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: (sessionId: string) => autolockSessions.has(sessionId),
       getSession: (sessionId: string) => autolockSessions.get(sessionId) ?? null,
       getSessionForDevice: (deviceId: string) =>
         Array.from(autolockSessions.values()).find((session) => session.assignedDevice === deviceId)
@@ -87,6 +89,7 @@ export function createFakeDaemonState(
       getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -169,7 +172,11 @@ export async function openPersistentConnection(socketPath: string): Promise<Pers
       if (!line.trim()) {
         continue;
       }
-      const response = JSON.parse(line) as DaemonResponse;
+      const frame: unknown = JSON.parse(line);
+      if (!isDaemonResponse(frame) || frame.id === null) {
+        continue;
+      }
+      const response = frame;
       const entry = pending.get(response.id);
       if (entry) {
         pending.delete(response.id);

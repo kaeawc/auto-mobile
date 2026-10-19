@@ -8,7 +8,6 @@ import {
   VIDEO_SERVER_HANDSHAKE_VERSION,
   VIDEO_SERVER_LEASE_DIRECTORY,
   VIDEO_SERVER_SOCKET_PREFIX,
-  type ActiveVideoSessionRegistry,
   type SocketConnector,
   type StreamSocket,
 } from "../../../src/features/webrtc/PersistentEncoderH264Source";
@@ -19,8 +18,12 @@ import {
   VIDEO_SERVER_TRACK_ID_AUDIO,
   VIDEO_SERVER_TRACK_ID_VIDEO,
 } from "../../../src/features/webrtc/VideoServerStreamParser";
-import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import type { BootedDevice } from "../../../src/models";
+import type {
+  VideoSourceAdb,
+  VideoSourceAdbFactory,
+} from "../../../src/features/webrtc/videoSourceAdb";
+import type { BootedDevice, ExecResult } from "../../../src/models";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../../helpers/capturedH264Stream";
 import { logger } from "../../../src/utils/logger";
@@ -29,7 +32,7 @@ const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
   name: "t",
-} as BootedDevice;
+};
 const FORWARD_PORT = "45999";
 const REMOTE_JAR_PATH = "/data/local/tmp/automobile-video.jar";
 // Host-known expected integrity of the local jar the source would push (issue #4733).
@@ -102,7 +105,37 @@ function muxPacket(trackId: number, payload: Buffer): Buffer {
   return Buffer.concat([header, payload]);
 }
 
-function makeSource(overrides: Record<string, unknown> = {}) {
+type PersistentSourceOptions = ConstructorParameters<typeof PersistentEncoderH264Source>[0];
+
+/** Harness knobs that script the fake device; everything else is a real source option. */
+interface DeviceScript {
+  audioEnabled?: boolean;
+  connectorHook?: (socket: FakeSocket) => void;
+  deviceUptimeMs?: number;
+  expectedJarIntegrity?: { sha256: string; size: number };
+  forwardListOutput?: string;
+  forwardResult?: Promise<ExecResult>;
+  hangCommands?: string[];
+  leaseFileListing?: string;
+  leaseOutput?: string;
+  processCommandLine?: string;
+  remoteJarAlwaysMismatch?: boolean;
+  remoteJarDiffersBeforePush?: boolean;
+  remoteJarMatchesBeforePush?: boolean;
+  remoteJarProbe?: string;
+  spawnHang?: boolean;
+}
+
+const ok = (stdout: string): ExecResult => createExecResult(stdout, "");
+
+function asError(value: unknown): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+  throw new Error(`expected an Error, got ${String(value)}`);
+}
+
+function makeSource(overrides: Partial<PersistentSourceOptions> & DeviceScript = {}) {
   const commands: string[] = [];
   const commandCalls: Array<{ command: string; timeoutMs?: number }> = [];
   const processes: FakeProcess[] = [];
@@ -114,18 +147,16 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   const timer = new FakeTimer();
   const audioEnabled = overrides.audioEnabled === true;
   let forwardedSocket: string | null = null;
-  const leaseOutput = (overrides.leaseOutput as string | undefined) ?? "";
-  const deviceUptimeMs = (overrides.deviceUptimeMs as number | undefined) ?? 100_000;
-  const forwardResult = overrides.forwardResult as
-    | Promise<{ stdout: string; stderr: string; exitCode: number }>
-    | undefined;
+  const leaseOutput = overrides.leaseOutput ?? "";
+  const deviceUptimeMs = overrides.deviceUptimeMs ?? 100_000;
+  const forwardResult = overrides.forwardResult;
   const processCommandLine =
-    (overrides.processCommandLine as string | undefined) ??
+    overrides.processCommandLine ??
     `app_process\u0000/\u0000${VIDEO_SERVER_MAIN_CLASS}\u0000--socket-name\u0000automobile_video_stale`;
 
   // Command substrings whose ADB call should hang forever, exercising the
   // injected withTimeout bound under FakeTimer (never a real wait).
-  const hangCommands = (overrides.hangCommands as string[] | undefined) ?? [];
+  const hangCommands = overrides.hangCommands ?? [];
   const neverResolves = <T>(): Promise<T> => new Promise<T>(() => {});
 
   // Models the on-device jar (issue #4733): the remote copy matches the expected
@@ -134,7 +165,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   let pushed = false;
   const remoteJarProbeStdout = (): string => {
     if (overrides.remoteJarProbe !== undefined) {
-      return overrides.remoteJarProbe as string;
+      return overrides.remoteJarProbe;
     }
     if (overrides.remoteJarAlwaysMismatch === true) {
       return remoteJarProbeOutput("b".repeat(64), 999);
@@ -153,81 +184,74 @@ function makeSource(overrides: Record<string, unknown> = {}) {
       : "";
   };
 
-  const adbFactory: AdbClientFactory = {
-    create() {
-      return {
-        getAdbPathOnly: async () => "adb",
-        executeCommand: (command: string, options?: { timeoutMs?: number }) => {
-          commands.push(command);
-          commandCalls.push({ command, timeoutMs: options?.timeoutMs });
-          if (hangCommands.some((sub) => command.includes(sub))) {
-            return neverResolves<{ stdout: string; stderr: string; exitCode: number }>();
+  const adbFactory: VideoSourceAdbFactory = {
+    create: (): VideoSourceAdb => ({
+      executeCommand: (command: string, options?: { timeoutMs?: number }) => {
+        commands.push(command);
+        commandCalls.push({ command, timeoutMs: options?.timeoutMs });
+        if (hangCommands.some((sub) => command.includes(sub))) {
+          return neverResolves<ExecResult>();
+        }
+        if (command.startsWith("push")) {
+          pushed = true;
+          return Promise.resolve(ok(""));
+        }
+        if (command.includes("sha256sum") && command.includes("automobile-video.jar")) {
+          return Promise.resolve(ok(remoteJarProbeStdout()));
+        }
+        if (command.startsWith("forward tcp:0")) {
+          forwardedSocket = command.split("localabstract:")[1] ?? null;
+          if (forwardResult) {
+            return forwardResult;
           }
-          if (command.startsWith("push")) {
-            pushed = true;
-            return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
-          }
-          if (command.includes("sha256sum") && command.includes("automobile-video.jar")) {
-            return Promise.resolve({ stdout: remoteJarProbeStdout(), stderr: "", exitCode: 0 });
-          }
-          if (command.startsWith("forward tcp:0")) {
-            forwardedSocket = command.split("localabstract:")[1] ?? null;
-            if (forwardResult) {
-              return forwardResult;
-            }
-            return Promise.resolve({ stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 });
-          }
-          return Promise.resolve(resolveCommand(command));
-        },
-        spawn: async (args: string[]) => {
-          spawnArgs.push(args);
-          if (overrides.spawnHang === true) {
-            return neverResolves<FakeProcess>();
-          }
-          const process = new FakeProcess();
-          processes.push(process);
-          return process;
-        },
-      } as unknown as ReturnType<AdbClientFactory["create"]>;
-    },
+          return Promise.resolve(ok(`${FORWARD_PORT}\n`));
+        }
+        return Promise.resolve(resolveCommand(command));
+      },
+      spawn: async (args: string[]) => {
+        spawnArgs.push(args);
+        if (overrides.spawnHang === true) {
+          return neverResolves<FakeProcess>();
+        }
+        const process = new FakeProcess();
+        processes.push(process);
+        return process;
+      },
+    }),
   };
 
-  function resolveCommand(command: string): { stdout: string; stderr: string; exitCode: number } {
+  function resolveCommand(command: string): ExecResult {
     if (command === "forward --list") {
       const stdout =
-        (overrides.forwardListOutput as string | undefined) ??
+        overrides.forwardListOutput ??
         (forwardedSocket
           ? `${DEVICE.deviceId} tcp:${FORWARD_PORT} localabstract:${forwardedSocket}\n`
           : "");
-      return { stdout, stderr: "", exitCode: 0 };
+      return ok(stdout);
     }
     if (command.includes("stat -c")) {
       // The orphan-file sweep listing (`NOW <epoch>` + `<mtime> <path>` rows).
-      return {
-        stdout: (overrides.leaseFileListing as string | undefined) ?? "",
-        stderr: "",
-        exitCode: 0,
-      };
+      return ok(overrides.leaseFileListing ?? "");
     }
     if (command.includes(`for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json`)) {
-      return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+      return ok(leaseOutput);
     }
     if (command.startsWith(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/`)) {
-      return { stdout: leaseOutput, stderr: "", exitCode: 0 };
+      return ok(leaseOutput);
     }
     if (command === "shell cat /proc/uptime") {
-      return { stdout: `${deviceUptimeMs / 1000} 0.00\n`, stderr: "", exitCode: 0 };
+      return ok(`${deviceUptimeMs / 1000} 0.00\n`);
     }
     if (command.startsWith("shell cat /proc/")) {
-      return { stdout: processCommandLine, stderr: "", exitCode: 0 };
+      return ok(processCommandLine);
     }
-    return { stdout: "", stderr: "", exitCode: 0 };
+    return ok("");
   }
 
   const connector: SocketConnector = async () => {
     const socket = new FakeSocket();
     sockets.push(socket);
-    (overrides.connectorHook as ((socket: FakeSocket) => void) | undefined)?.(socket);
+    overrides.connectorHook?.(socket);
     return socket;
   };
 
@@ -235,8 +259,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
   // leaks socket-name claims across tests; individual tests may inject a shared
   // one to exercise sibling-session behavior.
   const activeVideoSessionRegistry =
-    (overrides.activeVideoSessionRegistry as ActiveVideoSessionRegistry | undefined) ??
-    new InMemoryActiveVideoSessionRegistry();
+    overrides.activeVideoSessionRegistry ?? new InMemoryActiveVideoSessionRegistry();
 
   const source = new PersistentEncoderH264Source({
     device: DEVICE,
@@ -248,7 +271,7 @@ function makeSource(overrides: Record<string, unknown> = {}) {
     // is hashed; individual tests override for override/build-path coverage.
     jarIntegrityProvider: {
       computeLocalJarIntegrity: async () =>
-        (overrides.expectedJarIntegrity as { sha256: string; size: number } | undefined) ?? {
+        overrides.expectedJarIntegrity ?? {
           sha256: EXPECTED_JAR_SHA256,
           size: EXPECTED_JAR_SIZE,
         },
@@ -365,7 +388,7 @@ describe("PersistentEncoderH264Source on-device jar integrity (issue #4733)", ()
     }
     expect(pushCommands(ctx)).toHaveLength(1);
     expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toContain("failed integrity verification");
+    expect(asError(thrown).message).toContain("failed integrity verification");
 
     await ctx.source.stop();
   });
@@ -383,7 +406,7 @@ describe("PersistentEncoderH264Source on-device jar integrity (issue #4733)", ()
     }
     // start() tears down and rethrows so the factory can fall back to screenrecord.
     expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toContain("failed integrity verification");
+    expect(asError(thrown).message).toContain("failed integrity verification");
     // app_process must NOT have been spawned.
     expect(ctx.spawnArgs).toHaveLength(0);
     expect(ctx.source.isRunning).toBe(false);
@@ -736,7 +759,7 @@ describe("PersistentEncoderH264Source", () => {
     await startReady(ctx);
     await ctx.source.stop();
 
-    expect(ctx.processes[0].killed).toContain("SIGINT");
+    expect(ctx.processes[0].killSignals).toContain("SIGINT");
     expect(ctx.sockets[0].destroyed).toBe(true);
     expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
     // Must NOT device-wide pkill: it would kill a concurrent videoRecording.
@@ -744,12 +767,10 @@ describe("PersistentEncoderH264Source", () => {
   });
 
   test("removes a forward created after stop races startup", async () => {
-    let resolveForward!: (result: { stdout: string; stderr: string; exitCode: number }) => void;
-    const forwardResult = new Promise<{ stdout: string; stderr: string; exitCode: number }>(
-      (resolve) => {
-        resolveForward = resolve;
-      },
-    );
+    let resolveForward!: (result: ExecResult) => void;
+    const forwardResult = new Promise<ExecResult>((resolve) => {
+      resolveForward = resolve;
+    });
     const ctx = makeSource({ forwardResult });
 
     const startPromise = ctx.source.start();
@@ -758,7 +779,7 @@ describe("PersistentEncoderH264Source", () => {
     expect(ctx.commands).toContain(`forward tcp:0 localabstract:${SESSION_SOCKET}`);
 
     const stopPromise = ctx.source.stop();
-    resolveForward({ stdout: `${FORWARD_PORT}\n`, stderr: "", exitCode: 0 });
+    resolveForward(ok(`${FORWARD_PORT}\n`));
     await Promise.all([startPromise, stopPromise]);
 
     expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
@@ -775,7 +796,7 @@ describe("PersistentEncoderH264Source", () => {
     // A startup failure must NOT be reported via onError (that path is for
     // post-start failures / reconnect); it surfaces as the rejection.
     expect(ctx.errors).toEqual([]);
-    expect(ctx.processes[0].killed).toContain("SIGINT");
+    expect(ctx.processes[0].killSignals).toContain("SIGINT");
     expect(ctx.commands).toContain(`forward --remove tcp:${FORWARD_PORT}`);
   });
 
@@ -878,7 +899,7 @@ describe("PersistentEncoderH264Source", () => {
 
     await expect(startPromise).rejects.toThrow(/readiness token mismatch/);
     expect(ctx.errors).toEqual([]);
-    expect(ctx.processes[0].killed).toContain("SIGINT");
+    expect(ctx.processes[0].killSignals).toContain("SIGINT");
   });
 
   test("waits for a complete readiness line when stdout splits the socket name", async () => {
@@ -1921,19 +1942,16 @@ describe("PersistentEncoderH264Source", () => {
       await tick();
     }
 
-    async function expectStartRejects(overrides: Record<string, unknown>): Promise<Error> {
+    async function expectStartRejects(overrides: Parameters<typeof makeSource>[0]): Promise<Error> {
       const ctx = makeSource(overrides);
       const startPromise = ctx.source.start();
-      const settled = startPromise.then(
-        () => null,
-        (error) => error as Error,
-      );
+      const settled = startPromise.then(() => null, asError);
       await fireTimeout(ctx, COMMAND_TIMEOUT_MS);
       const error = await settled;
       expect(error).toBeInstanceOf(Error);
       // The source tore itself down so the factory can fall back to screenrecord.
       expect(ctx.source.isRunning).toBe(false);
-      return error as Error;
+      return asError(error);
     }
 
     test("a hung adb push makes start() reject within the launch timeout", async () => {
@@ -1952,12 +1970,9 @@ describe("PersistentEncoderH264Source", () => {
     });
 
     test("a hung initial socket connect makes start() reject within the launch timeout", async () => {
-      const ctx = makeSource({ connector: (() => new Promise(() => {})) as SocketConnector });
+      const ctx = makeSource({ connector: () => new Promise(() => {}) });
       const startPromise = ctx.source.start();
-      const settled = startPromise.then(
-        () => null,
-        (error) => error as Error,
-      );
+      const settled = startPromise.then(() => null, asError);
       await tick(); // push + spawn
       ctx.processes[0].ready();
       await tick(); // ready resolves, forward + connect begins (and hangs)

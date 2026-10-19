@@ -1,5 +1,4 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -24,11 +23,6 @@ afterEach(() => {
 // Minimal MCP-server stand-in for ResourceRegistry: registerWithServer installs
 // request handlers on `server.server` and tracks the wrapper for notification
 // fan-out; notifyResourceListChanged sends via `server.server.notification`.
-
-// The one cast: FakeMcpServer implements only what the registry touches.
-function asServer(fake: FakeMcpServer): McpServer {
-  return fake as unknown as McpServer;
-}
 
 function methodsSent(server: FakeMcpServer): string[] {
   return server.server.notifications.map((n) => n.method);
@@ -89,7 +83,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     const releaseNotification = Promise.withResolvers<void>();
     server.server.notificationStarted = () => notificationStarted.resolve();
     server.server.notificationGate = releaseNotification.promise;
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
 
     let notificationSettled = false;
     let notification: Promise<void> | undefined;
@@ -171,7 +165,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     };
     PlatformDeviceManagerFactory.setInstance(manager);
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
 
     try {
       const oldRefresh = syncInstalledAppResources();
@@ -222,7 +216,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     manager.setBootedDevices("android", [disappearedDevice]);
     PlatformDeviceManagerFactory.setInstance(manager);
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     const cleanupStarted = Promise.withResolvers<void>();
     const releaseCleanup = Promise.withResolvers<void>();
     clearDeviceSession.mockImplementation(async () => {
@@ -265,8 +259,8 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   test("notifyResourceListChanged reaches every registered server", async () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(first));
-    ResourceRegistry.registerWithServer(asServer(second));
+    ResourceRegistry.registerWithServer(first);
+    ResourceRegistry.registerWithServer(second);
 
     await ResourceRegistry.notifyResourceListChanged();
 
@@ -278,8 +272,8 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     const failing = new FakeMcpServer();
     failing.server.shouldThrow = true;
     const healthy = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(failing));
-    ResourceRegistry.registerWithServer(asServer(healthy));
+    ResourceRegistry.registerWithServer(failing);
+    ResourceRegistry.registerWithServer(healthy);
 
     await ResourceRegistry.notifyResourceListChanged();
 
@@ -289,8 +283,8 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   test("prunes a server when its underlying transport closes", async () => {
     const closing = new FakeMcpServer();
     const surviving = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(closing));
-    ResourceRegistry.registerWithServer(asServer(surviving));
+    ResourceRegistry.registerWithServer(closing);
+    ResourceRegistry.registerWithServer(surviving);
 
     closing.server.onclose?.();
     await ResourceRegistry.notifyResourceListChanged();
@@ -315,8 +309,8 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   test("an ephemeral per-request server is never notified and retains no subscription (#4678)", async () => {
     const ephemeral = new FakeMcpServer();
     const session = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(ephemeral), undefined, { ephemeral: true });
-    ResourceRegistry.registerWithServer(asServer(session));
+    ResourceRegistry.registerWithServer(ephemeral, undefined, { ephemeral: true });
+    ResourceRegistry.registerWithServer(session);
     ResourceRegistry.register(
       "automobile:test/ephemeral-resource",
       "test",
@@ -340,7 +334,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   test("ephemeral servers are tracked only until they close, so none leak", () => {
     const servers = Array.from({ length: 3 }, () => new FakeMcpServer());
     for (const server of servers) {
-      ResourceRegistry.registerWithServer(asServer(server), undefined, { ephemeral: true });
+      ResourceRegistry.registerWithServer(server, undefined, { ephemeral: true });
     }
     expect(ResourceRegistry.trackedServerCountsForTesting()).toEqual({ notified: 0, ephemeral: 3 });
 
@@ -354,8 +348,8 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
   test("notifyResourceUpdated reaches only subscribed live servers (issue #3223)", async () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(first));
-    ResourceRegistry.registerWithServer(asServer(second));
+    ResourceRegistry.registerWithServer(first);
+    ResourceRegistry.registerWithServer(second);
     ResourceRegistry.register(
       "automobile:test/updated-resource",
       "test",
@@ -387,7 +381,7 @@ describe("ResourceRegistry connection subscriptions", () => {
 
   function registerServer(): FakeMcpServer {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     return server;
   }
 
@@ -443,7 +437,7 @@ describe("ResourceRegistry connection subscriptions", () => {
     closing.server.onclose = () => {
       closeCalls++;
     };
-    ResourceRegistry.registerWithServer(asServer(closing));
+    ResourceRegistry.registerWithServer(closing);
     const surviving = registerServer();
     await subscribe(closing, URI);
     await subscribe(closing, OTHER_URI);
@@ -529,7 +523,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("distinct per-page URIs are tracked as distinct subscription identities", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     await subscribe(server, PAGE_A);
     await subscribe(server, PAGE_B);
 
@@ -541,7 +535,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("a canonical-URI update fans out to every per-page subscriber, each with its own page URI", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     await subscribe(server, PAGE_A);
     await subscribe(server, PAGE_B);
 
@@ -552,7 +546,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("the whole-table subscriber and per-page subscribers are all notified", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     await subscribe(server, CANONICAL_URI);
     await subscribe(server, PAGE_A);
 
@@ -563,7 +557,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("pagination-only difference is order-independent between subscription and canonical URI", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     // offset before limit, still the same page-independent identity as CANONICAL_URI.
     const reordered = "automobile:pages/one/data?offset=10&appId=x&limit=10";
     await subscribe(server, reordered);
@@ -575,7 +569,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("does not fan out to a page of a different identity (differing non-pagination query)", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     const otherApp = "automobile:pages/one/data?appId=y&limit=10&offset=0";
     await subscribe(server, PAGE_A);
     await subscribe(server, otherApp);
@@ -587,7 +581,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("does not fan out to a page of a different path", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     const otherRow = "automobile:pages/two/data?appId=x&limit=10&offset=0";
     await subscribe(server, PAGE_A);
     await subscribe(server, otherRow);
@@ -599,7 +593,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("no subscribers means no notification even for a paginated template", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
 
     await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
 
@@ -608,7 +602,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("non-paginated resources keep exact-match notify semantics", async () => {
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
     // A non-paginated template (no pagination params declared).
     ResourceRegistry.registerTemplate(
       "automobile:plain/{id}{?appId}",
@@ -633,8 +627,8 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
   test("page updates reach only subscribed live servers (issue #3223)", async () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(first));
-    ResourceRegistry.registerWithServer(asServer(second));
+    ResourceRegistry.registerWithServer(first);
+    ResourceRegistry.registerWithServer(second);
     await subscribe(first, PAGE_A);
 
     await ResourceRegistry.notifyResourceUpdated(CANONICAL_URI);
@@ -646,8 +640,8 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
   test("canonical updates resolve each connection's own page URI (issue #6198)", async () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(first));
-    ResourceRegistry.registerWithServer(asServer(second));
+    ResourceRegistry.registerWithServer(first);
+    ResourceRegistry.registerWithServer(second);
     await subscribe(first, PAGE_A);
     await subscribe(second, PAGE_B);
 
@@ -659,7 +653,7 @@ describe("ResourceRegistry per-page subscription identities (issue #6198)", () =
 
   test("a connection closing during delivery receives no further page updates", async () => {
     const closing = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(asServer(closing));
+    ResourceRegistry.registerWithServer(closing);
     await subscribe(closing, PAGE_A);
     await subscribe(closing, PAGE_B);
     closing.server.notificationStarted = () => closing.server.onclose?.();
@@ -707,7 +701,7 @@ describe("ResourceRegistry URI-template matching", () => {
       }),
     );
     const controller = new AbortController();
-    ResourceRegistry.registerWithServer(asServer(server), (signal) => ({
+    ResourceRegistry.registerWithServer(server, (signal) => ({
       sessionUuid: "session-bound",
       signal,
     }));
@@ -785,7 +779,7 @@ describe("ResourceRegistry URI-template matching", () => {
         return { uri: handlerUri, text: "{}" };
       },
     );
-    ResourceRegistry.registerWithServer(asServer(server));
+    ResourceRegistry.registerWithServer(server);
 
     const readHandler = server.server.handlersBySchema.get("resources/read");
     const requestedUri = "automobile:test?second=two&first=one";

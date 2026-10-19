@@ -43,6 +43,22 @@ export interface ObserveScreenLike {
   execute(options?: { signal?: AbortSignal }): Promise<ObserveResult>;
 }
 
+/**
+ * Builds the default observe path: the setup holds a resolved ADB executor (not a
+ * factory), so it is wrapped in a trivial factory to satisfy ObserveScreen's
+ * factory-only contract. `create` is a test seam for asserting the binding.
+ */
+export function createDefaultObserveScreen(
+  device: BootedDevice,
+  adb: AdbExecutor,
+  create: (device: BootedDevice, adbFactory: { create: () => AdbExecutor }) => ObserveScreenLike = (
+    d,
+    factory,
+  ) => new RealObserveScreen(d, factory),
+): ObserveScreenLike {
+  return create(device, { create: () => adb });
+}
+
 /** A setup gesture left the source screen; replay must stop, including fallback edges. */
 export class UIStateSetupScreenChangedError extends ActionableError {}
 
@@ -64,12 +80,8 @@ export class DefaultUIStateSetup implements UIStateSetup {
     this.adb = adb;
     this.timer = timer;
     this.sessionUuid = sessionUuid;
-    // The setup holds a resolved ADB executor (not a factory), so wrap it in a
-    // trivial factory to satisfy ObserveScreen's factory-only contract (matches
-    // the AndroidCtrlProxyClient.getInstance call below).
     this.observeScreenProvider =
-      observeScreenProvider ??
-      (() => new RealObserveScreen(this.device, { create: () => this.adb }));
+      observeScreenProvider ?? (() => createDefaultObserveScreen(this.device, this.adb));
   }
 
   /**

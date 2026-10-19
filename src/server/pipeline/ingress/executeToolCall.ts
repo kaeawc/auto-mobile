@@ -4,7 +4,7 @@ import {
   getLiveTextRequestState,
   subscribeLiveDeadline,
 } from "../../../daemon/liveDeadlineRegistry";
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import {
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
@@ -203,11 +203,10 @@ function foreignOwnedExplicitSessionUuid(input: {
   readonly implicitAutolockMcpSessionId: string | undefined;
 }): string | undefined {
   const { providedSessionUuid, implicitAutolockMcpSessionId } = input;
-  const state = DaemonState.getInstance();
-  if (!providedSessionUuid || !state.isInitialized()) {
+  const pool = providedSessionUuid ? defaultDaemonContext.devicePool() : undefined;
+  if (!providedSessionUuid || !pool) {
     return undefined;
   }
-  const pool = state.getDevicePool();
   if (pool.isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) {
     return providedSessionUuid;
   }
@@ -216,7 +215,7 @@ function foreignOwnedExplicitSessionUuid(input: {
     input.daemonMode &&
     input.tool.isDeviceReadOnlyCall?.(input.parsedParams) === true &&
     implicitAutolockMcpSessionId
-      ? state.getSessionManager().getSession(providedSessionUuid)
+      ? defaultDaemonContext.requireSessionManager().getSession(providedSessionUuid)
       : undefined;
   return session &&
     holdsOwnerHeartbeatLease(session.livenessPolicy) &&
@@ -398,9 +397,11 @@ function routeCall(
   const sessionId = options.sessionContext?.sessionId;
   const implicitAutolockMcpSessionId =
     context.requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-  // The one session key (#4678): a daemon call's forwarded `__mcpSessionId`, else the
-  // request's session-key header, else the stateful transport's own id. Every binding
-  // read and write below goes through it, never the transport id directly.
+  // The one session key (#4678, #13315): `context.requestMcpSessionId` already applies the
+  // precedence (the session-key header wins over an in-band `__mcpSessionId`, except on the
+  // daemon's own trusted forward, whose in-band id names the originating client); else the
+  // stateful transport's own id. Every binding read and write below goes through it, never
+  // the transport id directly.
   const bindingKey = context.requestMcpSessionId ?? deps.serverBindingKey;
   let routingSessionUuid: string | undefined;
   let readOutsideBoundSession = false;
@@ -622,9 +623,8 @@ function claimExplicitSessionBind(
   return providedSessionUuid &&
     tool.requiresDevice &&
     tool.isDeviceReadOnlyCall?.(validated.parsedParams) !== true &&
-    implicitAutolockMcpSessionId &&
-    DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
+    implicitAutolockMcpSessionId
+    ? defaultDaemonContext.devicePoolWrites()?.beginMcpBind(implicitAutolockMcpSessionId)
     : undefined;
 }
 
@@ -637,6 +637,8 @@ async function executeToolCallBody(
   const context = parseCallContext(call.args, {
     daemonMode: deps.daemonMode,
     acceptanceDiscoveryCapability: deps.options.acceptanceDiscoveryCapability,
+    sessionKey: deps.options.requestMcpSessionId,
+    trustForwardedSessionId: deps.options.trustForwardedMcpSessionId === true,
   });
   const routed = routeCall(deps, call, context);
   if ("failure" in routed) {

@@ -271,6 +271,11 @@ export class HomeScreen extends BaseVisualChange {
     return workspace === undefined;
   }
 
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return { executeAndroidHome: this.executeAndroidHome.bind(this) };
+  }
+
   private async executeAndroidHome(requestSignal?: AbortSignal): Promise<string | undefined> {
     // Combine (never replace) with the ambient MCP request signal so a cancelled
     // request aborts the ADB keyevent fallback and the verification reads. Passing

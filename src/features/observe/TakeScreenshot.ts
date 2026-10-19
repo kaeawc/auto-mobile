@@ -164,6 +164,15 @@ function resolveIosPrototypeHider(
 }
 
 export class TakeScreenshot implements ScreenshotService {
+  /** Typed unit-test view of the private capture paths. */
+  readonly testHooks = {
+    filePull: (...args: [string, ScreenshotOptions?, AbortSignal?]) =>
+      this.captureScreenshotFilePull(...args),
+    ios: (...args: [string, ScreenshotOptions, AbortSignal?]) => this.captureiOSScreenshot(...args),
+    base64: (...args: [string, ScreenshotOptions?, AbortSignal?, boolean?]) =>
+      this.captureScreenshotBase64(...args),
+  };
+
   /** Device reads may write one capture but must not evict another session's cache. */
   static forObservationRead(device: BootedDevice): TakeScreenshot {
     return new TakeScreenshot(
@@ -288,7 +297,7 @@ export class TakeScreenshot implements ScreenshotService {
    * follows `AUTOMOBILE_DATA_DIR`, so a cached path would keep pointing at a
    * data dir that a test (or a reconfigured process) has since removed.
    */
-  private static getCacheDir(): string {
+  static getCacheDir(): string {
     return ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
   }
 
@@ -685,8 +694,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Capture screenshot using CtrlProxy iOS
-   * @param finalPath - Path to save the screenshot
-   * @returns ScreenshotResult with path to the saved screenshot or error
    */
   private async captureiOSScreenshot(
     finalPath: string,
@@ -879,9 +886,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Capture screenshot using base64 encoding (faster but may hit buffer limits)
-   * @param finalPath - Path to save the screenshot
-   * @param options - Screenshot format options
-   * @returns ScreenshotResult with path to the saved screenshot or error
    */
   private async captureScreenshotBase64(
     finalPath: string,
@@ -971,9 +975,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   /**
    * Capture screenshot using file pull approach (more reliable for large screenshots)
-   * @param finalPath - Path to save the screenshot
-   * @param options - Screenshot format options
-   * @returns ScreenshotResult with path to the saved screenshot or error
    */
   private async captureScreenshotFilePull(
     finalPath: string,
@@ -982,7 +983,7 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Using file pull approach`);
-    const tempFile = `/sdcard/screenshot_${this.sanitizeDeviceTempId(this.idGenerator.next())}.png`;
+    const tempFile = `/sdcard/screenshot_${screenshotTempIdToken(this.idGenerator.next())}.png`;
     const tempLocalFile = `${finalPath}.temp`;
     let result: ScreenshotResult;
     let captureDispatched = false;
@@ -1086,10 +1087,6 @@ export class TakeScreenshot implements ScreenshotService {
 
   private hasFailedScreencap(stdout: string, stderr: string): boolean {
     return !/AM_SCREENCAP_RC:0(?:\s|$)/.test(stdout) || this.hasCommandError(stderr);
-  }
-
-  private sanitizeDeviceTempId(rawId: string): string {
-    return screenshotTempIdToken(rawId);
   }
 
   private hasCommandError(stderr: string): boolean {

@@ -15,6 +15,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
+import { observeResultFromFixture } from "../../helpers/observeFixture";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("RecentApps", () => {
@@ -122,9 +123,7 @@ describe("RecentApps", () => {
 
     test("should still press recents when the view hierarchy is unavailable", async () => {
       fakeObserveScreen.setObserveResult(() => {
-        const result = createObserveResult();
-        (result.viewHierarchy as any) = null;
-        return result;
+        return { ...createObserveResult(), viewHierarchy: undefined };
       });
       fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
 
@@ -136,12 +135,11 @@ describe("RecentApps", () => {
   });
 
   describe("fresh overview reads (#10349)", () => {
-    const overview = (fresh: boolean): ObserveResult =>
-      ({
-        ...capturedRecents,
-        timestamp: fakeTimer.now(),
-        freshness: { isFresh: fresh, verified: fresh },
-      }) as unknown as ObserveResult;
+    const overview = (fresh: boolean): ObserveResult => ({
+      ...observeResultFromFixture(capturedRecents, "capturedRecents"),
+      updatedAt: fakeTimer.now(),
+      freshness: { isFresh: fresh, verified: fresh },
+    });
 
     // Models the hierarchy source: without a minTimestamp floor it serves its
     // cached (stale) tree even when requireFreshExtraction is set.

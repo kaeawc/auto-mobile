@@ -199,8 +199,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
     const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
-    await (socket as any).restoreSelectorSessions(args, socketSessionId);
-    const route = (socket as any).getMcpForwardRoute(request, socketSessionId);
+    await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
+    const route = socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
@@ -283,9 +283,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         },
       );
     }
-    const forwarded = (socket as any).withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
     const result = await fixture.client.callTool({ name, arguments: forwarded });
-    (socket as any).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
   };
   const daemon = new FakeDaemonManager();

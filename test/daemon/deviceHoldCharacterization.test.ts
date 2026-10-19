@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
@@ -110,7 +110,19 @@ describe("device hold current-behavior characterization (#11803)", () => {
     }
   }
 
-  beforeEach(initializePool);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table)(
+        name,
+        async (row: T) => {
+          await initializePool();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
   afterEach(closePool);
   // Warm the allocation module path outside the per-test budget, as warmedTests does.
   // Every measured row still constructs a fresh pool and asserts literal current answers.
@@ -476,7 +488,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     },
   ];
 
-  test.each(rows)("$name", async ({ setup, expected, recoveryRequester }: HoldRow) => {
+  arrangedEach(rows)("$name", async ({ setup, expected, recoveryRequester }: HoldRow) => {
     await setup();
     expect({
       availability: pool.genericAvailability(booted.deviceId),

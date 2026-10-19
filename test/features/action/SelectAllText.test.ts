@@ -24,12 +24,9 @@ describe("SelectAllText Android", () => {
         requestSelectAll: async () => ({ success: true, totalTimeMs: 1 }),
       };
     });
-    const observedSpy = spyOn(
-      selectAllText as unknown as {
-        observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: () => Promise<unknown>) => fn());
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(async (fn) =>
+      fn(),
+    );
 
     await selectAllText.execute();
 
@@ -51,12 +48,9 @@ describe("SelectAllText outcomes", () => {
   const iosDevice: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "ios-1" };
 
   const runWithoutObservation = (selectAllText: SelectAllText) => {
-    const observedSpy = spyOn(
-      selectAllText as unknown as {
-        observedInteraction: (fn: () => Promise<unknown>) => Promise<unknown>;
-      },
-      "observedInteraction",
-    ).mockImplementation(async (fn: () => Promise<unknown>) => fn());
+    const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(async (fn) =>
+      fn(),
+    );
     return { promise: selectAllText.execute(), observedSpy };
   };
 

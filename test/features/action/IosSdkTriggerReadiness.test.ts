@@ -9,7 +9,7 @@ import { fixedBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIosSdkTriggerSender } from "../../fakes/FakeIosSdkTriggerSender";
 
-const request = { module: "telephony", trigger: "phoneCall" } as unknown as SdkTriggerRequest;
+const request: SdkTriggerRequest = { module: "telephony", trigger: "phoneCall" };
 const noRoute: CtrlProxySdkTriggerResult = {
   success: false,
   available: false,

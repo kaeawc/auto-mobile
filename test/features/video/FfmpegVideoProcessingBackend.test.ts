@@ -27,36 +27,54 @@ import {
   type VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
-import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { VideoSimCtl } from "../../../src/features/video/VideoSimCtl";
 import { parseSimulatorDisplays } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 import type { FfmpegClient } from "../../../src/utils/media/FfmpegClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
-import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FakeRecordingProcess } from "../../fakes/FakeRecordingProcess";
+import type { AdbProcess } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 import {
   ProcessTeardownUnconfirmedError,
+  type TrackedChildProcess,
   trackProcess,
 } from "../../../src/utils/ChildProcessTracker";
 
 const duoEnumerate = loadDuoEnumerate();
 
-function createProcessTracker(stderr: string[] = []): ProcessTracker {
-  const process = new EventEmitter() as ProcessTracker["process"];
-  process.stderr = new EventEmitter() as ProcessTracker["process"]["stderr"];
-  process.exitCode = null;
-  process.killed = false;
-  process.kill = () => true;
+class ObservedTrackedProcess extends EventEmitter implements TrackedChildProcess {
+  readonly stderr = new EventEmitter();
+  exitCode: number | null = null;
+  killed = false;
+  signalCode: NodeJS.Signals | null = null;
+  pid?: number;
+
+  kill(): boolean {
+    return true;
+  }
+}
+
+function createObservedProcessTracker(stderr: string[] = []): {
+  tracker: ProcessTracker;
+  processEmitter: EventEmitter;
+  stderrEmitter: EventEmitter;
+} {
+  const process = new ObservedTrackedProcess();
 
   return {
-    process,
-    exitState: {},
-    exitPromise: new Promise<void>(() => {}),
-    stderr,
+    tracker: { process, exitState: {}, exitPromise: new Promise<void>(() => {}), stderr },
+    processEmitter: process,
+    stderrEmitter: process.stderr,
   };
+}
+
+function createProcessTracker(stderr: string[] = []): ProcessTracker {
+  return createObservedProcessTracker(stderr).tracker;
 }
 
 /** An FFmpeg client whose only live behavior is the capability probe. */
@@ -76,6 +94,20 @@ function availableFfmpegClient(onProbe: () => void = () => {}): FfmpegClient {
     return { version: "7.1", encoders: ALL_HARDWARE_ENCODERS };
   });
 }
+
+// Throws synchronously, exactly like calling a method the client does not have.
+const unsupportedSimctl = (member: string) => (): never => {
+  throw new TypeError(`simctl.${member} is not a function`);
+};
+
+/** A recording simctl whose unspecified members fail the way a missing method does. */
+const simctlWith = (
+  overrides: Partial<VideoSimCtl> & Pick<VideoSimCtl, "isAvailable" | "startCommandArgs">,
+): VideoSimCtl => ({
+  enumerateDisplays: unsupportedSimctl("enumerateDisplays"),
+  executeCommandArgs: unsupportedSimctl("executeCommandArgs"),
+  ...overrides,
+});
 
 describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   let backend: FfmpegVideoProcessingBackend;
@@ -393,11 +425,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const stderr = new PassThrough();
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, { stderr, stdout: null, stdin: null, killed: false, kill: () => true });
+    const child = new FakeRecordingProcess({ stderr });
     let receivedArgs: string[] = [];
     let receivedOptions: SpawnOptions | undefined;
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async (args: string[], options?: SpawnOptions) => {
         receivedArgs = args;
@@ -408,7 +439,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         }, 0);
         return child;
       },
-    } as SimCtl;
+    });
     backend = new FfmpegVideoProcessingBackend(
       undefined,
       () => simctl,
@@ -435,22 +466,9 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   // handshake. kill() emits "exit" so waitForExit's SIGINT teardown resolves.
   function makeCaptureChild(emitHandshake: boolean, timer: Timer = defaultTimer): ChildProcess {
     const stderr = new PassThrough();
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, {
+    const child = new FakeRecordingProcess({
       stderr,
-      stdout: null,
-      stdin: null,
-      killed: false,
-      exitCode: null,
-      signalCode: null,
-      kill: () => {
-        (child as unknown as { killed: boolean }).killed = true;
-        queueMicrotask(() => {
-          child.emit("exit", 0, "SIGINT");
-          child.emit("close");
-        });
-        return true;
-      },
+      onKill: () => ({ code: 0, signal: "SIGINT" }),
     });
     timer.setTimeout(() => {
       child.emit("spawn");
@@ -468,7 +486,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     let live = { width: 1398, height: 2034 };
     let enumerateFails = false;
     let probeFails = false;
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       enumerateDisplays: async () => {
         if (enumerateFails) {
@@ -480,7 +498,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         commands.push(args);
         return makeCaptureChild(true, timer);
       },
-    } as SimCtl;
+    });
     const ffmpeg = {
       binaryPath: "ffmpeg",
       probe: async () => ({ version: "7.1", encoders: [] }),
@@ -561,7 +579,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     let diagnosticCalls = 0;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       // First attempt never emits the handshake (cold-simulator miss); the retry does.
       startCommandArgs: async () => {
@@ -573,7 +591,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         diagnosticCalls++;
         return diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)");
       },
-    } as unknown as SimCtl;
+    });
 
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -597,16 +615,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   // when the capture path already exists (exit 17).
   function makeExistingFileChild(timer: Timer = defaultTimer): ChildProcess {
     const stderr = new PassThrough();
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, {
-      stderr,
-      stdout: null,
-      stdin: null,
-      killed: false,
-      exitCode: null,
-      signalCode: null,
-      kill: () => true,
-    });
+    const child = new FakeRecordingProcess({ stderr });
     timer.setTimeout(() => {
       child.emit("spawn");
       stderr.write(
@@ -614,7 +623,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
           "(use -f to override). File exists\n",
       );
       timer.setTimeout(() => {
-        (child as unknown as { exitCode: number }).exitCode = 17;
+        child.setExitCode(17);
         child.emit("exit", 17, null);
         child.emit("close");
       }, 0);
@@ -630,7 +639,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const removed: string[] = [];
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async (args: string[]) => {
         const capturePath = args[3];
@@ -642,7 +651,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         return makeCaptureChild(attempts.length >= 2, timer);
       },
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)"),
-    } as unknown as SimCtl;
+    });
     const remover = {
       remove: async (filePath: string) => {
         removed.push(filePath);
@@ -691,7 +700,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const attempts: string[] = [];
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async (args: string[]) => {
         const capturePath = args[3];
@@ -705,7 +714,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         return makeCaptureChild(attempts.length >= 2, timer);
       },
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)"),
-    } as unknown as SimCtl;
+    });
     // A remover that never actually deletes the partial — models the cleanup race
     // in which correctness must not depend on the removal succeeding.
     const remover = {
@@ -741,13 +750,13 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const startRequested = new Promise<void>((resolve) => {
       markStartRequested = resolve;
     });
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => {
         markStartRequested?.();
         return child;
       },
-    } as unknown as SimCtl;
+    });
     backend = new FfmpegVideoProcessingBackend(undefined, () => simctl, availableFfmpegClient());
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-abort-udid" };
     mockConfig.abortSignal = controller.signal;
@@ -766,12 +775,13 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const captureSpawned = new Promise<void>((resolve) => {
       resolveCaptureSpawned = resolve;
     });
-    const adb = {
-      spawn: async () => {
+    class SpawnSignalAdb extends FakeAdbExecutor {
+      override async spawn(): Promise<AdbProcess> {
         resolveCaptureSpawned?.();
         return captureProcess;
-      },
-    } as unknown as AdbExecutor;
+      }
+    }
+    const adb = new SpawnSignalAdb();
     const controller = new AbortController();
     backend = new FfmpegVideoProcessingBackend(
       new FakeAdbClientFactory(adb),
@@ -794,14 +804,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     let starts = 0;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => {
         starts++;
         return makeCaptureChild(false, timer); // never emits the handshake
       },
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Shutdown)"),
-    } as unknown as SimCtl;
+    });
 
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -833,23 +843,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   // macOS runner that is also busy with xcodebuild and Simulator.
   function makeSlowHandshakeChild(handshakeDelayMs: number, timer: Timer): ChildProcess {
     const stderr = new PassThrough();
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, {
+    const child = new FakeRecordingProcess({
       stderr,
-      stdout: null,
-      stdin: null,
-      killed: false,
-      exitCode: null,
-      signalCode: null,
       pid: 4242,
-      kill: () => {
-        (child as unknown as { killed: boolean }).killed = true;
-        queueMicrotask(() => {
-          child.emit("exit", 0, "SIGINT");
-          child.emit("close");
-        });
-        return true;
-      },
+      onKill: () => ({ code: 0, signal: "SIGINT" }),
     });
     timer.setTimeout(() => child.emit("spawn"), 0);
     timer.setTimeout(() => stderr.write("Recording started\n"), handshakeDelayMs);
@@ -860,14 +857,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     let starts = 0;
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => {
         starts++;
         return makeSlowHandshakeChild(6000, timer);
       },
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)"),
-    } as unknown as SimCtl;
+    });
 
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -889,7 +886,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const probeBudgets: Array<number | undefined> = [];
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => makeCaptureChild(false, timer), // never hand shakes
       executeCommandArgs: async (_args: string[], timeoutMs?: number) => {
@@ -897,7 +894,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         await timer.sleep(timeoutMs ?? 0); // burn the whole probe budget, then time out
         throw new Error(`Command timed out after ${timeoutMs}ms: xcrun simctl list devices udid`);
       },
-    } as unknown as SimCtl;
+    });
 
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -934,7 +931,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const controller = new AbortController();
     let diagnosticStarted = false;
     let probeSignal: AbortSignal | undefined;
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => makeCaptureChild(false, timer),
       executeCommandArgs: async (_args: string[], _timeoutMs?: number, signal?: AbortSignal) => {
@@ -949,7 +946,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
           signal?.addEventListener("abort", abort, { once: true });
         });
       },
-    } as unknown as SimCtl;
+    });
     backend = new FfmpegVideoProcessingBackend(
       undefined,
       () => simctl,
@@ -977,13 +974,13 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   test("still reports a definitive simctl failure as an unavailable state (#6857)", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => makeCaptureChild(false, timer),
       executeCommandArgs: async () => {
         throw new Error("Invalid device: ios-missing-udid");
       },
-    } as unknown as SimCtl;
+    });
 
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -1013,14 +1010,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const probeBudgets: Array<number | undefined> = [];
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => makeCaptureChild(false, timer),
       executeCommandArgs: async (_args: string[], timeoutMs?: number) => {
         probeBudgets.push(timeoutMs);
         return diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)");
       },
-    } as unknown as SimCtl;
+    });
 
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -1044,30 +1041,19 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const timer = new FakeTimer();
     const stderr = new PassThrough();
     const signals: Array<NodeJS.Signals | number | undefined> = [];
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, {
+    const child = new FakeRecordingProcess({
       stderr,
-      stdout: null,
-      stdin: null,
-      killed: false,
-      exitCode: null,
-      signalCode: null,
       pid: 123,
-      kill: (signal?: NodeJS.Signals | number) => {
+      onKill: (signal) => {
         signals.push(signal);
-        (child as unknown as { killed: boolean }).killed = true;
-        queueMicrotask(() => {
-          child.emit("exit", null, signal);
-          child.emit("close");
-        });
-        return true;
+        return { code: null, signal: signal ?? null };
       },
     });
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => child,
       executeCommandArgs: async () => diagnosticsExecResult("Booted"),
-    } as unknown as SimCtl;
+    });
     backend = new FfmpegVideoProcessingBackend(
       undefined,
       () => simctl,
@@ -1104,25 +1090,19 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     timer.enableAutoAdvance();
     const stderr = new PassThrough();
     const signals: Array<NodeJS.Signals | number | undefined> = [];
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, {
+    const child = new FakeRecordingProcess({
       stderr,
-      stdout: null,
-      stdin: null,
-      killed: false,
-      exitCode: null,
-      signalCode: null,
       pid: 123,
-      kill: (signal?: NodeJS.Signals | number) => {
+      onKill: (signal) => {
         signals.push(signal);
-        return true;
+        return undefined;
       },
     });
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async () => true,
       startCommandArgs: async () => child,
       executeCommandArgs: async () => diagnosticsExecResult("Booted"),
-    } as unknown as SimCtl;
+    });
     backend = new FfmpegVideoProcessingBackend(
       undefined,
       () => simctl,
@@ -1188,7 +1168,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const timer = new FakeTimer();
     let availabilitySignal: AbortSignal | undefined;
     let captureStarts = 0;
-    const simctl = {
+    const simctl = simctlWith({
       isAvailable: async (options?: { signal?: AbortSignal }) => {
         availabilitySignal = options?.signal;
         return await new Promise<never>((_resolve, reject) => {
@@ -1205,7 +1185,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         captureStarts++;
         return makeCaptureChild(true);
       },
-    } as unknown as SimCtl;
+    });
     const ffmpegClient = probeOnlyFfmpegClient(async () => ({ version: "7.1", encoders: [] }));
     backend = new FfmpegVideoProcessingBackend(
       undefined,
@@ -1484,22 +1464,20 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
 
     test("abort removes handshake listeners and its timeout", async function () {
       const timer = new FakeTimer();
-      const tracker = createProcessTracker();
+      const { tracker, processEmitter, stderrEmitter } = createObservedProcessTracker();
       const controller = new AbortController();
-      const stderr = tracker.process.stderr as unknown as EventEmitter;
       const waiting = waitForStderrMessage(tracker, "Recording started", 5000, {
         timer,
         signal: controller.signal,
       });
 
       expect(timer.getPendingTimeoutCount()).toBe(1);
-      expect(stderr.listenerCount("data")).toBe(1);
+      expect(stderrEmitter.listenerCount("data")).toBe(1);
       controller.abort(new Error("cancelled"));
 
       await expect(waiting).rejects.toThrow("cancelled");
       expect(timer.getPendingTimeoutCount()).toBe(0);
-      expect(stderr.listenerCount("data")).toBe(0);
-      const processEmitter = tracker.process as unknown as EventEmitter;
+      expect(stderrEmitter.listenerCount("data")).toBe(0);
       expect(processEmitter.listenerCount("exit")).toBe(0);
       expect(processEmitter.listenerCount("error")).toBe(0);
     });

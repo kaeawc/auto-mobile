@@ -1,5 +1,4 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import type { McpServer } from "@modelcontextprotocol/server";
 import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
@@ -94,7 +93,7 @@ describe("the registry backstop blames the client only for its own URI (#10135)"
       async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    ResourceRegistry.registerWithServer(server, () => ({}));
     const handler = server.server.handlersBySchema.get("resources/read");
     if (!handler) {
       throw new Error("read handler not registered");

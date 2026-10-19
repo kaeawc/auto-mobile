@@ -247,7 +247,7 @@ describe("default-display dispatch fences", () => {
               });
             }
             const action = h.attach(new TapAnyElement(h.device, null, h.deps));
-            action.setRefreshViewHierarchyForTesting(async () => null);
+            action.testHooks.setRefreshViewHierarchy(async () => null);
             run = () => action.execute({ action: actionName });
           }
           if (site === "double-second") {
@@ -554,7 +554,7 @@ describe("TalkBack waits retain the action fence", () => {
                   }),
                 );
                 let captures = 0;
-                action.setRefreshViewHierarchyForTesting(async () =>
+                action.testHooks.setRefreshViewHierarchy(async () =>
                   ++captures === 1 ? h.screen.viewHierarchy! : null,
                 );
                 return action.execute({ action: actionName });
@@ -714,7 +714,7 @@ describe("default-display recovery dispatches", () => {
                     elementSelector: selector,
                   }),
                 );
-                action.setRefreshViewHierarchyForTesting(async () => null);
+                action.testHooks.setRefreshViewHierarchy(async () => null);
                 return action.execute({ action: "longPress", duration: 500 });
               })();
         if (mode === "transition") {
@@ -1152,7 +1152,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       const any = h.attach(
         new TapAnyElement(h.device, h.adb, { ...h.deps, observeScreen: h.observe }),
       );
-      any.setRefreshViewHierarchyForTesting(async (_defaultRefresh, timeout) => refresh(timeout));
+      any.testHooks.setRefreshViewHierarchy(async (_defaultRefresh, timeout) => refresh(timeout));
       const options = {
         text: "Target",
         action: "longPress" as const,

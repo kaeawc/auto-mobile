@@ -165,7 +165,7 @@ export class InputText extends BaseVisualChange {
   }
 
   async execute(
-    text: string,
+    text: string | null | undefined,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode?: InputTextMode,
@@ -283,12 +283,12 @@ export class InputText extends BaseVisualChange {
   }
 
   /**
-   * Execute Android-specific text input using accessibility service
+   * Execute Android-specific text input using accessibility service (@internal unit-test seam)
    * @param text - Text to input
    * @param imeAction - Optional IME action
    * @returns Result with method information
    */
-  private async executeAndroidTextInput(
+  async executeAndroidTextInput(
     text: string,
     imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
@@ -1020,7 +1020,7 @@ export class InputText extends BaseVisualChange {
     }
   }
 
-  private async executeKeyEventPlan(
+  async executeKeyEventPlan(
     plan: KeyEventPlan,
     timeoutMs?: number,
     noRetry: boolean = false,
@@ -1058,7 +1058,7 @@ export class InputText extends BaseVisualChange {
    * @param imeAction - Optional IME action
    * @returns Result with method information
    */
-  private async executeiOSTextInput(
+  async executeiOSTextInput(
     text: string,
     imeAction?: ImeAction,
     signal?: AbortSignal,

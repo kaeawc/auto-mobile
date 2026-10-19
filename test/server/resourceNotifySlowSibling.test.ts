@@ -1,4 +1,3 @@
-import type { McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -38,8 +37,8 @@ describe("device resource notifications do not wait on one slow session", () => 
     healthy = new FakeMcpServer();
     release = Promise.withResolvers<void>();
     slow.server.notificationGate = release.promise;
-    ResourceRegistry.registerWithServer(slow as unknown as McpServer);
-    ResourceRegistry.registerWithServer(healthy as unknown as McpServer);
+    ResourceRegistry.registerWithServer(slow);
+    ResourceRegistry.registerWithServer(healthy);
     await subscribe(slow, URI);
     await subscribe(healthy, URI);
   });

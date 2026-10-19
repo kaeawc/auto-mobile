@@ -12,7 +12,7 @@ import {
 import { Timer } from "../../utils/SystemTimer";
 import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
 import { PlatformObservationTraits } from "./collectors/PlatformObservationTraits";
-import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort } from "./collectors/collectorPorts";
 import { computeFreshness, recordWrongWindowEvidence } from "./observationFreshness";
 import { displayTransitions } from "./DisplayTransition";
 import {
@@ -26,7 +26,7 @@ export interface SingleDisplaySettleStageDependencies {
   device: () => BootedDevice;
   timer: () => Timer;
   windowIdentity: () => WindowIdentityFreshnessResolver;
-  deviceStateCollector: () => DeviceStateCollector;
+  deviceStateCollector: () => DeviceStateCollectorPort;
   platformTraits: () => PlatformObservationTraits;
   identifyCapture: (result: ObserveResult, freshness: HierarchyCaptureRequest["freshness"]) => void;
   resolveObservationTimestampMs: (result: ObserveResult) => number | undefined;

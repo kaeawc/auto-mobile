@@ -45,12 +45,12 @@ describe("DaemonClient notification frames", () => {
     client.onNotification((notification) => received.push(notification.method));
     const errors = spyOn(logger, "error").mockImplementation(() => {});
     try {
-      client.simulateIncomingDataForTesting(
+      client.testHooks.simulateIncomingData(
         Buffer.from('\n  \n{bad}\n{"type":"daemon_notification",'),
       );
       expect(received).toEqual([]);
       expect(errors).toHaveBeenCalledTimes(1);
-      client.simulateIncomingDataForTesting(
+      client.testHooks.simulateIncomingData(
         Buffer.from('"method":"notifications/tools/list_changed"}\n'),
       );
       expect(received).toEqual(["notifications/tools/list_changed"]);

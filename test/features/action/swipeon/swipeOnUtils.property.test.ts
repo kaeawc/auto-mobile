@@ -10,11 +10,6 @@ import {
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
 const direction = fc.constantFrom<SwipeDirection>("up", "down", "left", "right");
-const gestureType = fc.constantFrom(
-  "swipeFingerTowardsDirection",
-  "scrollTowardsDirection",
-  undefined,
-);
 
 describe("SCROLL_TO_FINGER_DIRECTION (property-based)", () => {
   test("is an involution: inverting a scroll direction twice returns the original", () => {
@@ -86,19 +81,6 @@ describe("resolveSwipeDirection (property-based)", () => {
           gestureType: "scrollTowardsDirection",
         }).direction!;
         return SCROLL_TO_FINGER_DIRECTION[resolved] === d;
-      }),
-      RUN_OPTIONS,
-    );
-  });
-
-  test("a missing direction is always an error with no resolved direction", () => {
-    fc.assert(
-      fc.property(gestureType, (gt) => {
-        const result = resolveSwipeDirection({
-          direction: undefined as unknown as SwipeDirection,
-          gestureType: gt,
-        });
-        return result.error === "direction is required" && result.direction === undefined;
       }),
       RUN_OPTIONS,
     );

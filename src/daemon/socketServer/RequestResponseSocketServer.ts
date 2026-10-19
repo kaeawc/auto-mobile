@@ -22,7 +22,7 @@ export abstract class RequestResponseSocketServer<
   TResponse extends SocketResponse,
 > extends BaseSocketServer {
   /** Map of socket to pending promise chain for sequential processing */
-  private pendingBySocket: WeakMap<Socket, Promise<void>> = new WeakMap();
+  protected pendingBySocket: WeakMap<Socket, Promise<void>> = new WeakMap();
 
   constructor(
     socketPath: string,

@@ -13,11 +13,15 @@ import launcherHome from "../../../fixtures/android-launcher/launcher-home-emula
 import playgroundMain from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
 import playgroundTapScreen from "../../../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
 import { deriveSdkNavigationScreenIdentity } from "../../../../src/features/observe/sdkScreenIdentity";
+import {
+  observeResultFromFixture,
+  observeResultFromJsonText,
+} from "../../../helpers/observeFixture";
 
 // Captured on an iPhone 17 sim: the Playground Demos list (SDK identity route "demos").
-const demosList = JSON.parse(demosEnvelope.content[0].text) as ObserveResult;
+const demosList = observeResultFromJsonText(demosEnvelope.content[0].text, "demos");
 // Captured on the same sim after opening the "Forms & Input" row (navigation title "Forms").
-const formsScreen = formsCapture as unknown as ObserveResult;
+const formsScreen = observeResultFromFixture(formsCapture, "formsCapture");
 
 const demosRows = new SearchableHierarchy().project(demosList.viewHierarchy!);
 
@@ -82,8 +86,8 @@ describe("assessSwipeNavigation", () => {
   test("iOS scroll within the same screen is not navigation", () => {
     expect(
       assessSwipeNavigation(
-        nestedBeforeFocus as unknown as ObserveResult,
-        nestedScrolled as unknown as ObserveResult,
+        observeResultFromFixture(nestedBeforeFocus, "nestedBeforeFocus"),
+        observeResultFromFixture(nestedScrolled, "nestedScrolled"),
         { x: 200, y: 400 },
         "ios",
       ),
@@ -93,8 +97,8 @@ describe("assessSwipeNavigation", () => {
   test("iOS focus and keyboard changes alone are not navigation", () => {
     expect(
       assessSwipeNavigation(
-        nestedFocused as unknown as ObserveResult,
-        nestedBeforeFocus as unknown as ObserveResult,
+        observeResultFromFixture(nestedFocused, "nestedFocused"),
+        observeResultFromFixture(nestedBeforeFocus, "nestedBeforeFocus"),
         { x: 200, y: 400 },
         "ios",
       ),
@@ -106,8 +110,8 @@ describe("assessSwipeNavigation", () => {
     // cannot show the swipe stayed put.
     expect(
       assessSwipeNavigation(
-        androidScrollBefore as unknown as ObserveResult,
-        androidScrollAfter as unknown as ObserveResult,
+        observeResultFromFixture(androidScrollBefore, "androidScrollBefore"),
+        observeResultFromFixture(androidScrollAfter, "androidScrollAfter"),
         { x: 540, y: 1200 },
         "android",
       ),
@@ -118,8 +122,8 @@ describe("assessSwipeNavigation", () => {
     // Captured Playground Tap demo and design-system screens: both MainActivity, no pane title.
     expect(
       assessSwipeNavigation(
-        playgroundTapScreen as unknown as ObserveResult,
-        playgroundMain as unknown as ObserveResult,
+        observeResultFromFixture(playgroundTapScreen, "playgroundTapScreen"),
+        observeResultFromFixture(playgroundMain, "playgroundMain"),
         { x: 540, y: 1200 },
         "android",
       ),
@@ -163,8 +167,8 @@ describe("assessSwipeNavigation", () => {
 
   test("Android swipe that changed the foreground activity reports navigation", () => {
     const assessment = assessSwipeNavigation(
-      launcherHome as unknown as ObserveResult,
-      playgroundMain as unknown as ObserveResult,
+      observeResultFromFixture(launcherHome, "launcherHome"),
+      observeResultFromFixture(playgroundMain, "playgroundMain"),
       { x: 1038, y: 1076 },
       "android",
     );

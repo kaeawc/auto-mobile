@@ -1,4 +1,3 @@
-import type { Database as BunDatabase } from "bun:sqlite";
 import {
   DatabaseConnection,
   DatabaseIntrospector,
@@ -74,7 +73,26 @@ export const DEFAULT_OPTIMIZE_INTERVAL_MS = 5 * 60 * 1000;
  */
 export const BEGIN_TRANSACTION_SQL = "begin immediate";
 
-type BunStatement = ReturnType<BunDatabase["prepare"]>;
+/** The slice of a bun:sqlite prepared statement the connection uses. */
+export interface BunSqliteStatement {
+  all(...params: unknown[]): unknown[];
+  run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
+  get(...params: unknown[]): unknown;
+  finalize(): void;
+}
+
+/**
+ * The slice of a bun:sqlite `Database` the connection uses. The real `Database`
+ * satisfies it structurally; tests supply a fake without casting.
+ */
+export interface BunSqliteHandle {
+  prepare(sql: string): BunSqliteStatement;
+  exec(sql: string): void;
+  close(): void;
+}
+
+type BunDatabase = BunSqliteHandle;
+type BunStatement = BunSqliteStatement;
 
 /**
  * Kysely dialect for Bun's built-in SQLite.

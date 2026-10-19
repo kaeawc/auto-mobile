@@ -1,5 +1,10 @@
 import { StaleDisplayError } from "../../src/features/observe/StaleDisplayError";
-import { nodeAttributes } from "../../src/models/ViewHierarchyResult";
+import { nodeAttributes, type ViewHierarchyNode } from "../../src/models/ViewHierarchyResult";
+import type { AccessibilityAuditResult } from "../../src/models/AccessibilityAudit";
+import type { Element } from "../../src/models/Element";
+import type { GfxMetrics } from "../../src/models/GfxMetrics";
+import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyResult";
+import type { TestHierarchyNode } from "../features/observe/observeScreenTestBuilders";
 import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
@@ -47,46 +52,101 @@ import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
  */
 
 /** Airplane-mode row as Android inflates it: first without, then with, the switch child. */
-const AIRPLANE_ROW_HALF_INFLATED = {
+const AIRPLANE_ROW_HALF_INFLATED: TestHierarchyNode = {
   class: "android.widget.LinearLayout",
   "resource-id": "android:id/list_container",
-  node: {
-    class: "android.widget.RelativeLayout",
-    "view-id": "1f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
-    node: {
-      class: "android.widget.TextView",
-      "resource-id": "android:id/title",
-      text: "Airplane mode",
-      "view-id": "2f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
+  node: [
+    {
+      class: "android.widget.RelativeLayout",
+      "view-id": "1f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
+      node: [
+        {
+          class: "android.widget.TextView",
+          "resource-id": "android:id/title",
+          text: "Airplane mode",
+          "view-id": "2f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
+        },
+      ],
     },
-  },
+  ],
 };
 
-const AIRPLANE_ROW_INFLATED = {
+const AIRPLANE_ROW_INFLATED: TestHierarchyNode = {
   class: "android.widget.LinearLayout",
   "resource-id": "android:id/list_container",
-  node: {
-    class: "android.widget.RelativeLayout",
-    "view-id": "1f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
-    node: [
-      {
-        class: "android.widget.TextView",
-        "resource-id": "android:id/title",
-        text: "Airplane mode",
-        "view-id": "2f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
-      },
-      {
-        class: "android.widget.Switch",
-        "resource-id": "com.android.settings:id/switchWidget",
-        checkable: "true",
-        checked: "false",
-        "view-id": "com.android.settings:id/switchWidget",
-      },
-    ],
-  },
+  node: [
+    {
+      class: "android.widget.RelativeLayout",
+      "view-id": "1f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
+      node: [
+        {
+          class: "android.widget.TextView",
+          "resource-id": "android:id/title",
+          text: "Airplane mode",
+          "view-id": "2f0e3dad-9990-4fb4-a5c3-7f2a1b0c9d8e",
+        },
+        {
+          class: "android.widget.Switch",
+          "resource-id": "com.android.settings:id/switchWidget",
+          checkable: "true",
+          checked: "false",
+          "view-id": "com.android.settings:id/switchWidget",
+        },
+      ],
+    },
+  ],
 };
 
-function obs(node: Record<string, unknown>, updatedAt: number): ObserveResult {
+const ACTION_GFX_METRICS: GfxMetrics = {
+  packageName: "com.android.settings",
+  percentile50thMs: 8,
+  percentile90thMs: 12,
+  percentile95thMs: 14,
+  percentile99thMs: 20,
+  missedVsyncCount: 0,
+  slowUiThreadCount: 0,
+  frameDeadlineMissedCount: 0,
+  pollCount: 12,
+  stabilityWaitMs: 0,
+  isStable: true,
+};
+
+const AIRPLANE_ELEMENT: Element = {
+  text: "Airplane mode",
+  bounds: { left: 0, top: 0, right: 100, bottom: 48 },
+};
+
+const SEARCH_ELEMENT: Element = {
+  text: "Search",
+  bounds: { left: 0, top: 0, right: 100, bottom: 48 },
+};
+
+const RAW_XCUITEST_HIERARCHY: RawViewHierarchyResult = {
+  xcuitest: "{}",
+  source: "xcuitest",
+  timestamp: 10,
+  device: { deviceId: "ios-sim-1", platform: "ios" },
+};
+
+/** Root of the observation's hierarchy. */
+function hierarchyRoot(observation: ObserveResult): ViewHierarchyNode {
+  return observation.viewHierarchy!.hierarchy.node!;
+}
+
+/** Children of the airplane row's RelativeLayout. */
+function rowChildren(observation: ObserveResult): ViewHierarchyNode[] {
+  return hierarchyRoot(observation).node![0]!.node!;
+}
+
+/** Return the capture with metadata the action pipeline writes onto it (never ObserveScreen). */
+function withActionMetadata(
+  captured: ObserveResult,
+  metadata: Partial<ObserveResult>,
+): ObserveResult {
+  return { ...captured, ...metadata };
+}
+
+function obs(node: TestHierarchyNode, updatedAt: number): ObserveResult {
   return {
     updatedAt,
     screenSize: { width: 1080, height: 1920 },
@@ -98,7 +158,7 @@ function obs(node: Record<string, unknown>, updatedAt: number): ObserveResult {
     },
     viewHierarchy: {
       packageName: "com.android.settings",
-      hierarchy: { node: structuredClone(node) as any },
+      hierarchy: { node },
       updatedAt,
     },
   } as ObserveResult;
@@ -106,9 +166,9 @@ function obs(node: Record<string, unknown>, updatedAt: number): ObserveResult {
 
 /** The content-derived `s2-…` id the skeleton projection would emit for the row. */
 function airplaneRowStableId(observation: ObserveResult): string {
-  const root = structuredClone(observation.viewHierarchy!.hierarchy) as Record<string, unknown>;
+  const root = structuredClone(observation.viewHierarchy!.hierarchy);
   assignStableViewIds(root);
-  return ((root.node as any).node as Record<string, unknown>)["view-id"] as string;
+  return root.node!.node![0]!["view-id"]!;
 }
 
 function settleFor(fake: FakeObserveScreen, timer: FakeTimer): RealSettleObserve {
@@ -160,13 +220,11 @@ class ScreenshotSettleScreen extends FakeObserveScreen {
     const path = `/fake/${observation.observationId}.png`;
     this.screenshots.updateForObservation(observation.deviceId, observation.observationId, path);
     if (this.settledScreenshot) {
-      Object.assign(observation, {
-        screenshotPath: path,
-        screenshotSettled: true,
-        screenshotSource: "fresh",
-        screenshotCapturedAt: "2026-10-04T12:00:01.000Z",
-        screenshotImageSize: observation.screenSize,
-      });
+      observation.screenshotPath = path;
+      observation.screenshotSettled = true;
+      observation.screenshotSource = "fresh";
+      observation.screenshotCapturedAt = "2026-10-04T12:00:01.000Z";
+      observation.screenshotImageSize = observation.screenSize;
     }
   }
 }
@@ -710,9 +768,11 @@ describe("settleEmbeddedObservation (#6866)", () => {
     expect(outcome.observation.backStack?.capturedAt).toBe(999);
     expect(outcome.settled).toBe(true);
     // The switch child — the only carrier of toggle/checked — is now present.
-    const children = (outcome.observation.viewHierarchy!.hierarchy.node as any).node.node;
+    const children = rowChildren(outcome.observation);
     expect(Array.isArray(children)).toBe(true);
-    expect(children[1]["resource-id"]).toBe("com.android.settings:id/switchWidget");
+    expect(nodeAttributes(children[1]!)["resource-id"]).toBe(
+      "com.android.settings:id/switchWidget",
+    );
   });
 
   test("elementId stability: the settled row id equals the id a later observe emits", async () => {
@@ -746,10 +806,11 @@ describe("settleEmbeddedObservation (#6866)", () => {
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([obs(AIRPLANE_ROW_INFLATED, 20), obs(AIRPLANE_ROW_INFLATED, 30)]);
 
-    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
     // Written onto the capture by the action pipeline, never by ObserveScreen.
-    (captured as any).gfxMetrics = { totalFrames: 12 };
-    (captured as any).selectedElements = [{ text: "Airplane mode" }];
+    const captured = withActionMetadata(obs(AIRPLANE_ROW_HALF_INFLATED, 10), {
+      gfxMetrics: ACTION_GFX_METRICS,
+      selectedElements: [AIRPLANE_ELEMENT],
+    });
 
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -758,10 +819,10 @@ describe("settleEmbeddedObservation (#6866)", () => {
     });
 
     expect(outcome.settled).toBe(true);
-    expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
-    expect((outcome.observation as any).selectedElements).toEqual([{ text: "Airplane mode" }]);
+    expect(outcome.observation).toHaveProperty("gfxMetrics", ACTION_GFX_METRICS);
+    expect(outcome.observation.selectedElements).toEqual([AIRPLANE_ELEMENT]);
     // ...while the hierarchy itself is the settled one, not the half-inflated one.
-    expect((outcome.observation.viewHierarchy!.hierarchy.node as any).node.node.length).toBe(2);
+    expect(rowChildren(outcome.observation).length).toBe(2);
   });
 
   test("the action's wait timeout reason survives replacing its capture", async () => {
@@ -930,7 +991,7 @@ describe("settleEmbeddedObservationInResponse (#6866)", () => {
     expect(structured.observation.settled).toBe(true);
     const fromText = JSON.parse(response.content[0].text);
     expect(fromText.observation.settled).toBe(true);
-    expect(fromText.observation.viewHierarchy.hierarchy.node.node.node.length).toBe(2);
+    expect(fromText.observation.viewHierarchy.hierarchy.node.node[0].node.length).toBe(2);
   });
 
   test("stamps settled:false on a non-gated action without observing", async () => {
@@ -1211,7 +1272,7 @@ describe("settleEmbeddedObservation adoption guard (#6866)", () => {
 
     expect(outcome.settled).toBe(false);
     expect(outcome.observation).not.toBe(captured);
-    expect((outcome.observation.viewHierarchy!.hierarchy.node as any)["resource-id"]).toBe(
+    expect(nodeAttributes(hierarchyRoot(outcome.observation))["resource-id"]).toBe(
       "android:id/clock",
     );
   });
@@ -1421,15 +1482,16 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     } as ObserveResult;
     fake.setObserveSequence([settledFrame, { ...settledFrame, updatedAt: 30 } as ObserveResult]);
 
-    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
-    (captured as any).focusedElement = { text: "Search", bounds: { left: 0, top: 0 } };
-    (captured as any).accessibilityFocusedElement = { text: "Search" };
-    (captured as any).intentChooserDetected = true;
-    (captured as any).notificationPermissionDetected = true;
-    (captured as any).error = "partial hierarchy";
-    (captured as any).errors = [{ phase: "hierarchy", message: "partial hierarchy" }];
-    // ...while genuinely action-authored metadata still has to survive.
-    (captured as any).gfxMetrics = { totalFrames: 12 };
+    const captured = withActionMetadata(obs(AIRPLANE_ROW_HALF_INFLATED, 10), {
+      focusedElement: SEARCH_ELEMENT,
+      accessibilityFocusedElement: SEARCH_ELEMENT,
+      intentChooserDetected: true,
+      notificationPermissionDetected: true,
+      error: "partial hierarchy",
+      errors: [{ phase: "viewHierarchy", message: "partial hierarchy" }],
+      // ...while genuinely action-authored metadata still has to survive.
+      gfxMetrics: ACTION_GFX_METRICS,
+    });
 
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -1444,7 +1506,7 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     expect("notificationPermissionDetected" in outcome.observation).toBe(false);
     expect("error" in outcome.observation).toBe(false);
     expect("errors" in outcome.observation).toBe(false);
-    expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
+    expect(outcome.observation).toHaveProperty("gfxMetrics", ACTION_GFX_METRICS);
   });
 
   test("no capture-derived field outside the action whitelist survives adoption", async () => {
@@ -1461,20 +1523,21 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     } as ObserveResult;
     fake.setObserveSequence([settledFrame, { ...settledFrame, updatedAt: 30 } as ObserveResult]);
 
-    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
-    (captured as any).screenIdentity = {
-      platform: "ios",
-      source: "heuristic",
-      confidence: "high",
-      key: "origin-screen",
-      components: {},
-    };
-    (captured as any).rawViewHierarchy = { xcuitest: "{}", source: "xcuitest" };
-    (captured as any).observeScope = { mode: "scoped" };
-    (captured as any).recompositionSummary = { total: 3 };
-    // ...while genuinely action-authored metadata still has to survive.
-    (captured as any).gfxMetrics = { totalFrames: 12 };
-    (captured as any).selectedElements = [{ text: "Airplane mode" }];
+    const captured = withActionMetadata(obs(AIRPLANE_ROW_HALF_INFLATED, 10), {
+      screenIdentity: {
+        platform: "ios",
+        source: "heuristic",
+        confidence: "high",
+        key: "origin-screen",
+        components: {},
+      },
+      rawViewHierarchy: RAW_XCUITEST_HIERARCHY,
+      observeScope: { applied: ["focus"], nodesBefore: 10, nodesAfter: 4 },
+      recompositionSummary: { totalRecompositions: 3, averagePerSecond: 1, topRecompositions: [] },
+      // ...while genuinely action-authored metadata still has to survive.
+      gfxMetrics: ACTION_GFX_METRICS,
+      selectedElements: [AIRPLANE_ELEMENT],
+    });
 
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -1489,17 +1552,38 @@ describe("settleEmbeddedObservation stale-state clearing (#6866)", () => {
     expect("rawViewHierarchy" in outcome.observation).toBe(false);
     expect("observeScope" in outcome.observation).toBe(false);
     expect("recompositionSummary" in outcome.observation).toBe(false);
-    expect((outcome.observation as any).gfxMetrics).toEqual({ totalFrames: 12 });
-    expect((outcome.observation as any).selectedElements).toEqual([{ text: "Airplane mode" }]);
+    expect(outcome.observation).toHaveProperty("gfxMetrics", ACTION_GFX_METRICS);
+    expect(outcome.observation.selectedElements).toEqual([AIRPLANE_ELEMENT]);
   });
 });
 
 describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
   /** The shape `AccessibilityAuditor.run` attaches, trimmed to what matters here. */
-  const auditOfTheHalfInflatedTree = {
-    screenId: "com.android.settings/.SubSettings#half",
-    violations: [{ ruleId: "touch-target-size", elementId: "2f0e3dad" }],
-    summary: { passed: false, bySeverity: { error: 1, warning: 0 } },
+  const auditOfTheHalfInflatedTree: AccessibilityAuditResult = {
+    config: { level: "AA", failureMode: "report", useBaseline: false },
+    summary: {
+      totalViolations: 1,
+      bySeverity: { error: 1, warning: 0, info: 0 },
+      byType: {
+        "missing-content-description": 0,
+        "insufficient-contrast": 0,
+        "touch-target-too-small": 1,
+        "unlabeled-form-input": 0,
+      },
+      baselinedViolations: 0,
+      passed: false,
+    },
+    violations: [
+      {
+        type: "touch-target-too-small",
+        severity: "error",
+        criterion: "2.5.8",
+        fingerprint: "touch-target-too-small:2f0e3dad",
+        message: "Touch target is smaller than 24x24dp",
+        element: AIRPLANE_ELEMENT,
+      },
+    ],
+    timestamp: 10,
   };
 
   test("an adopted settled capture never carries the audit of the capture it replaced", async () => {
@@ -1514,8 +1598,9 @@ describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
       obs(AIRPLANE_ROW_INFLATED, 40),
     ]);
 
-    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
-    (captured as any).accessibilityAudit = auditOfTheHalfInflatedTree;
+    const captured = withActionMetadata(obs(AIRPLANE_ROW_HALF_INFLATED, 10), {
+      accessibilityAudit: auditOfTheHalfInflatedTree,
+    });
 
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -1540,8 +1625,9 @@ describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
     // the action's own capture — the one the audit describes — is handed back.
     fake.setObserveResult(obs(AIRPLANE_ROW_HALF_INFLATED, 5));
 
-    const captured = obs(AIRPLANE_ROW_INFLATED, 100);
-    (captured as any).accessibilityAudit = auditOfTheHalfInflatedTree;
+    const captured = withActionMetadata(obs(AIRPLANE_ROW_INFLATED, 100), {
+      accessibilityAudit: auditOfTheHalfInflatedTree,
+    });
 
     const outcome = await settleEmbeddedObservation({
       actionClass: "navigation",
@@ -1551,7 +1637,7 @@ describe("settleEmbeddedObservation accessibility audit (#6890)", () => {
 
     expect(outcome.observation).toBe(captured);
     expect(outcome.settled).toBe(false);
-    expect(outcome.observation.accessibilityAudit).toEqual(auditOfTheHalfInflatedTree as any);
+    expect(outcome.observation).toHaveProperty("accessibilityAudit", auditOfTheHalfInflatedTree);
     expect(outcome.observation.accessibilityAuditSkipped).toBeUndefined();
   });
 
@@ -2124,7 +2210,7 @@ test("single terminal capture produces the audit for the chosen frame", async ()
         captureScreenshot: async (frame) => {
           captures++;
           frame.screenshotPath = "/fake/audit-chosen.png";
-          Object.assign(frame, { accessibilityAudit: audit });
+          frame.accessibilityAudit = audit;
         },
       },
     });

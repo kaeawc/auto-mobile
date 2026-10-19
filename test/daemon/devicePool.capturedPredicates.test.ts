@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { expect, test } from "bun:test";
@@ -45,8 +46,8 @@ const rows: PredicateRow[] = [
   },
   {
     name: "suspect/grace",
-    prepare: ({ manager, timer, session }) => {
-      manager.recordHeartbeat(session.sessionId);
+    prepare: async ({ manager, timer, session }) => {
+      await deliverDaemonHeartbeat(manager, session.sessionId);
       // The suspect grace holds only the heartbeat lease, not idleness (#11107): keep the idle
       // window open so the lease, not the idle deadline, decides this row.
       session.expiresAt = timer.now() + 120_000;

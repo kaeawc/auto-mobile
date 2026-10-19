@@ -735,7 +735,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return hierarchyFingerprint(viewHierarchy);
   }
 
-  private deriveTapEffect(
+  deriveTapEffect(
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult | undefined,
   ): TapOnElementResult["effect"] | undefined {
@@ -1009,7 +1009,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.tapPoints.invisibleMatchFailure(...args);
   }
 
-  private resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
+  resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
     return this.tapPoints.resolveTapPoint(...args);
   }
 
@@ -1190,7 +1190,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     };
   }
 
-  private async readFreshHierarchy(
+  async readFreshHierarchy(
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
@@ -1304,7 +1304,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.findElementInHierarchy(options, hierarchy);
   }
 
-  private async searchForElement(
+  async searchForElement(
     options: TapVerificationOptions,
     observeResult: ObserveResult,
     signal?: AbortSignal,
@@ -3209,9 +3209,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   /**
    * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
-   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
+   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate. (@internal unit-test seam)
    */
-  private async executeAndroidTapWithCoordinates(
+  async executeAndroidTapWithCoordinates(
     action: string,
     x: number,
     y: number,

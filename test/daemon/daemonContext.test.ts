@@ -12,7 +12,22 @@ function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>
   return {
     renderedDisplaySessions: () => reads,
     sessionManager: () => undefined,
+    requireSessionManager: () => {
+      throw new Error("DaemonState not initialized");
+    },
+    requireFullDevicePool: () => {
+      throw new Error("DaemonState not initialized");
+    },
+    requireDevicePoolWrites: () => {
+      throw new Error("DaemonState not initialized");
+    },
+    isInitialized: () => false,
+    fullDevicePool: () => undefined,
     devicePool: () => undefined,
+    devicePoolWrites: () => undefined,
+    brokerConnectionScopes: () => undefined,
+    observerSessionRegistry: () => undefined,
+    deviceSessionRegistry: () => undefined,
   };
 }
 

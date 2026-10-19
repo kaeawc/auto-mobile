@@ -28,7 +28,7 @@ import {
   DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
   MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
 } from "../features/prototype/prototypeEventTimeout";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import type { PrototypeMutation } from "../features/prototype/PrototypeStatusStore";
 import { defaultTimer } from "../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../utils/AbortContext";
@@ -1630,19 +1630,17 @@ function settleShowEvents(
 }
 
 function prototypeDeviceUnboundSource(): object | undefined {
-  const state = DaemonState.getInstance();
-  return state.isInitialized() ? state.getSessionManager() : undefined;
+  return defaultDaemonContext.sessionManager();
 }
 
 function subscribePrototypeDeviceUnbound(
   listener: (deviceId: string) => void,
 ): (() => void) | undefined {
-  const state = DaemonState.getInstance();
-  if (!state.isInitialized()) {
+  const manager = defaultDaemonContext.sessionManager();
+  if (!manager) {
     // The shared host is created before startDaemon initialises DaemonState; the host retries.
     return undefined;
   }
-  const manager = state.getSessionManager();
   // This removable hook observes the same rebind as onSessionDeviceUnbound,
   // including a forced same-serial replacement, without retaining callbacks.
   return manager.onDeviceOwnershipChange((deviceId, invalidation) => {

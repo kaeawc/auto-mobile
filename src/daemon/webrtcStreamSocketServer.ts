@@ -49,7 +49,7 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import type { DeviceOwnershipChanges } from "./videoStreamSocketServer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -114,8 +114,7 @@ function loadManager() {
 }
 
 function defaultOwnershipChanges(): DeviceOwnershipChanges | null {
-  const state = DaemonState.getInstance();
-  return state.isInitialized() ? state.getSessionManager() : null;
+  return defaultDaemonContext.sessionManager() ?? null;
 }
 
 const WEBRTC_SOCKET_CLOSE_TIMEOUT_MS = 5_000;

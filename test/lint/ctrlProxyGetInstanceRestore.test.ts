@@ -646,8 +646,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    */
   const INSTALLERS: readonly string[] = [
     "test/daemon/socketServerInputGesture.integration.test.ts",
-    "test/daemon/socketServerInputSwipe.integration.test.ts",
-    "test/daemon/socketServerKeyValue.integration.test.ts",
     "test/daemon/socketServerToolCapabilities.integration.test.ts",
     "test/features/action/ClearText.adbFactory.test.ts",
     "test/features/action/InputText.test.ts",
@@ -659,8 +657,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "test/server/databaseIos.test.ts",
     "test/server/databaseResourcesPagination.test.ts",
     "test/server/deviceTools.killDevice.test.ts",
-    "test/server/storageResources.test.ts",
-    "test/server/toolRegistry.pipeline.test.ts",
     "test/server/unissuedSessionBoundConnection.integration.test.ts",
   ];
 

@@ -1,4 +1,5 @@
-import { beforeEach, afterEach, describe, expect, test, mock } from "bun:test";
+import { beforeEach, describe, expect, test, mock } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -47,7 +48,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("returns defaults for non-object input", () => {
-    const config = parseVideoRecordingConfig("invalid" as any);
+    const config = parseVideoRecordingConfig("invalid");
     expect(config.qualityPreset).toBe("low");
   });
 
@@ -58,7 +59,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("falls back on invalid quality preset", () => {
-    expect(parseVideoRecordingConfig({ qualityPreset: "ultra" as any }).qualityPreset).toBe("low");
+    expect(parseVideoRecordingConfig({ qualityPreset: "ultra" }).qualityPreset).toBe("low");
   });
 
   test("accepts valid fps", () => {
@@ -85,7 +86,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("falls back on invalid format", () => {
-    expect(parseVideoRecordingConfig({ format: "avi" as any }).format).toBe("mp4");
+    expect(parseVideoRecordingConfig({ format: "avi" }).format).toBe("mp4");
   });
 
   test("caps bitrate to max throughput", () => {
@@ -149,22 +150,20 @@ describe("parseVideoRecordingConfig", () => {
     expect(
       parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution,
     ).toBeUndefined();
-    expect(parseVideoRecordingConfig({ resolution: null as any }).resolution).toBeUndefined();
+    expect(parseVideoRecordingConfig({ resolution: null }).resolution).toBeUndefined();
   });
 });
 
 describe("VideoRecorderService", () => {
   let backend: ServiceTestBackend;
   let service: VideoRecorderService;
+  const scratch = useScratchRoot("video-test-");
   let archiveRoot: string;
   let securePermissions: FakeSecurePermissions;
 
   beforeEach(async () => {
     backend = new ServiceTestBackend();
-    archiveRoot = path.join(
-      os.tmpdir(),
-      `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    archiveRoot = path.join(scratch.next(), "archive");
     securePermissions = new FakeSecurePermissions();
 
     service = new VideoRecorderService({
@@ -644,10 +643,6 @@ describe("VideoRecorderService", () => {
     resolveStop?.();
 
     await expect(Promise.all([userStop, shutdownStop])).resolves.toHaveLength(2);
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 
   describe("startRecording", () => {

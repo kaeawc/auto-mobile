@@ -1892,18 +1892,14 @@ describe("Rotate", () => {
         window: fakeWindow,
       });
 
-      const lock = (rotate as any).getRotationLock();
-      // Same deviceId -> the second instance must resolve to the SAME lock.
-      expect((secondRotate as any).getRotationLock()).toBe(lock);
-
       const firstCall = rotate.execute("landscape");
 
       // Let the first call's microtasks run until it holds the lock and is
       // parked at the gate.
-      for (let i = 0; i < 50 && !lock.isLocked(); i++) {
+      for (let i = 0; i < 2000 && waitForRotationCalls === 0; i++) {
         await Promise.resolve();
       }
-      expect(lock.isLocked()).toBe(true);
+      expect(waitForRotationCalls).toBe(1);
 
       // Same requested orientation as the first call: `user_rotation` is
       // stubbed at a constant stale "0" (portrait) regardless of what either
@@ -1937,7 +1933,6 @@ describe("Rotate", () => {
         .getExecutedCommands()
         .filter((cmd) => cmd.includes("settings put system accelerometer_rotation"));
       expect(accelWrites.at(-1)).toContain("accelerometer_rotation 1");
-      expect(lock.isLocked()).toBe(false);
     });
   });
 

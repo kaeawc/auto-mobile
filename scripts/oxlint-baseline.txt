@@ -73,7 +73,6 @@
 1	src/db/database.ts	eslint(max-classes-per-file)
 1	src/db/deviceSessionRepository.ts	eslint(max-classes-per-file)
 1	src/db/migrationLock.ts	eslint(max-classes-per-file)
-1	src/db/navigationRepository.ts	auto-mobile(max-class-lines)
 1	src/devices/DeviceReadiness.ts	auto-mobile(max-class-lines)
 1	src/devices/DeviceReadiness.ts	eslint(max-classes-per-file)
 1	src/devices/DeviceReadiness.ts	oxlint-disable(complexity)

@@ -15,7 +15,12 @@ set -euo pipefail
 
 sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${ANDROID_SDK_HOME:-}}}"
 if [[ -z "${sdk_root}" ]]; then
-  for candidate in "/usr/local/lib/android/sdk" "${HOME:-}/Library/Android/sdk" "${HOME:-}/Android/Sdk"; do
+  # ENSURE_EMULATOR_SDK_FALLBACK_ROOTS (colon-separated, may be empty) overrides
+  # the default well-known roots so tests can prove the "no SDK" diagnostic
+  # without touching (and sdkmanager-installing into) the runner's real SDK.
+  default_roots="/usr/local/lib/android/sdk:${HOME:-}/Library/Android/sdk:${HOME:-}/Android/Sdk"
+  IFS=: read -r -a fallback_roots <<<"${ENSURE_EMULATOR_SDK_FALLBACK_ROOTS-${default_roots}}"
+  for candidate in ${fallback_roots[@]+"${fallback_roots[@]}"}; do
     if [[ -n "${candidate}" && -d "${candidate}" ]]; then
       sdk_root="${candidate}"
       break

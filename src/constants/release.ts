@@ -26,6 +26,7 @@
  */
 
 import { ActionableError } from "../models/ActionableError";
+import { ENV, readEnvRaw, readEnvTrimmed } from "../config/env";
 
 export const LATEST_RELEASE_VERSION = "latest";
 
@@ -758,10 +759,10 @@ export function resolveAssetVersion(
 export const DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile";
 
 /** Environment variable that pins daemon + APK + IPA to one coherent version. */
-export const AUTOMOBILE_VERSION_ENV = "AUTOMOBILE_VERSION";
+export const AUTOMOBILE_VERSION_ENV = ENV.VERSION.name;
 
 /** Environment variable that mirrors the APK/IPA download host for offline CI. */
-export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
+export const AUTOMOBILE_ASSET_BASE_URL_ENV = ENV.ASSET_BASE_URL.name;
 
 /**
  * Opt-out that permits a plaintext `http://` asset base/bundle URL (issue #4761).
@@ -771,7 +772,7 @@ export const AUTOMOBILE_ASSET_BASE_URL_ENV = "AUTOMOBILE_ASSET_BASE_URL";
  * checksum still blocks substitution). Set to `1`/`true` ONLY for a trusted
  * loopback/dev mirror (e.g. `http://127.0.0.1:8080` or `http://localhost`).
  */
-export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = "AUTOMOBILE_ALLOW_INSECURE_ASSET_URL";
+export const AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV = ENV.ALLOW_INSECURE_ASSET_URL.name;
 
 /** Default GitHub Releases base for versioned asset downloads. */
 export const DEFAULT_ASSET_BASE_URL = "https://github.com/kaeawc/auto-mobile/releases/download";
@@ -780,7 +781,7 @@ type EnvLike = Record<string, string | undefined>;
 
 /** True when the plaintext-http opt-out ({@link AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}) is set. */
 function isInsecureAssetUrlAllowed(env: EnvLike): boolean {
-  const value = env[AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV];
+  const value = readEnvRaw(ENV.ALLOW_INSECURE_ASSET_URL, env);
   return value === "1" || value?.toLowerCase() === "true";
 }
 
@@ -825,7 +826,7 @@ export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = p
  * yet a 404 URL (an incoherent triple).
  */
 export function resolvePinnedVersion(env: EnvLike = process.env): string {
-  const trimmed = env[AUTOMOBILE_VERSION_ENV]?.trim();
+  const trimmed = readEnvTrimmed(ENV.VERSION, env);
   if (!trimmed || trimmed.length === 0) {
     return LATEST_RELEASE_VERSION;
   }
@@ -863,7 +864,7 @@ export function isPinnedVersionKnown(
  * (trimmed, trailing slashes stripped) when set, otherwise the GitHub default.
  */
 export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
-  const trimmed = env[AUTOMOBILE_ASSET_BASE_URL_ENV]?.trim();
+  const trimmed = readEnvTrimmed(ENV.ASSET_BASE_URL, env);
   if (trimmed && trimmed.length > 0) {
     let parsed: URL;
     try {

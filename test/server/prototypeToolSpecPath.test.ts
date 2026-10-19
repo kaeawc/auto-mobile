@@ -1,3 +1,4 @@
+import { readToolResponse } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerPrototypeTools, prototypeOutputSchema } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -38,20 +39,23 @@ describe("prototype show specPath", () => {
     restore();
   });
 
-  async function call(input: unknown) {
+  async function call(input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return { response, payload: prototypeOutputSchema.parse(response.structuredContent) };
+    return {
+      response,
+      payload: prototypeOutputSchema.parse(readToolResponse(response).structuredContent),
+    };
   }
-  async function refusal(input: unknown): Promise<string> {
+  async function refusal(input: Record<string, unknown>): Promise<string> {
     const { response, payload } = await call(input);
-    expect(response.isError).toBe(true);
+    expect(readToolResponse(response).isError).toBe(true);
     expect(client.getPrototypeHistory()).toEqual([]);
     return payload.error ?? "";
   }
 
   test("shows the spec read from the file and never sends the path to the device", async () => {
     const { response } = await call({ action: "show", specPath: "/work/spec.json" });
-    expect(response.isError).not.toBe(true);
+    expect(readToolResponse(response).isError).not.toBe(true);
     const history = client.getPrototypeHistory();
     expect(history).toHaveLength(1);
     expect(JSON.stringify(history)).toContain("from-file");
@@ -69,7 +73,7 @@ describe("prototype show specPath", () => {
       }),
     );
     const { response } = await call({ action: "show", specPath: "/work/components.json" });
-    expect(response.isError).not.toBe(true);
+    expect(readToolResponse(response).isError).not.toBe(true);
     expect(client.getPrototypeHistory()).toMatchObject([
       { method: "show", spec: { ...spec, root: { type: "text", text: "Hello file" } } },
     ]);
@@ -79,7 +83,7 @@ describe("prototype show specPath", () => {
   test("other show options still apply", async () => {
     await call({ action: "show", specPath: "/work/spec.json" });
     const { response } = await call({ action: "show", specPath: "/work/spec.json", reset: true });
-    expect(response.isError).not.toBe(true);
+    expect(readToolResponse(response).isError).not.toBe(true);
     expect(client.getPrototypeHistory()).toHaveLength(2);
   });
 
@@ -141,7 +145,7 @@ describe("prototype show specPath", () => {
 
   test("specPath is a show-only field", async () => {
     const { response, payload } = await call({ action: "dismiss", all: true, specPath: "/x.json" });
-    expect(response.isError).toBe(true);
+    expect(readToolResponse(response).isError).toBe(true);
     expect(payload.error).toContain("dismiss allows");
   });
 });

@@ -1711,13 +1711,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.strategy.longPressDurationMs,
         element,
         {
-          ...this.withObservationScreenSize(options, target.observation),
-          verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
+          options: {
+            ...this.withObservationScreenSize(options, target.observation),
+            verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
+          },
+          isTalkBackEnabled: false,
+          screenSize: target.observation.screenSize,
+          signal,
+          selection,
         },
-        false,
-        target.observation.screenSize,
-        signal,
-        selection,
       );
     }
     return withResolvedLayer(
@@ -2462,29 +2464,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   tapPoint.y,
                   longPressDuration,
                   tapElement,
-                  signal,
                   {
-                    ...tapOptions,
-                    displayFence: fence,
-                    resolvedHierarchy: viewHierarchy,
-                    onResolvedElement: (current, selection, hierarchy) => {
-                      tapElement = current;
-                      finalSelection = selection ?? {
-                        ...finalSelection,
-                        element: current,
-                        matchedElement: current,
-                      };
-                      if (hierarchy) {
-                        viewHierarchy = hierarchy;
-                        preTapHierarchy = hierarchy;
-                        this.replaceObservationHierarchy(observeResult, hierarchy, true);
-                      }
-                      selectedElementMetadata = this.buildSelectedElementMetadata(finalSelection);
-                      Object.assign(tapPoint, this.geometry.getElementCenter(current));
+                    signal,
+                    options: {
+                      ...tapOptions,
+                      displayFence: fence,
+                      resolvedHierarchy: viewHierarchy,
+                      onResolvedElement: (current, selection, hierarchy) => {
+                        tapElement = current;
+                        finalSelection = selection ?? {
+                          ...finalSelection,
+                          element: current,
+                          matchedElement: current,
+                        };
+                        if (hierarchy) {
+                          viewHierarchy = hierarchy;
+                          preTapHierarchy = hierarchy;
+                          this.replaceObservationHierarchy(observeResult, hierarchy, true);
+                        }
+                        selectedElementMetadata = this.buildSelectedElementMetadata(finalSelection);
+                        Object.assign(tapPoint, this.geometry.getElementCenter(current));
+                      },
+                      onActivationWarning: (warning) => activationWarnings.push(warning),
                     },
-                    onActivationWarning: (warning) => activationWarnings.push(warning),
+                    isTalkBackEnabled: isAccessibilityServiceEnabled,
                   },
-                  isAccessibilityServiceEnabled,
                 );
                 break;
               case "ios":
@@ -2494,8 +2498,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   tapPoint.y,
                   longPressDuration,
                   tapElement,
-                  isAccessibilityServiceEnabled,
-                  { displayFence: fence, signal },
+                  {
+                    isVoiceOverEnabled: isAccessibilityServiceEnabled,
+                    displayFence: fence,
+                    signal,
+                  },
                 );
                 break;
               default:
@@ -2513,11 +2520,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               action,
               longPressDuration,
               tapElement,
-              { ...this.withObservationScreenSize(tapOptions, observeResult), displayFence: fence },
-              isAccessibilityServiceEnabled,
-              observeResult.screenSize,
-              signal,
-              finalSelection,
+              {
+                options: {
+                  ...this.withObservationScreenSize(tapOptions, observeResult),
+                  displayFence: fence,
+                },
+                isTalkBackEnabled: isAccessibilityServiceEnabled,
+                screenSize: observeResult.screenSize,
+                signal,
+                selection: finalSelection,
+              },
             );
           }
 
@@ -2818,28 +2830,23 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     );
   }
 
-  /**
-   * Execute Android-specific tap operations
-   * @param action - The tap action to perform
-   * @param x - X coordinate
-   * @param y - Y coordinate
-   * @param durationMs - Long press duration in milliseconds
-   * @param element - Target element
-   * @param signal - Abort signal
-   * @param options - Tap options (for focusFirst parameter)
-   */
+  /** Dispatch an Android tap using the supplied abort signal, tap options, and TalkBack state. */
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   async executeAndroidTap(
     action: string,
     x: number,
     y: number,
     durationMs: number,
     element: Element,
-    signal?: AbortSignal,
-    options?: TapOnElementOptions &
-      ResolvedAndroidTapOptions & { onActivationWarning?: (warning: string) => void },
-    isTalkBackEnabled?: boolean,
+    {
+      signal,
+      options,
+      isTalkBackEnabled,
+    }: {
+      signal?: AbortSignal;
+      options?: TapOnElementOptions & ResolvedAndroidTapOptions;
+      isTalkBackEnabled?: boolean;
+    } = {},
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
@@ -2964,15 +2971,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(
-        x,
-        y,
-        durationMs,
-        element,
+      await this.executeAndroidLongPress(x, y, durationMs, element, {
         signal,
         skipSemanticAction,
-        fenceOptions,
-      );
+        ...fenceOptions,
+      });
     } else if (action === "doubleTap") {
       await dispatchAndroidDoubleTap({
         // DocumentsUI rows use ADB input recovery, which has no single-gesture form.
@@ -3129,18 +3132,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   async retryTapIfNoChange(
     preTapHash: string | null,
     tapPoint: { x: number; y: number },
     action: string,
     longPressDuration: number,
     tapElement: Element,
-    options: TapVerificationOptions & DisplayFenceOption,
-    isTalkBackEnabled: boolean,
-    screenSize: ObserveResult["screenSize"],
-    signal?: AbortSignal,
-    selection?: ElementSelectionResult,
+    {
+      options,
+      isTalkBackEnabled,
+      screenSize,
+      signal,
+      selection,
+    }: {
+      options: TapVerificationOptions & DisplayFenceOption;
+      isTalkBackEnabled: boolean;
+      screenSize: ObserveResult["screenSize"];
+      signal?: AbortSignal;
+      selection?: ElementSelectionResult;
+    },
   ): Promise<void> {
     const probe = await checkAndroidTapHierarchyChange(
       this.timer,
@@ -3233,9 +3243,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       retryPoint.y,
       longPressDuration,
       retryTarget,
-      signal,
-      { ...options, resolvedHierarchy: probe.hierarchy },
-      isTalkBackEnabled,
+      { signal, options: { ...options, resolvedHierarchy: probe.hierarchy }, isTalkBackEnabled },
     );
   }
 
@@ -3471,24 +3479,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return screenReaderNavigation;
   }
 
-  /**
-   * Execute iOS-specific tap operations using CtrlProxy iOS
-   * @param action - The tap action to perform
-   * @param x - X coordinate
-   * @param y - Y coordinate
-   * @param durationMs - Long press duration in milliseconds
-   * @param element - The target element (for VoiceOver label resolution)
-   * @param isVoiceOverEnabled - Whether VoiceOver is active
-   */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
+  /** Dispatch an iOS tap, using the element for VoiceOver label resolution when active. */
   private async executeiOSTap(
     action: string,
     x: number,
     y: number,
     durationMs: number,
     element?: Element,
-    isVoiceOverEnabled?: boolean,
-    fenceOptions: IosTapOptions = {},
+    { isVoiceOverEnabled, ...fenceOptions }: IosTapOptions & { isVoiceOverEnabled?: boolean } = {},
   ): Promise<void> {
     if (isVoiceOverEnabled && element) {
       await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fenceOptions);
@@ -3559,15 +3557,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.strategy.longPressDurationMs;
   }
 
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async executeAndroidLongPress(
     x: number,
     y: number,
     durationMs: number,
     element: Element,
-    signal?: AbortSignal,
-    skipSemanticAction: boolean = false,
-    fenceOptions: ResolvedAndroidTapOptions = {},
+    {
+      signal,
+      skipSemanticAction = false,
+      ...fenceOptions
+    }: ResolvedAndroidTapOptions & { signal?: AbortSignal; skipSemanticAction?: boolean } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     throwIfAborted(signal);

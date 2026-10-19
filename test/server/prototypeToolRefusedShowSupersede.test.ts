@@ -1,3 +1,5 @@
+import { createExecResult } from "../../src/utils/execResult";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -44,7 +46,7 @@ describe("a refused show must not supersede a valid in-flight show of the same i
     // No prototype_appearance_v1: a pinned appearance is refused.
     client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(BOTH_PANELS, ""));
     unsubscribe = registerPrototypeTools({
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(adb),
@@ -67,7 +69,7 @@ describe("a refused show must not supersede a valid in-flight show of the same i
   async function call(input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   test("an appearance-refused newer show leaves the older show to be sent", async () => {

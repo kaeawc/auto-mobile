@@ -294,9 +294,9 @@ class DaemonConnectionProviderTest {
     val pidFile = Files.createTempFile("am-pid", ".json").toFile()
     try {
       pidFile.writeText("""{"pid":4242,"startedAt":1}""")
-      assertEquals(4242L, DaemonSocketPaths.readDaemonPidFromPidFile(pidFile.path))
+      assertEquals(4242L, DaemonPidFiles.readDaemonPidFromPidFile(pidFile.path))
       pidFile.writeText("""{"pid":0}""")
-      assertEquals(null, DaemonSocketPaths.readDaemonPidFromPidFile(pidFile.path))
+      assertEquals(null, DaemonPidFiles.readDaemonPidFromPidFile(pidFile.path))
     } finally {
       pidFile.delete()
     }

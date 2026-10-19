@@ -1424,13 +1424,13 @@ describe("MultiPlatformDeviceManager", () => {
 
   test("listDeviceImages(android) keeps configured AVDs when overlay mapping fails", async () => {
     const image: DeviceInfo = { name: "Pixel_8", platform: "android", isRunning: false };
-    const malformedBootedDevice = {
+    const malformedBootedDevice: BootedDevice = {
       name: "Pixel_8",
       platform: "android",
       get deviceId(): string {
         throw new Error("malformed booted device");
       },
-    } as unknown as BootedDevice;
+    };
     const fakeEmulator = createFakeAndroidEmulator({
       listAvds: async () => [image],
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [malformedBootedDevice],

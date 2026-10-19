@@ -726,9 +726,13 @@ describe("tapOn (Android default display)", () => {
         380,
         0,
         { ...plainElement, "hierarchy-source": "uiautomator" },
-        undefined,
-        { onActivationWarning: (warning) => warnings.push(warning) },
-        false,
+        {
+          options: {
+            action: "doubleTap",
+            onActivationWarning: (warning) => warnings.push(warning),
+          },
+          isTalkBackEnabled: false,
+        },
       );
       expect(warnings.join("\n")).toContain("double-tap timeout");
     } finally {

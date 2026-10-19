@@ -1,3 +1,4 @@
+import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
 import type { BaseVisualChange } from "../../src/features/action/BaseVisualChange";
 import { asObservedResult } from "../../src/features/action/observedInteractionStages";
 import type { ObservedEnvelope } from "../../src/features/action/observedInteractionTypes";
@@ -24,9 +25,21 @@ export function runBlockWith(observation: ObservationSource): ObservedInteractio
 export function runBlockWithEnvelope(
   observation: ObservationSource,
   envelope: ObservedEnvelope,
+  afterBlock?: () => void,
 ): ObservedInteractionImpl {
   return async (block) => {
     const result = asObservedResult(await block(await resolveObservation(observation)));
+    afterBlock?.();
     return { ...result, ...envelope };
   };
+}
+
+/** No observation-loop side effects: these tests drive the phases explicitly. */
+export function isolatedTapStrategy(): FakeTapStrategy {
+  const strategy = new FakeTapStrategy();
+  strategy.warnsOnDisabledElement = false;
+  strategy.settlesPostTapChange = false;
+  strategy.verifiesRefreshedDisplay = false;
+  strategy.promotesClickableAncestor = false;
+  return strategy;
 }

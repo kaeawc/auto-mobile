@@ -34,15 +34,9 @@ afterEach(() => {
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 
 function createClient() {
-  return new DaemonClient(
-    "/fake/socket",
-    1_000,
-    new FakeTimer(),
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    undefined,
-    "win32",
-  );
+  return new DaemonClient("/fake/socket", 1_000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, null, {
+    platformOverride: "win32",
+  });
 }
 
 // Issue #6382: the proxy may replay a mutating tools/call only when the client
@@ -81,15 +75,9 @@ describe("DaemonClient request delivery phase", () => {
 describe("DaemonClient request that fails before the frame is written", () => {
   function createTimedClient() {
     const timer = new FakeTimer();
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      undefined,
-      "win32",
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      platformOverride: "win32",
+    });
     return { client, timer };
   }
 

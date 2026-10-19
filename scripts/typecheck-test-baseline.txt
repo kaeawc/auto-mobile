@@ -165,7 +165,7 @@ test/features/action/TargetDisplayAction.test.ts TS2741 7
 test/features/action/TargetDisplayAction.test.ts TS2769 3
 test/features/action/TargetDisplayPreDispatchCapture.test.ts TS2740 1
 test/features/action/androidDoubleTap.test.ts TS2322 8
-test/features/action/androidDoubleTap.test.ts TS2345 2
+test/features/action/androidDoubleTap.test.ts TS2345 1
 test/features/action/androidDoubleTap.test.ts TS2739 1
 test/features/action/containerFailure.test.ts TS2322 1
 test/features/action/swipeon/SwipeOn.iosChrome.test.ts TS2322 1

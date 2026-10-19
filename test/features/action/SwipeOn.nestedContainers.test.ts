@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, test } from "bun:test";
 import { swipeOnSchema } from "../../../src/server/interactionTools";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
@@ -37,7 +38,7 @@ function observation(kind = "missing", top = 100): ObserveResult {
   if (kind === "container-ambiguous") {
     panel.children.push(node("list"));
   }
-  return {
+  return buildObserveResult({
     updatedAt: top,
     observationId: "test-observation",
     display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
@@ -55,7 +56,7 @@ function observation(kind = "missing", top = 100): ObserveResult {
         ),
       },
     },
-  };
+  });
 }
 function harness(frames: ObserveResult[], resolver?: ElementResolver) {
   const observe = new FakeObserveScreen();

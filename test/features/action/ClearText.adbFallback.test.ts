@@ -174,55 +174,59 @@ describe("ClearText Android ADB fallback", () => {
   let observedSpy: ReturnType<typeof spyOn> | null = null;
   let refreshSpy: ReturnType<typeof spyOn> | null = null;
 
-  const focusedFieldObserve = (text: string): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      hierarchy: {
-        node: {
-          $: {
-            focused: "true",
-            text: text,
-            class: "android.widget.EditText",
+  const focusedFieldObserve = (text: string): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: {
+              focused: "true",
+              text: text,
+              class: "android.widget.EditText",
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  const noHierarchyObserve = (): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  });
+  const noHierarchyObserve = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
 
-  const noFocusedFieldObserve = (): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      updatedAt: 100,
-      hierarchy: {
-        node: {
-          $: {
-            class: "android.widget.TextView",
-            focused: "false",
-            text: "Home",
+  const noFocusedFieldObserve = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        updatedAt: 100,
+        hierarchy: {
+          node: {
+            $: {
+              class: "android.widget.TextView",
+              focused: "false",
+              text: "Home",
+            },
           },
         },
       },
-    },
-  });
+    });
 
-  const hierarchyErrorObserve = (): ObserveResult => ({
-    timestamp: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      hierarchy: { error: "Accessibility hierarchy unavailable" },
-    },
-  });
+  const hierarchyErrorObserve = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: {
+        hierarchy: { error: "Accessibility hierarchy unavailable" },
+      },
+    });
 
   const runClearText = (
     observeResult: ObserveResult,
@@ -694,7 +698,13 @@ test("iOS clear warns and preserves the failure result when CtrlProxy throws", a
       undefined,
       new FakeTimer(),
     );
-    const result = await action["executeiOSClearText"](buildObserveResult({ updatedAt: 0 }));
+    const result = await action.testHooks.executeiOSClearText(
+      buildObserveResult({
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        updatedAt: 0,
+      }),
+    );
     expect(result).toEqual({ success: false, error: String(error) });
     expect(
       loggerCallsWithPrefix(warning.mock.calls, "[ClearText] CtrlProxy iOS exception:"),
@@ -728,7 +738,14 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
     );
     action.observeScreen = new FakeObserveScreen();
     expect(
-      await action["executeiOSClearText"](buildObserveResult({ updatedAt: 0 }), controller.signal),
+      await action.testHooks.executeiOSClearText(
+        buildObserveResult({
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          updatedAt: 0,
+        }),
+        controller.signal,
+      ),
     ).toEqual({
       success: false,
       retryable: false,

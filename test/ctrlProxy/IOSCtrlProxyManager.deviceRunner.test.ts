@@ -1,3 +1,4 @@
+import { FakeXcodeSigningManager } from "../fakes/FakeXcodeSigningManager";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
@@ -196,13 +197,7 @@ function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilderSurface {
   });
 }
 
-const defaultSigning = {
-  resolveSigningForDevice: async () => ({
-    buildSettings: [],
-    allowProvisioningUpdates: false,
-    warnings: [],
-  }),
-} as unknown as XcodeSigningManager;
+const defaultSigning = new FakeXcodeSigningManager();
 
 /** Drain promise continuations only, so the auto-advancing fake timer does not move. */
 async function flushMicrotasks(): Promise<void> {

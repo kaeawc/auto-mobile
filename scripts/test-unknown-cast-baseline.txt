@@ -1,7 +1,5 @@
 # AutoMobile test unknown-cast ratchet baseline -- see scripts/test-as-any-baseline.sh
 2	test/ctrlProxy/CtrlProxyManager.test.ts
-1	test/ctrlProxy/IOSCtrlProxyManager.deviceRunner.test.ts
-3	test/ctrlProxy/IOSCtrlProxyManager.simulatorStart.test.ts
 2	test/daemon/daemonAndroidAvdProvenanceStartup.test.ts
 6	test/daemon/daemonDevicePoolStartup.test.ts
 3	test/daemon/daemonForeignForwardWiring.test.ts
@@ -27,7 +25,6 @@
 1	test/devices/iosCreatedSimRollbackBooted.test.ts
 1	test/devices/physicalIosDeviceResolution.test.ts
 1	test/devices/waitForDeviceReadyOrCancel.test.ts
-1	test/fakes/FakeAndroidInventoryLoad.ts
 2	test/fakes/FakeTimer.ts
 1	test/fakes/SafeDaemonManager.ts
 1	test/features/action/TapOnElement.ensureChecked.test.ts

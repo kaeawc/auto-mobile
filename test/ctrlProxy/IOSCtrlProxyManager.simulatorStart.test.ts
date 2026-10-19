@@ -1,3 +1,4 @@
+import { FakeXcodeSigningManager } from "../fakes/FakeXcodeSigningManager";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   IOSCtrlProxyManager,
@@ -17,7 +18,6 @@ import { logger } from "../../src/utils/logger";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
-import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
@@ -876,13 +876,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
             throw new Error("runner verification rejected");
           }
         };
-        const signing = {
-          resolveSigningForDevice: async () => ({
-            buildSettings: [],
-            allowProvisioningUpdates: false,
-            warnings: [],
-          }),
-        } as unknown as XcodeSigningManager;
+        const signing = new FakeXcodeSigningManager();
         const xcodebuild: Xcodebuild = {
           executeCommand: async () => createExecResult("", ""),
           isAvailable: async () => true,
@@ -935,13 +929,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
             return "/tmp/automobile-runner-DEV.xctestrun";
           },
         });
-        const fakeSigning = {
-          resolveSigningForDevice: async () => ({
-            buildSettings: [],
-            allowProvisioningUpdates: false,
-            warnings: [],
-          }),
-        } as unknown as XcodeSigningManager;
+        const fakeSigning = new FakeXcodeSigningManager();
         const { steps } = createManagerWithOwnSteps({
           device: physicalDevice,
           timer: fakeTimer,
@@ -987,13 +975,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
         timer: fakeTimer,
         builder: createFakeBuilder(),
         processExecutor: fakeExecutor,
-        signingManager: {
-          resolveSigningForDevice: async () => ({
-            buildSettings: [],
-            allowProvisioningUpdates: false,
-            warnings: [],
-          }),
-        } as unknown as XcodeSigningManager,
+        signingManager: new FakeXcodeSigningManager(),
         tunnelClient: new FakeIosTunnelClient(),
       });
 

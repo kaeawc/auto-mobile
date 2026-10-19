@@ -630,7 +630,7 @@ describe("TapAtCoordinate", () => {
       expect(sent).toEqual(["epoch:1"]);
     });
 
-    test("retries only once and never when the fresh layout differs", async () => {
+    test("retries only once when the fresh layout is unchanged", async () => {
       const twice = createIosTapAt(
         [],
         [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2")],
@@ -639,14 +639,20 @@ describe("TapAtCoordinate", () => {
       expect(failed.success).toBe(false);
       expect(failed.error).toContain("Stale frame context");
       expect(twice.sent).toEqual(["epoch:1", "epoch:2"]);
+    });
 
+    test("asks an implicit tap caller to observe again when the refreshed layout changed", async () => {
       const changed = createIosTapAt(
         ["epoch:2"],
         [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2", 0, { text: "other" })],
       );
       const refused = await changed.tapAt.execute({ x: 10, y: 20 });
       expect(refused.success).toBe(false);
+      expect(refused.error).toContain(
+        "screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId",
+      );
       expect(changed.sent).toEqual(["epoch:1"]);
+      expect(changed.observeScreen.getExecuteCallCount()).toBe(2);
     });
   });
 
@@ -2290,7 +2296,7 @@ describe("TapAtCoordinate", () => {
       label: "navigation",
       refreshed: observation(100, 200, "epoch:2", 0, { text: "Network & internet" }),
     },
-  ])("preserves stale rejection after a genuine Android $label", async ({ refreshed }) => {
+  ])("explains the refused retry after a genuine Android $label", async ({ refreshed }) => {
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
       requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
@@ -2311,12 +2317,54 @@ describe("TapAtCoordinate", () => {
 
     expect(result).toMatchObject({
       success: false,
-      error: expect.stringContaining("Stale frame context"),
+      error: expect.stringContaining(
+        "screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId",
+      ),
     });
     expect(dispatches).toEqual(["epoch:1"]);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
   });
+
+  test.each(["missing frame", "same token", "coordinate error", "changed coordinates"])(
+    "preserves the original stale rejection for %s even when the layout changed",
+    async (reason) => {
+      const dispatches: Array<string | undefined> = [];
+      const error = "Stale frame context for input/tap";
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+          dispatches.push(frameContext);
+          return { success: false, error };
+        },
+      };
+      const refreshed = observation(
+        reason === "coordinate error" ? 10 : 200,
+        200,
+        reason === "same token" ? "epoch:1" : "epoch:2",
+        0,
+        { text: "Changed target" },
+      );
+      if (reason === "missing frame" && refreshed.viewHierarchy) {
+        refreshed.viewHierarchy.frameContext = undefined;
+      }
+      const { tapAt } = createAndroidTapAtWithClient(
+        [observation(100, 200, "epoch:1"), refreshed],
+        client,
+      );
+
+      const result = await tapAt.execute(
+        reason === "changed coordinates"
+          ? { x: 0.2, y: 0.15, coordinateSpace: "normalized" }
+          : { x: 20, y: 30 },
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        error: `Failed to tap at coordinates: ${error}`,
+      });
+      expect(dispatches).toEqual(["epoch:1"]);
+    },
+  );
 
   test("bounds Android stale-frame recovery to one retry", async () => {
     const dispatches: string[] = [];
@@ -2828,7 +2876,9 @@ describe("TapAtCoordinate TalkBack", () => {
         const result = await h.tapAt.execute({ x: 1, y: 2, display: "active" });
         expect(result.success).toBe(false);
         expect(result.error).toContain(
-          `TalkBack coordinate tap failed: Focus tap failed: Stale frame context: ${scenario === "second rejection" ? "epoch:2" : "epoch:1"}`,
+          scenario === "changed layout"
+            ? "screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId"
+            : `TalkBack coordinate tap failed: Focus tap failed: Stale frame context: ${scenario === "second rejection" ? "epoch:2" : "epoch:1"}`,
         );
         expect(frames).toEqual(
           scenario === "second rejection" ? ["epoch:1", "epoch:2"] : ["epoch:1"],

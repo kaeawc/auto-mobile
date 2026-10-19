@@ -58,7 +58,7 @@ import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import {} from "../server/toolUnavailableError";
+import {} from "./toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
@@ -128,7 +128,7 @@ import {
   ResourceUpdatedBroadcaster,
   type ResourceUpdateTargets,
   type ListChangedKind,
-} from "../server/listChangedBroadcast";
+} from "./listChangedBroadcast";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import {
   toolSelectionProfileUuidFromResponse,

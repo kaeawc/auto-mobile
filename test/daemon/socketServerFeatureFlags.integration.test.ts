@@ -12,7 +12,7 @@ import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonResponse } from "../../src/daemon/types";
-import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+import { ListChangedBroadcaster } from "../../src/daemon/listChangedBroadcast";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 function createTestService(): FeatureFlagService {

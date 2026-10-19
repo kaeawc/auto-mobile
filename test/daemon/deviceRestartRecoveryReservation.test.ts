@@ -5,7 +5,7 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import type { TerminalReleaseIntent } from "../../src/daemon/terminalReleaseJournal";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionManager,

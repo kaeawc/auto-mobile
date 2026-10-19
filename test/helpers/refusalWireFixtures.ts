@@ -60,7 +60,7 @@ import {
   DaemonRequestNotDeliveredError,
 } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -116,7 +116,7 @@ import {
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
+} from "../../src/daemon/deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
@@ -125,7 +125,7 @@ import {
   PooledAvdIdentityError,
   ProvisionDeviceRollbackError,
 } from "../../src/server/deviceTools";
-import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
+import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
 import {
   mcpOverloadResult,
   noActiveDeviceSessionResult,

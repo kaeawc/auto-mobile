@@ -2,7 +2,7 @@ import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
 import { toActionableError } from "../../models/ActionableError";
-import { DeviceOutsideBoundSessionError } from "../deviceOutsideBoundSessionRefusal";
+import { DeviceOutsideBoundSessionError } from "../../daemon/deviceOutsideBoundSessionRefusal";
 import { ZodType } from "zod/v4";
 import {
   DeviceReadiness,

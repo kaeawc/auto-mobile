@@ -81,7 +81,7 @@ import {
   type WireEnvelope,
 } from "./inMemoryDaemonWire";
 import { drainMicrotasks } from "./fakeTimerStepping";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   registerDeviceTools,
   setDeviceToolsDependencies,

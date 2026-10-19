@@ -38,7 +38,7 @@ import {
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
   terminalSessionRefusalFields,
-} from "./deviceSessionResult";
+} from "../daemon/deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
 import { ToolRegistry } from "./toolRegistry";

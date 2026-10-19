@@ -3,7 +3,7 @@ import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   DAEMON_UNKNOWN_TOOL_CODE,
-} from "../daemon/types";
+} from "./types";
 
 /**
  * A tool this server registers but whose availability gate (debug-only,

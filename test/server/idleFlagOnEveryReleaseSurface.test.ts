@@ -9,7 +9,7 @@ import {
   recoveryIdentityLossDetails,
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../src/server/deviceSessionResult";
+} from "../../src/daemon/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
@@ -128,7 +128,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "ownership lost",
-    builders: ["src/server/deviceSessionResult.ts#sessionOwnershipLostPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload"],
     reasonKey: "reason",
     holder: (reason) =>
       sessionOwnershipLostPayload({ message: "Released", sessionUuid: SESSION, reason }).error,
@@ -136,7 +136,7 @@ const surfaces: Surface[] = [
   {
     name: "released during call MCP",
     builders: [
-      "src/server/deviceSessionResult.ts#sessionOwnershipLostPayload",
+      "src/daemon/deviceSessionResult.ts#sessionOwnershipLostPayload",
       "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
     ],
     reasonKey: "reason",
@@ -232,7 +232,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "recovery identity loss details",
-    builders: ["src/server/deviceSessionResult.ts#recoveryIdentityLossDetails"],
+    builders: ["src/daemon/deviceSessionResult.ts#recoveryIdentityLossDetails"],
     reasonKey: "reason",
     holder: (reason) =>
       recoveryIdentityLossDetails({

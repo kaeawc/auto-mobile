@@ -5,7 +5,7 @@ import { releaseVersion } from "../../utils/mcpVersion";
 import { DaemonUnavailableError } from "../client";
 import { type BuildIdentity, describeBuildIdentity } from "../buildIdentity";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../types";
-import { DEVICE_SESSION_RECOVERY_PROMPT } from "../../server/deviceSessionResult";
+import { DEVICE_SESSION_RECOVERY_PROMPT } from "../deviceSessionResult";
 import type { SessionReleaseSnapshot } from "../sessionManager";
 import {
   livenessHandoverMessage,

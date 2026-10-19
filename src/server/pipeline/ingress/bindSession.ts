@@ -5,7 +5,7 @@ import { SessionReleaseBroadcaster } from "../../../daemon/sessionReleaseBroadca
 import {
   getActiveDeviceSelectionFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../deviceSessionResult";
+} from "../../../daemon/deviceSessionResult";
 import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
 import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import {
@@ -15,7 +15,7 @@ import {
 import { sessionForToolBinding } from "../../sessionForToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../toolSelectionTools";
-import type { ToolSelectionProfileRegistry } from "../../toolSelectionProfileRegistry";
+import type { ToolSelectionProfileRegistry } from "../../../daemon/toolSelectionProfileRegistry";
 import type { InvocationPlan } from "./invoke";
 
 /**

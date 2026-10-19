@@ -1,17 +1,17 @@
-import { idleReleaseField } from "../daemon/releaseReasons";
+import { idleReleaseField } from "./releaseReasons";
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
 } from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
-import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
+import type { SessionReleaseSnapshot } from "./sessionManager";
 import {
   SESSION_OWNERSHIP_LOST_CODE,
   sessionReleaseThatCancelledCall,
-} from "../daemon/sessionReleasedDuringCall";
-import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
-import { SUSPECT_GRACE_MS } from "../daemon/sessionLivenessWindows";
+} from "./sessionReleasedDuringCall";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_SHUTTING_DOWN_CODE,

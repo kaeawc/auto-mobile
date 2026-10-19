@@ -21,7 +21,7 @@ import {
   SessionRebindingError,
   SessionTerminalReleaseInProgressError,
 } from "../../src/daemon/sessionManager";
-import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
+import { readDeviceCleanupInProgressRefusal } from "../../src/daemon/deviceSessionResult";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {

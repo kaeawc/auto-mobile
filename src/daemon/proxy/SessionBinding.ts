@@ -1,12 +1,12 @@
 import type { Timer } from "../../utils/SystemTimer";
-import type { ListChangedKind } from "../../server/listChangedBroadcast";
+import type { ListChangedKind } from "../listChangedBroadcast";
 import {
   declaresDeviceSessionInvalid,
   getDeviceSessionIdFromResult,
   getDevicePlatformFromResult,
   getDeviceIdFromResult,
   isDeviceSessionAcquisitionTool,
-} from "../../server/deviceSessionResult";
+} from "../deviceSessionResult";
 import {
   foreignOwnedSessionUuidFromResult,
   routedSessionUuidFromResult,

@@ -16,7 +16,7 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
 import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
-import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
+import { readDeviceCleanupInProgressRefusal } from "../../src/daemon/deviceSessionResult";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,

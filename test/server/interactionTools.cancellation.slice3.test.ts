@@ -1,3 +1,7 @@
+import type {
+  ObservedActionResult,
+  ObservedEnvelope,
+} from "../../src/features/action/observedInteractionTypes";
 import {
   cancellationHandlers,
   cancellationTests,
@@ -37,6 +41,8 @@ const captured = JSON.parse(
   ),
 ) as Pick<ObserveResult, "viewHierarchy">;
 const observation: ObserveResult = {
+  observationId: "test-observation",
+  display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
   ...captured,
   updatedAt: 0,
   screenSize: { width: 1080, height: 2316 },
@@ -64,7 +70,7 @@ test.each(["keyboard", "openLink", "systemTray"])(
     let dispatches = 0;
     const keyboard = spyOn(Keyboard.prototype, "execute").mockImplementation(
       async (_action, signal) => {
-        throwIfAborted(signal);
+        throwIfAborted(signal instanceof AbortSignal ? signal : signal?.signal);
         dispatches++;
         return { success: true, open: false, message: "closed" };
       },
@@ -176,16 +182,22 @@ test("openLink stops before chooser launch if URL resolution cancels the request
 
 // Exercise command dispatch while keeping the separately tested observation pipeline fake.
 class UnobservedOpenURL extends OpenURL {
+  override observedInteraction<R extends ObservedActionResult>(
+    block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+  ): Promise<R & ObservedEnvelope>;
   override async observedInteraction(
-    block: Parameters<OpenURL["observedInteraction"]>[0],
-  ): Promise<unknown> {
+    block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+  ): Promise<ObservedActionResult & ObservedEnvelope> {
     return block(observation);
   }
 }
 class UnobservedChooser extends HandleIntentChooser {
+  override observedInteraction<R extends ObservedActionResult>(
+    block: (observation: ObserveResult) => Promise<R | ObservedActionResult>,
+  ): Promise<R & ObservedEnvelope>;
   override async observedInteraction(
-    block: Parameters<HandleIntentChooser["observedInteraction"]>[0],
-  ): Promise<unknown> {
+    block: (observation: ObserveResult) => Promise<ObservedActionResult>,
+  ): Promise<ObservedActionResult & ObservedEnvelope> {
     return block({
       ...observation,
       viewHierarchy: { ...observation.viewHierarchy!, updatedAt: 1000 },

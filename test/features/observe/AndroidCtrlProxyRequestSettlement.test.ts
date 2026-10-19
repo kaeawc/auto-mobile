@@ -136,7 +136,7 @@ const methods: Method[] = [
     name: "tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestTapCoordinates({
+      h.client.testHooks.gestures().requestTapCoordinates({
         x: 1,
         y: 2,
         duration: 0,
@@ -149,13 +149,13 @@ const methods: Method[] = [
     name: "double tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDoubleTapCoordinates(1, 2, undefined, { signal }),
+      h.client.testHooks.gestures().requestDoubleTapCoordinates(1, 2, undefined, { signal }),
   },
   {
     name: "swipe",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestSwipe({
+      h.client.testHooks.gestures().requestSwipe({
         x1: 1,
         y1: 2,
         x2: 3,
@@ -170,7 +170,7 @@ const methods: Method[] = [
     name: "drag",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDrag({
+      h.client.testHooks.gestures().requestDrag({
         x1: 1,
         y1: 2,
         x2: 3,
@@ -186,7 +186,7 @@ const methods: Method[] = [
     name: "pinch",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestPinch({
+      h.client.testHooks.gestures().requestPinch({
         centerX: 1,
         centerY: 2,
         distanceStart: 3,
@@ -194,23 +194,37 @@ const methods: Method[] = [
         rotationDegrees: 0,
         duration: 20,
         timeoutMs: 50,
-        perf: perf,
-        signal: signal,
+        perf,
+        signal,
       }),
   },
   {
     name: "two finger swipe",
-    invoke: (h) => h.client["gestures"].requestTwoFingerSwipe(1, 2, 3, 4, 20, 10, 50),
+    invoke: (h) =>
+      h.client.testHooks.gestures().requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 20,
+        offset: 10,
+        timeoutMs: 50,
+      }),
   },
   {
     name: "gesture start",
     invoke: (h) =>
-      h.client["gestures"].requestGestureStart({ gestureId: "g", x: 1, y: 2, timeoutMs: 50 }),
+      h.client.testHooks
+        .gestures()
+        .requestGestureStart({ gestureId: "g", x: 1, y: 2, timeoutMs: 50 }),
   },
-  { name: "gesture move", invoke: (h) => h.client["gestures"].requestGestureMove("g", 1, 2, 50) },
+  {
+    name: "gesture move",
+    invoke: (h) => h.client.testHooks.gestures().requestGestureMove("g", 1, 2, 50),
+  },
   {
     name: "gesture end",
-    invoke: (h) => h.client["gestures"].requestGestureEnd("g", 1, 2, false, 50),
+    invoke: (h) => h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, false, 50),
   },
   {
     name: "set text",

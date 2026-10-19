@@ -73,12 +73,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         8765,
         createSuccessWebSocketFactory(timer),
         timer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        options,
+        { options },
       );
       void client.connectionTestHooks.deliverMessage(
         JSON.stringify({

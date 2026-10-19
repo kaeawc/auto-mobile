@@ -1,13 +1,7 @@
 src/daemon/daemon.ts	6
 src/daemon/daemonContext.ts	1
-src/daemon/manager.ts	1
 src/daemon/socketServer.ts	1
-src/features/deviceLifecycle/deviceLifecycleCore.ts	2
-src/features/observe/ObserveScreenWiring.ts	1
-src/server/bootedDeviceResources.ts	1
 src/server/deviceToolsLifecycle.ts	2
 src/server/deviceToolsShutdown.ts	4
 src/server/deviceToolsStartDevice.ts	6
-src/server/deviceToolsStartupLease.ts	1
-src/server/sessionBrokerToolGate.ts	1
 src/utils/plan/PlanExecutor.ts	2

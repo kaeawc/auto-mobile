@@ -1,9 +1,10 @@
-import { DaemonState } from "./daemonState";
+import { DaemonState, type DaemonStateLike } from "./daemonState";
 import type { DevicePool } from "./devicePool";
 import type { SessionManager } from "./sessionManager";
 import type { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import type { BrokerConnectionScopes } from "./sessionBroker/connectionScope";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
+import type { SessionBrokerService } from "./sessionBroker/service";
 
 /** The per-session rendered-display reads action code takes from the daemon's SessionManager. */
 export type RenderedDisplaySessionReads = Pick<
@@ -97,8 +98,14 @@ export interface DaemonContext {
   requireSessionManager(): SessionManager;
   /** The whole device pool, throwing "DaemonState not initialized" when the daemon is not initialized. */
   requireFullDevicePool(): DevicePool;
+  /** Device-session identity lookups, throwing "DaemonState not initialized" when the daemon is not initialized. */
+  requireDeviceSessionRegistry(): DeviceSessionRegistry;
   /** The device-pool mutations, throwing "DaemonState not initialized" when the daemon is not initialized. */
   requireDevicePoolWrites(): DevicePoolWrites;
+  /** Whether the daemon runs in session-broker mode; false until a broker is configured. */
+  isSessionBrokerMode(): boolean;
+  /** The session-broker service, or undefined when none is attached (initialized or not). */
+  sessionBrokerService(): SessionBrokerService | undefined;
   /** Whether the daemon is initialized (stdio and tests are not). */
   isInitialized(): boolean;
   /**
@@ -137,6 +144,9 @@ export const defaultDaemonContext: DaemonContext = {
   requireSessionManager: () => currentDaemon().getSessionManager(),
   requireFullDevicePool: () => currentDaemon().getDevicePool(),
   requireDevicePoolWrites: () => currentDaemon().getDevicePool(),
+  requireDeviceSessionRegistry: () => currentDaemon().getDeviceSessionRegistry(),
+  isSessionBrokerMode: () => currentDaemon().isSessionBrokerMode(),
+  sessionBrokerService: () => currentDaemon().getSessionBrokerService(),
   isInitialized: () => currentDaemon().isInitialized(),
   fullDevicePool: () => initializedDaemon()?.getDevicePool(),
   devicePool: () => initializedDaemon()?.getDevicePool(),
@@ -145,3 +155,23 @@ export const defaultDaemonContext: DaemonContext = {
   observerSessionRegistry: () => initializedDaemon()?.getObserverSessionRegistry(),
   deviceSessionRegistry: () => initializedDaemon()?.getDeviceSessionRegistry(),
 };
+
+export type { DaemonStateLike };
+
+/** The classic `DaemonStateLike` read surface over a context, for callers that still take it. */
+export function daemonStateLikeFrom(
+  context: Pick<
+    DaemonContext,
+    | "isInitialized"
+    | "requireSessionManager"
+    | "requireFullDevicePool"
+    | "requireDeviceSessionRegistry"
+  >,
+): DaemonStateLike {
+  return {
+    isInitialized: () => context.isInitialized(),
+    getSessionManager: () => context.requireSessionManager(),
+    getDevicePool: () => context.requireFullDevicePool(),
+    getDeviceSessionRegistry: () => context.requireDeviceSessionRegistry(),
+  };
+}

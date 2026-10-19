@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Visitor, type Expression } from "oxc-parser";
 import {
@@ -13,15 +13,11 @@ import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
 
 /**
  * #11848: every environment variable read in src/ must be declared in
- * src/config/env.ts. Unmigrated reads are listed in env-registry-baseline.txt
- * as `<file>\t<NAME>` lines; the list may only shrink. Regenerate after
- * migrating with `UPDATE_ENV_REGISTRY_BASELINE=1 bun test test/lint/envRegistry.test.ts`
- * (refuses to add entries; `=grow` is for the initial seeding only).
+ * src/config/env.ts. There is no baseline: any unregistered read is a failure.
  */
 const ROOT = path.resolve(import.meta.dir, "../..");
 const SRC = path.join(ROOT, "src");
 const REGISTRY_FILE = "src/config/env.ts";
-const BASELINE = path.join(import.meta.dir, "env-registry-baseline.txt");
 const DOCS = path.join(ROOT, "docs/using/environment-variables.md");
 const PRODUCT_NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 /** The registry table itself (`ENV.DATA_DIR`) is not an environment object. */
@@ -179,12 +175,6 @@ function registeredNames(): Set<string> {
   );
 }
 
-function readBaseline(): string[] {
-  return readFileSync(BASELINE, "utf8")
-    .split("\n")
-    .filter((line) => line.length > 0 && !line.startsWith("#"));
-}
-
 function unregisteredReads(files: Map<string, string>): string[] {
   const registered = registeredNames();
   return [...files]
@@ -218,24 +208,10 @@ describe("environment variable registry", () => {
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, allowlisted));
   }, 60_000);
 
-  test("every env read in src/ is registered or on the shrink-only baseline", () => {
-    if (process.env.UPDATE_ENV_REGISTRY_BASELINE) {
-      const existing = new Set(readBaseline());
-      const grown = found.filter((entry) => !existing.has(entry));
-      if (process.env.UPDATE_ENV_REGISTRY_BASELINE !== "grow") {
-        expect(grown, "Register these variables in src/config/env.ts instead.").toEqual([]);
-      }
-      writeFileSync(BASELINE, `${[...found].join("\n")}\n`);
-      return;
-    }
-    const baseline = new Set(readBaseline());
+  test("every env read in src/ is registered", () => {
     expect(
-      found.filter((entry) => !baseline.has(entry)),
+      found,
       "Unregistered environment read(s): declare the variable in src/config/env.ts and read it through readEnvTrimmed/readEnvRaw.",
-    ).toEqual([]);
-    expect(
-      [...baseline].filter((entry) => !found.includes(entry)),
-      "Stale baseline entries: rerun with UPDATE_ENV_REGISTRY_BASELINE=1 to shrink it.",
     ).toEqual([]);
   });
 
@@ -275,11 +251,6 @@ describe("environment variable registry", () => {
     for (const reason of Object.values(NON_ENV_LITERALS)) {
       expect(reason.length).toBeGreaterThan(0);
     }
-  });
-
-  test("baseline is sorted and has no duplicates", () => {
-    const baseline = readBaseline();
-    expect(baseline).toEqual([...new Set(baseline)].sort());
   });
 
   test("detector recognises dotted, bracket, destructured and literal forms", () => {

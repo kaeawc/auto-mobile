@@ -29,7 +29,6 @@ describe("turbo caching safety (#5124)", () => {
       "test/**/*.typecheck.ts",
       "tsconfig.json",
       "scripts/typecheck-baseline.sh",
-      "scripts/typecheck-baseline.txt",
       "package.json",
     ];
     for (const glob of required) {

@@ -527,11 +527,7 @@ internal class StorageController(
     } catch (e: CancellationException) {
       // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
       throw e
-    } catch (e: java.io.IOException) {
-      Log.e(TAG, "Error broadcasting storage change", e)
-    } catch (e: IllegalArgumentException) {
-      Log.e(TAG, "Error broadcasting storage change", e)
-    } catch (e: IllegalStateException) {
+    } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting storage change", e)
     }
   }

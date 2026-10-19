@@ -9,8 +9,6 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
-import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -50,17 +48,12 @@ class SdkBatchReceiversTest {
   }
 
   @Test
-  fun `batch handler failures propagate outside the parsing boundary`() {
+  fun `a throwing batch handler is contained`() {
     val handler = mockk<SdkEventBatchBroadcastHandler>()
-    val failure = IllegalStateException("boom")
-    every { handler.handle(any(), any(), any()) } throws failure
+    every { handler.handle(any(), any(), any()) } throws IllegalStateException("boom")
 
-    val thrown =
-      assertThrows(IllegalStateException::class.java) {
-        EventBatchReceiver(handler)
-          .onReceive(context, Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH))
-      }
-    assertSame(failure, thrown)
+    EventBatchReceiver(handler)
+      .onReceive(context, Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH))
   }
 
   @Test
@@ -79,17 +72,28 @@ class SdkBatchReceiversTest {
   }
 
   @Test
-  fun `anr handler failures propagate and other actions are ignored`() {
+  fun `a throwing anr handler is contained and other actions are ignored`() {
     val handler = mockk<SdkAnrBroadcastHandler>()
-    val failure = IllegalStateException("boom")
-    every { handler.handle(any(), any(), any()) } throws failure
+    every { handler.handle(any(), any(), any()) } throws IllegalStateException("boom")
     val receiver = AnrReceiver(handler)
 
-    val thrown =
-      assertThrows(IllegalStateException::class.java) {
-        receiver.onReceive(context, Intent(AutoMobileAnr.ACTION_ANR))
-      }
-    assertSame(failure, thrown)
+    receiver.onReceive(context, Intent(AutoMobileAnr.ACTION_ANR))
     receiver.onReceive(context, Intent("other.action"))
+  }
+
+  @Test
+  fun `plain runtime extras failures are contained by both receivers`() {
+    val intent = mockk<Intent>()
+    every { intent.getStringExtra(any()) } throws RuntimeException("Parcel.readValue failed")
+    val batch = mockk<SdkEventBatchBroadcastHandler>(relaxed = true)
+    val anr = mockk<SdkAnrBroadcastHandler>(relaxed = true)
+
+    every { intent.action } returns SdkEventSerializer.ACTION_SDK_EVENT_BATCH
+    EventBatchReceiver(batch).onReceive(context, intent)
+    every { intent.action } returns AutoMobileAnr.ACTION_ANR
+    AnrReceiver(anr).onReceive(context, intent)
+
+    verify(exactly = 0) { batch.handle(any(), any(), any()) }
+    verify(exactly = 0) { anr.handle(any(), any(), any()) }
   }
 }

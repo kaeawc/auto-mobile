@@ -97,12 +97,7 @@ internal class NavigationEventReceiver(
       ) {
         Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
       }
-    } catch (e: android.os.BadParcelableException) {
-      Log.e(TAG, "Error handling navigation event broadcast", e)
-    } catch (e: IllegalArgumentException) {
-      Log.e(TAG, "Error handling navigation event broadcast", e)
-    } catch (e: IllegalStateException) {
-      if (e is kotlinx.coroutines.CancellationException) throw e
+    } catch (e: Exception) {
       Log.e(TAG, "Error handling navigation event broadcast", e)
     }
   }

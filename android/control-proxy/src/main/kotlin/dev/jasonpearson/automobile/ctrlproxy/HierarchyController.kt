@@ -200,13 +200,7 @@ internal class HierarchyController(
     } catch (e: CancellationException) {
       // Let cooperative cancellation unwind the collector normally.
       throw e
-    } catch (e: IllegalArgumentException) {
-      Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
-    } catch (e: IllegalStateException) {
-      Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
-    } catch (e: java.io.IOException) {
-      Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
-    } catch (e: SecurityException) {
+    } catch (e: Exception) {
       Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
     }
   }

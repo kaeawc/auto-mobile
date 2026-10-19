@@ -67,6 +67,9 @@ internal fun discoverSdkCapabilities(
   } catch (error: android.os.BadParcelableException) {
     Log.w("SdkCapabilities", "Capability discovery unavailable", error)
     unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
+  } catch (error: NullPointerException) {
+    Log.w("SdkCapabilities", "Capability discovery unavailable", error)
+    unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")
   } catch (error: android.os.RemoteException) {
     Log.w("SdkCapabilities", "Capability discovery unavailable", error)
     unavailableSdkCapabilities("BRIDGE_UNAVAILABLE")

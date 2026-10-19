@@ -1,11 +1,11 @@
 import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import type { TapAtPlanContext } from "../../models/TapAtGeometry";
-import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
+import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import {
   resolveTalkBackStateConfirmation,
   TALKBACK_STATE_UNKNOWN_WARNING,
-} from "../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
+} from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";

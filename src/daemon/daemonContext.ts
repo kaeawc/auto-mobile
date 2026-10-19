@@ -83,6 +83,11 @@ export type DevicePoolWrites = Pick<
   | "reconcileDiscoveryObservation"
 >;
 
+/** The one session read a failed plan makes to explain a lost session base. */
+export interface PlanEndDaemonContext {
+  sessionManager(): Pick<SessionManager, "peekTerminalAnswerForEndedSession"> | undefined;
+}
+
 /** The state the daemon itself initializes and updates over its lifecycle. */
 export type DaemonStateWrites = Pick<
   DaemonState,

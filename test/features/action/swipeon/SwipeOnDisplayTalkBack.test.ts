@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
 import { harness } from "./displaySwipeHarness";
 

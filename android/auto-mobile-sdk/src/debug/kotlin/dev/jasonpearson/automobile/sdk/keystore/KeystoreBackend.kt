@@ -61,7 +61,7 @@ internal class AndroidDeviceLockProbe(private val context: Context?) : DeviceLoc
         else manager.isKeyguardLocked) -> DeviceLockState.LOCKED
         else -> DeviceLockState.UNLOCKED
       }
-    } catch (error: Exception) {
+    } catch (error: SecurityException) {
       Log.w("KeystoreTestState", "Device lock probe unavailable", error)
       DeviceLockState.UNKNOWN
     }

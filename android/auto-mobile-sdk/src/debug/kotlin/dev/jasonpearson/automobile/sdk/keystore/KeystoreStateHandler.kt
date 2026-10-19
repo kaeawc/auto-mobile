@@ -61,7 +61,7 @@ internal class KeystoreStateHandler(
   private fun probeLock(): DeviceLockState =
     try {
       lockProbe.state()
-    } catch (error: Exception) {
+    } catch (error: SecurityException) {
       Log.w("KeystoreTestState", "Device lock probe failed", error)
       DeviceLockState.UNKNOWN
     }

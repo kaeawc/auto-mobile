@@ -15,7 +15,7 @@ import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../.
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { SqliteSessionBrokerStore } from "../sqliteStore";
-import type { BrokerRequestsTable, BrokerResourcesTable } from "../store";
+import type { BrokerReceiptTables } from "../store";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
 import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
@@ -174,12 +174,10 @@ interface BindingJournalTable {
   updated_at_ms: number;
 }
 
-export interface BindingRegistryDatabase {
+export interface BindingRegistryDatabase extends BrokerReceiptTables {
   slot_scopes: BindingScopesTable;
   slot_assignments: BindingAssignmentsTable;
   slot_journal: BindingJournalTable;
-  session_broker_requests: BrokerRequestsTable;
-  session_broker_resources: BrokerResourcesTable;
 }
 
 type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDatabase>;

@@ -13,6 +13,7 @@ import { Rotate } from "../../src/features/action/Rotate";
 import { SetPosture } from "../../src/features/device/SetPosture";
 import { AwaitIdle } from "../../src/features/observe/AwaitIdle";
 import { BaseVisualChange } from "../../src/features/action/BaseVisualChange";
+import { asObservedResult } from "../../src/features/action/observedInteractionStages";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -56,7 +57,7 @@ observation.setObserveResult({
 } as ObserveResult);
 const bypassObservation = () =>
   spyOn(BaseVisualChange.prototype, "observedInteraction").mockImplementation(async (block) =>
-    block(await observation.execute({})),
+    asObservedResult(await block(await observation.execute({}))),
   );
 
 describe("registered interaction handlers honor cancellation", () => {

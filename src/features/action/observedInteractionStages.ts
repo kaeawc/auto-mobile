@@ -6,6 +6,18 @@ import type { ObservedActionResult, ObservedEnvelope } from "./observedInteracti
 
 // Pure post-read stages of the observed-interaction pipeline (see BaseVisualChange).
 
+/**
+ * The block's own result as `observedInteraction` returns it. Its declared result type `R` is
+ * trusted: blocks also return bare `{ success: false, error }` failures that lack `R`'s required
+ * fields. The one place that trust is stated, shared by the pipeline and by tests that replace
+ * the surrounding observation loop.
+ */
+export function asObservedResult<R extends ObservedActionResult>(
+  result: R | ObservedActionResult,
+): R & ObservedEnvelope {
+  return result as R & ObservedEnvelope;
+}
+
 /** Retry unless the read errored (retrying only adds latency) or is fresh and changed. */
 export function observationNeedsRetry(
   observation: ObserveResult,

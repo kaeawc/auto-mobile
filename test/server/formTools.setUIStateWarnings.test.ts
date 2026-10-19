@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { registerFormTools, createSetUIStateHandler } from "../../src/server/formTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
-import type { SetUIStateResult } from "../../src/features/action/SetUIState";
+import type { SetUIStateResult } from "../../src/models/SetUIStateResult";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -39,10 +39,12 @@ test("setUIState forwards warnings into its structured and text output schema", 
   expect(structured.fields[0]).not.toHaveProperty("warnings");
 });
 
-test.each([
+const omittedWarnings: Array<{ name: string; value: string[] | undefined }> = [
   { name: "absent", value: undefined },
   { name: "empty", value: [] },
-])("setUIState omits $name warnings", async ({ value }) => {
+];
+
+test.each(omittedWarnings)("setUIState omits $name warnings", async ({ value }) => {
   const setUIStateHandler = createSetUIStateHandler({
     setUIStateFactory: () => ({
       execute: async () => ({

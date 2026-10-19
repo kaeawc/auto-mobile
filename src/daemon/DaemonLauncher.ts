@@ -483,11 +483,10 @@ export class DaemonLauncher {
       deadlineHandle = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
     });
     try {
-      // oxlint-disable-next-line auto-mobile/no-raw-promise-race -- Reuse the group grace deadline; another timer would change its expiry.
-      const wrapperExited = await Promise.race([
-        exitPromise.then(() => true),
-        deadline.then(() => false),
-      ]);
+      const wrapperExited = await raceWithDeadline(
+        [exitPromise.then(() => true), deadline.then(() => false)],
+        { timer: this.timer, label: "Daemon process group grace deadline" },
+      );
 
       // A `bunx`/`bun x` wrapper can exit while its daemon remains in the same
       // detached group. Keep the grace timer alive when that group still exists.

@@ -58,6 +58,14 @@ class FakeBrokerCommandClient implements SessionBrokerCommandClient {
   async close(): Promise<void> {
     this.closeCalls++;
   }
+
+  async callTool(): Promise<never> {
+    throw new Error("A broker command must not call an MCP tool");
+  }
+
+  async readResource(): Promise<never> {
+    throw new Error("A broker command must not read an MCP resource");
+  }
 }
 
 const statusArgs = [REQUEST_ID, "--liveness-owner-token", OWNER_TOKEN, "--json"];
@@ -98,7 +106,7 @@ describe("session broker command arguments", () => {
     expect(clientsCreated).toBe(0);
   });
 
-  test.each([
+  test.each<{ name: string; args: string[] }>([
     { name: "no arguments", args: [] },
     { name: "missing identity and token", args: [REQUEST_ID, "--json"] },
     {

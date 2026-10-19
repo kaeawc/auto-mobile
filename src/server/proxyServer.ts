@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
 import type {
   CallToolResult,
   ListToolsResult,
@@ -18,7 +19,6 @@ import {
   DaemonRestartDeferredError,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../daemon/client";
 import { daemonRestartDeferredPayload } from "../daemon/daemonRestartAdmission";
 import { McpOverloadError, McpTimeoutError } from "../daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";

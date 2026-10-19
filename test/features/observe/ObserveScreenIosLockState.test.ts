@@ -56,6 +56,9 @@ describe("observe iOS simulator lock state", () => {
     ).execute({ skipScreenshot: true, skipBackStack: true });
     expect(result.error).toContain("Observation failed");
     expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true });
+    if (!result.deviceLock) {
+      throw new Error("Expected lock state");
+    }
     const output = sanitizeObserveResult(result, { dropElements: true });
     expect(output.deviceLock).toEqual(result.deviceLock);
     expect(deviceLockSchema.parse(output.deviceLock)).toEqual(result.deviceLock);

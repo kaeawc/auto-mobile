@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { describe, expect, test } from "bun:test";
@@ -50,21 +51,23 @@ describe("searchable node derivation", () => {
   });
 
   test("a trailing-space own label stays consistent with skeleton display (#6240)", () => {
-    const [row] = new SearchableHierarchy().project({
-      hierarchy: {
-        node: {
-          bounds,
-          "resource-id": "bt-row",
-          "content-desc": "Bluetooth ",
-          clickable: true,
+    const [row] = new SearchableHierarchy().project(
+      wireCapture({
+        hierarchy: {
           node: {
-            bounds: { left: 1, top: 1, right: 90, bottom: 40 },
-            "resource-id": "bt-state",
-            text: "Off",
+            bounds,
+            "resource-id": "bt-row",
+            "content-desc": "Bluetooth ",
+            clickable: true,
+            node: {
+              bounds: { left: 1, top: 1, right: 90, bottom: 40 },
+              "resource-id": "bt-state",
+              text: "Off",
+            },
           },
         },
-      },
-    });
+      }),
+    );
 
     expect(row.label).toBe("Bluetooth");
     expect(row.displayedLabel).toBe("Bluetooth");
@@ -189,14 +192,14 @@ test("capture projection retains unbounded ancestry, ranks windows and memoizes 
     windows: [{ windowLayer: 10, hierarchy: { node: { bounds, text: "Dialog" } } }],
   };
   const projection = new SearchableHierarchy();
-  const nodes = projection.project(capture);
+  const nodes = projection.project(wireCapture(capture));
   expect(nodes).toHaveLength(3);
   expect(nodes[0].label).toBe("Continue");
   expect(nodes[0].element).toBeUndefined();
   expect(nodes[1].parentIndex).toBe(0);
   expect(nodes[2].windowRank).toBeLessThan(nodes[0].windowRank);
-  expect(projection.project(capture)).toBe(nodes);
-  expect(projection.project({ ...capture })).not.toBe(nodes);
+  expect(projection.project(wireCapture(capture))).toBe(nodes);
+  expect(projection.project(wireCapture({ ...capture }))).not.toBe(nodes);
 });
 
 test("collector calls do not share mutable output descriptors", () => {
@@ -214,9 +217,9 @@ test("collector output bounds cannot mutate cached compact capture bounds", () =
   const capture = {
     hierarchy: { node: { bounds: [0, 0, 100, 50], text: "Original", clickable: true } },
   };
-  const first = collector.collect(capture, "android")!;
+  const first = collector.collect(wireCapture(capture), "android")!;
   first.clickable![0].bounds.left = 99;
-  expect(collector.collect(capture, "android")!.clickable![0].bounds.left).toBe(0);
+  expect(collector.collect(wireCapture(capture), "android")!.clickable![0].bounds.left).toBe(0);
 });
 
 test("minimal parsed descriptors retain raw observe categories", () => {
@@ -265,11 +268,11 @@ test("collector output nested fields cannot mutate a cached capture", () => {
       },
     },
   };
-  const first = collector.collect(capture, "android")!.text![0];
+  const first = collector.collect(wireCapture(capture), "android")!.text![0];
   first.actions.push("click");
   first.extras.nested.label = "Changed";
   first["semantic-links"]![0].text = "Changed";
-  const second = collector.collect(capture, "android")!;
+  const second = collector.collect(wireCapture(capture), "android")!;
   expect(second.text![0].actions).toEqual([]);
   expect(second.text![0].extras.nested.label).toBe("Original");
   expect(second.text![0]["semantic-links"]![0].text).toBe("Original");

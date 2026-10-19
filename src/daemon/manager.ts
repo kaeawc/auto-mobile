@@ -158,6 +158,7 @@ import {
   runDaemonCommand as runDaemonCommandWithManager,
   type RunDaemonCommandOptions,
 } from "./cli/runDaemonCommand";
+import { DaemonGenerationExitedBeforeSignalError } from "./DaemonGenerationExitedBeforeSignalError";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 export { resolveExtractionRootForEntryScript, type ExtractionCleaner } from "./extractionCleaner";
@@ -222,8 +223,6 @@ export function relayDaemonStderr(daemonProcess: Pick<DaemonLaunchedProcess, "st
   });
   (daemonStderr as typeof daemonStderr & { unref?: () => void }).unref?.();
 }
-
-class DaemonGenerationExitedBeforeSignalError extends Error {}
 
 interface WaitForStopResult {
   stopped: boolean;

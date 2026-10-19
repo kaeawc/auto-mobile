@@ -1,4 +1,8 @@
 import { BindingConfigError } from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
@@ -51,14 +55,7 @@ import {
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  daemonResponseError,
-  DaemonHandshakeMismatchError,
-  DaemonBoundSessionLostError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  DaemonRequestNotDeliveredError,
-} from "../../src/daemon/client";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";

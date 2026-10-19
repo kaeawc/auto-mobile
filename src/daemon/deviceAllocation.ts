@@ -1,4 +1,5 @@
 import { bindDevice, holderOf, isIdle } from "./deviceBinding";
+import { DevicePoolError } from "./DevicePoolError";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type Platform } from "../models";
 import { runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -12,11 +13,7 @@ import type { RetryExecutor } from "../utils/retry/RetryExecutor";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 import type { DeviceUnhealthyError } from "../models/deviceAcquisitionRefusals";
-import {
-  ALLOCATION_SNAPSHOT_STALE_RETRIES,
-  DevicePoolError,
-  refreshFailureContext,
-} from "./devicePool";
+import { ALLOCATION_SNAPSHOT_STALE_RETRIES, refreshFailureContext } from "./devicePool";
 import type {
   DevicePool,
   PooledDevice,

@@ -1,16 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   BindingJournal,
-  BindingJournalRedriveLoop,
   BINDING_JOURNAL_DISCOVERY_BUDGET_MS,
   BINDING_JOURNAL_CLAIM_BUDGET_MS,
   BINDING_JOURNAL_MATCH_BUDGET_MS,
   BINDING_JOURNAL_DELETE_GRACE_MS,
   BINDING_JOURNAL_STEP_BUDGET_MS,
-  BINDING_JOURNAL_STOP_BUDGET_MS,
   BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   type BindingJournalPassResult,
 } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import {
+  BindingJournalRedriveLoop,
+  BINDING_JOURNAL_STOP_BUDGET_MS,
+} from "../../../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
 import {
   BindingReconciler,
   DefaultManagedSpecResolver,

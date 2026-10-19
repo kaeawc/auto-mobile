@@ -31,13 +31,15 @@ afterEach(() => {
   serverConfig.setPlanExecutionActive(previousPlanActive);
 });
 
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
 function harness() {
   serverConfig.setPlanExecutionActive(true);
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
   const transportAliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
   const incidents = new InMemoryEmulatorLossIncidentStore(timer, new FakeIdGenerator());
-  const device: PooledDevice = {
+  const device: Mutable<PooledDevice> = {
     id: "emulator-5554",
     name: "Pixel",
     platform: "android",
@@ -48,7 +50,7 @@ function harness() {
     lastUsedAt: 0,
     errorCount: 0,
     avdName: "Pixel",
-    androidImage: { name: "Pixel", platform: "android" },
+    androidImage: { name: "Pixel", platform: "android", isRunning: true },
   };
   const peer = { ...device, id: "emulator-5556", avdName: "Pixel_2", sessionId: "peer" };
   const devices = new Map([
@@ -71,7 +73,7 @@ function harness() {
       this.onDiscovery();
       return super.getBootedDevicesDetailed(platform);
     }
-    async getAndroidOfflineDeviceIds() {
+    async getAndroidOfflineDeviceIds(_candidateIds?: Iterable<string>) {
       this.onOfflineProbe();
       if (this.offlineProbeError) {
         throw this.offlineProbeError;
@@ -227,6 +229,7 @@ describe("confirmed plan device loss", () => {
     const missing = {
       disconnected: [],
       missed: [{ deviceId: h.device.id, misses: 1 }],
+      transitional: [],
       skippedAllDiscoveryFailed: false,
     };
     const present = new Set([h.peer.id]);
@@ -258,6 +261,7 @@ describe("confirmed plan device loss", () => {
       {
         disconnected: [],
         missed: [{ deviceId: h.device.id, misses: 1 }],
+        transitional: [],
         skippedAllDiscoveryFailed: false,
       },
       new Set([h.peer.id]),
@@ -298,6 +302,7 @@ describe("confirmed plan device loss", () => {
       {
         disconnected: [],
         missed: [{ deviceId: usb, misses: 1 }],
+        transitional: [],
         skippedAllDiscoveryFailed: false,
       },
       new Set([h.peer.id]),
@@ -325,6 +330,7 @@ describe("confirmed plan device loss", () => {
     const missing = {
       disconnected: [],
       missed: [{ deviceId: h.device.id, misses: 1 }],
+      transitional: [],
       skippedAllDiscoveryFailed: false,
     };
     await check(missing, new Set([h.peer.id]));
@@ -588,8 +594,11 @@ describe("confirmed plan device loss", () => {
     async (state) => {
       const h = harness();
       const plan = h.start("executePlan");
-      if (state === "idle" || state === "error") {
+      if (state === "idle") {
         h.device.status = state;
+      }
+      if (state === "error") {
+        h.device.health = state;
       }
       if (state === "leased") {
         h.leased = true;

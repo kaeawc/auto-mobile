@@ -200,7 +200,7 @@ describe("pinned session exports", () => {
       expect((await h.store.getExport(IDENTITY.prepareId))?.acknowledgedAtMs).toBeNull();
     }
     h.timer.advanceTime(17);
-    const expected = { prepareId: IDENTITY.prepareId, outcome: "acknowledged" };
+    const expected = { prepareId: IDENTITY.prepareId, outcome: "acknowledged" } as const;
     expect(await ack()).toEqual(expected);
     const time = (await h.store.getExport(IDENTITY.prepareId))?.acknowledgedAtMs;
     expect(time).toBe(h.timer.now());

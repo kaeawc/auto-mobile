@@ -131,7 +131,7 @@ describe("exact Android binding during transitional adb presence", () => {
       });
       expect(pending.settled()).toBe(false);
       expect(discovery).toHaveBeenCalledTimes(1);
-      expect((await discovery.mock.results[0]!.value).devices).toEqual([]);
+      expect(await discovery.mock.results[0]!.value).toHaveProperty("devices", []);
       h.unchanged();
       h.manager.bootedDevices = [device];
       h.manager.androidListedDeviceStates.set(device.deviceId, "device");
@@ -139,10 +139,10 @@ describe("exact Android binding during transitional adb presence", () => {
       const sessionId = await pending.result;
       expect(sessionId).toEqual(expect.any(String));
       expect(discovery).toHaveBeenCalledTimes(2);
-      expect((await discovery.mock.results[1]!.value).devices).toEqual([device]);
+      expect(await discovery.mock.results[1]!.value).toHaveProperty("devices", [device]);
       expect(h.timer.now()).toBe(100);
       expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
-      expect(h.entry?.sessionId).toBe(sessionId);
+      expect(sessionId).toBe(h.entry?.sessionId);
       h.noLossSideEffects();
     } finally {
       discovery.mockRestore();
@@ -392,7 +392,7 @@ describe("exact Android binding during transitional adb presence", () => {
       device.name,
       image.name,
     );
-    const entryBefore = { ...h.entry };
+    const entryBefore = { ...h.entry! };
     try {
       const error = await settleByFakeEvents(
         h.timer,
@@ -556,7 +556,7 @@ describe("exact Android binding during transitional adb presence", () => {
     await h.bind();
     h.manager.bootedDevices = [];
     h.manager.androidListedDeviceStates.set(device.deviceId, "offline");
-    const entryBefore = { ...h.entry };
+    const entryBefore = { ...h.entry! };
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {
       const pending = track(
@@ -639,7 +639,7 @@ describe("exact Android binding during transitional adb presence", () => {
         expect(sessionId).toEqual(autolock ? expect.any(String) : "owner");
         expect(h.timer.now()).toBe(100);
         expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
-        expect(h.entry?.sessionId).toBe(sessionId);
+        expect(sessionId).toBe(h.entry?.sessionId);
         h.noLossSideEffects();
       } finally {
         probe.mockRestore();
@@ -699,7 +699,7 @@ describe("exact Android binding during transitional adb presence", () => {
     const recovery = h.pool.recoverSessionBoundAndroidDeviceAfterLoss(
       device.deviceId,
       undefined,
-      h.entry,
+      h.entry ?? undefined,
     );
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {

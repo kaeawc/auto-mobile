@@ -15,7 +15,7 @@ describe("session broker host configuration", () => {
   test("requires an explicit operator default policy and fills only safe optional metadata", () => {
     const parsed = parseSessionBrokerHostConfig(config());
 
-    expect(parsed).toEqual({
+    expect<unknown>(parsed).toEqual({
       contractVersion: 1,
       limits: {},
       defaults: { ios: iosDefaults() },
@@ -57,7 +57,7 @@ describe("session broker host configuration", () => {
       sessionCap: 0,
       idlePoolCap: 7,
     });
-    expect(parsed.defaults).toEqual({
+    expect<unknown>(parsed.defaults).toEqual({
       ios: iosDefaults(),
       android: androidDefaults(),
     });

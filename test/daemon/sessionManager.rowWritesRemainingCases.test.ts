@@ -737,7 +737,10 @@ describe("remaining session row writes (#11557)", () => {
       }
       const assigner: SessionDeviceAssigner = {
         async assignDeviceToSession(id) {
-          const creating = manager.createSession(id, DEVICE, "android", { timeoutMs: 60_000 });
+          const creating = manager.createSession(id, DEVICE, "android", {
+            timeoutMs: 60_000,
+            signal: controller.signal,
+          });
           if (!landed) {
             controller.abort(failure);
           }
@@ -747,7 +750,9 @@ describe("remaining session row writes (#11557)", () => {
       const writesBefore = store.releases.length;
       await expect(
         runWithAbortSignal(controller.signal, () =>
-          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true),
+          manager.getOrCreateSession(SESSION, assigner, "android", undefined, true, {
+            signal: controller.signal,
+          }),
         ),
       ).rejects.toBe(failure);
       expect(await row()).toMatchObject({

@@ -151,7 +151,10 @@ export function scanExpensiveHookWork(file: string, source: string): ExpensiveHo
   if (errors.length > 0) {
     throw new Error(`${file}: ${errors[0].message}`);
   }
-  const root = program as unknown as AstNode;
+  if (!isAstNode(program)) {
+    throw new TypeError("Parser did not return an AST program");
+  }
+  const root = program;
   const named = namedFunctions(root);
   const findings: ExpensiveHookFinding[] = [];
 

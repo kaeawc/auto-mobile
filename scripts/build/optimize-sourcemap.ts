@@ -30,8 +30,16 @@ export function selectSourceMaps(
 /** Preserve dependency-only trimming when stripping all source text is disabled. */
 export function optimizeSourceMap(
   map: SourceMap,
+  options?: SourceMapOptions,
+): { map: SourceMap; trimmedCount: number };
+export function optimizeSourceMap(
+  map: Partial<SourceMap>,
+  options?: SourceMapOptions,
+): { map: Partial<SourceMap>; trimmedCount: number };
+export function optimizeSourceMap(
+  map: Partial<SourceMap>,
   options: SourceMapOptions = {},
-): { map: SourceMap; trimmedCount: number } {
+): { map: Partial<SourceMap>; trimmedCount: number } {
   if (options.stripSources) {
     // Bun's decoder rejects a map whose sourcesContent is absent or whose length
     // differs from sources (InvalidSourceMap, #10849), so keep one null per source.
@@ -52,9 +60,10 @@ export function optimizeSourceMap(
     return { map, trimmedCount: 0 };
   }
 
+  const sources = map.sources;
   let trimmedCount = 0;
   const sourcesContent = map.sourcesContent.map((content: unknown, index: number) => {
-    const source = String(map.sources[index] ?? "");
+    const source = String(sources[index] ?? "");
     if (source.includes("node_modules") || source.includes("__bun")) {
       if (content) {
         trimmedCount += 1;

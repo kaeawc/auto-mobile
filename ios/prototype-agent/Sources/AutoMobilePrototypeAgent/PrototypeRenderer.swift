@@ -550,6 +550,20 @@ struct NodeView: View {
             .modifier(SpanLinksModifier(runs: runs, spans: node.spans, model: model))
     }
 
+    private func spanWeight(_ value: Int) -> Font.Weight {
+        switch value {
+        case ..<200: .ultraLight
+        case ..<300: .thin
+        case ..<400: .light
+        case ..<500: .regular
+        case ..<600: .medium
+        case ..<700: .semibold
+        case ..<800: .bold
+        case ..<900: .heavy
+        default: .black
+        }
+    }
+
     /// The core supplies plain values; only this layer knows SwiftUI attribute types.
     private func attributedText(_ runs: [PrototypeTextRun]) -> AttributedString {
         let resolved = typography.resolve(style)
@@ -571,17 +585,7 @@ struct NodeView: View {
                 case .standard: .default
                 }
             }
-            let weight: Font.Weight = switch authored?.fontWeight ?? resolved.weight {
-            case ..<200: .ultraLight
-            case ..<300: .thin
-            case ..<400: .light
-            case ..<500: .regular
-            case ..<600: .medium
-            case ..<700: .semibold
-            case ..<800: .bold
-            case ..<900: .heavy
-            default: .black
-            }
+            let weight = spanWeight(authored?.fontWeight ?? resolved.weight)
             let size = UIFontMetrics.default.scaledValue(for: authored?.textSize ?? resolved.size)
             var font = Font.system(size: size, weight: weight, design: design)
             if (authored?.fontStyle ?? style?.fontStyle) == "italic" { font = font.italic() }
@@ -746,7 +750,7 @@ struct NodeView: View {
             Rectangle().fill(palette.placeholderFill.map { Color($0) } ?? Color.gray.opacity(0.3))
                 .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
-        case .none:
+        case .absent:
             EmptyView()
         }
     }

@@ -117,16 +117,10 @@ for (const row of rows) {
           expect(element.bounds).toEqual(expectedNode.bounds);
           const point = new DefaultElementGeometry().getElementCenter(element);
           expect(point).toEqual({ x, y });
-          await tap.executeAndroidTap(
-            "tap",
-            point.x,
-            point.y,
-            500,
-            element,
-            undefined,
-            options,
-            true,
-          );
+          await tap.executeAndroidTap("tap", point.x, point.y, 500, element, {
+            options: options,
+            isTalkBackEnabled: true,
+          });
         } else {
           const tap = new TapAnyElement(device, adb, {
             ...dependencies,

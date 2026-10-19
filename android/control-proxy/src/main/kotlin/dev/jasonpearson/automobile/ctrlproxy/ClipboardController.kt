@@ -46,103 +46,10 @@ internal class ClipboardController(
 
       val (success, resultText, error) =
         when (action) {
-          "copy" -> {
-            if (text == null || text.isEmpty()) {
-              Triple(false, null, "Text is required for copy action")
-            } else {
-              try {
-                val clip = ClipData.newPlainText("AutoMobile", text)
-                clipboardManager().setPrimaryClip(clip)
-                Log.d(TAG, "Clipboard copy successful (${text.length} chars)")
-                Triple(true, null, null)
-              } catch (e: CancellationException) {
-                throw e
-              } catch (e: Exception) {
-                Log.e(TAG, "Clipboard copy failed", e)
-                Triple(false, null, "Copy failed: ${e.message}")
-              }
-            }
-          }
-          "get" -> {
-            try {
-              val readResult =
-                CtrlProxyClipboard.readResultFromPrimaryClip(clipboardManager().primaryClip)
-              if (readResult.success) {
-                val clipText = readResult.text ?: ""
-                if (clipText.isEmpty()) {
-                  Log.d(TAG, "Clipboard is empty")
-                } else {
-                  Log.d(TAG, "Clipboard get successful (${clipText.length} chars)")
-                }
-                Triple(true, clipText, null)
-              } else {
-                val readError = readResult.error ?: "Clipboard read failed"
-                Log.w(TAG, readError)
-                Triple(false, null, readError)
-              }
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard get failed", e)
-              Triple(false, null, "Get failed: ${e.message}")
-            }
-          }
-          "clear" -> {
-            try {
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                clipboardManager().clearPrimaryClip()
-                Log.d(TAG, "Clipboard cleared using clearPrimaryClip()")
-              } else {
-                // Fallback for API < 28: set empty clip
-                val emptyClip = ClipData.newPlainText("", "")
-                clipboardManager().setPrimaryClip(emptyClip)
-                Log.d(TAG, "Clipboard cleared using empty clip (API < 28)")
-              }
-              Triple(true, null, null)
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard clear failed", e)
-              Triple(false, null, "Clear failed: ${e.message}")
-            }
-          }
-          "paste" -> {
-            try {
-              perfProvider.startOperation("findFocusedNode")
-              val focusedNode = findFocusedEditableNode(activeWindowRoot())
-              perfProvider.endOperation("findFocusedNode")
-
-              if (focusedNode == null) {
-                Log.w(TAG, "No focused editable node found for paste")
-                Triple(
-                  false,
-                  null,
-                  "No focused input field found. Focus a text field before pasting.",
-                )
-              } else {
-                perfProvider.startOperation("performPaste")
-                val pasteSuccess =
-                  focusedNode.performAction(
-                    AccessibilityNodeInfo.ACTION_PASTE,
-                  )
-                focusedNode.recycle()
-                perfProvider.endOperation("performPaste")
-
-                if (pasteSuccess) {
-                  Log.d(TAG, "Clipboard paste successful")
-                  Triple(true, null, null)
-                } else {
-                  Log.w(TAG, "Paste action returned false")
-                  Triple(false, null, "Paste action failed")
-                }
-              }
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard paste failed", e)
-              Triple(false, null, "Paste failed: ${e.message}")
-            }
-          }
+          "copy" -> copyClipboard(text)
+          "get" -> getClipboard()
+          "clear" -> clearClipboard()
+          "paste" -> pasteClipboard()
           else -> {
             Log.w(TAG, "Unknown clipboard action: $action")
             Triple(false, null, "Unknown action: $action")
@@ -166,6 +73,106 @@ internal class ClipboardController(
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing clipboard operation", e)
       broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
+    }
+  }
+
+  private fun copyClipboard(text: String?): Triple<Boolean, String?, String?> {
+    return if (text == null || text.isEmpty()) {
+      Triple(false, null, "Text is required for copy action")
+    } else {
+      try {
+        val clip = ClipData.newPlainText("AutoMobile", text)
+        clipboardManager().setPrimaryClip(clip)
+        Log.d(TAG, "Clipboard copy successful (${text.length} chars)")
+        Triple(true, null, null)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Clipboard copy failed", e)
+        Triple(false, null, "Copy failed: ${e.message}")
+      }
+    }
+  }
+
+  private fun getClipboard(): Triple<Boolean, String?, String?> {
+    return try {
+      val readResult = CtrlProxyClipboard.readResultFromPrimaryClip(clipboardManager().primaryClip)
+      if (readResult.success) {
+        val clipText = readResult.text ?: ""
+        if (clipText.isEmpty()) {
+          Log.d(TAG, "Clipboard is empty")
+        } else {
+          Log.d(TAG, "Clipboard get successful (${clipText.length} chars)")
+        }
+        Triple(true, clipText, null)
+      } else {
+        val readError = readResult.error ?: "Clipboard read failed"
+        Log.w(TAG, readError)
+        Triple(false, null, readError)
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      Log.e(TAG, "Clipboard get failed", e)
+      Triple(false, null, "Get failed: ${e.message}")
+    }
+  }
+
+  private fun clearClipboard(): Triple<Boolean, String?, String?> {
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        clipboardManager().clearPrimaryClip()
+        Log.d(TAG, "Clipboard cleared using clearPrimaryClip()")
+      } else {
+        // Fallback for API < 28: set empty clip
+        val emptyClip = ClipData.newPlainText("", "")
+        clipboardManager().setPrimaryClip(emptyClip)
+        Log.d(TAG, "Clipboard cleared using empty clip (API < 28)")
+      }
+      Triple(true, null, null)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      Log.e(TAG, "Clipboard clear failed", e)
+      Triple(false, null, "Clear failed: ${e.message}")
+    }
+  }
+
+  private fun pasteClipboard(): Triple<Boolean, String?, String?> {
+    return try {
+      perfProvider.startOperation("findFocusedNode")
+      val focusedNode = findFocusedEditableNode(activeWindowRoot())
+      perfProvider.endOperation("findFocusedNode")
+
+      if (focusedNode == null) {
+        Log.w(TAG, "No focused editable node found for paste")
+        Triple(
+          false,
+          null,
+          "No focused input field found. Focus a text field before pasting.",
+        )
+      } else {
+        perfProvider.startOperation("performPaste")
+        val pasteSuccess =
+          focusedNode.performAction(
+            AccessibilityNodeInfo.ACTION_PASTE,
+          )
+        focusedNode.recycle()
+        perfProvider.endOperation("performPaste")
+
+        if (pasteSuccess) {
+          Log.d(TAG, "Clipboard paste successful")
+          Triple(true, null, null)
+        } else {
+          Log.w(TAG, "Paste action returned false")
+          Triple(false, null, "Paste action failed")
+        }
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      Log.e(TAG, "Clipboard paste failed", e)
+      Triple(false, null, "Paste failed: ${e.message}")
     }
   }
 

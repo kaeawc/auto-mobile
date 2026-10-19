@@ -1,7 +1,6 @@
 // Generated from schemas/prototype-ios-icon-symbols.json; do not edit.
 // Regenerate: bun scripts/ios/generate-prototype-icon-symbols.ts
 // swiftformat:disable all
-// swiftlint:disable all
 let prototypeIconSymbolPlaceholder = "questionmark.square"
 let prototypeIconSymbolData = #"""
 abc	textformat.abc		

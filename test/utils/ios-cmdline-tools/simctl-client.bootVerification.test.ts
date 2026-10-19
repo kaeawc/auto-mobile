@@ -420,6 +420,9 @@ describe("SimCtlClient boot self-verification", () => {
       `Command timed out after 1234ms: xcrun simctl bootstatus ${UDID} -b`,
     );
     expect(requestController.signal.aborted).toBe(false);
+    if (!bootstatusSignal) {
+      throw new Error("bootstatus did not capture its signal");
+    }
     expect(bootstatusSignal.aborted).toBe(true);
     expect(shutdownCalls(calls)).toEqual([`xcrun simctl shutdown ${UDID}`]);
     expect(shutdownSignal).toBeDefined();
@@ -450,6 +453,9 @@ describe("SimCtlClient boot self-verification", () => {
     await waitForCondition(() => completeCleanup !== undefined, "failed-start cleanup");
     await drainMicrotasks();
     expect(harness.bootstatusInvocations()).toBe(1);
+    if (!completeCleanup) {
+      throw new Error("Missing completeCleanup callback");
+    }
     completeCleanup();
 
     await expect(firstStart).rejects.toThrow(
@@ -629,6 +635,9 @@ describe("SimCtlClient boot self-verification", () => {
       .catch((error: unknown) => error);
     const sessionStart = harness.createClient().bootSimulator(UDID);
     const readiness = harness.createClient().waitForSimulatorReady(UDID, 5_000);
+    if (!completeFirstBootstatus) {
+      throw new Error("Missing completeFirstBootstatus callback");
+    }
     completeFirstBootstatus();
     await expect(firstStart).resolves.toBeDefined();
 
@@ -739,6 +748,9 @@ describe("SimCtlClient boot self-verification", () => {
       .createClient()
       .bootSimulator(UDID)
       .catch((error: unknown) => error);
+    if (!completeOwnerBootstatus) {
+      throw new Error("Missing completeOwnerBootstatus callback");
+    }
     completeOwnerBootstatus();
 
     await expect(owner).resolves.toBeDefined();
@@ -1148,6 +1160,9 @@ describe("SimCtlClient boot self-verification", () => {
     expect(handle.kill()).toBe(true);
     await drainMicrotasks();
     expect(harness.shutdownInvocations()).toBe(0);
+    if (!completeMetadata) {
+      throw new Error("Missing completeMetadata callback");
+    }
     completeMetadata();
 
     await expect(readiness).resolves.toMatchObject({ deviceId: UDID });
@@ -1205,6 +1220,9 @@ describe("SimCtlClient boot self-verification", () => {
     await drainMicrotasks();
     expect(harness.shutdownInvocations()).toBe(0);
 
+    if (!completeReadiness) {
+      throw new Error("Missing completeReadiness callback");
+    }
     completeReadiness();
     harness.timer.enableAutoAdvance();
 
@@ -1313,6 +1331,9 @@ describe("SimCtlClient boot self-verification", () => {
       .createClient()
       .startSimulator(UDID, 5_000)
       .catch((error: unknown) => error);
+    if (!completeOwnerBootstatus) {
+      throw new Error("Missing completeOwnerBootstatus callback");
+    }
     completeOwnerBootstatus();
 
     await expect(owner).resolves.toBeDefined();
@@ -1681,12 +1702,12 @@ describe("SimCtlClient boot self-verification", () => {
 
   test("bootSimulator and waitForSimulatorReady agree when isAvailable is absent", async () => {
     const bootHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(undefined),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(undefined),
     );
     const readyHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(undefined),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(undefined),
     );
 
     const bootDevice = await bootHarness
@@ -1715,12 +1736,12 @@ describe("SimCtlClient boot self-verification", () => {
   test("bootSimulator and waitForSimulatorReady agree when isAvailable is false", async () => {
     const availabilityError = "the requested device runtime is unavailable";
     const bootHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(false, availabilityError),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(false, availabilityError),
     );
     const readyHarness = createConcurrentStartHarness(
-      () => createExecResult("", ""),
-      () => bootedDeviceListResult(false, availabilityError),
+      async () => createExecResult("", ""),
+      async () => bootedDeviceListResult(false, availabilityError),
     );
 
     const bootError = await bootHarness

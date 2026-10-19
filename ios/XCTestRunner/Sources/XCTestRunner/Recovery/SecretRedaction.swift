@@ -84,32 +84,42 @@ enum SecretRedaction {
     private static func yamlEscaped(_ value: String) -> String {
         var result = ""
         for scalar in value.unicodeScalars {
-            switch scalar.value {
-            case 0x00: result += "\\0"
-            case 0x07: result += "\\a"
-            case 0x08: result += "\\b"
-            case 0x09: result += "\\t"
-            case 0x0A: result += "\\n"
-            case 0x0B: result += "\\v"
-            case 0x0C: result += "\\f"
-            case 0x0D: result += "\\r"
-            case 0x1B: result += "\\e"
-            case 0x22: result += "\\\""
-            case 0x5C: result += "\\\\"
-            case 0x85: result += "\\N"
-            case 0x2028: result += "\\L"
-            case 0x2029: result += "\\P"
-            case 0x01 ... 0x1F, 0x7F ... 0x9F:
-                result += String(format: "\\x%02X", scalar.value)
-            case 0xFEFF, 0xFFFE, 0xFFFF:
-                result += String(format: "\\u%04X", scalar.value)
-            case 0x10000 ... 0x10FFFF:
-                result += String(format: "\\U%08X", scalar.value)
-            default:
-                result.unicodeScalars.append(scalar)
-            }
+            result += yamlControlEscape(scalar) ?? yamlScalarSpelling(scalar)
         }
         return result
+    }
+
+    private static func yamlControlEscape(_ scalar: Unicode.Scalar) -> String? {
+        switch scalar.value {
+        case 0x00: return "\\0"
+        case 0x07: return "\\a"
+        case 0x08: return "\\b"
+        case 0x09: return "\\t"
+        case 0x0A: return "\\n"
+        case 0x0B: return "\\v"
+        case 0x0C: return "\\f"
+        case 0x0D: return "\\r"
+        case 0x1B: return "\\e"
+        default: return nil
+        }
+    }
+
+    private static func yamlScalarSpelling(_ scalar: Unicode.Scalar) -> String {
+        switch scalar.value {
+        case 0x22: return "\\\""
+        case 0x5C: return "\\\\"
+        case 0x85: return "\\N"
+        case 0x2028: return "\\L"
+        case 0x2029: return "\\P"
+        case 0x01 ... 0x1F, 0x7F ... 0x9F:
+            return String(format: "\\x%02X", scalar.value)
+        case 0xFEFF, 0xFFFE, 0xFFFF:
+            return String(format: "\\u%04X", scalar.value)
+        case 0x10000 ... 0x10FFFF:
+            return String(format: "\\U%08X", scalar.value)
+        default:
+            return String(scalar)
+        }
     }
 
     /// The JSON-string-escaped form of `value` (its inner content, without surrounding quotes),

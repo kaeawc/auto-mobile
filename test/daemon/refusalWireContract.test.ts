@@ -20,6 +20,10 @@ import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealt
 import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import * as bindingRefusals from "../../src/daemon/sessionBroker/provisioning/refusal";
+import * as bindingDiscoveryIncompleteErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import * as bindingRegistrySchemaUnsupportedErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import * as bindingOwnershipLostErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
+import * as bindingOwnershipUnconfirmedErrorModule from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import * as sessionConfig from "../../src/devices/sessionConfig";
 import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError.base";
 import * as androidDiscoveryRefusals from "../../src/models/AndroidBootedDeviceDiscoveryIncompleteError";
@@ -154,6 +158,13 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/DeviceLostError": deviceLost,
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
   "daemon/sessionBroker/provisioning/refusal": bindingRefusals,
+  "daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError":
+    bindingDiscoveryIncompleteErrorModule,
+  "daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError":
+    bindingRegistrySchemaUnsupportedErrorModule,
+  "daemon/sessionBroker/provisioning/BindingOwnershipLostError": bindingOwnershipLostErrorModule,
+  "daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError":
+    bindingOwnershipUnconfirmedErrorModule,
   "devices/sessionConfig": sessionConfig,
   "models/BootedDeviceDiscoveryIncompleteError.base": discoveryRefusals,
   "models/AndroidBootedDeviceDiscoveryIncompleteError": androidDiscoveryRefusals,

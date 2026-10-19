@@ -49,11 +49,13 @@ function createDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getSessionForDevice: (deviceId: string) => deviceHolders.get(deviceId) ?? null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),

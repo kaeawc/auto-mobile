@@ -73,7 +73,7 @@ const IDLE_MS = 120_000;
 
 /** Every `input/*` and device-mutating `ide/*` control frame, with params that run. */
 const KEY_VALUE = { appId: "com.example", fileName: "prefs" };
-const FRAMES: ReadonlyArray<{
+const FRAMES: Array<{
   method: string;
   params: Record<string, unknown>;
   /** The device call a frame that runs makes. */

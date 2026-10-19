@@ -5,6 +5,8 @@
  * refused to the CLI. Drives the real {@link UnixSocketServer}, real {@link DevicePool} and the
  * registered `getAndroid` handler; only the loopback MCP hop is replaced by a direct dispatch.
  */
+import type { CallToolResult } from "@modelcontextprotocol/client";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
@@ -123,17 +125,27 @@ async function createHarness(): Promise<Harness> {
   const server = new UnixSocketServer(socketPath, DaemonState.getInstance(), new FakeTimer());
   // The loopback MCP hop dispatches straight to the registered handler with the arguments the
   // socket server forwards, internal markers included.
-  server.mcpClientFactory = async () => ({
-    callTool: async ({ name, arguments: args }: { name: string; arguments?: unknown }) =>
-      await ToolRegistry.getTool(name)!.handler(args as Record<string, unknown>),
-    listTools: async () => ({ tools: [] }),
-    listResources: async () => ({ resources: [] }),
-    readResource: async () => ({ contents: [] }),
-    listResourceTemplates: async () => ({ resourceTemplates: [] }),
-    close: async () => {},
-  });
+  server.mcpClientFactory = async () =>
+    new StubMcpClient({
+      callTool: async ({ name, arguments: args }) => {
+        const result = await ToolRegistry.getTool(name)!.handler(args as Record<string, unknown>);
+        if (!isCallToolResult(result)) {
+          throw new Error(`Tool ${name} returned a non-MCP result`);
+        }
+        return result;
+      },
+    });
   await server.start();
   return { db, manager, pool, server, socketPath, clients: [] };
+}
+
+function isCallToolResult(value: unknown): value is CallToolResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "content" in value &&
+    Array.isArray(value.content)
+  );
 }
 
 function connect(h: Harness): DaemonClient {

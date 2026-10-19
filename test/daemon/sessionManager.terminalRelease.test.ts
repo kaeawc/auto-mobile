@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -802,7 +803,12 @@ describe("explicit-release regression", () => {
       await expect(manager.createSession("plan-uuid", "handset", "android")).resolves.toMatchObject(
         { assignedDevice: "handset" },
       );
-      for (const releaseReason of ["heartbeat-timeout", "cli-idle-timeout", "device-killed"]) {
+      const terminalReasons: SessionReleaseReason[] = [
+        "heartbeat-timeout",
+        "cli-idle-timeout",
+        "device-killed",
+      ];
+      for (const releaseReason of terminalReasons) {
         const sessionUuid = `terminal-${releaseReason}`;
         await manager.createSession(sessionUuid, "other-handset", "android");
         await manager.releaseSession(sessionUuid, releaseReason);
@@ -811,7 +817,12 @@ describe("explicit-release regression", () => {
             "Acquire a new device with getAndroid or getApple.",
         );
       }
-      for (const releaseReason of ["daemon-shutdown", "daemon-restart", "device-restart:handset"]) {
+      const recoverableReasons: SessionReleaseReason[] = [
+        "daemon-shutdown",
+        "daemon-restart",
+        "device-restart:handset",
+      ];
+      for (const releaseReason of recoverableReasons) {
         const sessionUuid = `recoverable-${releaseReason}`;
         await manager.createSession(sessionUuid, "other-handset", "android");
         await manager.releaseSession(sessionUuid, releaseReason);

@@ -111,7 +111,14 @@ describe("SendKeys iOS text transport", () => {
     async (failure) => {
       const h = createIosDelegateHarness();
       const text = new CtrlProxyText(h.context);
-      const getInstance = spyOnIosClientInstance(text);
+      const getInstance = spyOnIosClientInstance({
+        requestSetText: (...args: Parameters<CtrlProxyText["requestSetText"]>) =>
+          text.requestSetText(...args),
+        requestAppendText: (...args: Parameters<CtrlProxyText["requestAppendText"]>) =>
+          text.requestAppendText(...args),
+        requestClearText: (...args: Parameters<CtrlProxyText["requestClearText"]>) =>
+          text.requestClearText(...args),
+      });
       try {
         const observer = createObserver();
         const executor = new DefaultSendKeysCommandExecutor(

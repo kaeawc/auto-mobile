@@ -1,4 +1,4 @@
-import { IOSCtrlProxy } from "../../src/features/observe/ios";
+import { IOSCtrlProxy, type IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
@@ -773,7 +773,30 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   }
 
+  /** No SDK is attached to the fake, so there is never a fresher screen identity to adopt. */
+  async refreshSdkScreenIdentity(
+    ...args: Parameters<IOSCtrlProxyClient["refreshSdkScreenIdentity"]>
+  ): ReturnType<IOSCtrlProxyClient["refreshSdkScreenIdentity"]> {
+    void args;
+    return undefined;
+  }
+
+  /** No SDK is attached to the fake, so there is no remembered screen identity to clear. */
+  clearSdkScreenIdentity(...args: Parameters<IOSCtrlProxyClient["clearSdkScreenIdentity"]>): void {
+    void args;
+  }
+
+  private viewHierarchyResultOverride: ViewHierarchyResult | null = null;
+
+  /** Make the hierarchy conversion return `result` instead of the neutral one-node tree. */
+  setViewHierarchyResult(result: ViewHierarchyResult | null): void {
+    this.viewHierarchyResultOverride = result;
+  }
+
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
+    if (this.viewHierarchyResultOverride) {
+      return this.viewHierarchyResultOverride;
+    }
     return {
       hierarchy: {
         node: {

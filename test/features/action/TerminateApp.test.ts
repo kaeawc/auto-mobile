@@ -316,7 +316,7 @@ describe("TerminateApp (iOS)", () => {
           this.setHierarchyData(null);
         }
 
-        clearSdkScreenIdentity(bundleId: string): void {
+        override clearSdkScreenIdentity(bundleId: string): void {
           this.clearedSdkApplications.push(bundleId);
         }
       }

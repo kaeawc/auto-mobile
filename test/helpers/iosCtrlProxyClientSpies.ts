@@ -2,78 +2,184 @@
  * Typed seams for substituting the iOS CtrlProxy client in tests.
  *
  * Production resolves the client through the static registry accessors
- * `IOSCtrlProxyClient.getInstance` / `getExistingInstance`, which are declared to
- * return the concrete class. A test double (`FakeIOSCtrlProxy`, or a partial stub
- * of a few methods) can only satisfy the narrow `IOSCtrlProxy` interface, so
- * handing it to `mockReturnValue` needs a cast. These helpers confine that cast to
- * one documented place instead of repeating a double cast to `IOSCtrlProxyClient` at
- * every call site (#11863).
+ * `IOSCtrlProxyClient.getInstance` / `getExistingInstance`, which are declared to return the
+ * concrete class. A test never casts a stub into that class: it builds a real client with
+ * `IOSCtrlProxyClient.createForTesting` (its socket factory refuses to connect) and replaces
+ * the public methods it exercises, either from an {@link IosClientOverrides} bag or by
+ * forwarding a `FakeIOSCtrlProxy` (#11863).
  */
 
 import { spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-/** Anything a test substitutes for the client: a fake or a partial method stub. */
-type IosClientStub = object;
+/** Public client members that are callable (everything a test can replace). */
+type ClientMethodKey = {
+  [K in keyof IOSCtrlProxyClient]: IOSCtrlProxyClient[K] extends (...args: never[]) => unknown
+    ? K
+    : never;
+}[keyof IOSCtrlProxyClient];
 
-/**
- * The single narrowing point: a stub is an `object`, and the registry accessors are
- * typed to the concrete class. A direct `object` -> class assertion is legal, so no
- * double cast through unknown is needed.
- */
-function asClient(stub: IosClientStub): IOSCtrlProxyClient {
-  return stub as IOSCtrlProxyClient;
+/** The client methods a test replaces; each keeps the real signature. */
+export type IosClientOverrides = {
+  [K in ClientMethodKey]?: IOSCtrlProxyClient[K];
+};
+
+/** What a test substitutes for the client: a real test client, method overrides or a recording fake. */
+type IosClientStub = IOSCtrlProxyClient | IosClientOverrides | FakeIOSCtrlProxy;
+
+const DEFAULT_IOS_DEVICE: BootedDevice = {
+  name: "iPhone Test",
+  platform: "ios",
+  deviceId: "ios-test-client",
+};
+
+function isClientMethodKey(client: IOSCtrlProxyClient, key: string): key is ClientMethodKey {
+  return key in client;
 }
 
-/** Make `IOSCtrlProxyClient.getInstance` return `client` until the spy is restored. */
-export function spyOnIosClientInstance(client: IosClientStub) {
-  return spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(asClient(client));
+function override<K extends ClientMethodKey>(
+  client: IOSCtrlProxyClient,
+  key: K,
+  impl: IOSCtrlProxyClient[K] | undefined,
+): void {
+  if (impl) {
+    client[key] = impl;
+  }
 }
 
-/**
- * Make `IOSCtrlProxyClient.getExistingInstance` return `client` (or `null` for "no
- * client yet") until the spy is restored.
- */
-export function spyOnIosExistingInstance(client: IosClientStub | null) {
-  return spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-    client === null ? null : asClient(client),
-  );
-}
-
-/** Like {@link spyOnIosClientInstance}, but resolves the stub per device. */
-export function spyOnIosClientFactory(create: (device: BootedDevice) => IosClientStub) {
-  return spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation((device) =>
-    asClient(create(device)),
-  );
-}
-
-/** Like {@link spyOnIosExistingInstance}, but resolves the stub per device id. */
-export function spyOnIosExistingFactory(create: (deviceId: string) => IosClientStub | null) {
-  return spyOn(IOSCtrlProxyClient, "getExistingInstance").mockImplementation((deviceId) => {
-    const stub = create(deviceId);
-    return stub === null ? null : asClient(stub);
-  });
-}
-
-/** The client methods the daemon input suites replace; each keeps the real signature. */
-export interface IosClientOverrides {
-  requestDrag?: IOSCtrlProxyClient["requestDrag"];
-  requestTapCoordinates?: IOSCtrlProxyClient["requestTapCoordinates"];
-  requestSetText?: IOSCtrlProxyClient["requestSetText"];
-  requestAppendText?: IOSCtrlProxyClient["requestAppendText"];
-  requestImeAction?: IOSCtrlProxyClient["requestImeAction"];
-  getScreenScaleMetadata?: IOSCtrlProxyClient["getScreenScaleMetadata"];
-  requestHierarchySyncWithoutObservationStreamPush?: IOSCtrlProxyClient["requestHierarchySyncWithoutObservationStreamPush"];
-  setPreference?: IOSCtrlProxyClient["setPreference"];
-  removePreference?: IOSCtrlProxyClient["removePreference"];
-  clearPreferenceStore?: IOSCtrlProxyClient["clearPreferenceStore"];
+/** Forwards every client method the fake implements to the fake, resolved at call time so a test can still spy on the fake. */
+export function iosClientOverridesFromFake(fake: FakeIOSCtrlProxy): IosClientOverrides {
+  return {
+    bindSession: (...args: Parameters<FakeIOSCtrlProxy["bindSession"]>) =>
+      fake.bindSession(...args),
+    clearCache: (...args: Parameters<FakeIOSCtrlProxy["clearCache"]>) => fake.clearCache(...args),
+    close: (...args: Parameters<FakeIOSCtrlProxy["close"]>) => fake.close(...args),
+    connectWithoutSetup: (...args: Parameters<FakeIOSCtrlProxy["connectWithoutSetup"]>) =>
+      fake.connectWithoutSetup(...args),
+    convertToViewHierarchyResult: (
+      ...args: Parameters<FakeIOSCtrlProxy["convertToViewHierarchyResult"]>
+    ) => fake.convertToViewHierarchyResult(...args),
+    ensureConnected: (...args: Parameters<FakeIOSCtrlProxy["ensureConnected"]>) =>
+      fake.ensureConnected(...args),
+    getAccessibilityHierarchy: (
+      ...args: Parameters<FakeIOSCtrlProxy["getAccessibilityHierarchy"]>
+    ) => fake.getAccessibilityHierarchy(...args),
+    getBoundSessionId: (...args: Parameters<FakeIOSCtrlProxy["getBoundSessionId"]>) =>
+      fake.getBoundSessionId(...args),
+    getLatestHierarchy: (...args: Parameters<FakeIOSCtrlProxy["getLatestHierarchy"]>) =>
+      fake.getLatestHierarchy(...args),
+    getSupportedCommands: (...args: Parameters<FakeIOSCtrlProxy["getSupportedCommands"]>) =>
+      fake.getSupportedCommands(...args),
+    hasCachedHierarchy: (...args: Parameters<FakeIOSCtrlProxy["hasCachedHierarchy"]>) =>
+      fake.hasCachedHierarchy(...args),
+    invalidateCache: (...args: Parameters<FakeIOSCtrlProxy["invalidateCache"]>) =>
+      fake.invalidateCache(...args),
+    isConnected: (...args: Parameters<FakeIOSCtrlProxy["isConnected"]>) =>
+      fake.isConnected(...args),
+    onPushUpdate: (...args: Parameters<FakeIOSCtrlProxy["onPushUpdate"]>) =>
+      fake.onPushUpdate(...args),
+    refreshSdkScreenIdentity: (...args: Parameters<FakeIOSCtrlProxy["refreshSdkScreenIdentity"]>) =>
+      fake.refreshSdkScreenIdentity(...args),
+    clearSdkScreenIdentity: (...args: Parameters<FakeIOSCtrlProxy["clearSdkScreenIdentity"]>) =>
+      fake.clearSdkScreenIdentity(...args),
+    requestAction: (...args: Parameters<FakeIOSCtrlProxy["requestAction"]>) =>
+      fake.requestAction(...args),
+    requestActivateAccessibilityLink: (
+      ...args: Parameters<FakeIOSCtrlProxy["requestActivateAccessibilityLink"]>
+    ) => fake.requestActivateAccessibilityLink(...args),
+    requestAddHighlight: (...args: Parameters<FakeIOSCtrlProxy["requestAddHighlight"]>) =>
+      fake.requestAddHighlight(...args),
+    requestAppendText: (...args: Parameters<FakeIOSCtrlProxy["requestAppendText"]>) =>
+      fake.requestAppendText(...args),
+    requestClearText: (...args: Parameters<FakeIOSCtrlProxy["requestClearText"]>) =>
+      fake.requestClearText(...args),
+    requestClipboard: (...args: Parameters<FakeIOSCtrlProxy["requestClipboard"]>) =>
+      fake.requestClipboard(...args),
+    requestDoubleTapCoordinates: (
+      ...args: Parameters<FakeIOSCtrlProxy["requestDoubleTapCoordinates"]>
+    ) => fake.requestDoubleTapCoordinates(...args),
+    requestDrag: (...args: Parameters<FakeIOSCtrlProxy["requestDrag"]>) =>
+      fake.requestDrag(...args),
+    requestHierarchySync: (...args: Parameters<FakeIOSCtrlProxy["requestHierarchySync"]>) =>
+      fake.requestHierarchySync(...args),
+    requestHierarchySyncForTapRevalidation: (
+      ...args: Parameters<FakeIOSCtrlProxy["requestHierarchySyncForTapRevalidation"]>
+    ) => fake.requestHierarchySyncForTapRevalidation(...args),
+    requestHierarchySyncWithoutObservationStreamPush:
+      fake.requestHierarchySyncWithoutObservationStreamPush.bind(fake),
+    requestImeAction: (...args: Parameters<FakeIOSCtrlProxy["requestImeAction"]>) =>
+      fake.requestImeAction(...args),
+    requestKeyboard: (...args: Parameters<FakeIOSCtrlProxy["requestKeyboard"]>) =>
+      fake.requestKeyboard(...args),
+    requestLaunchApp: (...args: Parameters<FakeIOSCtrlProxy["requestLaunchApp"]>) =>
+      fake.requestLaunchApp(...args),
+    requestMagicTap: (...args: Parameters<FakeIOSCtrlProxy["requestMagicTap"]>) =>
+      fake.requestMagicTap(...args),
+    requestMultiFingerSwipe: (...args: Parameters<FakeIOSCtrlProxy["requestMultiFingerSwipe"]>) =>
+      fake.requestMultiFingerSwipe(...args),
+    requestPathGesture: (...args: Parameters<FakeIOSCtrlProxy["requestPathGesture"]>) =>
+      fake.requestPathGesture(...args),
+    requestPinch: (...args: Parameters<FakeIOSCtrlProxy["requestPinch"]>) =>
+      fake.requestPinch(...args),
+    requestPressBack: (...args: Parameters<FakeIOSCtrlProxy["requestPressBack"]>) =>
+      fake.requestPressBack(...args),
+    requestPressButton: (...args: Parameters<FakeIOSCtrlProxy["requestPressButton"]>) =>
+      fake.requestPressButton(...args),
+    requestPressHome: (...args: Parameters<FakeIOSCtrlProxy["requestPressHome"]>) =>
+      fake.requestPressHome(...args),
+    requestPressKey: (...args: Parameters<FakeIOSCtrlProxy["requestPressKey"]>) =>
+      fake.requestPressKey(...args),
+    requestRecentApps: (...args: Parameters<FakeIOSCtrlProxy["requestRecentApps"]>) =>
+      fake.requestRecentApps(...args),
+    requestResetPermissions: (...args: Parameters<FakeIOSCtrlProxy["requestResetPermissions"]>) =>
+      fake.requestResetPermissions(...args),
+    requestRotate: (...args: Parameters<FakeIOSCtrlProxy["requestRotate"]>) =>
+      fake.requestRotate(...args),
+    requestScreenshot: (...args: Parameters<FakeIOSCtrlProxy["requestScreenshot"]>) =>
+      fake.requestScreenshot(...args),
+    requestScreenshotWithoutObservationStreamPush:
+      fake.requestScreenshotWithoutObservationStreamPush.bind(fake),
+    requestSdkTrigger: (...args: Parameters<FakeIOSCtrlProxy["requestSdkTrigger"]>) =>
+      fake.requestSdkTrigger(...args),
+    requestSelectAll: (...args: Parameters<FakeIOSCtrlProxy["requestSelectAll"]>) =>
+      fake.requestSelectAll(...args),
+    requestSetHingeAngle: (...args: Parameters<FakeIOSCtrlProxy["requestSetHingeAngle"]>) =>
+      fake.requestSetHingeAngle(...args),
+    requestSetText: (...args: Parameters<FakeIOSCtrlProxy["requestSetText"]>) =>
+      fake.requestSetText(...args),
+    requestSetVoiceOverEnabled: (
+      ...args: Parameters<FakeIOSCtrlProxy["requestSetVoiceOverEnabled"]>
+    ) => fake.requestSetVoiceOverEnabled(...args),
+    requestShake: (...args: Parameters<FakeIOSCtrlProxy["requestShake"]>) =>
+      fake.requestShake(...args),
+    requestSwipe: (...args: Parameters<FakeIOSCtrlProxy["requestSwipe"]>) =>
+      fake.requestSwipe(...args),
+    requestTapCoordinates: (...args: Parameters<FakeIOSCtrlProxy["requestTapCoordinates"]>) =>
+      fake.requestTapCoordinates(...args),
+    requestVoiceOverActivate: (...args: Parameters<FakeIOSCtrlProxy["requestVoiceOverActivate"]>) =>
+      fake.requestVoiceOverActivate(...args),
+    requestVoiceOverState: (...args: Parameters<FakeIOSCtrlProxy["requestVoiceOverState"]>) =>
+      fake.requestVoiceOverState(...args),
+    resetConnectionBudget: (...args: Parameters<FakeIOSCtrlProxy["resetConnectionBudget"]>) =>
+      fake.resetConnectionBudget(...args),
+    setNetworkErrorSimulation: (
+      ...args: Parameters<FakeIOSCtrlProxy["setNetworkErrorSimulation"]>
+    ) => fake.setNetworkErrorSimulation(...args),
+    terminateStaleConnection: (...args: Parameters<FakeIOSCtrlProxy["terminateStaleConnection"]>) =>
+      fake.terminateStaleConnection(...args),
+    verifyServiceReady: (...args: Parameters<FakeIOSCtrlProxy["verifyServiceReady"]>) =>
+      fake.verifyServiceReady(...args),
+    waitForConnection: (...args: Parameters<FakeIOSCtrlProxy["waitForConnection"]>) =>
+      fake.waitForConnection(...args),
+  };
 }
 
 /**
  * A real {@link IOSCtrlProxyClient} built through `createForTesting` (its socket factory
- * refuses to connect), with the given methods replaced. Nothing is cast: the spied methods
+ * refuses to connect), with the given methods replaced. Nothing is cast: the replacements
  * keep the class's own signatures.
  */
 export function createIosTestClient(
@@ -88,39 +194,64 @@ export function createIosTestClient(
     },
     new FakeTimer(),
   );
-  if (overrides.requestDrag) {
-    spyOn(client, "requestDrag").mockImplementation(overrides.requestDrag);
-  }
-  if (overrides.requestTapCoordinates) {
-    spyOn(client, "requestTapCoordinates").mockImplementation(overrides.requestTapCoordinates);
-  }
-  if (overrides.requestSetText) {
-    spyOn(client, "requestSetText").mockImplementation(overrides.requestSetText);
-  }
-  if (overrides.requestAppendText) {
-    spyOn(client, "requestAppendText").mockImplementation(overrides.requestAppendText);
-  }
-  if (overrides.requestImeAction) {
-    spyOn(client, "requestImeAction").mockImplementation(overrides.requestImeAction);
-  }
-  if (overrides.getScreenScaleMetadata) {
-    spyOn(client, "getScreenScaleMetadata").mockImplementation(overrides.getScreenScaleMetadata);
-  }
-  if (overrides.requestHierarchySyncWithoutObservationStreamPush) {
-    spyOn(client, "requestHierarchySyncWithoutObservationStreamPush").mockImplementation(
-      overrides.requestHierarchySyncWithoutObservationStreamPush,
-    );
-  }
-  if (overrides.setPreference) {
-    spyOn(client, "setPreference").mockImplementation(overrides.setPreference);
-  }
-  if (overrides.removePreference) {
-    spyOn(client, "removePreference").mockImplementation(overrides.removePreference);
-  }
-  if (overrides.clearPreferenceStore) {
-    spyOn(client, "clearPreferenceStore").mockImplementation(overrides.clearPreferenceStore);
+  for (const key of Object.keys(overrides)) {
+    if (!isClientMethodKey(client, key)) {
+      throw new Error(`IosClientOverrides names an unknown client member: ${key}`);
+    }
+    override(client, key, overrides[key]);
   }
   return client;
+}
+
+/** One real client per stub, so `getInstance` and `getExistingInstance` hand back the same one. */
+const clientsByStub = new WeakMap<object, IOSCtrlProxyClient>();
+
+function clientFor(stub: IosClientStub, device: BootedDevice): IOSCtrlProxyClient {
+  if (stub instanceof IOSCtrlProxyClient) {
+    return stub;
+  }
+  const existing = clientsByStub.get(stub);
+  if (existing) {
+    return existing;
+  }
+  const client = createIosTestClient(
+    device,
+    stub instanceof FakeIOSCtrlProxy ? iosClientOverridesFromFake(stub) : stub,
+  );
+  clientsByStub.set(stub, client);
+  return client;
+}
+
+/** Make `IOSCtrlProxyClient.getInstance` return `client` until the spy is restored. */
+export function spyOnIosClientInstance(client: IosClientStub) {
+  return spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+    clientFor(client, DEFAULT_IOS_DEVICE),
+  );
+}
+
+/**
+ * Make `IOSCtrlProxyClient.getExistingInstance` return `client` (or `null` for "no
+ * client yet") until the spy is restored.
+ */
+export function spyOnIosExistingInstance(client: IosClientStub | null) {
+  return spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
+    client === null ? null : clientFor(client, DEFAULT_IOS_DEVICE),
+  );
+}
+
+/** Like {@link spyOnIosClientInstance}, but resolves the stub per device. */
+export function spyOnIosClientFactory(create: (device: BootedDevice) => IosClientStub) {
+  return spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation((device) =>
+    clientFor(create(device), device),
+  );
+}
+
+/** Like {@link spyOnIosExistingInstance}, but resolves the stub per device id. */
+export function spyOnIosExistingFactory(create: (deviceId: string) => IosClientStub | null) {
+  return spyOn(IOSCtrlProxyClient, "getExistingInstance").mockImplementation((deviceId) => {
+    const stub = create(deviceId);
+    return stub === null ? null : clientFor(stub, { ...DEFAULT_IOS_DEVICE, deviceId });
+  });
 }
 
 /** Make `IOSCtrlProxyClient.getInstance` return a {@link createIosTestClient} client until the spy is restored. */

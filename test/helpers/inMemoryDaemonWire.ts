@@ -149,7 +149,7 @@ export class ProcessTimer implements Timer {
 }
 
 /** One end of an in-process connection; what it writes arrives as `data` on its peer. */
-class SocketEnd extends FakeSocket {
+export class SocketEnd extends FakeSocket {
   peer!: SocketEnd;
 
   override write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean;

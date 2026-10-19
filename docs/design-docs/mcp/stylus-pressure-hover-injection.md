@@ -2,7 +2,9 @@
 
 Issue #12539. Research spike: what can each platform inject beyond a plain
 finger touch (tool type, pressure, tilt, stylus buttons, hover, eraser), and how
-should AutoMobile expose and record it? No code changed.
+should AutoMobile expose and record it? The spike itself changed no code; the recorder
+pen parsing (#13101) and the Pointer Probe screen (#13096) shipped alongside it, and the
+current-state rows below describe the code after them.
 
 Confidence tags used below:
 

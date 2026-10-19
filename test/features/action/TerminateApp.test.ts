@@ -700,7 +700,7 @@ describe("TerminateApp (iOS wasForeground from the pre-terminate observation)", 
     updatedAt: fakeTimer.now(),
     screenSize: { width: 1170, height: 2532 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    activeWindow: { appId, activityName: "", type: "window" },
+    activeWindow: { appId, activityName: "", layoutSeqSum: 0, type: "window" },
     viewHierarchy: {
       packageName: appId,
       updatedAt: fakeTimer.now(),
@@ -754,7 +754,7 @@ describe("TerminateApp (iOS wasForeground from the pre-terminate observation)", 
     const result = await terminateObserved(
       simDevice,
       observationFor("com.example.app", {
-        freshness: { isFresh: false, requestedMinTimestamp: 0, actualTimestamp: 0 },
+        freshness: { isFresh: false, requestedAfter: 0, actualTimestamp: 0 },
       }),
     );
 

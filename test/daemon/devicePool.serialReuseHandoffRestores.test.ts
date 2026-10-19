@@ -81,12 +81,23 @@ async function setup(saved = true) {
       if ((kind === "rotation" && behavior.rotationFails) || kind === behavior.failingKind) {
         throw new Error("restore not confirmed");
       }
-      return { status: "restored" as const };
     },
   });
+  const recordKeepAwake = (kind: string) => {
+    const base = record(kind);
+    return (device: BootedDevice) => {
+      const restorer = base(device);
+      return {
+        restore: async (state: unknown, signal?: AbortSignal) => {
+          await restorer.restore(state, signal);
+          return { status: "restored" as const };
+        },
+      };
+    };
+  };
   const sessions = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorer: record("keep-awake"),
+    keepScreenAwakeRestorer: recordKeepAwake("keep-awake"),
     biometricEnrollmentRestorer: record("biometric"),
     restorers: {
       networkCondition: record("network"),

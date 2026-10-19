@@ -8713,6 +8713,9 @@ export class DevicePool {
       startedDeviceProcesses: this.startedDeviceProcesses,
       startedDeviceProcessOutput: this.startedDeviceProcessOutput,
       rehydrationReservations: this.rehydrationReservations,
+      intentionalShutdowns: this.intentionalShutdowns,
+      isReservedForShutdown: (device: PooledDevice) => this.isReservedForShutdown(device),
+      restartReadiness: this.deviceReservations.restartReadiness,
       cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
         () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),
         (replacement) => {

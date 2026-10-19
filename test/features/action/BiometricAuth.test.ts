@@ -12,14 +12,18 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Helper function to create mock ObserveResult
 let hierarchyCounter = 0;
-const createObserveResult = (): ObserveResult => ({
-  display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
-  observationId: `biometric-observation-${hierarchyCounter++}`,
-  updatedAt: Date.now(),
-  screenSize: { width: 1080, height: 1920 },
-  systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-  viewHierarchy: { hierarchy: {} },
-});
+// Every call reports a different screen so visual change detection is genuinely exercised.
+const createObserveResult = (): ObserveResult => {
+  const index = hierarchyCounter++;
+  return {
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    observationId: `biometric-observation-${index}`,
+    updatedAt: Date.now(),
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
+    viewHierarchy: { hierarchy: { node: { text: `screen-${index}` } } },
+  };
+};
 
 describe("BiometricAuth", () => {
   let biometricAuth: BiometricAuth;

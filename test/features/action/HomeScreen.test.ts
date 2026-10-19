@@ -30,7 +30,9 @@ import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
 let hierarchyCounter = 0;
-const createObserveResult = (): ObserveResult => ({
+type ObservationWithHierarchy = ObserveResult & { viewHierarchy: ViewHierarchyResult };
+
+const createObserveResult = (): ObservationWithHierarchy => ({
   display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
   observationId: `home-observation-${hierarchyCounter}`,
   updatedAt: Date.now(),
@@ -41,7 +43,7 @@ const createObserveResult = (): ObserveResult => ({
 
 // Read/parse each byte-exact capture at most once.
 const launcherCaptures = new Map<string, ViewHierarchyResult>();
-function launcherObservation(surface: string, deviceId: number): ObserveResult {
+function launcherObservation(surface: string, deviceId: number): ObservationWithHierarchy {
   const name = `launcher-${surface}-emulator-${deviceId}.json`;
   let viewHierarchy = launcherCaptures.get(name);
   if (!viewHierarchy) {
@@ -87,6 +89,8 @@ function iosHierarchy(packageName: string): CtrlProxyHierarchy {
   return { packageName, updatedAt: 1, hierarchy: { className: "XCUIApplication" } };
 }
 
+type GlobalActionResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestGlobalAction"]>>;
+
 describe("HomeScreen", () => {
   let homeScreen: HomeScreen;
   let mockDevice: BootedDevice;
@@ -99,12 +103,20 @@ describe("HomeScreen", () => {
   let previousObserveCacheStore: ReturnType<typeof getObserveCacheStore>;
 
   // Collaborators are fixed at construction; a test that needs a different window builds its own.
-  const createHomeScreen = (window: WindowInterface = fakeWindow): HomeScreen =>
+  const createHomeScreen = (
+    window: WindowInterface = fakeWindow,
+    globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">,
+  ): HomeScreen =>
     new HomeScreen(mockDevice, fakeAdb, fakeTimer, undefined, {
       observeScreen: fakeObserveScreen,
       window,
       awaitIdle: fakeAwaitIdle,
+      globalActionClient,
     });
+
+  const globalActionResult = (
+    result: Pick<GlobalActionResult, "success" | "error">,
+  ): GlobalActionResult => ({ action: "home", totalTimeMs: 0, ...result });
 
   beforeEach(() => {
     previousObserveCacheStore = getObserveCacheStore();
@@ -456,7 +468,12 @@ describe("HomeScreen", () => {
           const fresh: ObserveResult = {
             observationId: "failed-read",
             updatedAt: fakeTimer.now(),
-            display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+            display: {
+              key: "0",
+              role: "unknown",
+              posture: "unknown",
+              generation: 0,
+            } satisfies ObserveResult["display"],
             screenSize: { width: 0, height: 0 },
             systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
             error: "Observation failed due to device access error",
@@ -541,7 +558,12 @@ describe("HomeScreen", () => {
               return {
                 observationId: "cancelled-read",
                 updatedAt: fakeTimer.now(),
-                display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+                display: {
+                  key: "0",
+                  role: "unknown",
+                  posture: "unknown",
+                  generation: 0,
+                } satisfies ObserveResult["display"],
                 screenSize: { width: 0, height: 0 },
                 systemInsets: cached.systemInsets,
               };
@@ -1216,9 +1238,9 @@ describe("HomeScreen", () => {
         simctl: { executeCommandArgs: async () => createExecResult("", "") },
       });
       let readCount = 0;
-      spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
-        hierarchy: readCount++ === 0 ? undefined : iosHierarchy("com.apple.springboard"),
-      }));
+      spyOn(client, "requestHierarchySync").mockImplementation(async () =>
+        readCount++ === 0 ? null : { hierarchy: iosHierarchy("com.apple.springboard") },
+      );
 
       await action.executeIosHomeNavigation();
       expect(readCount).toBe(2);
@@ -1311,9 +1333,10 @@ describe("HomeScreen", () => {
   // instead of trusting a dispatch method's self-reported result.
   describe("home-press verification (issue #6147)", () => {
     test("reports success when the accessibility global action actually backgrounds the app", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
+      const globalActionClient = {
+        requestGlobalAction: async () => globalActionResult({ success: true }),
+      };
+      homeScreen = createHomeScreen(fakeWindow, globalActionClient);
       // Default fakeWindow already reports "com.android.launcher3" foreground.
 
       const result = await homeScreen.execute();
@@ -1330,10 +1353,10 @@ describe("HomeScreen", () => {
       // reports success, but the foreground package stays the app under
       // test on every check, including after the ADB fallback -- so this
       // must surface a failure rather than false success.
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
-      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
+      const globalActionClient = {
+        requestGlobalAction: async () => globalActionResult({ success: true }),
+      };
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]), globalActionClient);
       fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
@@ -1344,9 +1367,9 @@ describe("HomeScreen", () => {
     });
 
     test("recovers via the ADB keyevent fallback when the global action is inert but the fallback reaches the launcher", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: true }),
-      });
+      const globalActionClient = {
+        requestGlobalAction: async () => globalActionResult({ success: true }),
+      };
       // The post-global-action verification retries internally (initial
       // attempt + 2 backoff retries) before giving up, so it must see the
       // app unchanged on all 3 of those checks; only the post-ADB-keyevent
@@ -1358,6 +1381,7 @@ describe("HomeScreen", () => {
           "com.android.settings",
           "com.android.launcher3",
         ]),
+        globalActionClient,
       );
       fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
@@ -1368,10 +1392,11 @@ describe("HomeScreen", () => {
     });
 
     test("throws instead of reporting false success when the ADB keyevent fallback also fails to reach the launcher", async () => {
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-        requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
-      });
-      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
+      const globalActionClient = {
+        requestGlobalAction: async () =>
+          globalActionResult({ success: false, error: "global action unavailable" }),
+      };
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]), globalActionClient);
       fakeAdb.setCommandResponse("shell input keyevent 3", createExecResult("", ""));
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
@@ -1384,11 +1409,12 @@ describe("HomeScreen", () => {
     test("bounds the KEYCODE_HOME keyevent with a deadline and threads a signal", async () => {
       // Global action unavailable, so the ADB keyevent fallback runs; the
       // default fakeWindow reports the launcher, so verification passes.
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      const globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
+      homeScreen = createHomeScreen(fakeWindow, globalActionClient);
 
       await homeScreen.execute();
 
@@ -1404,11 +1430,12 @@ describe("HomeScreen", () => {
     test("an ambient request abort cancels the KEYCODE_HOME fallback (combined signal)", async () => {
       // The forwarded private signal is combined with the ambient request
       // signal, so a cancelled MCP request still aborts the fallback read.
-      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      const globalActionClient = {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      });
+      };
+      homeScreen = createHomeScreen(fakeWindow, globalActionClient);
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();

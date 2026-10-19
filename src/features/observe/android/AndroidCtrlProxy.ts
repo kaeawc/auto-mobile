@@ -1,3 +1,5 @@
+import type { PinchRequest } from "../shared/SharedGestureDelegate";
+import type { TwoFingerSwipeRequest } from "./types";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import type {
   PrototypePatchRequest,
@@ -98,7 +100,6 @@ export type AndroidCtrlProxyClientSurface = Pick<
   | "clearAccessibilityFocus"
   | "requestGestureStart"
   | "requestGestureMove"
-  | "requestTwoFingerSwipe"
   | "getSupportedCommands"
   | "getSdkScreenIdentityReceivedAtMs"
   | "awaitSdkScreenIdentityAfter"
@@ -108,7 +109,8 @@ export type AndroidCtrlProxyClientSurface = Pick<
   | "requestDoubleTapCoordinates"
 >;
 
-export interface AndroidCtrlProxy extends CtrlProxyClient, AndroidCtrlProxyClientSurface {
+export interface AndroidCtrlProxy
+  extends Omit<CtrlProxyClient, "requestPinch">, AndroidCtrlProxyClientSurface {
   isLastConnectionFailureForwardingLeaseConflict?(): boolean;
   getLastConnectionFailureMessage?(): string | undefined;
   setRecompositionTrackingEnabled(
@@ -157,19 +159,9 @@ export interface AndroidCtrlProxy extends CtrlProxyClient, AndroidCtrlProxyClien
 
   requestDrag(request: DragRequest): Promise<A11yDragResult>;
 
-  requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult>;
+  requestTwoFingerSwipe(request: TwoFingerSwipeRequest): Promise<A11ySwipeResult>;
+
+  requestPinch(request: PinchRequest): Promise<A11yPinchResult>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
 

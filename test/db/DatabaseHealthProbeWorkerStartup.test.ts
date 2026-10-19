@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import * as healthProbe from "../../src/db/DatabaseHealthProbe";
+import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProbeTimeoutError";
+import { DatabaseHealthProbeInitTimeoutError } from "../../src/db/DatabaseHealthProbeInitTimeoutError";
 import type { ProbeWorker, ProbeWorkerMessage } from "../../src/db/DatabaseHealthProbe";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -121,7 +123,7 @@ test("clean exit while a request is pending rejects without a timeout", async ()
   expect(check.settled).toBe(true);
   const error = await check.result;
   expect(error).toBeInstanceOf(Error);
-  expect(error).not.toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).not.toBeInstanceOf(DatabaseHealthProbeTimeoutError);
   expect(error).toMatchObject({ message: "Database health probe worker exited with code 0" });
   expect(timer.now()).toBe(0);
   expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -135,8 +137,8 @@ test("never-ready worker uses the default 10000ms init budget and is replaced", 
   expect(first.settled).toBe(false);
   timer.advanceTime(1);
   const error = await first.result;
-  expect(error).toBeInstanceOf(healthProbe.DatabaseHealthProbeInitTimeoutError);
-  expect(error).toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).toBeInstanceOf(DatabaseHealthProbeInitTimeoutError);
+  expect(error).toBeInstanceOf(DatabaseHealthProbeTimeoutError);
   expect(error).toMatchObject({
     phase: "init",
     timeoutMs: 10000,
@@ -176,7 +178,7 @@ test("worker error after ready but before posting rejects without waiting for a 
   workers[0]!.emit("error", new Error("worker died before receiving SELECT"));
   const error = await check.result;
   expect(error).toBeInstanceOf(Error);
-  expect(error).not.toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).not.toBeInstanceOf(DatabaseHealthProbeTimeoutError);
   expect(error).toMatchObject({ message: "Database health probe worker is no longer available" });
   expect(workers[0]!.requests).toHaveLength(0);
   expect(timer.now()).toBe(0);
@@ -222,7 +224,7 @@ test.each([0, 1500])("slow query gets exactly 1000ms after %ims startup", async 
   expect(check.settled).toBe(false);
   timer.advanceTime(1);
   const error = await check.result;
-  expect(error).toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).toBeInstanceOf(DatabaseHealthProbeTimeoutError);
   expect(error).toMatchObject({ phase: "query", timeoutMs: 1000 });
   expect(timer.now()).toBe(startupMs + 1000);
   expect(workers[0]!.terminateCalls).toBe(1);
@@ -272,7 +274,7 @@ test("SQLite error response after ready preserves the message and stack", async 
   });
   const error = await check.result;
   expect(error).toBeInstanceOf(Error);
-  expect(error).not.toBeInstanceOf(healthProbe.DatabaseHealthProbeTimeoutError);
+  expect(error).not.toBeInstanceOf(DatabaseHealthProbeTimeoutError);
   expect(error).toMatchObject({
     message: "database disk image is malformed",
     stack: "sqlite stack",
@@ -308,8 +310,8 @@ test("overlapping checks share initialization and both settle when it times out"
   expect(second.settled).toBe(false);
   expect(workers).toHaveLength(1);
   timer.advanceTime(1500);
-  expect(await first.result).toBeInstanceOf(healthProbe.DatabaseHealthProbeInitTimeoutError);
-  expect(await second.result).toBeInstanceOf(healthProbe.DatabaseHealthProbeInitTimeoutError);
+  expect(await first.result).toBeInstanceOf(DatabaseHealthProbeInitTimeoutError);
+  expect(await second.result).toBeInstanceOf(DatabaseHealthProbeInitTimeoutError);
   expect(workers[0]!.terminateCalls).toBe(1);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
@@ -322,7 +324,7 @@ test("abandoned worker termination rejection is logged and safely observed", asy
     const failure = new Error("worker already gone");
     workers[0]!.termination = Promise.reject(failure);
     timer.advanceTime(2000);
-    expect(await check.result).toBeInstanceOf(healthProbe.DatabaseHealthProbeInitTimeoutError);
+    expect(await check.result).toBeInstanceOf(DatabaseHealthProbeInitTimeoutError);
     await drainUntilQuiescent(timer);
     expect(debug.mock.calls.flat()).toContain(failure);
   } finally {

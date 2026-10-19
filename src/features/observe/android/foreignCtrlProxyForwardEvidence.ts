@@ -13,17 +13,13 @@ import {
   type ForwardClientConnectionProbe,
 } from "./CtrlProxyForwardClientProbe";
 
-export { CtrlProxyForwardOwnershipUnreadableError } from "./CtrlProxyForwardOwnershipUnreadableError";
+export { CtrlProxyForwardOwnershipUnreadableError } from "../../../models/CtrlProxyForwardOwnershipUnreadableError";
 
-export type ForeignCtrlProxyForwardVerdict =
-  | { kind: "none" }
-  | { kind: "foreign"; ports: number[]; clientPids: number[]; message: string }
-  | { kind: "unknown"; ports: number[]; reason: string; message: string };
-
-export interface ForeignCtrlProxyForwardEvidence {
-  /** Never mutates the device or the host. */
-  read(deviceId: string, signal?: AbortSignal): Promise<ForeignCtrlProxyForwardVerdict>;
-}
+import type {
+  ForeignCtrlProxyForwardEvidence,
+  ForeignCtrlProxyForwardVerdict,
+} from "../../../models/ForeignCtrlProxyForwardEvidence";
+export type { ForeignCtrlProxyForwardEvidence, ForeignCtrlProxyForwardVerdict };
 
 /** Process-wide: losing a socket never establishes that its live owner has gone (#12220). */
 const rememberedClients = new Map<string, Map<number, Set<number>>>();

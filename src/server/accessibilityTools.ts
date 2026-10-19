@@ -9,7 +9,7 @@ import {
   FeatureFlagService,
   type FeatureFlagReader,
 } from "../features/featureFlags/FeatureFlagService";
-import { accessibilityDetector } from "../features/accessibility/AccessibilityDetector";
+import { accessibilityDetector } from "../ctrlProxy/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../features/accessibility/IosVoiceOverDetector";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";

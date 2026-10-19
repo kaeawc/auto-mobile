@@ -1,3 +1,5 @@
+import { wireHierarchyFrom } from "../../helpers/androidHierarchyConverter";
+import type { NavigationEvent } from "../../../src/utils/interfaces/NavigationGraph";
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterAll, beforeAll, describe, expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -127,8 +129,8 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
 
   const recordedEvent = (destination: string) => {
     const call = navHarness.telemetrySpy.mock.calls
-      .map(([event]) => event)
-      .find((event) => event.destination === destination);
+      .map(([event]: [NavigationEvent]) => event)
+      .find((event: NavigationEvent) => event.destination === destination);
     if (!call) {
       throw new Error(`Expected telemetry event for ${destination}`);
     }
@@ -242,8 +244,10 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
   test.each(["focused-window", "unknown"])(
     "%s identity is navigation-only and leaves the cached/returned capture unchanged",
     async (source) => {
-      const payload = observePayload();
-      delete payload.packageName;
+      const withoutPackage = Object.fromEntries(
+        Object.entries(observePayload()).filter(([key]) => key !== "packageName"),
+      );
+      const payload = wireHierarchyFrom(withoutPackage);
       const navigationPackage = source === "focused-window" ? "com.android.settings" : undefined;
       if (navigationPackage) {
         payload.windows!.find((window) => window.isFocused)!.packageName = navigationPackage;

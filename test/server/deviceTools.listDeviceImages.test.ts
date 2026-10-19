@@ -13,7 +13,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -307,7 +307,7 @@ describe("listDeviceImages", function () {
       platform: "android",
       isRunning: false,
     };
-    const emulator = {
+    const emulator = createFakeAndroidEmulator({
       listAvds: async () => [image],
       getBootedDevicesChecked: async (): Promise<BootedDevice[]> => [
         {
@@ -316,7 +316,7 @@ describe("listDeviceImages", function () {
           deviceId: "emulator-5554",
         },
       ],
-    } as unknown as AndroidEmulatorClient;
+    });
     const deviceManager = new MultiPlatformDeviceManager(new FakeAdbClient(), undefined, emulator);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceManager,

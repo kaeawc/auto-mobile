@@ -77,7 +77,7 @@ describe("navigation graph composition", () => {
       applicationId: APP_ID,
     });
     if (depth !== undefined) {
-      await manager.recordBackStack({ depth, currentTaskId: 1 });
+      await manager.recordBackStack({ depth, currentTaskId: 1, activities: [], tasks: [] });
     }
   }
 
@@ -214,7 +214,7 @@ describe("navigation graph composition", () => {
 
       // The opposite query (Home is the deeper, current screen; Detail the target):
       // Detail's only outgoing edge is the Back press, which must not count as forward.
-      await manager.recordBackStack({ depth: 3, currentTaskId: 1 });
+      await manager.recordBackStack({ depth: 3, currentTaskId: 1, activities: [], tasks: [] });
       const reverse = await optimizer.shouldUseBackButton("Home", "Detail", 3);
       expect(reverse.shouldUseBack).toBe(false);
       expect(reverse.reason).toMatch(/No known navigation path to verify safety/);

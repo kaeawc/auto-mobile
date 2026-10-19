@@ -1,5 +1,5 @@
 import { freshSwipeHierarchy } from "./freshSwipeHierarchy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { type StaleDisplayDetails } from "../../observe/StaleDisplayError";
 import { scopedSearchDescription } from "./swipeSelectorScopes";
 import {

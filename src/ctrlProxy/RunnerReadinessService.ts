@@ -2,17 +2,12 @@ import type { TapCoordinatesRequest } from "../utils/interfaces/TapCoordinatesRe
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, DeviceLockState } from "../models";
 import { ActionableError, toActionableError } from "../models";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { AndroidCtrlProxyManager, CtrlProxyInspectionError } from "./CtrlProxyManager";
-import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
-import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
+import { CtrlProxyInspectionError } from "./CtrlProxyManager";
 import { redactAndroidCommandOutput } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { compareIosVersions } from "../utils/ios-cmdline-tools/iosVersion";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import type { Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import {
@@ -38,7 +33,7 @@ const READINESS_PROBE_TIMEOUT_MS = 2_000;
 const CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS = 5_000;
 const MAX_DIAGNOSTIC_LENGTH = 4_000;
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
-const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
+export const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
 const SYSTEM_UI_ANR_RECOVERY_POLL_MS = 1_000;
 const CTRL_PROXY_REBIND_RECOVERY_POLL_MS = 1_000;
 /**
@@ -1719,7 +1714,7 @@ function phaseElapsedLabel(phase: string): string {
   }
 }
 
-function normalizeDiagnostic(error: unknown): string {
+export function normalizeDiagnostic(error: unknown): string {
   const raw = errorMessage(error);
   const redacted = redactAndroidCommandOutput(raw);
   if (redacted.length <= MAX_DIAGNOSTIC_LENGTH) {
@@ -1727,110 +1722,4 @@ function normalizeDiagnostic(error: unknown): string {
   }
   const half = Math.floor((MAX_DIAGNOSTIC_LENGTH - 32) / 2);
   return `${redacted.slice(0, half)}\n...[diagnostic truncated]...\n${redacted.slice(-half)}`;
-}
-
-async function getDefaultAndroidFrameworkReadiness(
-  device: BootedDevice,
-  signal: AbortSignal,
-  timeoutMs: number,
-): Promise<AndroidFrameworkReadinessResult> {
-  const adb = defaultAdbClientFactory.create(device);
-  const [packageLookup, settingsLookup] = await Promise.allSettled([
-    adb.execute(["shell", "cmd", "package", "path", "android"], {
-      timeoutMs,
-      noRetry: true,
-      signal,
-    }),
-    adb.execute(["shell", "settings", "get", "secure", "accessibility_enabled"], {
-      timeoutMs,
-      noRetry: true,
-      signal,
-    }),
-  ]);
-  signal.throwIfAborted();
-
-  const unavailableResources: string[] = [];
-  const diagnostics: string[] = [];
-  if (packageLookup.status === "rejected" || !packageLookup.value.stdout.includes("package:")) {
-    unavailableResources.push("package");
-    diagnostics.push(
-      packageLookup.status === "rejected"
-        ? `package: ${normalizeDiagnostic(packageLookup.reason)}`
-        : `package: ${normalizeDiagnostic(packageLookup.value.stdout || packageLookup.value.stderr)}`,
-    );
-  }
-  if (
-    settingsLookup.status === "rejected" ||
-    isAndroidFrameworkUnavailable(`${settingsLookup.value.stdout}\n${settingsLookup.value.stderr}`)
-  ) {
-    unavailableResources.push("settings");
-    diagnostics.push(
-      settingsLookup.status === "rejected"
-        ? `settings: ${normalizeDiagnostic(settingsLookup.reason)}`
-        : `settings: ${normalizeDiagnostic(settingsLookup.value.stdout || settingsLookup.value.stderr)}`,
-    );
-  }
-  return {
-    ready: unavailableResources.length === 0,
-    ...(unavailableResources.length > 0 ? { unavailableResources } : {}),
-    ...(diagnostics.length > 0 ? { diagnostic: diagnostics.join("; ") } : {}),
-  };
-}
-
-function compactDiagnosticValue(value: string): string {
-  return normalizeDiagnostic(value).replace(/\s+/g, " ").trim() || "empty";
-}
-
-async function getDefaultAndroidRunnerHealthDiagnostic(
-  device: BootedDevice,
-  signal: AbortSignal,
-): Promise<AndroidRunnerHealthDiagnostic> {
-  const deviceAdb = defaultAdbClientFactory.create(device);
-  // Use an unbound client for `adb devices -l`, which is a server-wide view.
-  const adbServer = defaultAdbClientFactory.create();
-  const options = {
-    timeoutMs: RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS,
-    noRetry: true,
-    signal,
-  };
-  const [bootCompleted, adbDevices, emulatorQemuHealth] = await Promise.allSettled([
-    deviceAdb.execute(["shell", "getprop", "sys.boot_completed"], options),
-    adbServer.execute(["devices", "-l"], options),
-    adbServer.execute(["-s", device.deviceId, "get-state"], options),
-  ]);
-
-  const output = (result: PromiseSettledResult<{ stdout: string; stderr: string }>): string =>
-    result.status === "fulfilled"
-      ? compactDiagnosticValue(result.value.stdout || result.value.stderr)
-      : `unavailable (${compactDiagnosticValue(errorMessage(result.reason))})`;
-  return {
-    sysBootCompleted: output(bootCompleted),
-    adbDevices: output(adbDevices),
-    emulatorQemuHealth: output(emulatorQemuHealth),
-  };
-}
-
-export function createDefaultRunnerReadinessService(
-  timer: Timer = defaultTimer,
-): RunnerReadinessService {
-  return new RunnerReadinessService({
-    timer,
-    getAndroidFrameworkReadiness: getDefaultAndroidFrameworkReadiness,
-    getAndroidManager: (device) => AndroidCtrlProxyManager.getInstance(device),
-    getAndroidClient: (device) => AndroidCtrlProxyClient.getInstance(device),
-    getIosManager: (device) => IOSCtrlProxyManager.getInstance(device),
-    getIosClient: (device, port) => IOSCtrlProxyClient.getInstance(device, port),
-    checkIosOverride: checkIosCtrlProxyOverride,
-    awaitIosStartupMaintenance: () => IOSCtrlProxyManager.awaitStartupOrphanRunnerReap(),
-    getAndroidRunnerConnectDiagnostic: async (device, signal) => {
-      const adb = defaultAdbClientFactory.create(device);
-      const [deviceLock, users] = await Promise.all([
-        adb.getDeviceLock(signal),
-        adb.listUsers(signal),
-      ]);
-      const primaryUser = users.find((user) => user.profileType === "primary" || user.userId === 0);
-      return { deviceLock, primaryUserStartState: primaryUser?.startState };
-    },
-    getAndroidRunnerHealthDiagnostic: getDefaultAndroidRunnerHealthDiagnostic,
-  });
 }

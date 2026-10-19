@@ -951,7 +951,7 @@ export class DevicePool {
   private readonly devices = new InMemoryDeviceTable();
   private deviceSessionStarts: Map<string, number> = new Map();
   private sessionManager: SessionManager;
-  private assignmentMutex = new Mutex();
+  protected assignmentMutex = new Mutex();
   private readonly multiDeviceAllocations = this.createMultiDeviceAllocationQueue();
   private readonly foreignClaims = this.createForeignClaims();
   private readonly connectionOwnership = this.createConnectionOwnership();
@@ -1125,7 +1125,7 @@ export class DevicePool {
   private readonly managedExecutionOwnership: DevicePoolDependencies["managedExecutionOwnership"];
   private readonly bindingExclusion: BindingExclusion | undefined;
   /** Devices held for the persisted rows restart recovery is working through (#11294). */
-  private readonly rehydrationReservations = new Map<string, DeviceRehydrationReservation>();
+  protected readonly rehydrationReservations = new Map<string, DeviceRehydrationReservation>();
   private readonly intentionallyCancelledRecoverySessions = new WeakSet<Session>();
 
   constructor({
@@ -4268,7 +4268,7 @@ export class DevicePool {
     return this.missingDeviceLiveness.takeFreshPresenceDiscovery(platform);
   }
 
-  private evictMissingPooledDevice(
+  protected evictMissingPooledDevice(
     device: PooledDevice,
     reason: string,
     options: MissingDeviceEvictionOptions = {},
@@ -8068,7 +8068,7 @@ export class DevicePool {
   }
 
   /** Whether a connected MCP client other than `exceptMcpSessionId` owns `namedSessionId`. */
-  private hasConnectedMcpSessionOwner(
+  protected hasConnectedMcpSessionOwner(
     namedSessionId: string,
     exceptMcpSessionId?: string,
   ): boolean {

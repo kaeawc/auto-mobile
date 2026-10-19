@@ -29,6 +29,13 @@ import { SUSPECT_GRACE_MS } from "../../../../src/daemon/livenessOwnerLease";
 // #11340: managed executions stay live until their held session is released.
 // The configured idle window stays stored; heartbeats and reads never move activity clocks.
 
+/** A real session manager that exposes how it rebuilds liveness from a persisted row. */
+class RecoveryLivenessProbe extends SessionManager {
+  livenessOf(row: Parameters<SessionManager["recoveryLivenessFromPersisted"]>[0]) {
+    return this.recoveryLivenessFromPersisted(row);
+  }
+}
+
 const SESSION = "managed-execution-session";
 const DEVICE = "emulator-5554";
 const OWNER = "managed-proxy-token";
@@ -80,6 +87,7 @@ describe("managed-execution session liveness", () => {
     getSessionManager: () => manager,
     getDevicePool: () => ({
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
     }),
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
@@ -428,14 +436,9 @@ describe("managed-execution session liveness", () => {
     await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 30 * MINUTE });
     const row = (await persistence.getSession!(SESSION))!;
 
-    const liveness = (
-      manager as unknown as {
-        recoveryLivenessFromPersisted(persisted: typeof row): {
-          livenessPolicy: string;
-          sessionTimeoutMs: number;
-        };
-      }
-    ).recoveryLivenessFromPersisted(row);
+    const probe = new RecoveryLivenessProbe(timer, persistence);
+    probe.stopCleanupTimer();
+    const liveness = probe.livenessOf(row);
 
     expect(liveness.livenessPolicy).toBe(MANAGED_EXECUTION_LIVENESS_POLICY);
     expect(liveness.sessionTimeoutMs).toBe(30 * MINUTE);

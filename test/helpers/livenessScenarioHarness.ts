@@ -23,7 +23,7 @@ import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
@@ -195,6 +195,8 @@ export interface LivenessScenarioOptions {
    * {@link LivenessScenario.holdAsManagedExecution}). Without it the host has no registry.
    */
   bindings?: boolean;
+  /** Build each stdio proxy, e.g. as a `DaemonMcpProxy` subclass that exposes a test seam. */
+  proxyFactory?: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
 }
 
 /** Drops a dead daemon's listeners on process-wide registries. Teardown only, never wiring. */
@@ -450,6 +452,7 @@ export class LivenessScenario {
   /** The loopback MCP transports the running daemon's socket server holds open, by bound session. */
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
   private readonly bindingsEnabled: boolean;
+  private readonly proxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
   private bindings: BindingRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
@@ -490,6 +493,7 @@ export class LivenessScenario {
     this.realStartAdmission = options.realStartAdmission ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
     this.bindingsEnabled = options.bindings ?? false;
+    this.proxyFactory = options.proxyFactory ?? ((config) => new DaemonMcpProxy(config));
   }
 
   static async start(options: LivenessScenarioOptions = {}): Promise<LivenessScenario> {
@@ -894,7 +898,7 @@ export class LivenessScenario {
         }
       },
     };
-    const proxy = new DaemonMcpProxy({
+    const proxy = this.proxyFactory({
       // A new client per connection attempt, as src/index.ts builds one.
       clientFactory: () => {
         if (client) {

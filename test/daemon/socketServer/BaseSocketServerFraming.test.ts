@@ -23,7 +23,7 @@ class FramingTestServer extends BaseSocketServer {
 
   /** Expose the protected connection setup for direct driving in tests. */
   attach(socket: FakeSocket): void {
-    this.handleConnection(socket as unknown as Socket);
+    this.handleConnection(socket);
   }
 
   protected async processLine(_socket: Socket, line: string): Promise<void> {
@@ -66,7 +66,7 @@ describe("BaseSocketServer line framing", () => {
     socket.simulateData('on":"go"}\n');
 
     expect(server.dispatched).toHaveLength(1);
-    expect(JSON.parse(server.dispatched[0])).toEqual({ id: "1", action: "go" });
+    expect(server.dispatched[0]).toBe('{"id":"1","action":"go"}');
   });
 
   it("dispatches each newline-delimited request in a single chunk", () => {
@@ -77,8 +77,8 @@ describe("BaseSocketServer line framing", () => {
     socket.simulateData('{"id":"1","action":"a"}\n{"id":"2","action":"b"}\n');
 
     expect(server.dispatched).toHaveLength(2);
-    expect(JSON.parse(server.dispatched[0])).toEqual({ id: "1", action: "a" });
-    expect(JSON.parse(server.dispatched[1])).toEqual({ id: "2", action: "b" });
+    expect(server.dispatched[0]).toBe('{"id":"1","action":"a"}');
+    expect(server.dispatched[1]).toBe('{"id":"2","action":"b"}');
   });
 
   it("retains a trailing partial line after complete lines until its newline arrives", () => {
@@ -89,12 +89,12 @@ describe("BaseSocketServer line framing", () => {
     // One complete request followed by the start of a second.
     socket.simulateData('{"id":"1","action":"a"}\n{"id":"2","act');
     expect(server.dispatched).toHaveLength(1);
-    expect(JSON.parse(server.dispatched[0])).toEqual({ id: "1", action: "a" });
+    expect(server.dispatched[0]).toBe('{"id":"1","action":"a"}');
 
     // The remainder of the second request completes it.
     socket.simulateData('ion":"b"}\n');
     expect(server.dispatched).toHaveLength(2);
-    expect(JSON.parse(server.dispatched[1])).toEqual({ id: "2", action: "b" });
+    expect(server.dispatched[1]).toBe('{"id":"2","action":"b"}');
   });
 
   it("preserves a multibyte character split across socket reads", () => {

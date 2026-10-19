@@ -7,6 +7,8 @@
  * - roundCoordinates: Android rounds to integers, iOS passes exact values
  */
 
+import type { TapCoordinatesRequest } from "../../../utils/interfaces/TapCoordinatesRequest";
+export type { TapCoordinatesRequest } from "../../../utils/interfaces/TapCoordinatesRequest";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
@@ -102,18 +104,20 @@ export class SharedGestureDelegate {
     return {};
   }
 
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration: number = 0,
-    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<BaseResult> {
+  async requestTapCoordinates(request: TapCoordinatesRequest): Promise<BaseResult> {
+    const {
+      x,
+      y,
+      duration = 0,
+      timeoutMs = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      perf,
+      frameContext,
+      signal,
+      onDispatch,
+      displayId,
+      beforeSend,
+    } = request;
+
     return sendCommand<BaseResult>(
       this.context,
       this.tapCommandOptions({

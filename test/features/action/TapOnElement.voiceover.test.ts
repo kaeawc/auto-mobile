@@ -146,8 +146,8 @@ describe("TapOnElement VoiceOver mode", () => {
         expect(request.mock.calls).toHaveLength(action === "doubleTap" ? 0 : 1);
         expect(double).toHaveBeenCalledTimes(action === "doubleTap" ? 1 : 0);
         for (const call of request.mock.calls) {
-          expect(call[2]).toBe(action === "longPress" ? 500 : 50);
-          expect(call[3]).toBe(
+          expect(call[0].duration).toBe(action === "longPress" ? 500 : 50);
+          expect(call[0].timeoutMs).toBe(
             action === "longPress" ? DEFAULT_GESTURE_REQUEST_TIMEOUT_MS : undefined,
           );
         }

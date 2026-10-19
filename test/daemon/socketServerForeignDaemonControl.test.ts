@@ -117,7 +117,7 @@ beforeEach(() => {
   spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: async (...args) => {
-      args[6]?.();
+      args[0].onDispatch?.();
       deviceCalls.push("tap");
       return { success: true, totalTimeMs: 0 };
     },

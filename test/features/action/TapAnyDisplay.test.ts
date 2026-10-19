@@ -102,8 +102,8 @@ function harness(
   const dispatches: Array<number | undefined> = [];
   let onDispatch = () => {};
   const tap = spyOn(client, "requestTapCoordinates").mockImplementation(async (...args) => {
-    args[9]?.();
-    dispatches.push(args[8]);
+    args[0].beforeSend?.();
+    dispatches.push(args[0].displayId);
     onDispatch();
     return { success: true };
   });

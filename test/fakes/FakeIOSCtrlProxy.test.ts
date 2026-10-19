@@ -103,7 +103,7 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       name: "tap",
       setResult: (proxy, result) => proxy.setTapResult(result),
       send: (proxy, onDispatch) =>
-        proxy.requestTapCoordinates(1, 2, 0, 5000, undefined, undefined, undefined, onDispatch),
+        proxy.requestTapCoordinates({ x: 1, y: 2, duration: 0, timeoutMs: 5000, onDispatch }),
     },
     {
       name: "swipe",
@@ -203,8 +203,15 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
       let dispatches = 0;
 
       await expect(
-        proxy.requestTapCoordinates(1, 2, 0, 5000, undefined, undefined, aborted(), () => {
-          dispatches++;
+        proxy.requestTapCoordinates({
+          x: 1,
+          y: 2,
+          duration: 0,
+          timeoutMs: 5000,
+          signal: aborted(),
+          onDispatch: () => {
+            dispatches++;
+          },
         }),
       ).rejects.toBe(reason);
 

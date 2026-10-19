@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, describe, expect, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
@@ -33,18 +34,9 @@ function gestureHarness(reason: string, fold = false) {
   const dispatches: { x: number; y: number; displayId?: number }[] = [];
   const client: CoordinateTapClient & { supportsCommand: () => Promise<boolean> } = {
     supportsCommand: async () => true,
-    requestTapCoordinates: async (
-      x,
-      y,
-      _duration,
-      _timeout,
-      _perf,
-      _context,
-      _dispatch,
-      _signal,
-      displayId,
-      beforeSend,
-    ) => {
+    requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+      const { x, y, displayId, beforeSend } = request;
+
       beforeSend?.();
       dispatches.push({ x, y, displayId });
       return { success: true };

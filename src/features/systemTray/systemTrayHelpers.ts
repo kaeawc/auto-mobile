@@ -42,6 +42,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { SwipeRequest } from "../observe/shared/types";
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { ignoreCasePolicy, INSPECT_INTENT } from "../utility/SelectionPolicy";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -96,15 +97,7 @@ export interface SystemTrayAdb {
 
 export interface SystemTrayIosClient {
   requestSwipe(request: SwipeRequest): Promise<IosGestureResult>;
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-  ): Promise<IosGestureResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<IosGestureResult>;
 }
 
 export interface SystemTrayDependencies {

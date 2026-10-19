@@ -152,7 +152,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         const result = await h.run();
         expect(result.success).toBe(true);
         expect(result.element?.bounds).toEqual({ left: 210, top: 200, right: 290, bottom: 260 });
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
         expect(h.sync).toHaveBeenCalledTimes(1);
         expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
       } finally {
@@ -164,7 +164,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       try {
         const controller = new AbortController();
         expect((await h.run(100, undefined, controller.signal)).success).toBe(true);
-        expect(h.dispatch.mock.calls[0]?.[6]).toBe(controller.signal);
+        expect(h.dispatch.mock.calls[0]?.[0].signal).toBe(controller.signal);
       } finally {
         h.restore();
       }
@@ -181,7 +181,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           15000,
           { forceCapture: true },
         ]);
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([50, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 50, y: 230 });
       } finally {
         h.restore();
       }
@@ -239,7 +239,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         expect(h.sync).toHaveBeenCalledTimes(2);
         expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
         expect(h.sync.mock.calls[1]).toHaveLength(4);
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
       } finally {
         h.restore();
       }
@@ -289,7 +289,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           [2500, { forceCapture: true }],
         ]);
         expect(h.timer.getSleepHistory()).toContain(500);
-        expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
+        expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
       } finally {
         h.restore();
       }

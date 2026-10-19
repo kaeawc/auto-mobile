@@ -107,7 +107,13 @@ const methods: Method[] = [
     name: "accessibility link",
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestActivateAccessibilityLink("link", 0, undefined, 50, perf, signal),
+      h.client.requestActivateAccessibilityLink({
+        text: "link",
+        occurrence: 0,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   ...(["copy", "paste", "get", "clear"] as const).map((action): Method => ({
     name: `clipboard ${action}`,
@@ -130,7 +136,14 @@ const methods: Method[] = [
     name: "tap",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestTapCoordinates(1, 2, 0, 50, perf, undefined, signal),
+      h.client["gestures"].requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 0,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "double tap",
@@ -178,7 +191,11 @@ const methods: Method[] = [
     name: "two finger swipe",
     invoke: (h) => h.client["gestures"].requestTwoFingerSwipe(1, 2, 3, 4, 20, 10, 50),
   },
-  { name: "gesture start", invoke: (h) => h.client["gestures"].requestGestureStart("g", 1, 2, 50) },
+  {
+    name: "gesture start",
+    invoke: (h) =>
+      h.client["gestures"].requestGestureStart({ gestureId: "g", x: 1, y: 2, timeoutMs: 50 }),
+  },
   { name: "gesture move", invoke: (h) => h.client["gestures"].requestGestureMove("g", 1, 2, 50) },
   {
     name: "gesture end",

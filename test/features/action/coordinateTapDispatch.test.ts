@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
 import { describe, expect, mock, test } from "bun:test";
@@ -25,8 +26,10 @@ describe("dispatchAndroidCoordinateTap", () => {
       const controller = new AbortController();
       const adb = new FakeAdbExecutor();
       const onTapDelivered = mock(() => {});
-      const client: CoordinateTapClient<() => void> = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { onDispatch } = request;
+
           onDispatch?.();
           controller.abort();
           return { success, error: success ? undefined : "Tap timed out after 5000ms" };
@@ -99,8 +102,10 @@ describe("dispatchAndroidCoordinateTap", () => {
     "does not replay a dispatched tap when its response is lost (frame %s)",
     async (frameContext) => {
       const adb = new FakeAdbExecutor();
-      const client: CoordinateTapClient<() => void> = {
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { frameContext: frame, onDispatch } = request;
+
           expect(frame).toBe(frameContext);
           onDispatch?.();
           return { success: false, error: "Tap timed out after 5000ms" };
@@ -229,18 +234,9 @@ describe("androidDisplayTapDispatch", () => {
       const dispatch = await androidDisplayTapDispatch(
         {
           supportsCommand: async () => true,
-          requestTapCoordinates: async (
-            _x,
-            _y,
-            _duration,
-            _timeout,
-            _perf,
-            _frame,
-            _onDispatch,
-            _signal,
-            _display,
-            beforeSend,
-          ) => {
+          requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+            const { beforeSend } = request;
+
             if (failure === "abort") {
               controller.abort();
             } else if (failure !== "stale frame") {
@@ -354,8 +350,8 @@ describe("androidDisplayTapDispatch", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const onDispatched = mock(() => {});
-    const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
-      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+    const requestTapCoordinates = mock<CoordinateTapClient["requestTapCoordinates"]>(
+      async ({ onDispatch: onDispatch }) => {
         if (requestTapCoordinates.mock.calls.length === 1) {
           onDispatch?.();
           return { success: true };
@@ -401,7 +397,9 @@ describe("androidDisplayTapDispatch", () => {
       const onDispatched = mock(() => {});
       const client: Parameters<typeof androidDisplayTapDispatch>[0] = {
         supportsCommand: async (name) => name === "gesture_display_id_v1",
-        requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+        requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+          const { frameContext: frame, onDispatch } = request;
+
           expect(frame).toBeUndefined();
           expect(onDispatch).toBeFunction();
           onDispatch?.();
@@ -436,16 +434,9 @@ describe("androidDisplayTapDispatch", () => {
     const onDispatched = mock(() => {});
     const client: Parameters<typeof androidDisplayTapDispatch>[0] = {
       supportsCommand: async () => true,
-      requestTapCoordinates: async (
-        _x,
-        _y,
-        _duration,
-        _timeout,
-        _perf,
-        _frame,
-        onDispatch,
-        signal,
-      ) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { onDispatch, signal } = request;
+
         expect(signal).toBe(controller.signal);
         onDispatch?.();
         controller.abort();
@@ -478,8 +469,8 @@ describe("androidDisplayTapDispatch", () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
     const onDispatched = mock(() => {});
-    const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
-      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+    const requestTapCoordinates = mock<CoordinateTapClient["requestTapCoordinates"]>(
+      async ({ onDispatch: onDispatch }) => {
         onDispatch?.();
         controller.abort();
         return { success: true };
@@ -504,8 +495,8 @@ describe("androidDisplayTapDispatch", () => {
   test("does not attempt the second double tap after an indeterminate first tap", async () => {
     const adb = new FakeAdbExecutor();
     const onDispatched = mock(() => {});
-    const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
-      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+    const requestTapCoordinates = mock<CoordinateTapClient["requestTapCoordinates"]>(
+      async ({ onDispatch: onDispatch }) => {
         onDispatch?.();
         return { success: false, error: "Tap timed out after 5000ms" };
       },
@@ -537,8 +528,8 @@ describe("androidDisplayTapDispatch", () => {
       timer.enableAutoAdvance();
       const onDispatched = mock(() => {});
       const controller = new AbortController();
-      const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
-        async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+      const requestTapCoordinates = mock<CoordinateTapClient["requestTapCoordinates"]>(
+        async ({ onDispatch: onDispatch }) => {
           expect(onDispatched).toHaveBeenCalledTimes(requestTapCoordinates.mock.calls.length - 1);
           onDispatch?.();
           return { success: true };
@@ -556,16 +547,16 @@ describe("androidDisplayTapDispatch", () => {
       expect(requestTapCoordinates).toHaveBeenCalledTimes(count);
       for (const call of requestTapCoordinates.mock.calls) {
         expect(call).toEqual([
-          10,
-          20,
-          duration,
-          duration === 10 ? undefined : resolveGestureCtrlProxyTimeoutMs(duration),
-          undefined,
-          undefined,
-          expect.any(Function),
-          controller.signal,
-          displayId === 0 ? undefined : displayId,
-          target.assertCurrent,
+          {
+            x: 10,
+            y: 20,
+            duration,
+            timeoutMs: duration === 10 ? undefined : resolveGestureCtrlProxyTimeoutMs(duration),
+            onDispatch: expect.any(Function),
+            signal: controller.signal,
+            displayId: displayId === 0 ? undefined : displayId,
+            beforeSend: target.assertCurrent,
+          },
         ]);
       }
       expect(onDispatched).toHaveBeenCalledTimes(count);
@@ -622,34 +613,30 @@ describe("coordinate tap transport timeouts", () => {
     ])(
       `${platform} sizes and clamps a %sms long press to %sms`,
       async (duration, expectedTimeout) => {
-        const requestTapCoordinates = mock(
-          async (_x: number, _y: number, _duration?: number, _timeout?: number) => ({
-            success: true,
-          }),
-        );
+        const requestTapCoordinates = mock(async (_request: TapCoordinatesRequest) => ({
+          success: true,
+        }));
         const client: CoordinateTapClient = { requestTapCoordinates };
         if (platform === "ios") {
           await dispatchIosCoordinateTap(client, 10, 20, duration);
         } else {
           await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, duration);
         }
-        expect(requestTapCoordinates.mock.calls[0][3]).toBe(expectedTimeout);
+        expect(requestTapCoordinates.mock.calls[0][0]?.timeoutMs).toBe(expectedTimeout);
       },
     );
 
     test(`${platform} leaves the ordinary tap timeout undefined`, async () => {
-      const requestTapCoordinates = mock(
-        async (_x: number, _y: number, _duration?: number, _timeout?: number) => ({
-          success: true,
-        }),
-      );
+      const requestTapCoordinates = mock(async (_request: TapCoordinatesRequest) => ({
+        success: true,
+      }));
       const client: CoordinateTapClient = { requestTapCoordinates };
       if (platform === "ios") {
         await dispatchIosCoordinateTap(client, 10, 20, 50);
       } else {
         await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, 10);
       }
-      expect(requestTapCoordinates.mock.calls[0][3]).toBeUndefined();
+      expect(requestTapCoordinates.mock.calls[0][0]?.timeoutMs).toBeUndefined();
     });
   }
 });
@@ -657,14 +644,14 @@ describe("coordinate tap transport timeouts", () => {
 test.each([500, 4000, MAX_SETTIMEOUT_DELAY_MS])(
   "coordinate dispatchers match tapAny's shared timeout for %sms",
   async (duration) => {
-    const requestTapCoordinates = mock(
-      async (_x: number, _y: number, _duration?: number, _timeout?: number) => ({ success: true }),
-    );
+    const requestTapCoordinates = mock(async (_request: TapCoordinatesRequest) => ({
+      success: true,
+    }));
     const client: CoordinateTapClient = { requestTapCoordinates };
     await dispatchIosCoordinateTap(client, 10, 20, duration);
     await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, duration);
     for (const call of requestTapCoordinates.mock.calls) {
-      expect(call[3]).toBe(resolveGestureCtrlProxyTimeoutMs(duration));
+      expect(call[0].timeoutMs).toBe(resolveGestureCtrlProxyTimeoutMs(duration));
     }
   },
 );

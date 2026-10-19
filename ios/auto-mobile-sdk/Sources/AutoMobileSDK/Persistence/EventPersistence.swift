@@ -128,7 +128,7 @@ final class FileEventPersistence: EventPersisting, Sendable {
             else { return }
 
             for file in files {
-                if let ts = Self.extractTimestamp(from: file.lastPathComponent), ts < cutoff {
+                if let timestamp = Self.extractTimestamp(from: file.lastPathComponent), timestamp < cutoff {
                     try? FileManager.default.removeItem(at: file)
                 }
             }
@@ -204,6 +204,13 @@ final class FileEventPersistence: EventPersisting, Sendable {
             return try? decoder.decode(SdkLogEvent.self, from: data)
         case .lifecycle:
             return try? decoder.decode(SdkLifecycleEvent.self, from: data)
+        default:
+            return decodeInteractionEvent(type: type, data: data, decoder: decoder)
+        }
+    }
+
+    private func decodeInteractionEvent(type: SdkEventType, data: Data, decoder: JSONDecoder) -> (any SdkEvent)? {
+        switch type {
         case .notificationAction:
             return try? decoder.decode(SdkNotificationActionEvent.self, from: data)
         case .viewBodySnapshot:
@@ -218,6 +225,7 @@ final class FileEventPersistence: EventPersisting, Sendable {
             return try? decoder.decode(SdkViewHierarchyEvent.self, from: data)
         case .webView:
             return try? decoder.decode(SdkWebViewEvent.self, from: data)
+        default: return nil
         }
     }
 }

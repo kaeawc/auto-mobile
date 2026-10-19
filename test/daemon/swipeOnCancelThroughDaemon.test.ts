@@ -185,14 +185,9 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
     internals.connect(daemonSide);
-    daemonClient = new DaemonClient(
-      "/fake/socket",
-      60_000,
-      timer,
-      ISOLATED_DAEMON_RECOVERY,
-      null,
-      new FakeIdGenerator(),
-    );
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+      idGenerator: new FakeIdGenerator(),
+    });
     daemonClient.testHooks.attachSocket(clientSide);
     daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
   });

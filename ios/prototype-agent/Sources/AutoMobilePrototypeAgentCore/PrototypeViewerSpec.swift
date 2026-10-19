@@ -21,7 +21,7 @@ struct PrototypeViewerFileReader: PrototypeViewerFileReading {
 }
 
 enum PrototypeViewerContent {
-    case none
+    case absent
     case invalid(path: String, message: String)
     case unsupportedFormat(version: Int)
     case corrupt(String)
@@ -53,8 +53,9 @@ struct PrototypeViewerSpecLoader: PrototypeViewerContentLoading {
             guard data.count <= PrototypeLimits.maxSpecBytes * 4 else {
                 return .invalid(path: "$", message: "Spec byte limit exceeded")
             }
+            // Replacement decoding preserves the existing empty-file check for malformed UTF-8.
             guard !data.isEmpty,
-                  !String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                  !String(decoding: data, as: Unicode.UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
                 return .invalid(path: "$", message: "Prototype file is empty; expected JSON")
             }
@@ -76,7 +77,7 @@ struct PrototypeViewerSpecLoader: PrototypeViewerContentLoading {
                 return .invalid(path: "$", message: error.localizedDescription)
             }
         }
-        return .none
+        return .absent
     }
 
     private static func invalid(_ error: DecodingError) -> PrototypeViewerContent {

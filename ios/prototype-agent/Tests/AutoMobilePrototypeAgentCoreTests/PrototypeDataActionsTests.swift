@@ -16,11 +16,11 @@ final class PrototypeDataActionsTests: XCTestCase {
     }
 
     private func write(
-        _ data: String, _ op: PrototypeDataWrite.Op, _ path: String, _ value: JSONValue? = nil
+        _ data: String, _ operation: PrototypeDataWrite.Operation, _ path: String, _ value: JSONValue? = nil
     )
         throws -> Result<[String: JSONValue], PrototypeDataWriteFailure>
     {
-        try PrototypeDataWrite.apply(object(data), op: op, path: path, value: value)
+        try PrototypeDataWrite.apply(object(data), op: operation, path: path, value: value)
     }
 
     private func failure(_ result: Result<[String: JSONValue], PrototypeDataWriteFailure>) -> PrototypeDataWriteCode? {

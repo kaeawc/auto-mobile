@@ -29,7 +29,7 @@ struct PrototypeMenuBoundsReporter: ViewModifier {
 @MainActor
 private struct PrototypeMenuSurface<Content: View>: View {
     let anchor: CGRect?
-    var identifier: String? = nil
+    var identifier: String?
     @ViewBuilder let content: () -> Content
     @Environment(\.prototypePalette) private var palette
     @Environment(\.layoutDirection) private var direction

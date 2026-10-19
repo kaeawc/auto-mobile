@@ -880,10 +880,12 @@ struct PrototypeTimePickerView: View {
                         _ = model.refusedChanges
                         return PrototypeTime.isPM(hour: hour) ? 1 : 0
                     },
-                    set: { commit(
-                        hour: PrototypeTime.hour24(hour12: PrototypeTime.hour12(of: hour), pm: $0 == 1),
-                        minute: minute
-                    ) }
+                    set: {
+                        commit(
+                            hour: PrototypeTime.hour24(hour12: PrototypeTime.hour12(of: hour), pm: $0 == 1),
+                            minute: minute
+                        )
+                    }
                 )) {
                     Text("AM").tag(0)
                     Text("PM").tag(1)
@@ -1150,7 +1152,7 @@ extension PrototypeTextFieldOptions {
         case .next: .next
         case .search: .search
         case .send: .send
-        case .go: .go
+        case .proceed: .go
         case nil: .return
         }
     }

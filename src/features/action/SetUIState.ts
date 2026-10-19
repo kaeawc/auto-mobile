@@ -1,39 +1,23 @@
 import { runWithTextRequestContext } from "./textTransportTimeout";
-import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
-import {
-  SetUIStateOptions,
-  FieldSpec,
-  SetUIStateElementSelector,
-} from "../../models/SetUIStateOptions";
+import { BootedDevice, Element, ObserveResult } from "../../models";
+import { SetUIStateOptions, FieldSpec } from "../../models/SetUIStateOptions";
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector } from "./FieldTypeDetector";
+import { SetUIStateDeadlineRacer } from "./SetUIStateDeadlineRacer";
+import { SetUIStateFieldApplier } from "./SetUIStateFieldApplier";
 import type { InputTextMode } from "./InputText";
 import type { Keyboard } from "./Keyboard";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { ActionableError } from "../../models/ActionableError";
-import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
-import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
-import {
-  CONTAINS_IGNORE_CASE,
-  FOCUS_INPUT_INSPECT_INTENT,
-  FOCUS_INPUT_INTENT,
-  FOCUS_INPUT_WITH_HINT_FALLBACK,
-  INSPECT_INTENT,
-  TOGGLE_INSPECT_INTENT,
-} from "../utility/SelectionPolicy";
 import { logger } from "../../utils/logger";
-import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import type { ActionCall, TapOnCall } from "./ActionCall";
 
-// Dropdown controls need time to open before selection.
-export const DROPDOWN_OPEN_SETTLE_MS = 200;
+export { DROPDOWN_OPEN_SETTLE_MS } from "./SetUIStateFieldApplier";
 
 /**
  * Subscribes `listener` to extensions of the live transport deadline and
@@ -45,7 +29,7 @@ export type LiveDeadlineSubscriber = (listener: () => void) => (() => void) | un
 /**
  * Interface for TapOnElement dependency
  */
-interface TapOnElementLike {
+export interface TapOnElementLike {
   execute(
     options: {
       text?: string;
@@ -66,7 +50,7 @@ interface TapOnElementLike {
 /**
  * Interface for InputText dependency
  */
-interface InputTextLike {
+export interface InputTextLike {
   execute(
     text: string,
     imeAction?: string,
@@ -85,7 +69,7 @@ interface InputTextLike {
 /**
  * Interface for ClearText dependency
  */
-interface ClearTextLike {
+export interface ClearTextLike {
   execute(
     progress?: ProgressCallback,
     signal?: AbortSignal,
@@ -144,18 +128,18 @@ interface InternalFieldResult extends FieldResult {
   warnings?: string[];
 }
 
-interface FieldVerificationOutcome {
+export interface FieldVerificationOutcome {
   verified?: boolean;
   observation?: ObserveResult;
   error?: string;
   stopRetrying?: boolean;
 }
 
-interface TextFocusRecovery {
+export interface TextFocusRecovery {
   occlusionError?: KeyboardOcclusionError;
 }
 
-type FieldApplicationResult = {
+export type FieldApplicationResult = {
   success: boolean;
   error?: string;
   warnings?: string[];
@@ -163,7 +147,7 @@ type FieldApplicationResult = {
   stopRetrying?: boolean;
 };
 
-type FieldValueVerification = {
+export type FieldValueVerification = {
   verified: boolean;
   observation?: ObserveResult;
   observedValue?: string | boolean;
@@ -282,6 +266,8 @@ export class SetUIState extends BaseVisualChange {
   private fieldTypeDetector: FieldTypeDetector;
   private readonly selector: ResolverElementSelector;
   private dependencies: SetUIStateDependencies;
+  private readonly deadlineRacer: SetUIStateDeadlineRacer;
+  private readonly fieldApplier: SetUIStateFieldApplier;
 
   constructor(
     device: BootedDevice,
@@ -295,6 +281,22 @@ export class SetUIState extends BaseVisualChange {
     });
     this.fieldTypeDetector = dependencies.fieldTypeDetector ?? new FieldTypeDetector();
     this.dependencies = dependencies;
+    this.deadlineRacer = new SetUIStateDeadlineRacer(() => ({ timer: this.timer }));
+    this.fieldApplier = new SetUIStateFieldApplier(() => ({
+      fieldTypeDetector: this.fieldTypeDetector,
+      selector: this.selector,
+      device: this.device,
+      timer: this.timer,
+      getKeyboard: () => this.getKeyboard(),
+      getTapOnElement: () => this.getTapOnElement(),
+      getInputText: () => this.getInputText(),
+      getClearText: () => this.getClearText(),
+      getObserveScreen: () => this.getObserveScreen(),
+    }));
+  }
+
+  findElement(...args: Parameters<SetUIStateFieldApplier["findElement"]>) {
+    return this.fieldApplier.findElement(...args);
   }
 
   /**
@@ -475,7 +477,7 @@ export class SetUIState extends BaseVisualChange {
     // discarding the whole call. Fail fast into the same structured
     // all-`notAttempted` shape used below instead (issue #6222 P1).
     if (this.timer.now() >= admissionDeadlineMs()) {
-      const missing = options.fields.map((f) => this.describeSelector(f.selector));
+      const missing = options.fields.map((f) => this.fieldApplier.describeSelector(f.selector));
       const notAttemptedReason = `Not attempted: setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s) was already reached before the initial observation`;
       return {
         success: false,
@@ -493,7 +495,7 @@ export class SetUIState extends BaseVisualChange {
     // is a safety net for a stalled observe, which may remain in the
     // background when the deadline wins (see `raceAgainstDeadline`). It returns
     // the same structured all-`notAttempted` shape used by the admission check.
-    const initialObservationRaced = await this.raceAgainstDeadline(
+    const initialObservationRaced = await this.deadlineRacer.raceAgainstDeadline(
       () => this.getObserveScreen().execute({ signal, skipWaitForFresh: false, minTimestamp: 0 }),
       () => cutoffMs(),
       "initial observation",
@@ -501,7 +503,7 @@ export class SetUIState extends BaseVisualChange {
     );
     signal?.throwIfAborted();
     if (initialObservationRaced === "timed-out") {
-      const missing = options.fields.map((f) => this.describeSelector(f.selector));
+      const missing = options.fields.map((f) => this.fieldApplier.describeSelector(f.selector));
       const notAttemptedReason = `Not attempted: setUIState's initial observation did not settle within setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s)`;
       return {
         success: false,
@@ -606,12 +608,15 @@ export class SetUIState extends BaseVisualChange {
         // PRRT_kwDOP-GF5M6fuyts): a stall here stops the search and returns
         // what has already been applied instead of letting the outer abort
         // discard it.
-        const searchRaced = await this.raceAgainstDeadline<ObserveResult | undefined>(
+        const searchRaced = await this.deadlineRacer.raceAgainstDeadline<ObserveResult | undefined>(
           async (onTick) => {
             // Search direction describes content to reveal, not finger movement.
             await this.getSwipeOn().execute(
               { direction: searchState.currentDirection, gestureType: "scrollTowardsDirection" },
-              { progress: this.withRearmOnTick(fieldProgress(processed.size), onTick), signal },
+              {
+                progress: this.deadlineRacer.withRearmOnTick(fieldProgress(processed.size), onTick),
+                signal,
+              },
             );
 
             // Re-observe after scroll
@@ -702,28 +707,30 @@ export class SetUIState extends BaseVisualChange {
     // SAME field's own timeout against the new, larger budget instead of
     // timing out against the stale value captured here.
     const fieldBudgetMs = cutoffMs() - this.timer.now();
-    const raced = await this.raceAgainstDeadline<InternalFieldResult>(
-      (onTick) =>
-        runWithTextRequestContext({ getDeadlineMs: cutoffMs }, () =>
-          this.processField(
-            fieldSpec,
-            element,
-            this.withRearmOnTick(fieldProgress(processed.size), onTick),
-            signal,
+    const raced = await this.deadlineRacer
+      .raceAgainstDeadline<InternalFieldResult>(
+        (onTick) =>
+          runWithTextRequestContext({ getDeadlineMs: cutoffMs }, () =>
+            this.processField(
+              fieldSpec,
+              element,
+              this.deadlineRacer.withRearmOnTick(fieldProgress(processed.size), onTick),
+              signal,
+            ),
           ),
-        ),
-      () => cutoffMs(),
-      this.describeSelector(fieldSpec.selector),
-      subscribeLiveTransportDeadline,
-    ).catch((error: unknown): InternalFieldResult => {
-      signal?.throwIfAborted();
-      return {
-        selector: fieldSpec.selector,
-        success: false,
-        attempts: 0,
-        error: errorMessage(error),
-      };
-    });
+        () => cutoffMs(),
+        this.fieldApplier.describeSelector(fieldSpec.selector),
+        subscribeLiveTransportDeadline,
+      )
+      .catch((error: unknown): InternalFieldResult => {
+        signal?.throwIfAborted();
+        return {
+          selector: fieldSpec.selector,
+          success: false,
+          attempts: 0,
+          error: errorMessage(error),
+        };
+      });
     signal?.throwIfAborted();
 
     processed.add(fieldIndex);
@@ -740,7 +747,7 @@ export class SetUIState extends BaseVisualChange {
         success: false,
         attempts: 0,
         timedOut: true,
-        error: `Field ${this.describeSelector(fieldSpec.selector)} did not settle within its ${Math.round(Math.max(fieldBudgetMs, 0) / 1000)}s share of setUIState's result deadline; it may still be applying in the background`,
+        error: `Field ${this.fieldApplier.describeSelector(fieldSpec.selector)} did not settle within its ${Math.round(Math.max(fieldBudgetMs, 0) / 1000)}s share of setUIState's result deadline; it may still be applying in the background`,
       };
       state.resultBudgetSpent = true;
       return "stop";
@@ -767,8 +774,8 @@ export class SetUIState extends BaseVisualChange {
     await emitProgress(
       processed.size * 100,
       result.success
-        ? `Set field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
-        : `Failed field ${this.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
+        ? `Set field ${this.fieldApplier.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`
+        : `Failed field ${this.fieldApplier.describeSelector(fieldSpec.selector)} (${processed.size}/${options.fields.length})`,
     );
 
     // Refresh observation after each success. processField already fetched
@@ -788,7 +795,7 @@ export class SetUIState extends BaseVisualChange {
       // SAME live cutoff every other device call in this method already
       // respects (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev).
       signal?.throwIfAborted();
-      const observationRaced = await this.raceAgainstDeadline<ObserveResult>(
+      const observationRaced = await this.deadlineRacer.raceAgainstDeadline<ObserveResult>(
         () => this.observationAfterSuccess(result, signal),
         () => cutoffMs(),
         "post-success observation refresh",
@@ -798,7 +805,7 @@ export class SetUIState extends BaseVisualChange {
 
       if (observationRaced === "timed-out") {
         logger.warn(
-          `[SetUIState] Post-success observation refresh stalled after field ${this.describeSelector(fieldSpec.selector)}; returning ${processed.size}/${options.fields.length} accumulated field result(s) without a fresh observation`,
+          `[SetUIState] Post-success observation refresh stalled after field ${this.fieldApplier.describeSelector(fieldSpec.selector)}; returning ${processed.size}/${options.fields.length} accumulated field result(s) without a fresh observation`,
         );
         const notAttemptedReason =
           processed.size < options.fields.length
@@ -823,15 +830,17 @@ export class SetUIState extends BaseVisualChange {
     // Fail fast on failure
     if (!result.success) {
       logger.debug(
-        `[SetUIState] Field failed, stopping: ${this.describeSelector(fieldSpec.selector)}`,
+        `[SetUIState] Field failed, stopping: ${this.fieldApplier.describeSelector(fieldSpec.selector)}`,
       );
-      const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.describeSelector(fieldSpec.selector)} failed`;
+      const notAttemptedReason = `Not attempted: setUIState stopped after field ${this.fieldApplier.describeSelector(fieldSpec.selector)} failed`;
       return {
         success: false,
         fields: this.collectResults(fieldResults, options.fields, processed, notAttemptedReason),
         totalAttempts: state.totalAttempts,
         observation: state.lastObservation,
-        error: result.error ?? `Failed to set field: ${this.describeSelector(fieldSpec.selector)}`,
+        error:
+          result.error ??
+          `Failed to set field: ${this.fieldApplier.describeSelector(fieldSpec.selector)}`,
       };
     }
   }
@@ -847,7 +856,7 @@ export class SetUIState extends BaseVisualChange {
     if (processed.size < options.fields.length || state.resultBudgetSpent) {
       const missing = options.fields
         .filter((_, i) => !processed.has(i))
-        .map((f) => this.describeSelector(f.selector));
+        .map((f) => this.fieldApplier.describeSelector(f.selector));
 
       // The result-deadline case is NOT "not found" -- these fields may well
       // be on screen, they were simply never reached. Say so distinctly and
@@ -890,7 +899,7 @@ export class SetUIState extends BaseVisualChange {
    */
   private toPublicFieldResult(result: InternalFieldResult, warnings: Set<string>): FieldResult {
     for (const warning of result.warnings ?? []) {
-      warnings.add(`${this.describeSelector(result.selector)}: ${warning}`);
+      warnings.add(`${this.fieldApplier.describeSelector(result.selector)}: ${warning}`);
     }
     return {
       selector: result.selector,
@@ -934,7 +943,7 @@ export class SetUIState extends BaseVisualChange {
         continue;
       }
 
-      const element = this.findElement(
+      const element = this.fieldApplier.findElement(
         {
           ...fields[i].selector,
           screenSizeOptions: {
@@ -984,211 +993,11 @@ export class SetUIState extends BaseVisualChange {
           attempts: 0,
           error: fields[i].selector.elementId?.startsWith("s2-")
             ? `Element id '${fields[i].selector.elementId}' is stale; re-observe and use the id from the new observation.`
-            : `Element not found: ${this.describeSelector(fields[i].selector)}`,
+            : `Element not found: ${this.fieldApplier.describeSelector(fields[i].selector)}`,
         });
       }
     }
     return out;
-  }
-
-  /**
-   * Wraps a field's progress callback so every tick that reaches it also
-   * calls `onTick` -- the hook `raceAgainstDeadline` uses to re-arm an
-   * in-flight race's timeout against the LIVE cutoff (issue #6222 P1,
-   * fujuk). A progress notification is the only thing that can move a
-   * `ProgressExtendableDeadline` forward (`extendOnProgress`,
-   * `src/daemon/socketServer.ts`), so re-checking exactly when one is
-   * forwarded -- rather than only once at field admission -- is what lets a
-   * mid-field extension apply to THIS SAME field's own remaining budget
-   * instead of only to fields admitted afterward. A no-op (returns
-   * `undefined`) when there is no inner callback to wrap, matching
-   * `fieldProgress`'s own contract.
-   */
-  private withRearmOnTick(
-    inner: ProgressCallback | undefined,
-    onTick: () => void,
-  ): ProgressCallback | undefined {
-    if (!inner) {
-      return undefined;
-    }
-    return async (childProgress, childTotal, message) => {
-      await inner(childProgress, childTotal, message);
-      onTick();
-    };
-  }
-
-  /**
-   * Race a unit of device I/O against a live-read cutoff (issue #6222 P1,
-   * unifying fujug/fujuk/fujun). Used for both the initial observation and
-   * each admitted field's `processField()` call. Without this, either can run
-   * past the transport deadline and reproduce the exact silent-discard this whole feature exists to
-   * prevent, even though it was correctly started under budget at the time.
-   *
-   * This deadline is a safety net: when it wins, started work may remain
-   * active in the background. An external AbortSignal is forwarded to the
-   * text actions and observation so they can stop between device calls.
-   *
-   * Takes a THUNK, not an already-started promise: `startWork()` must not be
-   * called until AFTER the timeout is armed. Its own dependencies can run
-   * synchronously far enough to matter (fakes in tests advance a shared
-   * clock synchronously; real device I/O at least burns real wall-clock time
-   * before its first genuine suspension) -- starting it as part of
-   * evaluating this method's arguments, before its body runs, would arm the
-   * timeout against a clock that already moved, silently shrinking the
-   * work's actual budget.
-   *
-   * `getCutoffMs` is read fresh both when the timeout is (re-)armed here and
-   * again every time `startWork`'s own `onTick` hook fires (see
-   * `withRearmOnTick`) -- so a live-extended deadline applies to an
-   * ALREADY-RUNNING race, not just to work started afterward (fujuk). A
-   * cutoff at or before now re-arms as an IMMEDIATE timeout rather than a
-   * no-op, so an extension that shrinks the effective remaining time (e.g.
-   * the live deadline did not move) still resolves promptly.
-   *
-   * @param startWork - Starts the work. Invoked exactly once, after the
-   *   timeout below is first armed. Receives `onTick`, to be invoked
-   *   whenever the caller learns the live cutoff may have moved.
-   * @param getCutoffMs - Returns the CURRENT absolute cutoff (already
-   *   headroom-adjusted, e.g. `cutoffMs()`) this race must finish before.
-   *   Read fresh on every (re-)arm, never cached.
-   * @param describeWork - Only used to identify the work in a debug log if
-   *   its promise eventually settles after the race already timed out.
-   * @param subscribeToCutoffMoves - Optional subscription to live-deadline
-   *   extensions. While the race is pending, every extension re-arms the
-   *   timeout exactly like `onTick`, so an extension that lands after the
-   *   last tick's re-read (but before the old cutoff) still keeps the work
-   *   running (issue #6283). Unsubscribed as soon as the race settles.
-   * @returns The work's real result if it settles in time, or the literal
-   *   string `"timed-out"` if the timeout wins the race.
-   */
-  private async raceAgainstDeadline<T>(
-    startWork: (onTick: () => void) => Promise<T>,
-    getCutoffMs: () => number,
-    describeWork: string,
-    subscribeToCutoffMoves?: LiveDeadlineSubscriber,
-  ): Promise<T | "timed-out"> {
-    // A background settlement after abandonment has no observer left to
-    // report to beyond this debug trace -- expected once the work's own
-    // budget has already been spent.
-    const logBackgroundSettlement = (workPromise: Promise<T>): void => {
-      workPromise
-        .then(() => {
-          logger.debug(`[SetUIState] Background work settled after timeout for ${describeWork}`);
-        })
-        .catch((error: unknown) => {
-          logger.debug(
-            `[SetUIState] Background work rejected after timeout for ${describeWork}: ${errorMessage(error)}`,
-          );
-        });
-    };
-
-    return new Promise<T | "timed-out">((resolve, reject) => {
-      let settled = false;
-      let timeoutHandle: NodeJS.Timeout | undefined;
-      // Held in a mutable slot that exists BEFORE the first arm: on a
-      // FakeTimer-driven test, `startWork()`'s own synchronous prefix can
-      // advance the clock far enough to fire the timeout re-entrantly,
-      // synchronously, before `startWork()` even returns -- at which point
-      // the promise has not been assigned yet. The slot is initialized
-      // immediately, so the timeout closure below can safely read it (as
-      // `undefined`) even if it fires before the assignment further down
-      // ever runs. The guard below skips tracing when it is still
-      // `undefined`, and the post-`startWork()` check a few lines down
-      // handles that case instead.
-      const work: { promise?: Promise<T> } = {};
-      let unsubscribeCutoffMoves: (() => void) | undefined;
-
-      const finishTimedOut = (): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        unsubscribeCutoffMoves?.();
-        if (timeoutHandle !== undefined) {
-          this.timer.clearTimeout(timeoutHandle);
-          timeoutHandle = undefined;
-        }
-        if (work.promise) {
-          logBackgroundSettlement(work.promise);
-        }
-        resolve("timed-out");
-      };
-
-      // (Re-)arms the timeout against a FRESHLY read cutoff. A non-positive
-      // remaining budget still resolves "timed-out" immediately rather than
-      // arming a timer for it.
-      const armTimeout = (): void => {
-        if (settled) {
-          return;
-        }
-        if (timeoutHandle !== undefined) {
-          this.timer.clearTimeout(timeoutHandle);
-          timeoutHandle = undefined;
-        }
-        const budgetMs = getCutoffMs() - this.timer.now();
-        if (budgetMs <= 0) {
-          finishTimedOut();
-          return;
-        }
-        timeoutHandle = this.timer.setTimeout(finishTimedOut, budgetMs);
-      };
-
-      // Passed to `startWork` as `onTick`: re-arms against the live cutoff
-      // whenever the caller learns it may have moved (issue #6222 P1,
-      // fujuk). A no-op once already settled.
-      const onTick = (): void => {
-        armTimeout();
-      };
-
-      armTimeout();
-      // Re-arm whenever the live deadline is extended, not only on a tick:
-      // the daemon applies the extension in its own `onprogress` handler,
-      // which may run after this call's tick already re-read the old value
-      // (issue #6283).
-      if (!settled) {
-        unsubscribeCutoffMoves = subscribeToCutoffMoves?.(armTimeout);
-      }
-      // Armed above; only now does the work actually start.
-      const startedWorkPromise = startWork(onTick);
-      work.promise = startedWorkPromise;
-      if (settled) {
-        // The timeout above already fired (synchronously, budget<=0, or
-        // re-entrantly while `startWork()` was still running synchronously)
-        // before this closure could observe it via `work.promise` -- trace
-        // its eventual settlement here instead.
-        logBackgroundSettlement(startedWorkPromise);
-        return;
-      }
-      startedWorkPromise.then(
-        (result) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          unsubscribeCutoffMoves?.();
-          if (timeoutHandle !== undefined) {
-            this.timer.clearTimeout(timeoutHandle);
-          }
-          resolve(result);
-        },
-        (error: unknown) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          unsubscribeCutoffMoves?.();
-          if (timeoutHandle !== undefined) {
-            this.timer.clearTimeout(timeoutHandle);
-          }
-          // The known callers (`processField`, `ObserveScreen.execute`)
-          // resolve rather than reject in practice -- this is a defensive
-          // fallback for something truly unexpected. Propagated to the
-          // caller rather than swallowed here, since only the caller knows
-          // how to shape a failure specific to what it was racing.
-          reject(error);
-        },
-      );
-    });
   }
 
   /**
@@ -1213,17 +1022,21 @@ export class SetUIState extends BaseVisualChange {
       try {
         // On retry, re-find the element via scroll
         if (attempts > 1) {
-          element = await this.refreshFieldElement(fieldSpec, element, signal);
+          element = await this.fieldApplier.refreshFieldElement(fieldSpec, element, signal);
         }
 
         // Detect field type
         fieldType = this.fieldTypeDetector.detect(element);
         logger.info(
-          `[SetUIState] Field type detected: ${fieldType} for ${this.describeSelector(fieldSpec.selector)}`,
+          `[SetUIState] Field type detected: ${fieldType} for ${this.fieldApplier.describeSelector(fieldSpec.selector)}`,
         );
 
         // Check if field already has correct value
-        const alreadyCorrect = this.isFieldAlreadyCorrect(element, fieldSpec, fieldType);
+        const alreadyCorrect = this.fieldApplier.isFieldAlreadyCorrect(
+          element,
+          fieldSpec,
+          fieldType,
+        );
         if (alreadyCorrect) {
           logger.info(`[SetUIState] Field already has correct value, skipping`);
           return {
@@ -1237,7 +1050,7 @@ export class SetUIState extends BaseVisualChange {
         }
 
         // Apply the value based on field type
-        const applyResult = await this.applyFieldValue(
+        const applyResult = await this.fieldApplier.applyFieldValue(
           element,
           fieldSpec,
           fieldType,
@@ -1258,7 +1071,7 @@ export class SetUIState extends BaseVisualChange {
           continue;
         }
 
-        const verification = await this.verifyAppliedFieldValue(
+        const verification = await this.fieldApplier.verifyAppliedFieldValue(
           fieldSpec,
           fieldType,
           element,
@@ -1302,700 +1115,6 @@ export class SetUIState extends BaseVisualChange {
       error: lastError,
       fieldType,
     };
-  }
-
-  private async verifyAppliedFieldValue(
-    fieldSpec: FieldSpec,
-    fieldType: FieldType,
-    element: Element,
-    attempts: number,
-    signal?: AbortSignal,
-  ): Promise<FieldVerificationOutcome> {
-    if (this.shouldSkipFieldVerification(fieldSpec, fieldType, element)) {
-      return {};
-    }
-
-    const verifyResult = await this.verifyFieldValue(fieldSpec, fieldType, signal, element);
-    if (verifyResult.unverifiable) {
-      return { observation: verifyResult.observation };
-    }
-    if (verifyResult.verified) {
-      return { verified: true, observation: verifyResult.observation };
-    }
-
-    return {
-      error:
-        `Verification failed for ${this.describeSelector(fieldSpec.selector)}: ` +
-        `expected ${JSON.stringify(fieldType === "toggle" || fieldType === "checkbox" ? fieldSpec.selected : fieldSpec.value)}, ` +
-        `observed ${JSON.stringify(verifyResult.observedValue)}`,
-      stopRetrying: fieldType === "text" && attempts >= 2,
-    };
-  }
-
-  private shouldSkipFieldVerification(
-    fieldSpec: FieldSpec,
-    fieldType: FieldType,
-    element: Element,
-  ): boolean {
-    if (
-      this.fieldTypeDetector.isPasswordField(element) ||
-      this.fieldTypeDetector.shouldSkipVerification(element, fieldType)
-    ) {
-      return true;
-    }
-
-    return (
-      fieldType !== "text" &&
-      fieldType === "dropdown" &&
-      fieldSpec.selector.text !== undefined &&
-      fieldSpec.selector.elementId === undefined
-    );
-  }
-
-  private async refreshFieldElement(
-    fieldSpec: FieldSpec,
-    previousElement: Element,
-    signal?: AbortSignal,
-  ): Promise<Element> {
-    const observation = await this.getObserveScreen().execute({
-      signal,
-      skipWaitForFresh: false,
-      minTimestamp: 0,
-    });
-    if (!observation?.viewHierarchy) {
-      return previousElement;
-    }
-
-    const found = this.findElement(
-      {
-        ...fieldSpec.selector,
-        screenSizeOptions: {
-          observationScreenSize: observation.screenSize,
-          display: observation.viewHierarchy,
-        },
-      },
-      observation.viewHierarchy,
-      fieldSpec.selected !== undefined,
-    );
-    if (found) {
-      return found;
-    }
-
-    const resourceId = previousElement["resource-id"];
-    if (fieldSpec.selector.text && resourceId) {
-      return (
-        this.findByResourceId(observation.viewHierarchy, resourceId, {
-          observationScreenSize: observation.screenSize,
-          display: observation.viewHierarchy,
-        }) ?? previousElement
-      );
-    }
-    return previousElement;
-  }
-
-  /**
-   * Resolves the element a selector names without acting on it; public for tests (null if none).
-   */
-  findElement(
-    selector: SetUIStateElementSelector & {
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-    viewHierarchy?: ViewHierarchyResult,
-    wantsCheckable = false,
-  ): Element | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-
-    if (selector.text) {
-      const control = wantsCheckable
-        ? this.findCheckableByText(selector.text, viewHierarchy, selector.screenSizeOptions)
-        : null;
-      if (control) {
-        return control;
-      }
-      if (this.device.platform === "ios") {
-        return (
-          this.selector.select(
-            viewHierarchy,
-            { text: selector.text },
-            {
-              ...FOCUS_INPUT_INSPECT_INTENT,
-              screenSizeOptions: selector.screenSizeOptions,
-            },
-          ).element ?? null
-        );
-      }
-      return this.findAndroidTextElement(selector.text, viewHierarchy, selector.screenSizeOptions);
-    }
-
-    if (selector.elementId) {
-      return this.findByResourceId(viewHierarchy, selector.elementId, selector.screenSizeOptions);
-    }
-
-    return null;
-  }
-
-  /**
-   * A `selected` request names a control by its visible label, which usually sits on a
-   * clickable row that owns the checkable widget (Settings switch and radio rows, #10616).
-   * The toggle intent resolves the checkable node the matched label or row encloses; a
-   * match that is not checkable falls back to the ordinary field lookup.
-   */
-  private findCheckableByText(
-    text: string,
-    viewHierarchy: ViewHierarchyResult,
-    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
-  ): Element | null {
-    const android = this.device.platform !== "ios";
-    const element = this.selector.select(
-      viewHierarchy,
-      { text },
-      {
-        ...TOGGLE_INSPECT_INTENT,
-        ...(android ? CONTAINS_IGNORE_CASE : {}),
-        screenSizeOptions,
-      },
-    ).element;
-    if (!element) {
-      return null;
-    }
-    const fieldType = this.fieldTypeDetector.detect(element);
-    return fieldType === "toggle" || fieldType === "checkbox" ? element : null;
-  }
-
-  /**
-   * The field node an ID names. `inspect` keeps the node itself (no tap-owner
-   * promotion) and the resolver deduplicates one field serialized in multiple roots.
-   */
-  private findByResourceId(
-    viewHierarchy: ViewHierarchyResult,
-    resourceId: string,
-    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
-  ): Element | null {
-    return (
-      this.selector.select(
-        viewHierarchy,
-        { elementId: resourceId },
-        {
-          ...INSPECT_INTENT,
-          screenSizeOptions,
-        },
-      ).element ?? null
-    );
-  }
-
-  private findAndroidTextElement(
-    text: string,
-    viewHierarchy: ViewHierarchyResult,
-    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
-  ): Element | null {
-    const matched = this.selector.select(
-      viewHierarchy,
-      { text },
-      {
-        ...INSPECT_INTENT,
-        ...CONTAINS_IGNORE_CASE,
-        screenSizeOptions,
-      },
-    ).element;
-    if (!matched) {
-      return this.selector.select(
-        viewHierarchy,
-        { text },
-        {
-          ...FOCUS_INPUT_WITH_HINT_FALLBACK,
-          screenSizeOptions,
-        },
-      ).element;
-    }
-    // Preserve legacy matching and all classified controls. Only an unclassified
-    // label may use the same bounded label-to-input promotion as sendKeys.
-    if (this.fieldTypeDetector.detect(matched) !== "unknown") {
-      return matched;
-    }
-    const identity = matched["resource-id"] || matched["view-id"];
-    const focusOptions = {
-      ...FOCUS_INPUT_INTENT,
-      screenSizeOptions,
-    };
-    let focused = identity
-      ? this.selector.select(viewHierarchy, { elementId: identity }, focusOptions)
-      : this.selector.select(
-          viewHierarchy,
-          { text },
-          {
-            ...focusOptions,
-            ...CONTAINS_IGNORE_CASE,
-          },
-        );
-    const source = getHierarchyNodeSource(matched);
-    if (identity && source !== getHierarchyNodeSource(focused.matchedElement ?? matched)) {
-      // Legacy text search prefers hierarchy; the resolver may choose a separately
-      // deserialized window copy. Retry that primary tree, then require exact source equality.
-      focused = this.selector.select(
-        { ...resolveViewHierarchyForSearch(viewHierarchy)!, windows: undefined },
-        { elementId: identity },
-        focusOptions,
-      );
-    }
-    return source &&
-      focused.matchedElement &&
-      source === getHierarchyNodeSource(focused.matchedElement)
-      ? (focused.element ?? matched)
-      : matched;
-  }
-
-  /**
-   * Check if field already has the correct value
-   */
-  private isFieldAlreadyCorrect(
-    element: Element,
-    fieldSpec: FieldSpec,
-    fieldType: FieldType,
-  ): boolean {
-    switch (fieldType) {
-      case "text":
-        if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
-        }
-        return false;
-
-      case "checkbox":
-      case "toggle":
-        if (fieldSpec.selected !== undefined) {
-          const isChecked = this.fieldTypeDetector.isChecked(element);
-          return isChecked === fieldSpec.selected;
-        }
-        return false;
-
-      case "dropdown":
-        if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
-        }
-        return false;
-
-      default:
-        return false;
-    }
-  }
-
-  /**
-   * Make one Android IME recovery attempt per field, preserving the original refusal.
-   */
-  private async focusTextField(
-    element: Element,
-    fieldSpec: FieldSpec,
-    recovery: TextFocusRecovery,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): ReturnType<TapOnElementLike["execute"]> {
-    const focus = (target: Element) =>
-      this.getTapOnElement().execute(
-        target["resource-id"]
-          ? { elementId: target["resource-id"], action: "focus" }
-          : this.buildTapOptions(fieldSpec.selector, "focus"),
-        { progress, signal, recovery: { throwOnKeyboardOcclusion: true } },
-      );
-    try {
-      return await focus(element);
-    } catch (error) {
-      throwIfAborted(signal);
-      if (this.device.platform !== "android" || !(error instanceof KeyboardOcclusionError)) {
-        // Preserve the field-error contract while keeping thrown errors structured.
-        throw error instanceof ActionableError
-          ? error
-          : new ActionableError(errorMessage(error), { cause: error });
-      }
-      if (recovery.occlusionError) {
-        logger.warn("[SetUIState] IME recovery failed", error);
-        throw recovery.occlusionError;
-      }
-      recovery.occlusionError = error;
-      logger.debug("[SetUIState] Text field is covered by the IME; closing the keyboard", error);
-      try {
-        const dismissal = await this.getKeyboard().execute("close", { signal });
-        throwIfAborted(signal);
-        if (!dismissal.success) {
-          throw error;
-        }
-        const refreshed = await this.refreshFieldElement(fieldSpec, element, signal);
-        throwIfAborted(signal);
-        const result = await focus(refreshed);
-        throwIfAborted(signal);
-        if (!result.success || result.focusVerified !== true) {
-          throw error;
-        }
-        return result;
-      } catch (recoveryError) {
-        throwIfAborted(signal);
-        logger.warn("[SetUIState] IME recovery failed", recoveryError);
-        throw error;
-      }
-    }
-  }
-
-  /**
-   * Apply value to field based on type
-   */
-  private async applyFieldValue(
-    element: Element,
-    fieldSpec: FieldSpec,
-    fieldType: FieldType,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    focusRecovery: TextFocusRecovery = {},
-  ): Promise<FieldApplicationResult> {
-    const tapOnElement = this.getTapOnElement();
-    const inputText = this.getInputText();
-    const clearText = this.getClearText();
-
-    try {
-      switch (fieldType) {
-        case "text":
-          return await this.applyTextFieldValue({
-            element,
-            fieldSpec,
-            focusRecovery,
-            progress,
-            signal,
-            inputText,
-            clearText,
-          });
-
-        case "checkbox":
-        case "toggle":
-          return await this.applySelectedFieldValue(
-            element,
-            fieldSpec,
-            tapOnElement,
-            progress,
-            signal,
-          );
-
-        case "dropdown":
-          return await this.applyDropdownFieldValue(fieldSpec, tapOnElement, progress, signal);
-
-        default:
-          // Name what was actually matched: this is normally a label rather than
-          // the input itself, and "Unknown field type: unknown" describes an
-          // internal state the caller cannot act on (#4242).
-          return {
-            success: false,
-            unclassifiable: true,
-            error:
-              `Cannot set ${this.describeSelector(fieldSpec.selector)}: matched an element that is not ` +
-              `an editable field (detected type "${fieldType}"). Select the input rather than its label.`,
-          };
-      }
-    } catch (error) {
-      signal?.throwIfAborted();
-      logger.warn(`[SetUIState] Failed to apply field value: ${errorMessage(error)}`, error);
-      return {
-        success: false,
-        error: errorMessage(error),
-        stopRetrying: error instanceof KeyboardOcclusionError,
-      };
-    }
-  }
-
-  private async applyTextFieldValue({
-    element,
-    fieldSpec,
-    focusRecovery,
-    progress,
-    signal,
-    inputText,
-    clearText,
-  }: {
-    element: Element;
-    fieldSpec: FieldSpec;
-    focusRecovery: TextFocusRecovery;
-    progress?: ProgressCallback;
-    signal?: AbortSignal;
-    inputText: InputTextLike;
-    clearText: ClearTextLike;
-  }): Promise<FieldApplicationResult> {
-    if (fieldSpec.value === undefined) {
-      return { success: false, error: "value is required for text fields" };
-    }
-
-    const selectorDesc = this.describeSelector(fieldSpec.selector);
-
-    // The focus action verifies that this editable field, rather than a
-    // previously focused field, owns input before ClearText can mutate it.
-    logger.debug(`[SetUIState] text.focus selector=${selectorDesc}`);
-    const tapStart = Date.now();
-    const tapResult = await this.focusTextField(
-      element,
-      fieldSpec,
-      focusRecovery,
-      progress,
-      signal,
-    );
-    signal?.throwIfAborted();
-    logger.debug(
-      `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
-    );
-    if (!tapResult.success || tapResult.focusVerified !== true) {
-      return {
-        success: false,
-        error: `Failed to tap/focus on field: ${tapResult.error ?? "focus was not verified"}`,
-      };
-    }
-
-    // Clear existing text
-    logger.debug(`[SetUIState] text.clear selector=${selectorDesc}`);
-    const clearStart = Date.now();
-    signal?.throwIfAborted();
-    const clearResult = await clearText.execute(progress, signal);
-    if (clearResult.retryable !== false) {
-      signal?.throwIfAborted();
-    }
-    logger.debug(
-      `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
-    );
-    if (!clearResult.success) {
-      return {
-        success: false,
-        error: `Failed to clear text: ${clearResult.error}`,
-        stopRetrying: clearResult.retryable === false,
-      };
-    }
-
-    const inputResult = await this.inputFieldText(fieldSpec, selectorDesc, inputText, signal);
-    return {
-      ...inputResult,
-      warnings: clearResult.warnings,
-    };
-  }
-
-  private async inputFieldText(
-    fieldSpec: FieldSpec,
-    selectorDesc: string,
-    inputText: InputTextLike,
-    signal?: AbortSignal,
-  ): Promise<FieldApplicationResult> {
-    // Input new text. Intentionally passes no mode so the shared
-    // InputText.execute applies event-all marker auto-promotion here too
-    // (a form field value containing a configured marker, e.g. an
-    // @mention, is typed via eventAll). This is by design — the feature
-    // is scoped to both the internal text-input primitive and setUIState text fields.
-    logger.debug(
-      `[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value!.length}`,
-    );
-    const inputStart = Date.now();
-    signal?.throwIfAborted();
-    const inputResult = await inputText.execute(
-      fieldSpec.value!,
-      undefined,
-      false,
-      undefined,
-      signal,
-    );
-    if (inputResult.retryable !== false) {
-      signal?.throwIfAborted();
-    }
-    logger.debug(
-      `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
-    );
-    if (!inputResult.success) {
-      return {
-        success: false,
-        error: `Failed to input text: ${inputResult.error}`,
-        stopRetrying: inputResult.retryable === false,
-      };
-    }
-
-    return { success: true };
-  }
-
-  private async applySelectedFieldValue(
-    element: Element,
-    fieldSpec: FieldSpec,
-    tapOnElement: TapOnElementLike,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<FieldApplicationResult> {
-    if (fieldSpec.selected === undefined) {
-      return { success: false, error: "selected is required for checkbox/toggle fields" };
-    }
-
-    // Check current state
-    const isChecked = this.fieldTypeDetector.isChecked(element);
-
-    // Only tap if state needs to change
-    if (isChecked !== fieldSpec.selected) {
-      const tapResult = await tapOnElement.execute(
-        this.buildTapOptions(fieldSpec.selector, "tap"),
-        { progress, signal },
-      );
-      if (!tapResult.success) {
-        return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
-      }
-    }
-
-    return { success: true };
-  }
-
-  private async applyDropdownFieldValue(
-    fieldSpec: FieldSpec,
-    tapOnElement: TapOnElementLike,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<FieldApplicationResult> {
-    if (fieldSpec.value === undefined) {
-      return { success: false, error: "value is required for dropdown fields" };
-    }
-
-    // Tap to open dropdown
-    const openResult = await tapOnElement.execute(this.buildTapOptions(fieldSpec.selector, "tap"), {
-      progress,
-      signal,
-    });
-    if (!openResult.success) {
-      return { success: false, error: `Failed to open dropdown: ${openResult.error}` };
-    }
-
-    // Wait a bit for dropdown to open
-    await this.timer.sleep(DROPDOWN_OPEN_SETTLE_MS);
-
-    // Tap on the desired value
-    const selectResult = await tapOnElement.execute(
-      { text: fieldSpec.value, action: "tap" },
-      { progress, signal },
-    );
-    if (!selectResult.success) {
-      return {
-        success: false,
-        error: `Failed to select dropdown value: ${selectResult.error}`,
-      };
-    }
-
-    return { success: true };
-  }
-
-  /**
-   * Verify field value after setting
-   */
-  private async verifyFieldValue(
-    fieldSpec: FieldSpec,
-    fieldType: FieldType,
-    signal?: AbortSignal,
-    previouslyMatchedElement?: Element,
-  ): Promise<FieldValueVerification> {
-    // Get fresh observation. The caller (processField -> execute) reuses this
-    // as its own post-success refresh instead of issuing a second, effectively
-    // redundant observe against the device (#6222).
-    const observation = await this.getObserveScreen().execute({
-      signal,
-      skipWaitForFresh: false,
-      minTimestamp: 0,
-    });
-    if (!observation?.viewHierarchy) {
-      if (fieldType === "text") {
-        return { verified: false, observation, unverifiable: true };
-      }
-      return { verified: false, observation };
-    }
-
-    // Find the element again
-    let element = this.findElement(
-      {
-        ...fieldSpec.selector,
-        screenSizeOptions: {
-          observationScreenSize: observation.screenSize,
-          display: observation.viewHierarchy,
-        },
-      },
-      observation.viewHierarchy,
-      fieldSpec.selected !== undefined,
-    );
-    // A text selector can name the field's current label/value, which changes
-    // after input. Prefer the matched field's stable resource ID in the fresh
-    // hierarchy when the original text no longer identifies it.
-    const resourceId = previouslyMatchedElement?.["resource-id"];
-    if (!element && resourceId) {
-      element = this.findByResourceId(observation.viewHierarchy, resourceId, {
-        observationScreenSize: observation.screenSize,
-        display: observation.viewHierarchy,
-      });
-    }
-    if (!element) {
-      if (fieldType === "text") {
-        return { verified: false, observation, unverifiable: true };
-      }
-      return { verified: false, observation };
-    }
-
-    return this.verifyObservedFieldValue(fieldSpec, fieldType, element, observation);
-  }
-
-  private verifyObservedFieldValue(
-    fieldSpec: FieldSpec,
-    fieldType: FieldType,
-    element: Element,
-    observation: ObserveResult,
-  ): FieldValueVerification {
-    // Verify based on field type
-    switch (fieldType) {
-      case "text":
-        if (fieldSpec.value !== undefined) {
-          const observedValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: observedValue === fieldSpec.value, observation, observedValue };
-        }
-        return { verified: true, observation };
-
-      case "checkbox":
-      case "toggle":
-        if (fieldSpec.selected !== undefined) {
-          const isChecked = this.fieldTypeDetector.isChecked(element);
-          return {
-            verified: isChecked === fieldSpec.selected,
-            observation,
-            observedValue: isChecked,
-          };
-        }
-        return { verified: true, observation };
-
-      case "dropdown":
-        if (fieldSpec.value !== undefined) {
-          const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: currentValue === fieldSpec.value, observation };
-        }
-        return { verified: true, observation };
-
-      default:
-        return { verified: true, observation };
-    }
-  }
-
-  /**
-   * Build tap options from selector
-   */
-  private buildTapOptions(
-    selector: SetUIStateElementSelector,
-    action: string,
-  ): { text?: string; elementId?: string; action: string } {
-    if (selector.text) {
-      return { text: selector.text, action };
-    }
-    return { elementId: selector.elementId, action };
-  }
-
-  /**
-   * Describe a selector for error messages
-   */
-  private describeSelector(selector: SetUIStateElementSelector): string {
-    if (selector.text) {
-      return `text="${selector.text}"`;
-    }
-    if (selector.elementId) {
-      return `elementId="${selector.elementId}"`;
-    }
-    return "unknown selector";
   }
 
   // Dependency getters with lazy initialization

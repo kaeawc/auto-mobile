@@ -11,6 +11,8 @@ import type WebSocket from "ws";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+export type { SwipeRequest, SwipeRequestOptions } from "../../../utils/interfaces/SwipeRequest";
+export type { DragRequest } from "../../../utils/interfaces/DragRequest";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
 import type { PrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import type { SavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
@@ -135,10 +137,4 @@ export interface DelegateContext {
   unsupportedCommandError?(messageType: string): string;
   /** Cancel any pending screenshot backoff captures */
   cancelScreenshotBackoff(): void;
-}
-
-/** Optional iOS swipe context; a legacy frame-context string remains accepted. */
-export interface SwipeRequestOptions {
-  frameContext?: string;
-  lockScreen?: boolean;
 }

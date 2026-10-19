@@ -7,6 +7,7 @@ import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayErr
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 
 const device: BootedDevice = { deviceId: "ios-swipe", platform: "ios", name: "iPhone" };
 
@@ -25,12 +26,12 @@ class ScriptedSwipeClient extends FakeIOSCtrlProxy {
   }
 
   override async requestSwipe(
-    ...args: Parameters<IOSCtrlProxyClient["requestSwipe"]>
+    request: SwipeRequest,
   ): ReturnType<IOSCtrlProxyClient["requestSwipe"]> {
     this.calls++;
-    this.receivedSignal = args[8];
-    this.receivedOnDispatch = args[9];
-    return this.script(() => args[9]?.());
+    this.receivedSignal = request.signal;
+    this.receivedOnDispatch = request.onDispatch;
+    return this.script(() => request.onDispatch?.());
   }
 }
 
@@ -238,24 +239,12 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
 });
 
 describe("ExecuteGesture iOS swipe over the real transport", () => {
-  /** Wires the real delegate, translating the facade's argument order to the delegate's. */
+  /** Wires the real delegate behind the client's request-object swipe. */
   function wire() {
     const h = createIosDelegateHarness();
     const gestures = new CtrlProxyGestures(h.context);
     const client = Object.assign(new FakeIOSCtrlProxy(h.timer), {
-      requestSwipe: (...args: Parameters<IOSCtrlProxyClient["requestSwipe"]>) =>
-        gestures.requestSwipe(
-          args[0],
-          args[1],
-          args[2],
-          args[3],
-          args[4],
-          args[5],
-          args[6],
-          args[7],
-          args[9],
-          args[8],
-        ),
+      requestSwipe: (request: SwipeRequest) => gestures.requestSwipe(request),
     });
     use(client);
     return h;

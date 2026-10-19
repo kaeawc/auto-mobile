@@ -151,9 +151,9 @@ describe("dragAndDrop Android explicit-display cancellation", () => {
         display: "external",
       });
       const controller = new AbortController();
-      drag.mockImplementation(async (...args) => {
-        expect(args[9]).toBe(controller.signal);
-        expect(args[10]).toBe(2);
+      drag.mockImplementation(async (request) => {
+        expect(request.signal).toBe(controller.signal);
+        expect(request.displayId).toBe(2);
         controller.abort();
         if (reply === "rejects") {
           throw new Error("Drag request cancelled");
@@ -298,7 +298,11 @@ describe("dragAndDrop display durations", () => {
       expect(result.success).toBe(true);
       expect(result.duration).toBe(300);
       expect(drag).toHaveBeenCalledTimes(1);
-      expect(drag.mock.calls[0]?.slice(4, 7)).toEqual([600, 300, 100]);
+      expect(drag.mock.calls[0]?.[0]).toMatchObject({
+        pressDurationMs: 600,
+        dragDurationMs: 300,
+        holdDurationMs: 100,
+      });
       expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
     });
   }
@@ -317,21 +321,19 @@ describe("dragAndDrop display durations", () => {
       expect(result.success).toBe(true);
       expect(capability).toHaveBeenCalledWith("gesture_display_id_v1");
       expect(drag).toHaveBeenCalledTimes(1);
-      expect(drag.mock.calls[0]).toEqual([
-        50,
-        40,
-        150,
-        140,
-        durations.pressDurationMs ?? 600,
-        durations.dragDurationMs ?? 300,
-        durations.holdDurationMs ?? 100,
-        expect.any(Number),
-        undefined,
-        undefined,
-        2,
-        expect.any(Function),
-        expect.any(Function),
-      ]);
+      expect(drag.mock.calls[0]?.[0]).toEqual({
+        x1: 50,
+        y1: 40,
+        x2: 150,
+        y2: 140,
+        pressDurationMs: durations.pressDurationMs ?? 600,
+        dragDurationMs: durations.dragDurationMs ?? 300,
+        holdDurationMs: durations.holdDurationMs ?? 100,
+        timeoutMs: expect.any(Number),
+        displayId: 2,
+        beforeSend: expect.any(Function),
+        onDispatch: expect.any(Function),
+      });
       expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
     });
   }
@@ -380,9 +382,17 @@ describe("dragAndDrop display durations", () => {
     });
     expect(result.success).toBe(true);
     expect(drag).toHaveBeenCalledTimes(1);
-    const args = drag.mock.calls[0];
-    expect(args?.slice(0, 7)).toEqual([50, 40, 150, 140, 700, 500, 200]);
-    expect(args?.[10]).toBeUndefined();
+    const request = drag.mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      x1: 50,
+      y1: 40,
+      x2: 150,
+      y2: 140,
+      pressDurationMs: 700,
+      dragDurationMs: 500,
+      holdDurationMs: 200,
+    });
+    expect(request?.displayId).toBeUndefined();
     expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
   });
 });
@@ -405,8 +415,8 @@ describe("Android drag dispatch outcomes", () => {
       "Failed to dispatch gesture",
     ])(`${label}: dispatched no-op reply stays plain: %s`, async (error) => {
       const { action, drag, adb } = fixture({ supportsDisplay: true, display });
-      drag.mockImplementation(async (...args) => {
-        args[12]?.();
+      drag.mockImplementation(async (request) => {
+        request.onDispatch?.();
         return { success: false, totalTimeMs: 20, error };
       });
       const result = await action.execute({ ...endpoints, display });
@@ -433,8 +443,8 @@ describe("Android drag dispatch outcomes", () => {
       "Non-finite gesture coordinate: x1=NaN. Coordinates must be finite (not NaN or Infinity).\n",
     ])(`${label}: partial or unknown reply stays indeterminate: %s`, async (error) => {
       const { action, drag } = fixture({ supportsDisplay: true, display });
-      drag.mockImplementation(async (...args) => {
-        args[12]?.();
+      drag.mockImplementation(async (request) => {
+        request.onDispatch?.();
         return { success: false, totalTimeMs: 20, error };
       });
       const result = await action.execute({ ...endpoints, display });
@@ -449,8 +459,8 @@ describe("Android drag dispatch outcomes", () => {
       const error = new Error("Connection lost");
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       restorers.push(() => warn.mockRestore());
-      drag.mockImplementation(async (...args) => {
-        args[12]?.();
+      drag.mockImplementation(async (request) => {
+        request.onDispatch?.();
         throw error;
       });
       const result = await action.execute({ ...endpoints, display });
@@ -460,18 +470,20 @@ describe("Android drag dispatch outcomes", () => {
 
     test(`${label}: accepts a reply beyond the old 600ms slack`, async () => {
       const { action, drag, timer } = fixture({ supportsDisplay: true, display });
-      drag.mockImplementation(async (...args) => {
-        args[12]?.();
+      drag.mockImplementation(async (request) => {
+        request.onDispatch?.();
         const reply = new Promise<{ success: boolean; totalTimeMs: number }>((resolve) => {
           timer.setTimeout(() => resolve({ success: true, totalTimeMs: 1850 }), 1850);
         });
-        return raceWithDeadline(reply, { timer, timeoutMs: args[7], label: "Drag" });
+        return raceWithDeadline(reply, { timer, timeoutMs: request.timeoutMs, label: "Drag" });
       });
       const result = await action.execute({ ...endpoints, display });
       expect(result.success).toBe(true);
       expect(drag).toHaveBeenCalledTimes(1);
-      expect(drag.mock.calls[0]?.[7]).toBe(getIosDragTimeoutMs(600, 300, 100));
-      expect(drag.mock.calls[0]?.[7]).toBeGreaterThanOrEqual(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+      expect(drag.mock.calls[0]?.[0].timeoutMs).toBe(getIosDragTimeoutMs(600, 300, 100));
+      expect(drag.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
+        DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      );
     });
 
     test.each(["timeout", "transport rejection", "runner failure"] as const)(
@@ -479,8 +491,8 @@ describe("Android drag dispatch outcomes", () => {
       async (failure) => {
         const { action, drag, timer, adb } = fixture({ supportsDisplay: true, display });
         let timeoutAt: number | undefined;
-        drag.mockImplementation(async (...args) => {
-          args[12]?.();
+        drag.mockImplementation(async (request) => {
+          request.onDispatch?.();
           if (failure === "transport rejection") {
             throw new Error("Connection lost");
           }
@@ -488,11 +500,11 @@ describe("Android drag dispatch outcomes", () => {
             return { success: false, totalTimeMs: 20, error: "Gesture cancelled" };
           }
           const reply = new Promise<never>(() => {});
-          const timeout = new Error(`Drag timed out after ${args[7]}ms`);
+          const timeout = new Error(`Drag timed out after ${request.timeoutMs}ms`);
           try {
             return await raceWithDeadline(reply, {
               timer,
-              timeoutMs: args[7],
+              timeoutMs: request.timeoutMs,
               label: "Drag",
               timeoutError: () => timeout,
             });
@@ -501,7 +513,7 @@ describe("Android drag dispatch outcomes", () => {
               throw error;
             }
             timeoutAt = timer.now();
-            return { success: false, totalTimeMs: args[7], error: timeout.message };
+            return { success: false, totalTimeMs: request.timeoutMs, error: timeout.message };
           }
         });
         const result = await action.execute({ ...endpoints, display });
@@ -536,10 +548,10 @@ describe("Android drag dispatch outcomes", () => {
         const controller = new AbortController();
         let forwardedSignal: AbortSignal | undefined;
         const ready = Promise.withResolvers<void>();
-        drag.mockImplementation(async (...args) => {
-          forwardedSignal = args[9];
+        drag.mockImplementation(async (request) => {
+          forwardedSignal = request.signal;
           if (dispatched) {
-            args[12]?.();
+            request.onDispatch?.();
           }
           timer.setTimeout(() => controller.abort(), 25);
           // sendCommand registers its reply timer only after ensureConnected returns.
@@ -547,8 +559,8 @@ describe("Android drag dispatch outcomes", () => {
           const pending = dispatched
             ? raceWithDeadline(reply, {
                 timer,
-                timeoutMs: args[7],
-                signal: args[9],
+                timeoutMs: request.timeoutMs,
+                signal: request.signal,
                 label: "Drag",
               })
             : reply;
@@ -578,9 +590,9 @@ test("explicit-display helper throws an indeterminate ActionableError after disp
   const target = await prepareTargetDisplayAction(device, "external", observe, adb, {
     lastRenderedObservation: () => observation,
   });
-  drag.mockImplementation(async (...args) => {
-    args[12]?.();
-    return { success: false, totalTimeMs: args[7], error: "Drag timed out" };
+  drag.mockImplementation(async (request) => {
+    request.onDispatch?.();
+    return { success: false, totalTimeMs: request.timeoutMs, error: "Drag timed out" };
   });
   const outcome = action["executeOnAndroidDisplay"]({ ...endpoints, display: "external" }, target);
   await expect(outcome).rejects.toBeInstanceOf(ActionableError);

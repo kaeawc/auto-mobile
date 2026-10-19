@@ -94,7 +94,9 @@ const SCENARIOS: Scenario[] = [
   {
     name: "a swipe is sent with both endpoints and its duration",
     replies: { request_swipe: capturedResponse("swipe_result") },
-    run: async (proxy) => [observed(await proxy.requestSwipe(10, 20, 30, 40, 300))],
+    run: async (proxy) => [
+      observed(await proxy.requestSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration: 300 })),
+    ],
     expectedRequests: [{ type: "request_swipe", x1: 10, y1: 20, x2: 30, y2: 40, duration: 300 }],
     expected: [{ success: true, ...ack }],
   },
@@ -136,7 +138,7 @@ const SCENARIOS: Scenario[] = [
     run: async (proxy) => [
       observed(await proxy.requestTapCoordinates(1, 2, 50)),
       observed(await proxy.requestPressHome()),
-      observed(await proxy.requestSwipe(5, 6, 7, 8, 120)),
+      observed(await proxy.requestSwipe({ x1: 5, y1: 6, x2: 7, y2: 8, duration: 120 })),
     ],
     expectedRequests: [
       { type: "request_tap_coordinates", x: 1, y: 2, duration: 50 },

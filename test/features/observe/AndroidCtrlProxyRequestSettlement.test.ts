@@ -142,13 +142,32 @@ const methods: Method[] = [
     name: "swipe",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestSwipe(1, 2, 3, 4, 50, 50, perf, undefined, undefined, signal),
+      h.client["gestures"].requestSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 50,
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
   },
   {
     name: "drag",
     signal: true,
     invoke: (h, signal) =>
-      h.client["gestures"].requestDrag(1, 2, 3, 4, 10, 20, 30, 50, undefined, signal),
+      h.client["gestures"].requestDrag({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        pressDurationMs: 10,
+        dragDurationMs: 20,
+        holdDurationMs: 30,
+        timeoutMs: 50,
+        signal,
+      }),
   },
   {
     name: "pinch",

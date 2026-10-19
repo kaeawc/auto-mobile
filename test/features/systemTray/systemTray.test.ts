@@ -29,6 +29,7 @@ import {
   resolveNotificationTapElement,
 } from "../../../src/features/systemTray/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../../src/features/systemTray/systemTrayHelpers";
+import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -1020,7 +1021,7 @@ class FakeIosClient implements SystemTrayIosClient {
   swipeError?: string;
   tapError?: string;
 
-  async requestSwipe(x1: number, y1: number, x2: number, y2: number, duration?: number) {
+  async requestSwipe({ x1, y1, x2, y2, duration }: SwipeRequest) {
     this.swipeCalls.push({ x1, y1, x2, y2, duration });
     return { success: this.swipeSuccess, error: this.swipeError };
   }

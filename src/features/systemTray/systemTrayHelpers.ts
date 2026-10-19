@@ -30,6 +30,7 @@ import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import type { SwipeRequest } from "../observe/shared/types";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { ignoreCasePolicy, INSPECT_INTENT } from "../utility/SelectionPolicy";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -91,17 +92,7 @@ export interface SystemTrayAdb {
 }
 
 export interface SystemTrayIosClient {
-  requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-  ): Promise<IosGestureResult>;
+  requestSwipe(request: SwipeRequest): Promise<IosGestureResult>;
   requestTapCoordinates(
     x: number,
     y: number,
@@ -146,8 +137,8 @@ const toIosGestureResult = (result: IosGestureResult): IosGestureResult => ({
 const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (device) => {
   const client = IOSCtrlProxyClient.getInstance(device);
   return {
-    requestSwipe: async (...args) => {
-      const result = await client.requestSwipe(...args);
+    requestSwipe: async (request) => {
+      const result = await client.requestSwipe(request);
       return toIosGestureResult(result);
     },
     requestTapCoordinates: async (...args) => {

@@ -216,7 +216,7 @@ import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
-import type { DelegateContext } from "../shared/types";
+import type { DelegateContext, DragRequest, SwipeRequest } from "../shared/types";
 import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
 import { defaultPrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
@@ -298,20 +298,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
 
-  requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult>;
+  requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult>;
 
   requestTapCoordinates(
     x: number,
@@ -326,21 +313,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     beforeSend?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
 
-  requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<A11yDragResult>;
+  requestDrag(request: DragRequest): Promise<A11yDragResult>;
 
   requestPinch(
     centerX: number,

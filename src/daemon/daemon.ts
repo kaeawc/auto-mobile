@@ -274,8 +274,8 @@ import {
 } from "./daemonStreamRouting";
 import { configureObservationStreamCallbacks } from "./daemonObservationStreamCallbacks";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
+import { BackgroundBindingRegistryUpgrade } from "./sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import {
-  BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
   prepareBindingRegistryForStartup,
 } from "./sessionBroker/registry/legacySlotDeviceRetirement";

@@ -158,6 +158,11 @@ export class TestExecutionRepository {
     this.db = db ?? null;
   }
 
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
+  }
+
   private getDb(): Kysely<Database> {
     if (this.db) {
       return this.db;
@@ -431,7 +436,7 @@ export class TestExecutionRepository {
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap without
   // inserting 10k rows.
-  async pruneToRowCap(maxRows: number = TEST_EXECUTION_RETENTION_MAX_ROWS): Promise<void> {
+  private async pruneToRowCap(maxRows: number = TEST_EXECUTION_RETENTION_MAX_ROWS): Promise<void> {
     try {
       await pruneTableByRowCap(this.getDb(), "test_executions", maxRows);
     } catch (error) {

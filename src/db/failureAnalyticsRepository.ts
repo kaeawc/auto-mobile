@@ -1,3 +1,4 @@
+import { deleteOrphanFailureGroups } from "./failureGroupRetention";
 import { errorMessage } from "../utils/describeUnknownError";
 import { sql, type Kysely, type SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
@@ -193,6 +194,11 @@ export class FailureAnalyticsRepository {
     this.timer = timer;
     this.getBarrier = getBarrier;
     this.idGenerator = idGenerator;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return { pruneToRowCap: (maxRows?: number) => this.pruneToRowCap(maxRows) };
   }
 
   private getDb(): Kysely<Database> {
@@ -1168,7 +1174,7 @@ export class FailureAnalyticsRepository {
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap without
   // inserting 10k rows.
-  async pruneToRowCap(maxRows: number = RETENTION_MAX_ROWS): Promise<void> {
+  private async pruneToRowCap(maxRows: number = RETENTION_MAX_ROWS): Promise<void> {
     try {
       const db = this.getDb();
 
@@ -1179,19 +1185,7 @@ export class FailureAnalyticsRepository {
       // use a correlated NOT EXISTS (index-served, early-exit) rather than
       // materializing the full DISTINCT set for a NOT IN scan.
       if (deleted > 0) {
-        await db
-          .deleteFrom("failure_groups")
-          .where((eb) =>
-            eb.not(
-              eb.exists(
-                eb
-                  .selectFrom("failure_occurrences")
-                  .select(sql`1`.as("one"))
-                  .whereRef("failure_occurrences.group_id", "=", "failure_groups.id"),
-              ),
-            ),
-          )
-          .execute();
+        await deleteOrphanFailureGroups(db);
       }
     } catch (error) {
       logger.warn(`[FailureAnalyticsRepository] Retention cleanup failed: ${error}`);

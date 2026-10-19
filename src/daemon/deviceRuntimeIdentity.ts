@@ -1,8 +1,8 @@
 import { holderOf } from "./deviceBinding";
+import { DevicePoolError } from "./DevicePoolError";
 import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
-import { getAbortSignal } from "../utils/AbortContext";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../utils/logger";
@@ -16,7 +16,7 @@ import {
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
 } from "../devices/deviceIdentityEvidence";
-import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import { type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
 
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
@@ -55,9 +55,8 @@ export interface DeviceRuntimeIdentityPoolPort {
 
 /** Resolves and caches pooled runtime identity without deciding pool membership. */
 export class DeviceRuntimeIdentity {
-  // Quarantine still withholds identity trust during shutdown. Remember only
-  // its deferred cancellation, not another shutdown fence; the existing
-  // reservation decides when cancellation is safe. Removed entries are not held.
+  // Quarantine still withholds identity trust during shutdown. Remember only its deferred
+  // cancellation, not another shutdown fence; the reservation decides when it is safe.
   private readonly deferredQuarantineCancellations = new WeakSet<PooledDevice>();
   private readonly pendingIdentityReplacements = new Map<string, BootedDevice>();
   private readonly pendingIdentityReplacementUnresolvedObservations = new Map<
@@ -154,10 +153,6 @@ export class DeviceRuntimeIdentity {
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    const signals = [options.signal, getAbortSignal()].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
-    );
-    options = { ...options, signal: signals.length > 0 ? AbortSignal.any(signals) : undefined };
     for (const device of devices) {
       // A caller that settled its deadline/abort can no longer safely apply a
       // stale snapshot to pooled entries an unrelated acquisition may have bound

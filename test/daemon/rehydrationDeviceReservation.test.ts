@@ -263,7 +263,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     expect(pool.getDevice(SIM_B)?.sessionId).toBe("row-b");
 
     await sessions.releaseSession("row-a", "explicit-release");
-    await pool.releaseDevice(SIM_A);
+    await pool.releaseDevice(SIM_A, "row-a");
     expect(pool.genericAvailability(SIM_A)).toBe("free");
   });
 });

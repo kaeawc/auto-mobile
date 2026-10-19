@@ -21,6 +21,7 @@ test/config/env.test.ts
 test/contracts/adbExecutor.test.ts
 test/contracts/androidCtrlProxy.test.ts
 test/contracts/dbWriteBarrier.test.ts
+test/contracts/deviceClientRegistry.test.ts
 test/contracts/deviceHealthMarkers.test.ts
 test/contracts/deviceManager.test.ts
 test/contracts/deviceSessionManager.test.ts
@@ -238,7 +239,9 @@ test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts
 test/daemon/proxy/BoundSessionFenceGate.test.ts
+test/daemon/proxy/ConnectionRecovery.test.ts
 test/daemon/proxy/DaemonErrorClassifier.test.ts
+test/daemon/proxy/ForwardedResultApplier.test.ts
 test/daemon/proxy/HandoverResolution.test.ts
 test/daemon/proxy/HeartbeatKeeper.test.ts
 test/daemon/proxy/HeldSessionLosses.test.ts
@@ -717,7 +720,6 @@ test/features/observe/android/AndroidBuildContextResolver.test.ts
 test/features/observe/android/AndroidClientRequests.test.ts
 test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
 test/features/observe/android/AndroidCtrlProxyClientRecoveryRaces.test.ts
-test/features/observe/android/AndroidCtrlProxyClientRegistry.test.ts
 test/features/observe/android/AndroidCtrlProxyClientRequestSettlement.test.ts
 test/features/observe/android/AndroidHierarchyUpdateHandler.test.ts
 test/features/observe/android/AndroidNavigationEvents.test.ts
@@ -868,6 +870,7 @@ test/features/prototype/ios/prototypeAgentInjection.test.ts
 test/features/prototype/ios/prototypeAgentRequestRouting.test.ts
 test/features/prototype/ios/prototypeViewerAttach.test.ts
 test/features/prototype/ios/prototypeViewerEndpoint.test.ts
+test/features/prototype/pinConfirmation.test.ts
 test/features/prototype/prototypeAnchors.test.ts
 test/features/prototype/prototypeAppearance.test.ts
 test/features/prototype/prototypeAssetUploader.test.ts
@@ -1014,6 +1017,7 @@ test/helpers/inMemoryDaemonWire.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
 test/helpers/isolateEmptyToolRegistry.test.ts
 test/helpers/observeFixture.test.ts
+test/helpers/observedInteractionStub.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/spawnProbe.test.ts
 test/helpers/toolResponse.test.ts
@@ -1322,6 +1326,7 @@ test/server/highlightCircleContract.test.ts
 test/server/highlightLayer.test.ts
 test/server/highlightSelectorCharacterization.test.ts
 test/server/highlightTools.test.ts
+test/server/idleFlagOnEveryReleaseSurface.test.ts
 test/server/imeOutputSchema.test.ts
 test/server/index.deviceExecutionBinding.test.ts
 test/server/index.progress.test.ts

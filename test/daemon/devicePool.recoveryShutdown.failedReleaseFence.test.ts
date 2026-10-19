@@ -1,5 +1,5 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
-import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -20,7 +20,7 @@ async function setupFailedReleaseFence() {
   context.sessions.setActiveSessionExecutionChecker((id) =>
     context.pool.isSessionRecoveryInFlight(id),
   );
-  const internals = poolInternals(context.pool);
+  const internals = context.pool.testHooks;
   const record = internals.startAndroidRecoveryRecord("session", { deviceId: original.deviceId }, [
     "loss",
     "quarantine",

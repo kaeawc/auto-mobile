@@ -29,7 +29,6 @@ import {
   KillTrackingShutdownManager,
   setup,
   setupPassiveRestart,
-  DevicePoolProcessExitInternals,
   assertNoRecoveryReservationsRemain,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -986,8 +985,8 @@ async function setupProcessExitPool(
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   const child = exitedChild();
-  const internals = pool as unknown as DevicePoolProcessExitInternals;
-  await internals.trackStartedDeviceProcess(original, child);
+  const internals = pool.testHooks;
+  await internals.trackStartedDeviceProcess.call(original, child);
   await pool.bindOrReuseDeviceSession({
     sessionId: "session",
     deviceId: original.deviceId,
@@ -1079,8 +1078,8 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
   expect(first).toMatchObject({ recovery: { outcome: "recovered" }, session: { state: "active" } });
   expect(recoveryInternals(pool).emulatorLossRecoverySettlements.size).toBe(0);
   manager.bootedDevices = [];
-  const late = internals
-    .trackStartedDeviceProcess(original, child)
+  const late = internals.trackStartedDeviceProcess
+    .call(original, child)
     .catch((error: unknown) => error);
   try {
     const secondId = await store.completed.promise;

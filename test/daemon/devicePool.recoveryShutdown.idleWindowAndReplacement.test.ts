@@ -1,4 +1,3 @@
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
@@ -256,7 +255,7 @@ test("active emulator loss adopts a new serial after its tracked process exits",
         throw new Error("An exited process must not be killed");
       },
     } as unknown as ChildProcess;
-    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
     await expect(

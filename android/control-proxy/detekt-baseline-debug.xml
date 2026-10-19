@@ -40,10 +40,7 @@
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$private fun performAccessibilityLinkActivation</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$private fun recordInteractionEvent</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastSdkEvent</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$private suspend fun performNodeAction</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:internal fun findNodeByResourceId: AccessibilityNodeInfo?</ID>
     <ID>CyclomaticComplexMethod:CtrlProxyMessageHandler.kt:CtrlProxyMessageHandler$override suspend fun handleMessage: WebSocketResponse?</ID>
     <ID>CyclomaticComplexMethod:FailureReceivers.kt:CrashReceiver$private fun parse: CrashReport?</ID>
@@ -56,7 +53,10 @@
     <ID>CyclomaticComplexMethod:ImeCommitDriver.kt:ImeCommitDriver.Companion$internal fun reconcileDecision: Reconciliation</ID>
     <ID>CyclomaticComplexMethod:ImeGraphemes.kt:ImeGraphemes$private fun Int.isConjoiningLetter: Boolean</ID>
     <ID>CyclomaticComplexMethod:InputConnectionDriver.kt:InputConnectionDriver$fun execute: Boolean</ID>
+    <ID>CyclomaticComplexMethod:InteractionEventController.kt:InteractionEventController$private fun recordInteractionEvent</ID>
     <ID>CyclomaticComplexMethod:LogcatReader.kt:LogcatReader$private fun isOwnDiagnostic: Boolean</ID>
+    <ID>CyclomaticComplexMethod:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
+    <ID>CyclomaticComplexMethod:NodeActionController.kt:NodeActionController$suspend fun performNodeAction</ID>
     <ID>CyclomaticComplexMethod:PackageController.kt:PackageController$suspend fun performPackageInfo</ID>
     <ID>CyclomaticComplexMethod:PackageScreenReceivers.kt:PackageEventReceiver$override fun onReceive</ID>
     <ID>CyclomaticComplexMethod:PrototypeAppearance.kt:internal fun prototypeResolveAppearance: PrototypeAppearance</ID>
@@ -114,6 +114,7 @@
     <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
+    <ID>InjectDispatcher:ScreenshotController.kt:ScreenshotController$IO</ID>
     <ID>InstanceOfCheckForException:DisplayIdentity.kt:PanelUniqueIdResolver$error is IllegalArgumentException</ID>
     <ID>LargeClass:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
     <ID>LargeClass:GestureController.kt:GestureController</ID>
@@ -125,26 +126,25 @@
     <ID>LargeClass:WebSocketServer.kt:WebSocketServer</ID>
     <ID>LongMethod:CaCertificateController.kt:CaCertificateController$suspend fun performRemoveCaCertificate</ID>
     <ID>LongMethod:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override suspend fun requestCommitText</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private fun extractHierarchy: ViewHierarchy?</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private fun extractHierarchyDirect: ViewHierarchy?</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private fun performAccessibilityLinkActivation</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private fun recordInteractionEvent</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastSdkEvent</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private suspend fun extractHierarchyNow</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$private suspend fun performNodeAction</ID>
     <ID>LongMethod:CtrlProxyIme.kt:CtrlProxyIme$private fun awaitInputConnection</ID>
     <ID>LongMethod:CtrlProxyMessageHandler.kt:CtrlProxyMessageHandler$override suspend fun handleMessage: WebSocketResponse?</ID>
     <ID>LongMethod:GestureController.kt:GestureController$fun performDrag</ID>
     <ID>LongMethod:GestureController.kt:GestureController$fun performPinch</ID>
     <ID>LongMethod:GestureController.kt:GestureController$fun performTwoFingerSwipe</ID>
+    <ID>LongMethod:HierarchyController.kt:HierarchyController$internal fun extractHierarchy: ViewHierarchy?</ID>
+    <ID>LongMethod:HierarchyController.kt:HierarchyController$internal suspend fun extractHierarchyNow</ID>
+    <ID>LongMethod:HierarchyController.kt:HierarchyController$private fun extractHierarchyDirect: ViewHierarchy?</ID>
     <ID>LongMethod:HierarchyDebouncer.kt:HierarchyDebouncer$private suspend fun extractAndCompare: ViewHierarchy?</ID>
     <ID>LongMethod:HierarchyDebouncer.kt:HierarchyDebouncer$suspend fun extractAfterQuiescenceSuspending: ViewHierarchy?</ID>
     <ID>LongMethod:HingeFallbackPostureSource.kt:HingeFallbackPostureSource$override fun observe: AutoCloseable</ID>
+    <ID>LongMethod:ImeController.kt:ImeController$suspend fun requestCommitText</ID>
+    <ID>LongMethod:InteractionEventController.kt:InteractionEventController$private fun recordInteractionEvent</ID>
     <ID>LongMethod:KeyboardScreen.kt:@Composable private fun KeyCap</ID>
+    <ID>LongMethod:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
+    <ID>LongMethod:NodeActionController.kt:NodeActionController$suspend fun performNodeAction</ID>
     <ID>LongMethod:PackageController.kt:PackageController$suspend fun performInstalledPackages</ID>
     <ID>LongMethod:PackageController.kt:PackageController$suspend fun performPackageInfo</ID>
     <ID>LongMethod:PrototypeComponents.kt:@Composable internal fun RenderPrototypeButton</ID>
@@ -163,6 +163,7 @@
     <ID>LongMethod:PrototypeSwipeRow.kt:@Composable internal fun PrototypeSwipeRow</ID>
     <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$override fun save: SavedPrototypeSaveResult</ID>
     <ID>LongMethod:SavedPrototypeDirectoryStore.kt:SavedPrototypeDirectoryStore$private fun read: SavedPrototypeLoadResult</ID>
+    <ID>LongMethod:ScreenshotController.kt:ScreenshotController$suspend fun takeScreenshotAsync: ScreenshotCaptureOutcome</ID>
     <ID>LongMethod:SdkTelemetryReceivers.kt:NavigationEventReceiver$override fun onReceive</ID>
     <ID>LongMethod:SettingsController.kt:SettingsController$suspend fun performSettingsWrite</ID>
     <ID>LongMethod:TextInputController.kt:TextInputController$suspend fun performImeAction</ID>
@@ -180,10 +181,8 @@
     <ID>LongParameterList:ClipboardController.kt:ClipboardController$private suspend fun broadcastClipboardResult</ID>
     <ID>LongParameterList:ConnectionCommandQueue.kt:ConnectionCommandQueue</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
-    <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastCommitTextResult</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastCrashEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastHandledExceptionEvent</ID>
-    <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastKeyboardProfileCatalog</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastPackageEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
     <ID>LongParameterList:CtrlProxy.kt:internal fun handledExceptionEventResponse: HandledExceptionEvent</ID>
@@ -204,14 +203,20 @@
     <ID>LongParameterList:GestureController.kt:GestureController$private fun dispatchGestureWithResult</ID>
     <ID>LongParameterList:GestureStreamRouter.kt:GestureStreamRouter$fun end</ID>
     <ID>LongParameterList:GestureStreamRouter.kt:GestureStreamRouter$fun start</ID>
+    <ID>LongParameterList:HierarchyController.kt:HierarchyController</ID>
     <ID>LongParameterList:HierarchyDebouncer.kt:HierarchyDebouncer</ID>
     <ID>LongParameterList:HighlightAnimator.kt:HighlightAnimator</ID>
     <ID>LongParameterList:ImeCommitDriver.kt:ImeCommitDriver$fun commit</ID>
     <ID>LongParameterList:ImeCommitDriver.kt:ImeCommitDriver.Companion$internal fun reconcileDecision: Reconciliation</ID>
+    <ID>LongParameterList:ImeController.kt:ImeController</ID>
+    <ID>LongParameterList:ImeController.kt:ImeController$private suspend fun broadcastCommitTextResult</ID>
+    <ID>LongParameterList:ImeController.kt:ImeController$private suspend fun broadcastKeyboardProfileCatalog</ID>
+    <ID>LongParameterList:ImeController.kt:ImeController.ImeTarget$fun commitText</ID>
     <ID>LongParameterList:InsertTextPlanner.kt:internal fun planInsertText: InsertTextPlan</ID>
     <ID>LongParameterList:InsertTextSettle.kt:internal suspend fun awaitPrecedingInput: Boolean</ID>
     <ID>LongParameterList:MultiFingerGeometry.kt:internal fun computeMultiFingerStrokes: List&lt;FingerStroke&gt;</ID>
     <ID>LongParameterList:NavigationEventAccumulator.kt:NavigationEventAccumulator$fun addEvent: TimestampedNavigationEvent</ID>
+    <ID>LongParameterList:NodeActionController.kt:NodeActionController.Host$suspend fun sendActionResult</ID>
     <ID>LongParameterList:OwnWindowTypeMemo.kt:internal fun ownWindowEventDecision: OwnWindowEventDecision</ID>
     <ID>LongParameterList:PackageController.kt:PackageController$private suspend fun broadcastInstalledPackagesResult</ID>
     <ID>LongParameterList:PackageController.kt:PackageController$private suspend fun broadcastLaunchIntentResult</ID>
@@ -258,7 +263,7 @@
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
     <ID>LongParameterList:WebSocketServer.kt:WebSocketServer</ID>
     <ID>NestedBlockDepth:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
-    <ID>NestedBlockDepth:CtrlProxy.kt:CtrlProxy$private fun performAccessibilityLinkActivation</ID>
+    <ID>NestedBlockDepth:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
     <ID>NestedBlockDepth:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$override fun pin: PinOutcome</ID>
     <ID>NestedBlockDepth:SettingsController.kt:SettingsController$suspend fun performSettingsList</ID>
     <ID>NestedBlockDepth:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
@@ -288,6 +293,7 @@
     <ID>TooGenericExceptionCaught:CtrlProxy.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceStateTransitions.kt:DeviceStateTransitions$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceStateTransitions.kt:DeviceStateTransitions.PostureFlowSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DisplayController.kt:DisplayController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DisplayIdentity.kt:PanelUniqueIdResolver$error: Exception</ID>
     <ID>TooGenericExceptionCaught:DisplayInsetsProvider.kt:WindowMetricsDisplayInsetsProvider$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DragStrokeSession.kt:DragStrokeSession$e: Exception</ID>
@@ -298,11 +304,15 @@
     <ID>TooGenericExceptionCaught:GestureController.kt:GestureController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:GestureController.kt:GestureController.AccessibilityStrokeDispatcher$e: Exception</ID>
     <ID>TooGenericExceptionCaught:GestureStreamSession.kt:GestureStreamSession$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:HierarchyController.kt:HierarchyController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:HingeFallbackPostureSource.kt:HingeFallbackPostureSource$e: Exception</ID>
     <ID>TooGenericExceptionCaught:InputConnectionDriver.kt:InputConnectionDriver$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:InteractionEventController.kt:InteractionEventController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:KeystoreDiscovery.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:LogcatReader.kt:LogcatReader$e: Exception</ID>
     <ID>TooGenericExceptionCaught:MainActivity.kt:e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NodeActionController.kt:NodeActionController$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NodeActionController.kt:NodeActionController$error: Exception</ID>
     <ID>TooGenericExceptionCaught:OverlayManager.kt:OverlayManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:OverlayManager.kt:OverlayManager$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PackageController.kt:PackageController$e: Exception</ID>
@@ -325,6 +335,7 @@
     <ID>TooGenericExceptionCaught:SavedPrototypeController.kt:SavedPrototypeController$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeScreenState.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeShortcuts.kt:AndroidSavedPrototypeShortcuts$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ScreenshotController.kt:ScreenshotController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:AnrReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:EventBatchReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkCapabilitiesDiscovery.kt:error: Exception</ID>
@@ -344,10 +355,13 @@
     <ID>TooManyFunctions:CaCertificateController.kt:CaCertificateController</ID>
     <ID>TooManyFunctions:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy : TypingPolicy</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
+    <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy$&lt;no name provided&gt; : Host</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:dev.jasonpearson.automobile.ctrlproxy.CtrlProxy.kt</ID>
     <ID>TooManyFunctions:CtrlProxyActions.kt:CtrlProxyActions</ID>
     <ID>TooManyFunctions:CtrlProxyIme.kt:CtrlProxyIme : InputMethodServiceLifecycleOwnerSavedStateRegistryOwner</ID>
     <ID>TooManyFunctions:GestureController.kt:GestureController</ID>
+    <ID>TooManyFunctions:HierarchyController.kt:HierarchyController</ID>
+    <ID>TooManyFunctions:HierarchyController.kt:HierarchyController$Host</ID>
     <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitDriver$CommitSequence</ID>
     <ID>TooManyFunctions:ImeCommitDriver.kt:ImeCommitSink</ID>
     <ID>TooManyFunctions:ImeConnection.kt:ImeConnection</ID>
@@ -376,7 +390,6 @@
     <ID>TooManyFunctions:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>
     <ID>TooManyFunctions:WebSocketServer.kt:WebSocketServer</ID>
     <ID>UnnecessaryNotNullOperator:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy!!</ID>
-    <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$event.text?.joinToString("") { it.toString() }</ID>
     <ID>UnsafeCallOnNullableType:TextInputController.kt:TextInputController$focusedNode!!</ID>
   </CurrentIssues>
 </SmellBaseline>

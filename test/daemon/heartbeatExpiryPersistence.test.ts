@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -33,7 +34,7 @@ test.each([[60_000, "monitor"]] as const)(
         timeoutMs: idleTimeoutMs,
         heartbeatTimeoutMs: 1_000,
       });
-      manager.recordHeartbeat("heartbeat-expired");
+      await deliverDaemonHeartbeat(manager, "heartbeat-expired");
       monitor.start();
 
       // One grace window after the heartbeat: the 1 s lease has lapsed, the grace has 1 s left.
@@ -83,7 +84,7 @@ test("idle expiry before the heartbeat lease lapses keeps its idle diagnostic", 
       timeoutMs: 1_000,
       heartbeatTimeoutMs: 10_000,
     });
-    manager.recordHeartbeat("idle-expired");
+    await deliverDaemonHeartbeat(manager, "idle-expired");
     timer.advanceTime(11_001);
 
     expect(manager.getSession("idle-expired")).toBeNull();
@@ -107,7 +108,7 @@ test("an idle window as short as the lease releases at the idle deadline, withou
       timeoutMs: 1_000,
       heartbeatTimeoutMs: 1_000,
     });
-    manager.recordHeartbeat("idle-at-deadline");
+    await deliverDaemonHeartbeat(manager, "idle-at-deadline");
     timer.advanceTime(1_000);
     expect(manager.getSession("idle-at-deadline")).not.toBeNull();
 
@@ -137,7 +138,7 @@ test.each(["lookup", "sweep"])(
         timeoutMs: 1_000,
         heartbeatTimeoutMs: 1_000,
       });
-      manager.recordHeartbeat("lease-lapsed");
+      await deliverDaemonHeartbeat(manager, "lease-lapsed");
       timer.advanceTime(1_000 + SUSPECT_GRACE_MS + 1);
 
       if (path === "sweep") {

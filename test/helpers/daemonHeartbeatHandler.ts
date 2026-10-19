@@ -34,3 +34,20 @@ export function daemonHeartbeatHandler(
     return response.result;
   };
 }
+
+/**
+ * One tokenless `daemon/heartbeat` frame for `sessionId`, delivered through
+ * {@link daemonHeartbeatHandler}. The sanctioned replacement for calling
+ * `sessionManager.recordHeartbeat(...)` in a test: the real handler admits it (or refuses it, in
+ * which case this rejects) and then records it. Pass `params` for a keeper's owner token or claim.
+ */
+export async function deliverDaemonHeartbeat(
+  sessionManager: SessionManager,
+  sessionId: string,
+  params: Record<string, unknown> = {},
+): Promise<unknown> {
+  return await daemonHeartbeatHandler(sessionManager)("daemon/heartbeat", {
+    sessionId,
+    ...params,
+  });
+}

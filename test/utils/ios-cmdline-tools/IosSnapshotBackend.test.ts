@@ -38,8 +38,8 @@ function actions(options: { deviceId: string; simctl: FakeSimctl }) {
   const simctl = options.simctl;
   const timer = new FakeTimer();
   return {
-    capture: new CaptureSnapshot(device, factory, undefined, timer, store, simctl),
-    restore: new RestoreSnapshot(device, factory, undefined, timer, store, simctl),
+    capture: new CaptureSnapshot(device, { adbFactory: factory, timer, store, simctl }),
+    restore: new RestoreSnapshot(device, { adbFactory: factory, timer, store, simctl }),
   };
 }
 

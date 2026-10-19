@@ -219,19 +219,16 @@ export class SingleDisplayCaptureStage {
     if (options?.hierarchyOnly) {
       // Commit verification reuses the same hierarchy/focus extraction, then
       // returns before device-state reads, cache writes, predictions or audits.
-      await this.d
-        .hierarchyCollector()
-        .collect(
-          result,
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          true,
-          capturedHierarchy,
-          options.timeoutMs,
-        );
+      await this.d.hierarchyCollector().collect(result, {
+        queryOptions,
+        perf,
+        skipWaitForFresh,
+        minTimestamp,
+        signal,
+        readOnly: true,
+        capturedHierarchy,
+        readOptions: options.timeoutMs,
+      });
       throwIfAborted(signal);
       perf.end();
       return { earlyResult: result, foregroundSnapshot, foregroundIdentity };

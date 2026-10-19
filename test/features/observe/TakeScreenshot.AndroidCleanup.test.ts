@@ -33,18 +33,19 @@ interface Base64Capture {
 
 function captureFor(adb: FakeAdbExecutor): Base64Capture {
   const timer = new FakeTimer();
-  const screenshot = new TakeScreenshot(
-    androidDevice("base64-cleanup"),
-    new FakeAdbClientFactory(adb),
+  const screenshot = new TakeScreenshot(androidDevice("base64-cleanup"), {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    new FakeIdGenerator(["cleanup"]),
-    new FakeScreenshotFileWriter(),
-    new FakeFileSystem(),
-    () => "/screenshots/cache",
-    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(timer) },
-  );
+    idGenerator: new FakeIdGenerator(["cleanup"]),
+    fileWriter: new FakeScreenshotFileWriter(),
+    fileSystem: new FakeFileSystem(),
+    cacheDirResolver: () => "/screenshots/cache",
+    physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+      new Map([[0, "4619827259835644672"]]),
+    ),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(timer),
+  });
   return {
     captureScreenshotBase64: (finalPath, options, signal, readOnly) =>
       screenshot.testHooks.base64(finalPath, options, signal, readOnly),
@@ -240,12 +241,11 @@ function filePullHarness(
   const fileSystem = new FakeFileSystem();
   const finalPath = "/screenshots/result.png";
   fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
-  const screenshot = new TakeScreenshot(
-    androidDevice("file-pull-cleanup"),
-    new FakeAdbClientFactory(adb),
+  const screenshot = new TakeScreenshot(androidDevice("file-pull-cleanup"), {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    new FakeIdGenerator(["cleanup"]),
-    {
+    idGenerator: new FakeIdGenerator(["cleanup"]),
+    fileWriter: {
       async write(path, bytes) {
         fileSystem.setBinaryFile(path, bytes);
         if (captureOutcome === "write cancelled") {
@@ -257,11 +257,13 @@ function filePullHarness(
       },
     },
     fileSystem,
-    () => "/screenshots/cache",
-    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
-    false,
-    { pathProtection: new FakeScreenshotPathProtection(timer) },
-  );
+    cacheDirResolver: () => "/screenshots/cache",
+    physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+      new Map([[0, "4619827259835644672"]]),
+    ),
+    cleanupOnCreate: false,
+    pathProtection: new FakeScreenshotPathProtection(timer),
+  });
   return {
     commands,
     execute,

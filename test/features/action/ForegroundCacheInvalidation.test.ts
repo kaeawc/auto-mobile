@@ -143,7 +143,9 @@ describe("shared foreground cache invalidation", () => {
   );
 
   test("snapshot foreground restoration invalidates even after an uncertain dispatch", async () => {
-    const action = new RestoreSnapshot(device, new FakeAdbClientFactory(new FakeAdbExecutor()));
+    const action = new RestoreSnapshot(device, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+    });
     const invalidator = new FakeDeviceWindowCacheInvalidator();
     action.windowCacheInvalidator = invalidator;
     await action["restoreForegroundApp"]("com.example.new");

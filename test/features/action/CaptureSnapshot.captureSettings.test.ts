@@ -54,9 +54,7 @@ describe("CaptureSnapshot settings characterization", () => {
       );
       const capture = new CaptureSnapshot(
         { deviceId: "settings-fake", name: "Fake", platform: "android" },
-        { create: () => adb },
-        undefined,
-        new FakeTimer(),
+        { adbFactory: { create: () => adb }, timer: new FakeTimer() },
       );
       const result = await capture["captureSettings"]();
       const fallback = { key: "value=tail", blank: "" };

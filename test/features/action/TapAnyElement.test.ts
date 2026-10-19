@@ -1,4 +1,5 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
@@ -525,7 +526,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
       expect(selected).toBeDefined();
       const replacement = identifyObservedHierarchy(
         "android",
-        { hierarchy: { node: { marker: "replacement" } } },
+        { hierarchy: { node: createFlatNodeForTest({ marker: "replacement" }) } },
         "fresh",
         timer,
         undefined,

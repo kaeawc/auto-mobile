@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { createExecResult } from "../../../src/utils/execResult";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -12,12 +13,7 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ElementContainerSelector } from "../../../src/models/PinchOnOptions";
-import type {
-  BootedDevice,
-  ObserveResult,
-  TapOnElementOptions,
-  ViewHierarchyResult,
-} from "../../../src/models";
+import type { BootedDevice, TapOnElementOptions, ViewHierarchyResult } from "../../../src/models";
 import { encodeAndroidFlat, type LogicalNode } from "../../fixtures/hierarchyArbitraries";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -65,7 +61,7 @@ function harness(
     },
   };
   const transitions = new FakeDisplayTransitionReader();
-  const observation = {
+  const observation = buildObserveResult({
     ...focused,
     displayRevision: transitions.fullRevision,
     display: {
@@ -74,8 +70,12 @@ function harness(
       posture: "unknown",
       generation: transitions.generation,
     },
-    viewHierarchy: { ...focused.viewHierarchy, displayId: 2 },
-  } as ObserveResult;
+    viewHierarchy: {
+      ...focused.viewHierarchy,
+      hierarchy: focused.viewHierarchy?.hierarchy ?? {},
+      displayId: 2,
+    },
+  });
   const calls: string[] = [];
   const targets: TapOnElementOptions[] = [];
   const observer: SendKeysObserver = { execute: async () => observation };
@@ -234,7 +234,12 @@ function realTap(capture: ViewHierarchyResult) {
   tap.observedInteraction = (callback) =>
     callback(
       recordObservationRead(
-        buildObserveResult({ viewHierarchy: capture, screenSize: { width: 500, height: 500 } }),
+        buildObserveResult({
+          updatedAt: 0,
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: capture,
+          screenSize: { width: 500, height: 500 },
+        }),
       ),
     );
   return tap;
@@ -272,6 +277,8 @@ test("default focuser forwards sibling scope options into TapOnElement", async (
   const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
     success: false,
     error: "Target not found within container",
+    action: "focus",
+    element: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
   });
   const h = harness("android", async () => ({ success: true }));
   const action = new SendKeys(
@@ -343,7 +350,7 @@ test("default field focus and currently focused input remain unchanged", async (
 test("sendKeys default focuser reaches the opted-in tapOn field resolution by hint", async () => {
   const capture: ViewHierarchyResult = {
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         class: "android.widget.EditText",
         "resource-id": "phone",
@@ -351,7 +358,7 @@ test("sendKeys default focuser reaches the opted-in tapOn field resolution by hi
         "hint-text": "Phone",
         clickable: true,
         focusable: true,
-      },
+      }),
     },
   };
   const fieldTap = realTap(capture);
@@ -360,7 +367,11 @@ test("sendKeys default focuser reaches the opted-in tapOn field resolution by hi
     expect(options.action).toBe("focus");
     const result = fieldTap.findElementInHierarchy(options, capture);
     expect(result.selection.element?.["resource-id"]).toBe("phone");
-    return { success: result.selection.element !== null };
+    return {
+      success: result.selection.element !== null,
+      action: "focus",
+      element: result.selection.element ?? { bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+    };
   });
   const action = new SendKeys(
     { deviceId: "fake-hint-focus", name: "Field", platform: "android" },

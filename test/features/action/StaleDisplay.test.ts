@@ -1,3 +1,5 @@
+import { viewHierarchyFromFixture } from "../../helpers/observeFixture";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -52,11 +54,11 @@ type Scenario = (typeof cases)[number];
 
 function harness(scenario: Scenario, platform: "android" | "ios" = "android") {
   const transitions = new FakeDisplayTransitionReader();
-  const screen = {
+  const screen = buildObserveResult({
     ...observation(100, 200),
     displayRevision: 41,
     display: { key: "inner", role: "inner", posture: "opened", generation: scenario.stamp },
-  } as ObserveResult;
+  });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(screen);
   const adb = new FakeAdbExecutor();
@@ -193,7 +195,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
           h.transitions.transition(scenario.count);
         }
       };
-      const references = new SnapshotReferenceStore(new CountingIdGenerator("fence"));
+      const references = new SnapshotReferenceStore(h.timer, new CountingIdGenerator("fence"));
       if (site === "F-pre-dispatch") {
         spyOn(references, "staleReason").mockImplementation(() => {
           transition();
@@ -216,7 +218,7 @@ describe("typed TapAtCoordinate fences D/E/F", () => {
         ...h.deps,
         snapshotReferences: references,
         androidClient: client,
-        iosClient: client,
+        iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
         dispatchAndroidCoordinateTap: dispatch,
         dispatchIosCoordinateTap: dispatch,
         dispatchIosDoubleTap: dispatch,
@@ -475,7 +477,7 @@ async function caughtExplicitAction(
       const action = new TapAtCoordinate(h.targetDevice, h.adb, {
         ...deps,
         androidClient: client,
-        iosClient: client,
+        iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
       });
       action.observeScreen = h.observe;
       return action.execute({ x: 1, y: 2, display: "inner" });
@@ -552,11 +554,11 @@ describe("tapOn fresh hierarchy transition fence", () => {
 function staleCallerHarness(platform: "android" | "ios") {
   const h = harness(cases[0], platform);
   h.transitions.transition(1);
-  const fresh = {
+  const fresh = buildObserveResult({
     ...h.screen,
     displayRevision: h.transitions.fullRevision,
     display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
-  } as ObserveResult;
+  });
   return { h, fresh };
 }
 
@@ -720,7 +722,7 @@ describe("selector tools retry once after a fold", () => {
     const action = new TapAtCoordinate(h.targetDevice, h.adb, {
       ...h.deps,
       androidClient: client,
-      iosClient: client,
+      iosClient: { ...client, requestDoubleTapCoordinates: async () => ({ success: true }) },
       dispatchAndroidCoordinateTap: dispatch,
       dispatchIosCoordinateTap: dispatch,
       invalidateIosCache: () => {},
@@ -743,14 +745,14 @@ describe("swipeOn lookFor and auto-target retry once after a fold", () => {
   function foldedSwipe() {
     const { h } = staleCallerHarness("android");
     // The cache still holds the pre-fold inner panel; only a fresh read sees the cover screen.
-    const fresh = {
+    const fresh = buildObserveResult({
       ...h.screen,
-      ...textCapture,
+      viewHierarchy: viewHierarchyFromFixture(textCapture.viewHierarchy),
       screenSize: { width: 1080, height: 2400 },
       systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
       displayRevision: h.transitions.fullRevision,
       display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
-    } as ObserveResult;
+    });
     h.observe.setObserveResult(fresh);
     restores.push(
       spyOn(h.observe, "getMostRecentCachedObserveResult").mockImplementation(async () => h.screen),

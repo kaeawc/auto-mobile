@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, spyOn, test } from "bun:test";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { InputKey } from "../../../src/features/action/InputKey";
@@ -47,10 +48,20 @@ test("recentApps execute preserves indeterminate cancellation before post-action
   });
   const clientSpy = spyOnIosClientInstance(client);
   const observe = new FakeObserveScreen();
-  observe.setObserveResult({ timestamp: h.timer.now() });
+  observe.setObserveResult(
+    buildObserveResult({
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: h.timer.now(),
+    }),
+  );
   const observeSpy = spyOn(observe, "execute").mockImplementation(async (options) => {
     options?.signal?.throwIfAborted();
-    return { timestamp: h.timer.now() };
+    return buildObserveResult({
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      updatedAt: h.timer.now(),
+    });
   });
   const recentApps = new RecentApps(device, null, h.timer);
   recentApps.observeScreen = observe;

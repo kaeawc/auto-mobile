@@ -102,6 +102,7 @@ fun probeEventOf(via: String, event: MotionEvent): ProbeEvent {
     buttonState = event.buttonState,
     pointers = pointers,
     eventTimeMs = event.eventTime,
+    actionButton = event.actionButton,
   )
 }
 

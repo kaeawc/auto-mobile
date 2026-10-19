@@ -80,4 +80,22 @@ class PointerProbeFormatterTest {
       PointerProbeFormatter.format(3, event),
     )
   }
+
+  @Test
+  fun formatsTheButtonABarrelReleaseChanged() {
+    val event =
+      ProbeEvent(
+        via = "generic",
+        action = 12,
+        deviceId = 5,
+        source = 0x4002,
+        buttonState = 0,
+        pointers = emptyList(),
+        actionButton = 32,
+      )
+    assertEquals(
+      "#4 generic BUTTON_RELEASE dev=5 src=STYLUS(0x4002) btn=NONE(0) changed=STYLUS_PRIMARY ",
+      PointerProbeFormatter.format(4, event),
+    )
+  }
 }

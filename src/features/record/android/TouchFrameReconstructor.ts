@@ -224,7 +224,8 @@ export class TouchFrameReconstructor {
   private setNodeTool(tool: PointerToolType, pressed: boolean): void {
     if (pressed) {
       this.nodeTool = tool;
-    } else if (this.nodeTool === tool) {
+    } else if (this.nodeTool === tool || this.nodeTool === undefined) {
+      // undefined: the tool key went down before recording started and was never replayed.
       this.nodeTool = undefined;
       // A pen leaving range ends its contact even if the driver sent no BTN_TOUCH UP.
       if (this.options.singleTouch) {

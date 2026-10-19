@@ -314,6 +314,21 @@ describe("pen contacts", () => {
     expect(gestures[0].toolType).toBe("stylus");
   });
 
+  test("a pen whose tool key predates the recording still ends its contact on tool-up", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_X                00000438",
+      "[  1.0] EV_ABS    ABS_Y                000005dc",
+      "[  1.0] EV_KEY    BTN_TOUCH            DOWN",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_KEY    BTN_TOOL_PEN         UP",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { gestures } = run(lines, { singleTouch: true });
+    expect(gestures.map((gesture) => [gesture.type, gesture.toolType])).toEqual([
+      ["tap", "stylus"],
+    ]);
+  });
+
   test("a pen-node contact is a stylus even when its tool key predates the recording", () => {
     const lines = [
       "[  1.0] EV_ABS    ABS_X                000001a4",

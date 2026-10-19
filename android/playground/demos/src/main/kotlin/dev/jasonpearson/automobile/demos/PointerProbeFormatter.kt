@@ -24,6 +24,8 @@ data class ProbeEvent(
   val pointers: List<ProbePointer>,
   /** MotionEvent.eventTime; identifies one hover event seen by both the View and Compose. */
   val eventTimeMs: Long = 0L,
+  /** MotionEvent.actionButton: the button a BUTTON_PRESS/BUTTON_RELEASE changed; 0 otherwise. */
+  val actionButton: Int = 0,
 )
 
 /**
@@ -109,6 +111,9 @@ object PointerProbeFormatter {
 
   /**
    * `#<seq> <via> <ACTION> dev=<id> src=<names>(0x..) btn=<names> p0:<TOOL> pr=.. tilt=.. ori=..`
+   *
+   * A BUTTON_PRESS/BUTTON_RELEASE also carries ` changed=<name>` after `btn=`, since `btn=` only
+   * lists the buttons still held.
    */
   fun format(sequence: Int, event: ProbeEvent): String {
     val pointers =
@@ -119,7 +124,9 @@ object PointerProbeFormatter {
       }
     return "#$sequence ${event.via} ${actionName(event.action)} dev=${event.deviceId} " +
       "src=${sourceNames(event.source)}(${hex(event.source)}) " +
-      "btn=${buttonNames(event.buttonState)}(${event.buttonState}) $pointers"
+      "btn=${buttonNames(event.buttonState)}(${event.buttonState}) " +
+      (if (event.actionButton != 0) "changed=${buttonNames(event.actionButton)} " else "") +
+      pointers
   }
 
   private fun hex(value: Int): String = "0x" + Integer.toHexString(value)

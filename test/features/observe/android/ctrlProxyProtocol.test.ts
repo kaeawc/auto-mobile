@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HighlightShape } from "../../../../src/models/VisualHighlight";
-import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../../src/utils/networkMockRules";
 import {
   SAVED_PROTOTYPE_ERROR_CODES,
   isSavedPrototypeErrorCode,

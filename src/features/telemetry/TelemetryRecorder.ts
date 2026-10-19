@@ -2,7 +2,7 @@ import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeScope } from "../prototype/PrototypeStatusStore";
 import { logger } from "../../utils/logger";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
-import { NetworkState } from "../../server/NetworkState";
+import { NetworkState } from "../../utils/NetworkState";
 import { recordLogEvent, type RecordLogEventInput } from "../../db/logEventRepository";
 import { recordOsEvent, type RecordOsEventInput } from "../../db/osEventRepository";
 import {

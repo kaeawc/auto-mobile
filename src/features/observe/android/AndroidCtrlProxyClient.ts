@@ -156,13 +156,13 @@ import {
   deviceIncarnationToken,
   registerDeviceIncarnationListener,
 } from "../../../utils/deviceIncarnation";
-import type { StackTraceElement } from "../../../server/failuresResources";
-import {} from "../../../server/NetworkState";
+import type { StackTraceElement } from "../../../models/failureAnalytics";
+import {} from "../../../utils/NetworkState";
 import {
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   type NetworkMockPushResult,
   type NetworkMockRuleSync,
-} from "../../../server/networkMockRules";
+} from "../../../utils/networkMockRules";
 import { pushNetworkMockRules } from "./networkMockRulesPush";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,

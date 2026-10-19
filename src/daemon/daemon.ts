@@ -189,7 +189,7 @@ import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
-import { NetworkState } from "../server/NetworkState";
+import { NetworkState } from "../utils/NetworkState";
 import {} from "../server/networkStateSessionCleanup";
 import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";

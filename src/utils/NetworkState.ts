@@ -1,7 +1,6 @@
-import { isFailedNetworkRequest } from "../utils/networkRequestOutcome";
-import { ResourceRegistry } from "./resourceRegistry";
-import { logger } from "../utils/logger";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { isFailedNetworkRequest } from "./networkRequestOutcome";
+import { logger } from "./logger";
+import { defaultTimer, type Timer } from "./SystemTimer";
 
 export type NotifFilter = "all" | "errors" | "slow";
 
@@ -108,11 +107,17 @@ interface DeviceNetworkScope {
   simulationOwner: string | null;
 }
 
-const defaultNotifier: ResourceNotifier = {
-  notifyResourceUpdated(uri: string): void {
-    void ResourceRegistry.notifyResourceUpdated(uri);
-  },
-};
+const noopNotifier: ResourceNotifier = { notifyResourceUpdated(): void {} };
+
+let defaultNotifier: ResourceNotifier = noopNotifier;
+
+/**
+ * Wires the notifier a default-constructed NetworkState uses. The MCP server owns the
+ * resource registry, so it registers itself here and this lower layer stays unaware of it.
+ */
+export function setDefaultResourceNotifier(notifier: ResourceNotifier): void {
+  defaultNotifier = notifier;
+}
 
 export class NetworkState {
   private static instance: NetworkState | null = null;

@@ -452,10 +452,6 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason:
       "WebRTC stream descriptor reporting its subscription lease expiry, not a session clock.",
   },
-  "src/server/NetworkState.ts NetworkState.startSimulationUntil": {
-    writes: 1,
-    reason: "Network-error simulation expiry, unrelated to device sessions.",
-  },
   "src/server/retainedScreenshot.ts readRetainedScreenshot": {
     writes: 1,
     reason: "Retained screenshot file-protection expiry, unrelated to device sessions.",

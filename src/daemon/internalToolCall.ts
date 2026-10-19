@@ -1,4 +1,4 @@
-import { INTERNAL_NO_DIFF_PARAM } from "../daemon/constants";
+import { INTERNAL_NO_DIFF_PARAM } from "./constants";
 import { ActionableError } from "../models";
 import { logger } from "../utils/logger";
 

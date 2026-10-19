@@ -2,10 +2,16 @@ import {
   TapTargetUnavailableError,
   findTapTargetNode,
   pointInTapBounds,
-  selectionHierarchyFor,
   type TapFocusFailure,
 } from "./tapTargetSupport";
-import type { HierarchyLayer } from "../../models/HierarchyLayer";
+import {
+  markFocusFailure,
+  resolvedElementLayer,
+  tapFocusFailure,
+  tapResolvedLayer,
+  withResolvedLayer,
+  type TapOnFocusResult,
+} from "./tapFocusResult";
 import { describeFocusTarget } from "./tapFocusIdentity";
 import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
 import { TapElementFinder } from "./tapElementFinder";
@@ -117,11 +123,7 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { boundsEqual } from "../../utils/bounds";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
-import {
-  hasOwnPrototype,
-  scopeHierarchyForSelector,
-  scopeHierarchyToLayer,
-} from "../observe/hierarchyLayer";
+import { hasOwnPrototype, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
@@ -197,10 +199,20 @@ type ResolvedAndroidTapOptions = DisplayFenceOption & {
 type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
+/** The TalkBack strategy surface TapOnElement calls; fakes implement exactly this. */
+type TapOnTalkBackStrategy = Pick<
+  TalkBackTapStrategy,
+  | "executeTap"
+  | "executeDirectActivation"
+  | "executeCoordinateFallback"
+  | "executePreciseTap"
+  | "executeLongPress"
+>;
+
 /**
  * Dependencies for TapOnElement that can be injected for testing.
  */
-interface TapOnElementDependencies extends DisplayFenceDependencies {
+export interface TapOnElementDependencies extends DisplayFenceDependencies {
   displayTransitions?: DisplayTransitionReader &
     Pick<DisplayTransitionTracker, "checkIdentity" | "record">;
   lastRenderedObservation?: RenderedObservationReader;
@@ -212,7 +224,7 @@ interface TapOnElementDependencies extends DisplayFenceDependencies {
   accessibilityDetector?: AccessibilityDetector;
   timer?: Timer;
   elementSelector?: ElementSelector;
-  talkBackStrategy?: TalkBackTapStrategy;
+  talkBackStrategy?: TapOnTalkBackStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: FeatureFlagReader;
@@ -251,68 +263,8 @@ export interface TapPreTapStabilitySeam {
   rebuildSelectedElementMetadataAfterStability: TapOnElement["rebuildSelectedElementMetadataAfterStability"];
 }
 
-/** Internal focus evidence; symbol keys never enter JSON tool output. */
-export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
-export const tapResolvedLayer: unique symbol = Symbol("tapResolvedLayer");
-export type { TapFocusFailure };
-/** Classify the already resolved node in the captured window scopes, without another read. */
-function resolvedElementLayer(
-  hierarchy: ViewHierarchyResult,
-  element: Element,
-  platform: "android" | "ios",
-): HierarchyLayer | undefined {
-  if (!hasOwnPrototype(hierarchy)) {
-    return undefined;
-  }
-  hierarchy = selectionHierarchyFor(element, hierarchy, platform);
-  const source = getHierarchyNodeSource(element);
-  if (!source) {
-    return undefined;
-  }
-  const parser = new DefaultElementParser();
-  for (const layer of ["prototype", "app"] as const) {
-    const entries = parser.flattenViewHierarchy(scopeHierarchyToLayer(hierarchy, layer), {
-      includeWindows: true,
-    });
-    if (entries.some((entry) => getHierarchyNodeSource(entry.element) === source)) {
-      return layer;
-    }
-  }
-  return undefined;
-}
-
-export type TapOnFocusResult = TapOnElementResult & {
-  [tapFocusFailure]?: TapFocusFailure;
-  [tapResolvedLayer]?: HierarchyLayer;
-};
+export { tapFocusFailure, tapResolvedLayer, type TapFocusFailure, type TapOnFocusResult };
 type TapOnFocusOutcome = TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean };
-
-/** Keep routing metadata available to internal callers without exposing it in MCP payloads. */
-function withResolvedLayer<T extends TapOnFocusResult>(
-  result: T,
-  layer: HierarchyLayer | undefined,
-): T {
-  if (layer !== undefined) {
-    Object.defineProperty(result, tapResolvedLayer, {
-      value: layer,
-      enumerable: false,
-      configurable: true,
-      writable: true,
-    });
-  }
-  return result;
-}
-
-function markFocusFailure(
-  action: string,
-  result: TapOnElementResult,
-  error: unknown,
-): TapOnFocusResult {
-  if (action === "focus" && error instanceof TapTargetUnavailableError) {
-    Object.defineProperty(result, tapFocusFailure, { value: error.reason });
-  }
-  return result;
-}
 
 function appendDisabledElementWarning(
   strategy: TapStrategy,
@@ -375,7 +327,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private elementSelector: ElementSelector;
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
-  private talkBackStrategy: TalkBackTapStrategy;
+  private talkBackStrategy: TapOnTalkBackStrategy;
   private readonly featureFlags: FeatureFlagReader;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
@@ -476,6 +428,43 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.featureFlags,
       );
     this.longPressMetadataDetector = new LongPressMetadataDetector(this.elementParser);
+  }
+
+  /** @internal Typed view of private seams for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      validateOptions: this.validateOptions.bind(this),
+      hasUniqueSemanticLinkOwner: this.hasUniqueSemanticLinkOwner.bind(this),
+      hashViewHierarchy: this.hashViewHierarchy.bind(this),
+      replaceObservationHierarchy: this.replaceObservationHierarchy.bind(this),
+      verifyFocusedInputTarget: this.verifyFocusedInputTarget.bind(this),
+      executeAndroidLongPress: this.executeAndroidLongPress.bind(this),
+      executeiOSTap: this.executeiOSTap.bind(this),
+      executeiOSTapWithCoordinates: this.executeiOSTapWithCoordinates.bind(this),
+      executeIOSTapWithVoiceOver: this.executeIOSTapWithVoiceOver.bind(this),
+      /** Replaces option validation, e.g. to capture the normalized options and abort. */
+      setValidateOptions: (validate: (options: TapOnElementOptions) => string | null): void => {
+        this.validateOptions = validate;
+      },
+      /** Replaces the iOS coordinate-tap transport so the VoiceOver fallback is observable. */
+      setIosCoordinateTap: (
+        tap: (action: string, x: number, y: number, durationMs: number) => Promise<void>,
+      ): void => {
+        this.executeiOSTapWithCoordinates = tap;
+      },
+      /** Replaces the terminal-screenshot capture performed after effect polling. */
+      setTerminalScreenshotCapture: (
+        capture: (observation: ObserveResult | undefined) => Promise<void>,
+      ): void => {
+        this.captureTerminalObservationScreenshot = capture;
+      },
+      /** Replaces the deferred prediction-outcome recorder. */
+      setDeferredPredictionRecorder: (
+        record: (result: unknown, finalObservation: ObserveResult) => Promise<void>,
+      ): void => {
+        this.recordDeferredPredictionOutcome = record;
+      },
+    };
   }
 
   /**

@@ -27,7 +27,7 @@ import {
   getNoOpTelemetryRepository,
   type TelemetryEvent,
 } from "../../../../src/features/telemetry/TelemetryRecorder";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { registerNetworkResources } from "../../../../src/server/networkResources";
 import { ResourceRegistry } from "../../../../src/server/resourceRegistry";
 import { logger } from "../../../../src/utils/logger";

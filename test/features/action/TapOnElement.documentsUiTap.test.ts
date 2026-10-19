@@ -15,6 +15,8 @@ function createTap(
     success?: boolean;
     throws?: boolean;
     dispatchedTapFails?: boolean;
+    talkBackStrategy?: FakeTalkBackTapStrategy;
+    talkBackDriverFactory?: { createDriver: () => FakeTalkBackNavigationDriver };
   } = {},
 ) {
   const adb = new FakeAdbClient();
@@ -42,7 +44,11 @@ function createTap(
     tap = new TapOnElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" },
       adb,
-      { timer },
+      {
+        timer,
+        talkBackStrategy: options.talkBackStrategy,
+        talkBackDriverFactory: options.talkBackDriverFactory,
+      },
     );
   } finally {
     clientSpy.mockRestore();
@@ -170,11 +176,13 @@ describe("DocumentsUI row activation (#6335)", () => {
 
 for (const action of ["tap", "doubleTap"]) {
   test(`TalkBack ${action} recovers through DocumentsUI routing after activation failure`, async () => {
-    const { tap, adb } = createTap({ success: false });
     const strategy = new FakeTalkBackTapStrategy();
     strategy.setDirectActivationResult({ success: false, method: "accessibility-action" });
-    (tap as any).talkBackStrategy = strategy;
-    (tap as any).talkBackDriverFactory = { createDriver: () => new FakeTalkBackNavigationDriver() };
+    const { tap, adb } = createTap({
+      success: false,
+      talkBackStrategy: strategy,
+      talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
+    });
     await tap.executeAndroidTap(action, 540, 380, 0, row, undefined, undefined, true);
     expect(strategy.fallbackCalls).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(action === "tap" ? 1 : 2);
@@ -184,7 +192,7 @@ for (const action of ["tap", "doubleTap"]) {
 test("does not activate or fall back after cancellation during runner capability lookup", async () => {
   const { tap, adb, service } = createTap();
   const controller = new AbortController();
-  (tap as any).accessibilityService.supportsNodeActionSelectors = async () => {
+  service.supportsNodeActionSelectors = async () => {
     controller.abort();
     return true;
   };
@@ -198,7 +206,7 @@ test("does not activate or fall back after cancellation during runner capability
 test.each(["capability", "action"])(
   "propagates abort during pending %s without input fallback",
   async (stage) => {
-    const { tap, adb, gestures } = createTap();
+    const { tap, adb, gestures, service } = createTap();
     const controller = new AbortController();
     let received: AbortSignal | undefined;
     let finish!: () => void;
@@ -206,27 +214,18 @@ test.each(["capability", "action"])(
       finish = resolve;
     });
     if (stage === "capability") {
-      (tap as any).accessibilityService.supportsNodeActionSelectors = async (
-        _perf: unknown,
-        signal: AbortSignal,
-      ) => {
+      service.supportsNodeActionSelectors = async (_perf, signal) => {
         received = signal;
-        signal.addEventListener("abort", finish, { once: true });
+        signal?.addEventListener("abort", finish, { once: true });
         await pending;
         return true;
       };
     } else {
-      (tap as any).accessibilityService.requestNodeAction = async (
-        _action: string,
-        _selector: unknown,
-        _timeout: unknown,
-        _perf: unknown,
-        signal: AbortSignal,
-      ) => {
+      service.requestNodeAction = async (_action, _selector, _timeout, _perf, signal) => {
         received = signal;
-        signal.addEventListener("abort", finish, { once: true });
+        signal?.addEventListener("abort", finish, { once: true });
         await pending;
-        return { success: true };
+        return { success: true, action: "click", totalTimeMs: 1 };
       };
     }
     const result = tap.executeAndroidTapWithCoordinates("tap", 540, 380, 0, row, controller.signal);

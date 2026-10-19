@@ -1,7 +1,7 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   registerObservationResources,
   type ObservationResourceDependencies,

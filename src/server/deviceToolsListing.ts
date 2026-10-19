@@ -25,7 +25,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { hydrateRequiredDisplayInventories } from "../devices/DisplayInventoryProvider";
 import { AndroidTransportAliases } from "../utils/androidSerial";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import type { TransitionalHold } from "./inventoryDeviceDescription";
 import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 import {

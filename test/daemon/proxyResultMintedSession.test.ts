@@ -4,7 +4,7 @@ import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   DAEMON_VERSION,
   DAEMON_SHUTDOWN_TIMEOUT_MS,

@@ -1,7 +1,7 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Client } from "@modelcontextprotocol/client";
 import { Server, type LoggingLevel, InMemoryTransport } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";

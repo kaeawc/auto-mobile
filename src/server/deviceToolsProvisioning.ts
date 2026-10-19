@@ -1,4 +1,4 @@
-import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
+import { provisionCancellationOutcomes } from "../daemon/provisionCancellationOutcomes";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,

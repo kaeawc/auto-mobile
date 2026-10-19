@@ -31,7 +31,7 @@ import { stripInternalToolParams } from "../../internalToolParams";
 import { PlanExecutionInProgressError } from "../../planExecutionInProgressRefusal";
 import type { PlanExecutionLock } from "../../PlanExecutionLock";
 import { withAdmittedSessionEcho } from "../../routedSessionEcho";
-import { withForeignOwnedSessionMeta } from "../../routedSessionMeta";
+import { withForeignOwnedSessionMeta } from "../../../daemon/routedSessionMeta";
 import { isTypedToolRefusal, shapeToolCallError } from "../../shapeToolCallError";
 import {
   responseCarriesStructuredContent,

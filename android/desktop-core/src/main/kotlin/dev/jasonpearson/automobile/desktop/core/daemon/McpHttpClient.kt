@@ -697,7 +697,7 @@ class McpHttpClient(
     requestSender?.send(request) ?: httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
   companion object {
-    /** Must match `MCP_SESSION_KEY_HEADER` in src/server/mcpSessionKey.ts. */
+    /** Must match `MCP_SESSION_KEY_HEADER` in src/daemon/mcpSessionKey.ts. */
     internal const val MCP_SESSION_KEY_HEADER = "x-auto-mobile-mcp-session-id"
     private const val SESSION_HEADER = "mcp-session-id"
     private const val MCP_ACCEPT_HEADER = "application/json, text/event-stream"

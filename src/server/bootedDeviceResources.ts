@@ -1,5 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../daemon/adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
   type AdbOfflineHold,

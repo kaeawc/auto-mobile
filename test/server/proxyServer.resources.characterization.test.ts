@@ -1,6 +1,6 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Server } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { beforeAll, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ActionableError } from "../../src/models";

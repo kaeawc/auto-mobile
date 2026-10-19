@@ -130,7 +130,7 @@ import {
   type ResourceUpdateTargets,
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import {
   toolSelectionProfileUuidFromResponse,
   IDE_SET_SESSION_TOOL_ENABLED_METHOD,
@@ -184,7 +184,7 @@ import {
   brokerConnectionControlRefusal,
   brokerConnectionHostMutationRefusal,
 } from "./sessionBroker/connectionScope";
-import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
+import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../features/deviceLifecycle/deviceLifecycleCore";
 
 /** Slack after the handler's settlement wait for it to finish rollback and build its result. */

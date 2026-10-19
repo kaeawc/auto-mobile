@@ -125,7 +125,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";

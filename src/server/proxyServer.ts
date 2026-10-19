@@ -7,7 +7,7 @@ import type {
   ServerContext,
 } from "@modelcontextprotocol/server";
 import { createSdkMcpServer } from "./sdkMcpServer";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
 import { logger } from "../utils/logger";
 import {
   DaemonBoundSessionExpiredError,

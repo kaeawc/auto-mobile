@@ -67,7 +67,7 @@ describe("identifyInteractions cached freshness", () => {
     setDebugModeEnabled(true);
     // Freshness only reads the current screen; avoid unrelated database migrations.
     navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+      new FakeNavigationGraphManager(),
     );
     timer = new FakeTimer();
     screen = new FakeObserveScreen();

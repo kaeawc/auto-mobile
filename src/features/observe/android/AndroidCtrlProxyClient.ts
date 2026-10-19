@@ -1193,7 +1193,7 @@ export class AndroidCtrlProxyClient
   /**
    * Get the NavigationGraphManager for the bound session, or the global singleton.
    */
-  private getNavigationGraphManager(): NavigationGraphManager {
+  private getNavigationGraphManager(): ReturnType<typeof NavigationGraphManager.getInstance> {
     return this.boundSessionId
       ? NavigationGraphManager.getInstanceForSession(this.boundSessionId)
       : NavigationGraphManager.getInstance();

@@ -25,11 +25,9 @@
 1	test/fixtures/observe/observeFixture.ts
 4	test/helpers/devicePoolSuite.ts
 5	test/helpers/directFrameRig.ts
-1	test/helpers/hostCommandGuard.ts
 7	test/helpers/inMemoryDaemonWire.ts
 1	test/helpers/livenessScenarioHarness.test.ts
 1	test/helpers/restartStopHarness.ts
-1	test/helpers/tapAtCoordinate.ts
 1	test/lint/deviceToolsKillDeviceImportCasing.test.ts
 1	test/lint/expensiveHookWork.ts
 1	test/models/screenScaleMetadata.test.ts

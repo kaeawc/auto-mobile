@@ -28,8 +28,7 @@ function createConnectedClient(fakeTimer: FakeTimer, writes: string[]): DaemonCl
     null,
     new CountingIdGenerator("req"),
   );
-  (client as unknown as { connected: boolean }).connected = true;
-  (client as unknown as { socket: Duplex }).socket = createCapturingSocket(writes);
+  client.testHooks.attachSocket(createCapturingSocket(writes));
   return client;
 }
 

@@ -19,7 +19,10 @@ test.each([false, true])(
       timer.advanceTime(70);
       return client;
     });
-    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({ success: true });
+    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({
+      success: true,
+      totalTimeMs: 0,
+    });
     const calls: Parameters<AppendTextInput["appendText"]>[] = [];
     const input: AppendTextInput = {
       async appendText(...args) {
@@ -70,7 +73,10 @@ test.each(["append", "validation"] as const)(
       timer.advanceTime(phase === "append" ? 1000 : 70);
       return client;
     });
-    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({ success: true });
+    const validate = spyOn(client, "validateFrameContext").mockResolvedValue({
+      success: true,
+      totalTimeMs: 0,
+    });
     const appendText = mock<AppendTextInput["appendText"]>(
       async (_text, timeoutMs, beforeKeyEvent) => {
         expect(timeoutMs).toBe(930);
@@ -123,7 +129,8 @@ test.each([false, true])(
         },
       },
     });
-    expect(
+    // The declared result omits the IME action fields the append path also returns.
+    expect<object>(
       await server["executeInputTypeText"](
         "android",
         device,
@@ -158,7 +165,8 @@ test("submit is the first dispatch when append sends no keyevents", async () => 
     input: { appendText: async () => ({ success: true, charsSent: 0 }) },
     fromCache: false,
   });
-  expect(
+  // The declared result omits the IME action fields the append path also returns.
+  expect<object>(
     await server["executeInputTypeText"](
       "android",
       device,

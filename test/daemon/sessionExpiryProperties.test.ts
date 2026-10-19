@@ -15,6 +15,7 @@ import {
   reasonClass,
   runSchedule,
   type Instant,
+  type ProducerEvent,
   type PropertyCheck,
   type RunResult,
   type Schedule,
@@ -527,7 +528,7 @@ describe("property replay logger isolation", () => {
     let levelDuringReplay: LogLevel | undefined;
     const instant: Instant = {
       at: 1,
-      get events() {
+      get events(): ProducerEvent[] {
         levelDuringReplay = logger.getLogLevel();
         throw failure;
       },

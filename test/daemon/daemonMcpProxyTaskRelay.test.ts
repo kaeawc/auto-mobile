@@ -72,7 +72,8 @@ describe("DaemonMcpProxy task relay (#4668)", () => {
     await proxy.relayTaskMethod("tasks/get", { taskId: "t-1" }, true);
     await proxy.relayTaskMethod("tasks/cancel", { taskId: "t-1" }, true);
 
-    const ownerKey = client.callToolOptions[0]?.tasks?.ownerKey;
+    // An absent key becomes "", which the prefix assertion rejects.
+    const ownerKey = client.callToolOptions[0]?.tasks?.ownerKey ?? "";
     expect(ownerKey).toStartWith("proxy-tasks:");
     expect(client.relayTaskCalls.map((call) => call.tasks)).toEqual([
       { ownerKey, declared: true },
@@ -164,7 +165,6 @@ describe("DaemonMcpProxy binds a device-binding task from its completed result (
 
   function settle(status: string, extra: Record<string, unknown> = {}): void {
     taskAnswers.set("boot-1", {
-      resultType: "complete",
       ...startDeviceTask("boot-1"),
       status,
       ...extra,

@@ -24,6 +24,7 @@ import {
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
 } from "../../src/daemon/proxyLivenessRecovery";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
@@ -84,10 +85,11 @@ const IO_DEADLINE_MS = 5_000;
 
 const refusals = new Map(buildRefusalWireFixtures().map((fixture) => [fixture.code, fixture]));
 
-function fakeDaemonState() {
+function fakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -98,6 +100,7 @@ function fakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 

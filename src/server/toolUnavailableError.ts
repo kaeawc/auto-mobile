@@ -4,6 +4,7 @@ import {
   DAEMON_TOOL_UNAVAILABLE_CODE,
   DAEMON_UNKNOWN_TOOL_CODE,
 } from "../daemon/types";
+export { UnknownToolError } from "./UnknownToolError";
 
 /**
  * A tool this server registers but whose availability gate (debug-only,
@@ -41,20 +42,6 @@ function wireDataCode(error: unknown): unknown {
  */
 export function isToolUnavailableWireError(error: unknown): boolean {
   return wireDataCode(error) === DAEMON_TOOL_UNAVAILABLE_CODE;
-}
-
-/**
- * A tool this server does not register at all. Same message as ever; `data` lets the daemon
- * proxy classify it by code instead of parsing "Unknown tool:" prose.
- */
-export class UnknownToolError extends ActionableError {
-  readonly data: { code: typeof DAEMON_UNKNOWN_TOOL_CODE; toolName: string };
-
-  constructor(toolName: string, hint?: string) {
-    super(`Unknown tool: ${toolName}${hint ? `. ${hint}` : ""}`);
-    this.name = "UnknownToolError";
-    this.data = { code: DAEMON_UNKNOWN_TOOL_CODE, toolName };
-  }
 }
 
 /** The tool name of an {@link UnknownToolError} after it crossed the loopback MCP transport. */

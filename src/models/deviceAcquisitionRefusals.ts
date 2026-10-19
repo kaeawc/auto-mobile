@@ -1,95 +1,40 @@
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "./deviceSessionRecovery";
-import { ActionableError } from "./ActionableError";
 import { InputDeviceOwnedError } from "./InputDeviceOwnedError";
-
-/**
- * A device whose previous session is still finishing its release cleanup (restores, recording
- * finalize) cannot be bound yet (#10960). Clients wait on it the way they wait for a held device.
- */
-export const DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress";
-
-/** A health marker refuses allocation until recovery succeeds or the device is replaced (#12112). */
-export const DEVICE_UNHEALTHY_CODE = "device_unhealthy";
-
-export interface UnhealthyDeviceEvidence {
-  readonly deviceId: string;
-  readonly reason: string;
-  readonly recovering: boolean;
-  readonly retryAfterMs?: number;
-}
-
-/** Every health reason has the same refusal, with retry intent derived from live recovery (#12112). */
-export class DeviceUnhealthyError extends ActionableError {
-  readonly code = DEVICE_UNHEALTHY_CODE;
-  readonly retryable: boolean;
-  readonly retryAfterMs?: number;
-  readonly recovering: boolean;
-  readonly deviceId?: string;
-  readonly reason?: string;
-  readonly devices: readonly UnhealthyDeviceEvidence[];
-
-  constructor(devices: readonly UnhealthyDeviceEvidence[], message: string) {
-    super(message);
-    this.name = "DeviceUnhealthyError";
-    if (devices.length === 0) {
-      throw new Error("DeviceUnhealthyError requires at least one unhealthy device");
-    }
-    this.devices = devices.map(({ deviceId, reason, recovering, retryAfterMs }) => ({
-      deviceId,
-      reason,
-      recovering,
-      ...(recovering && retryAfterMs !== undefined && Number.isFinite(retryAfterMs)
-        ? { retryAfterMs: Math.max(1, Math.ceil(retryAfterMs)) }
-        : {}),
-    }));
-    this.recovering = this.retryable = this.devices.some((device) => device.recovering);
-    const bounds = this.devices.flatMap((device) =>
-      device.retryAfterMs === undefined ? [] : [device.retryAfterMs],
-    );
-    if (bounds.length > 0) {
-      this.retryAfterMs = Math.min(...bounds);
-    }
-    if (this.devices.length === 1) {
-      this.deviceId = this.devices[0]!.deviceId;
-      this.reason = this.devices[0]!.reason;
-    }
-  }
-
-  toPayload(): Record<string, unknown> {
-    return {
-      code: this.code,
-      ...(this.deviceId === undefined ? {} : { deviceId: this.deviceId, reason: this.reason }),
-      recovering: this.recovering,
-      retryable: this.retryable,
-      ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }),
-      devices: this.devices,
-    };
-  }
-}
-
-/**
- * A session's creation did not finish within its deadline (a wedged DB write or a release of the
- * same UUID that never settled), so the bind was rolled back rather than hold the device and the
- * pool's assignment mutex (#10963). Retrying is safe.
- */
-export const SESSION_CREATION_TIMEOUT_CODE = "session_creation_timeout";
-
-/**
- * Another live AutoMobile daemon has claimed the device, so an explicit bind is refused (#10980,
- * owner decision 2026-10-09): two daemons must never drive the same device. Clients wait on it
- * like a held device; it frees once the other daemon releases its session.
- */
-export const DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon";
-
-/**
- * The device is under a kill/shutdown reservation, so an acquisition or readiness step cannot
- * proceed. The reservation clears once the shutdown finishes (or fails), after which the device
- * can be acquired again, so clients wait on it like a held device.
- */
-export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
-
-/** adb still lists the transport, but it has not returned online within the bind budget. */
-export const DEVICE_OFFLINE_CODE = "device_offline";
+import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./DeviceCleanupInProgressError";
+import { SESSION_CREATION_TIMEOUT_CODE } from "./SessionCreationTimeoutError";
+import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "./DeviceOwnedByOtherDaemonError";
+import { DEVICE_SHUTTING_DOWN_CODE } from "./DeviceShuttingDownError";
+export {
+  DEVICE_UNHEALTHY_CODE,
+  DeviceUnhealthyError,
+  type UnhealthyDeviceEvidence,
+} from "./DeviceUnhealthyError";
+export {
+  DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+  RetryableDeviceAcquisitionError,
+} from "./RetryableDeviceAcquisitionError";
+export {
+  DEVICE_CLEANUP_IN_PROGRESS_CODE,
+  DeviceCleanupInProgressError,
+} from "./DeviceCleanupInProgressError";
+export { DEVICE_OFFLINE_CODE, DeviceTransportOfflineError } from "./DeviceTransportOfflineError";
+export {
+  SESSION_CREATION_TIMEOUT_CODE,
+  SessionCreationTimeoutError,
+} from "./SessionCreationTimeoutError";
+export {
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,
+  DeviceOwnedByOtherDaemonError,
+} from "./DeviceOwnedByOtherDaemonError";
+export {
+  DEVICE_SHUTTING_DOWN_CODE,
+  DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
+  DeviceShuttingDownError,
+} from "./DeviceShuttingDownError";
+export {
+  SESSION_RELEASED_DURING_CREATION_CODE,
+  SessionReleasedDuringCreationError,
+} from "./SessionReleasedDuringCreationError";
 
 /**
  * The session UUID is under a kill's terminal release reservation (#11146), so it cannot be bound,
@@ -155,149 +100,4 @@ export function freshStartAlreadyBoundError(
     `Freshly started device '${deviceId}' was assigned to session ` +
       `${holderSessionId} before its owning session could reserve it.`,
   );
-}
-
-/** Retry hint when nothing bounds the remaining wait more precisely. */
-export const DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS = 1_000;
-
-/**
- * A typed, retryable refusal to bind a device that will become available without the caller
- * doing anything. The daemon does not block acquisition server-side; it returns this and the
- * client waits `retryAfterMs` before retrying, within its own bounded budget.
- */
-export class RetryableDeviceAcquisitionError extends ActionableError {
-  readonly retryable = true;
-
-  constructor(
-    readonly code: string,
-    readonly deviceId: string,
-    readonly retryAfterMs: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = "RetryableDeviceAcquisitionError";
-  }
-}
-
-export class DeviceCleanupInProgressError extends RetryableDeviceAcquisitionError {
-  constructor(deviceId: string, retryAfterMs: number) {
-    super(
-      DEVICE_CLEANUP_IN_PROGRESS_CODE,
-      deviceId,
-      retryAfterMs,
-      `Device '${deviceId}' is still completing the previous session's cleanup ` +
-        `(code ${DEVICE_CLEANUP_IN_PROGRESS_CODE}); retry in about ${retryAfterMs}ms, ` +
-        "after the cleanup finishes.",
-    );
-    this.name = "DeviceCleanupInProgressError";
-  }
-}
-
-export class DeviceTransportOfflineError extends RetryableDeviceAcquisitionError {
-  constructor(
-    deviceId: string,
-    readonly state: string | undefined,
-    adoptedRuntime = false,
-  ) {
-    super(
-      DEVICE_OFFLINE_CODE,
-      deviceId,
-      DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
-      (state === undefined
-        ? adoptedRuntime
-          ? `adb did not list the previously resolved emulator '${deviceId}' steadily while binding (its transport was absent or flapping) `
-          : `The emulator process this request started for device '${deviceId}' is still running but adb does not list its transport yet `
-        : `Device '${deviceId}' is still attached but adb lists it as ${state} `) +
-        `(code ${DEVICE_OFFLINE_CODE}); it was not bound. Retry in about ` +
-        `${DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS}ms.`,
-    );
-    this.name = "DeviceTransportOfflineError";
-  }
-}
-
-export class SessionCreationTimeoutError extends RetryableDeviceAcquisitionError {
-  constructor(
-    readonly sessionUuid: string,
-    deviceId: string,
-    timeoutMs: number,
-  ) {
-    super(
-      SESSION_CREATION_TIMEOUT_CODE,
-      deviceId,
-      DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
-      `Creating session ${sessionUuid} on device '${deviceId}' did not finish within ` +
-        `${timeoutMs}ms (code ${SESSION_CREATION_TIMEOUT_CODE}); the device was not bound. ` +
-        "Retry the request.",
-    );
-    this.name = "SessionCreationTimeoutError";
-  }
-}
-
-/** Retry hint for a device another daemon holds: its claim lapses only once that session ends. */
-export const DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS = 2_000;
-
-export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionError {
-  /** @param remedy what the caller can do instead; defaults to the acquisition remedy */
-  constructor(
-    deviceId: string,
-    readonly ownerPid: number | undefined,
-    remedy = "Retry after that daemon releases it, or pick another device.",
-  ) {
-    super(
-      DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
-      deviceId,
-      DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,
-      `Device '${deviceId}' is claimed by another AutoMobile daemon` +
-        (ownerPid === undefined ? "" : ` (PID ${ownerPid})`) +
-        ` (code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE}); two daemons must never drive the same ` +
-        `device. ${remedy}`,
-    );
-    this.name = "DeviceOwnedByOtherDaemonError";
-  }
-}
-
-/**
- * Retry hint for a device under shutdown: a kill normally finishes within a few seconds. It is a
- * polling interval, not a remaining time like `device_cleanup_in_progress` carries (#11616): a
- * shutdown reservation spans several separately bounded steps and records no deadline, so the
- * refusal has no bound to report. Each usable hint extends the runners' total wait using
- * max(30 s, min(waited + retryAfterMs, 150 s)), up to the 150 s cap. The 30 s floor alone
- * applies only when the refusal carries no usable hint.
- */
-export const DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS = 2_000;
-
-export class DeviceShuttingDownError extends RetryableDeviceAcquisitionError {
-  /** @param detail what the refused step was trying to do, e.g. "and cannot be assigned" */
-  constructor(deviceId: string, detail?: string) {
-    super(
-      DEVICE_SHUTTING_DOWN_CODE,
-      deviceId,
-      DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
-      `Device '${deviceId}' is shutting down${detail ? ` ${detail}` : ""} ` +
-        `(code ${DEVICE_SHUTTING_DOWN_CODE}); retry once the shutdown has finished.`,
-    );
-    this.name = "DeviceShuttingDownError";
-  }
-}
-
-/**
- * A session that was being created on demand was released before its creation returned (for
- * example an executePlan label session whose base was released mid-setup, #11146). The caller lost
- * the race; nothing is bound under its UUID.
- */
-export const SESSION_RELEASED_DURING_CREATION_CODE = "session_released_during_creation";
-
-export class SessionReleasedDuringCreationError extends ActionableError {
-  readonly code = SESSION_RELEASED_DURING_CREATION_CODE;
-  readonly retryable = false;
-  readonly nextAction = ACQUIRE_NEW_SESSION_NEXT_ACTION;
-
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Session ${sessionUuid} was released while it was being created ` +
-        `(code ${SESSION_RELEASED_DURING_CREATION_CODE}); no device is bound to it. ` +
-        "Acquire a new session with getAndroid or getApple.",
-    );
-    this.name = "SessionReleasedDuringCreationError";
-  }
 }

@@ -11,9 +11,6 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.put
 
 /**
  * Accessibility-event interaction intake: records tap, scroll, navigate and text interactions for
@@ -281,13 +278,7 @@ internal class InteractionEventController(
     }
 
     host.broadcast(
-      jsonCompact.encodeToString(
-        buildJsonObject {
-          put("type", "interaction_event")
-          put("timestamp", interaction.timestamp)
-          put("event", jsonCompact.encodeToJsonElement(interaction))
-        },
-      ),
+      interactionEventFrame(interaction.timestamp, jsonCompact.encodeToString(interaction)),
     )
   }
 }

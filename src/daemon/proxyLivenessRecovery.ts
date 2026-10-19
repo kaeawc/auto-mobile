@@ -1,26 +1,3 @@
-/**
- * Per-session liveness recovery for an MCP proxy (#10053, epic #10049).
- *
- * A proxy is the only liveness owner of the device sessions it holds. When it stops getting
- * heartbeat acknowledgements for a session it can be in one of two distinct states:
- *
- * - `daemon_stalled`: the daemon's socket is open or reconnectable but heartbeat acks time out.
- * - `proxy_stalled`: the proxy's own heartbeat tick fired later than the lease allows, which it can
- *   only notice after it resumes.
- *
- * Each state gets exactly {@link LIVENESS_RECOVERY_ATTEMPTS} automatic attempts (re-heartbeat with
- * the same owner token; a session the daemon holds as suspect is restored with the same UUID).
- * After that the proxy hands over to the harness with a structured error and does nothing more.
- *
- * Only an answer from the daemon proves a session lost (`proxy_stalled`): a session the daemon says
- * it no longer has, or that another token now owns. A daemon that never answers is stalled
- * (`daemon_stalled`) whichever state recovery started in.
- *
- * Nothing here reaches a daemon manager: the daemon is shared by every harness, so restarting it is
- * a harness action named in the handover, never a proxy one. The only way this module talks to the
- * daemon is the injected {@link LivenessRecoveryDeps.attempt}.
- */
-
 import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -49,6 +26,7 @@ export function daemonLifecycleAllowed(): boolean {
 export const LIVENESS_RECOVERY_ATTEMPTS = 3;
 
 export const DAEMON_STALLED_CODE = "daemon_stalled";
+
 export const PROXY_STALLED_CODE = "proxy_stalled";
 
 export type LivenessStallCode = typeof DAEMON_STALLED_CODE | typeof PROXY_STALLED_CODE;
@@ -61,6 +39,7 @@ export const RECOVERY_SAFETY_MARGIN_MS = 1_000;
 
 /** Recovery action named to the harness for each state. */
 export const RESTART_DAEMON_THEN_RESUME_ACTION = "restart_daemon_then_resume_by_session_uuid";
+
 export const REACQUIRE_LOST_SESSIONS_ACTION = "reacquire_lost_sessions";
 
 /** How long a session survives without an acknowledged heartbeat: the lease plus its suspect grace. */
@@ -172,26 +151,6 @@ export function recoveryAttemptSlotMs(params: {
     params.lastAckAt + livenessBudgetMs(params.leaseMs) - RECOVERY_SAFETY_MARGIN_MS - params.now;
   const budgetSlot = Math.floor(remaining / LIVENESS_RECOVERY_ATTEMPTS);
   return budgetSlot >= params.requestTimeoutMs / 2 ? budgetSlot : params.requestTimeoutMs;
-}
-
-/** Measures how much later than its cadence a periodic tick fired. */
-export class TickLatenessClock {
-  private lastTickAt: number | undefined;
-
-  constructor(private readonly intervalMs: number) {}
-
-  /** Record a tick starting at `now`; returns how late it was (0 for the first tick). */
-  note(now: number): number {
-    const lateness =
-      this.lastTickAt === undefined ? 0 : Math.max(0, now - this.lastTickAt - this.intervalMs);
-    this.lastTickAt = now;
-    return lateness;
-  }
-
-  /** Forget the previous tick, e.g. when the keeper stops and a later start is not "late". */
-  reset(): void {
-    this.lastTickAt = undefined;
-  }
 }
 
 export interface StalledSession {
@@ -725,3 +684,5 @@ export class LivenessRecovery {
     });
   }
 }
+
+export { TickLatenessClock } from "./TickLatenessClock";

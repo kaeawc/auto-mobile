@@ -8,8 +8,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonElement
 
 /** Device-owner CA certificate operations, with service and platform access supplied per call. */
 internal class CaCertificateController(
@@ -38,11 +37,7 @@ internal class CaCertificateController(
   interface ResponseSender {
     fun isRunning(): Boolean
 
-    suspend fun broadcastWithPerf(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    )
+    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
 
     fun getConnectionCount(): Int
   }
@@ -391,16 +386,8 @@ internal class CaCertificateController(
     }
 
     resultBroadcaster.guard(requestId, "ca_cert_result") {
-      responseSender.broadcastWithPerf("ca_cert_result", requestId) {
-        put("action", action)
-        put("success", success)
-        put("totalTimeMs", totalTimeMs)
-        if (alias != null) {
-          put("alias", alias)
-        }
-        if (error != null) {
-          put("error", error)
-        }
+      responseSender.broadcastWithPerf { perfTiming ->
+        caCertResultFrame(requestId, action, success, alias, error, totalTimeMs, perfTiming)
       }
       Log.d(TAG, "Broadcasted ca_cert_result to ${responseSender.getConnectionCount()} clients")
     }
@@ -420,16 +407,16 @@ internal class CaCertificateController(
     }
 
     resultBroadcaster.guard(requestId, "device_owner_status_result") {
-      val success = error == null
-      responseSender.broadcastWithPerf("device_owner_status_result", requestId) {
-        put("success", success)
-        put("totalTimeMs", totalTimeMs)
-        put("packageName", packageName)
-        put("isDeviceOwner", isDeviceOwner)
-        put("isAdminActive", isAdminActive)
-        if (error != null) {
-          put("error", error)
-        }
+      responseSender.broadcastWithPerf { perfTiming ->
+        deviceOwnerStatusResultFrame(
+          requestId,
+          packageName,
+          isDeviceOwner,
+          isAdminActive,
+          error,
+          totalTimeMs,
+          perfTiming,
+        )
       }
       Log.d(
         TAG,

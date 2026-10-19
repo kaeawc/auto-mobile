@@ -2,12 +2,25 @@ import {
   TapTargetUnavailableError,
   findTapTargetNode,
   pointInTapBounds,
-  selectionHierarchyFor,
   type TapFocusFailure,
 } from "./tapTargetSupport";
-import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { describeFocusTarget } from "./tapFocusIdentity";
 import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
+import {
+  TapExplicitDisplayPhase,
+  completedDisplayFailure,
+  didCompleteDisplayGesture,
+  rethrowKeyboardOcclusion,
+  unverifiableDisplayPostState,
+} from "./tapExplicitDisplayPhase";
+import {
+  markFocusFailure,
+  resolvedElementLayer,
+  warningsField,
+  withResolvedLayer,
+  type TapOnFocusOutcome,
+  type TapOnFocusResult,
+} from "./tapResultMarkers";
 import { TapElementFinder } from "./tapElementFinder";
 import { TapPointPlanner } from "./tapPointPlanner";
 import { invalidateIosCacheOnSuccess, tapViaVoiceOver } from "./tapIosVoiceOver";
@@ -38,7 +51,6 @@ import {
 } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { dispatchAndroidLongPress } from "./androidLongPress";
-import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import {
@@ -48,7 +60,6 @@ import {
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
-import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {
   ElementResolver,
   isFocusEditableElement,
@@ -117,11 +128,7 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { boundsEqual } from "../../utils/bounds";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
-import {
-  hasOwnPrototype,
-  scopeHierarchyForSelector,
-  scopeHierarchyToLayer,
-} from "../observe/hierarchyLayer";
+import { hasOwnPrototype, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
@@ -140,7 +147,6 @@ import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
-import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
@@ -152,7 +158,6 @@ import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { sequenceBackoff } from "../../utils/Backoff";
 import {
-  androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
   dispatchIosDoubleTap,
@@ -160,11 +165,7 @@ import {
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { executeTouchscreenInput } from "./touchscreenInput";
-import {
-  refreshTargetDisplayHierarchy,
-  prepareTargetDisplayAction,
-  type RenderedObservationReader,
-} from "./TargetDisplayAction";
+import { type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
   createDeviceHierarchyCapture,
@@ -193,8 +194,6 @@ type ResolvedAndroidTapOptions = DisplayFenceOption & {
   ) => void;
 };
 
-/** TalkBack state resolved once for an explicit-display tap, with any unknown-state warnings. */
-type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
 /**
@@ -251,68 +250,8 @@ export interface TapPreTapStabilitySeam {
   rebuildSelectedElementMetadataAfterStability: TapOnElement["rebuildSelectedElementMetadataAfterStability"];
 }
 
-/** Internal focus evidence; symbol keys never enter JSON tool output. */
-export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
-export const tapResolvedLayer: unique symbol = Symbol("tapResolvedLayer");
+export { tapFocusFailure, tapResolvedLayer, type TapOnFocusResult } from "./tapResultMarkers";
 export type { TapFocusFailure };
-/** Classify the already resolved node in the captured window scopes, without another read. */
-function resolvedElementLayer(
-  hierarchy: ViewHierarchyResult,
-  element: Element,
-  platform: "android" | "ios",
-): HierarchyLayer | undefined {
-  if (!hasOwnPrototype(hierarchy)) {
-    return undefined;
-  }
-  hierarchy = selectionHierarchyFor(element, hierarchy, platform);
-  const source = getHierarchyNodeSource(element);
-  if (!source) {
-    return undefined;
-  }
-  const parser = new DefaultElementParser();
-  for (const layer of ["prototype", "app"] as const) {
-    const entries = parser.flattenViewHierarchy(scopeHierarchyToLayer(hierarchy, layer), {
-      includeWindows: true,
-    });
-    if (entries.some((entry) => getHierarchyNodeSource(entry.element) === source)) {
-      return layer;
-    }
-  }
-  return undefined;
-}
-
-export type TapOnFocusResult = TapOnElementResult & {
-  [tapFocusFailure]?: TapFocusFailure;
-  [tapResolvedLayer]?: HierarchyLayer;
-};
-type TapOnFocusOutcome = TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean };
-
-/** Keep routing metadata available to internal callers without exposing it in MCP payloads. */
-function withResolvedLayer<T extends TapOnFocusResult>(
-  result: T,
-  layer: HierarchyLayer | undefined,
-): T {
-  if (layer !== undefined) {
-    Object.defineProperty(result, tapResolvedLayer, {
-      value: layer,
-      enumerable: false,
-      configurable: true,
-      writable: true,
-    });
-  }
-  return result;
-}
-
-function markFocusFailure(
-  action: string,
-  result: TapOnElementResult,
-  error: unknown,
-): TapOnFocusResult {
-  if (action === "focus" && error instanceof TapTargetUnavailableError) {
-    Object.defineProperty(result, tapFocusFailure, { value: error.reason });
-  }
-  return result;
-}
 
 function appendDisabledElementWarning(
   strategy: TapStrategy,
@@ -322,13 +261,6 @@ function appendDisabledElementWarning(
   if (strategy.warnsOnDisabledElement && isFalsy(element.enabled)) {
     warnings.push("The matched element is disabled; the tap may have no effect.");
   }
-}
-
-/**
- * Command to tap on UI element containing specified text
- */
-function warningsField(warnings: string[]): { warnings?: string[] } {
-  return warnings.length ? { warnings } : {};
 }
 
 function withActivationWarning(warnings: string[], warning: string | undefined): string[] {
@@ -363,6 +295,65 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     hashViewHierarchy: (hierarchy) => this.hashViewHierarchy(hierarchy),
     deriveTapEffect: (previous, current) => this.deriveTapEffect(previous, current),
     compareActiveWindow: (previous, current) => this.compareActiveWindow(previous, current),
+  });
+  private readonly explicitDisplay = new TapExplicitDisplayPhase({
+    device: this.device,
+    timer: this.timer,
+    tapPoints: this.tapPoints,
+    adb: () => this.adb,
+    accessibilityService: () => this.accessibilityService,
+    geometry: () => this.geometry,
+    hierarchyCapture: () => this.hierarchyCapture,
+    lastRenderedObservation: () => this.lastRenderedObservation,
+    observeScreen: () => this.observeScreen,
+    displayTransitionReader: () => this.displayTransitionReader,
+    strategy: () => this.strategy,
+    talkBackStrategy: () => this.talkBackStrategy,
+    talkBackDriverFactory: () => this.talkBackDriverFactory,
+    createErrorResult: (action, error, cause) => this.createErrorResult(action, error, cause),
+    validateOptions: (options) => this.validateOptions(options),
+    getSearchUntilDuration: (options) => this.getSearchUntilDuration(options),
+    hashViewHierarchy: (hierarchy) => this.hashViewHierarchy(hierarchy),
+    buildSelectedElementMetadata: (selection) => this.buildSelectedElementMetadata(selection),
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    withObservationScreenSize: (options, observation) =>
+      this.withObservationScreenSize(options, observation),
+    replaceObservationHierarchy: (observation, hierarchy, refreshed) =>
+      this.replaceObservationHierarchy(observation, hierarchy, refreshed),
+    refreshEnsureCheckedSelection: (options, observation, selection, signal) =>
+      this.refreshEnsureCheckedSelection(options, observation, selection, signal),
+    ensureCheckedBeforeTap: (options, element, selected, searchUntil) =>
+      this.ensureCheckedBeforeTap(options, element, selected, searchUntil),
+    applyEnsureCheckedResult: (result, options, signal) =>
+      this.applyEnsureCheckedResult(result, options, signal),
+    resolveAndroidStableTapTargetAfterRefreshes: (
+      options,
+      observation,
+      action,
+      requireId,
+      signal,
+    ) =>
+      this.resolveAndroidStableTapTargetAfterRefreshes(
+        options,
+        observation,
+        action,
+        requireId,
+        signal,
+      ),
+    searchForElement: (options, observation, signal) =>
+      this.searchForElement(options, observation, signal),
+    handleElementNotFound: (options, observation, containerFound, signal, selection) =>
+      this.handleElementNotFound(options, observation, containerFound, signal, selection),
+    visibleTapBounds: (...args) => this.visibleTapBounds(...args),
+    resolveVisibleTapPoint: (...args) => this.resolveVisibleTapPoint(...args),
+    retryTapIfNoChange: (...args) => this.retryTapIfNoChange(...args),
+    verifyFocusedInputTarget: (...args) => this.verifyFocusedInputTarget(...args),
+    observedInteraction: (block, options) => this.observedInteraction(block, options),
+    staleDisplay: (generation) => this.staleDisplay(generation),
+    checkPostActionDisplay: (result, assertCurrent, signal) =>
+      this.checkPostActionDisplay(result, assertCurrent, signal),
+    rethrowObservationAbort: (error, signal, enabled) =>
+      this.rethrowObservationAbort(error, signal, enabled),
   });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
@@ -1830,518 +1821,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return { element, usedParent: false };
   }
 
-  private async prepareAndroidDisplaySelection(
-    options: TapVerificationOptions,
-    context: {
-      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-      selection: ElementSelectionResult;
-      signal?: AbortSignal;
-    },
-  ): Promise<
-    | { selection: ElementSelectionResult; hierarchy: ViewHierarchyResult }
-    | { result: TapOnElementResult }
-  > {
-    const { target, signal } = context;
-    let selection = context.selection;
-    let hierarchy = target.observation.viewHierarchy;
-    if (!hierarchy) {
-      throw new ActionableError("Selected display has no view hierarchy");
-    }
-    const liveSelection = await this.refreshEnsureCheckedSelection(
-      options,
-      target.observation,
-      selection,
-      signal,
-    );
-    selection = liveSelection.selection;
-    hierarchy = liveSelection.viewHierarchy;
-    const searchUntil = { durationMs: 0, requestCount: 0, changeCount: 0 };
-    const checkedResult =
-      selection.element &&
-      this.ensureCheckedBeforeTap(
-        options,
-        selection.element,
-        this.buildSelectedElementMetadata(selection),
-        searchUntil,
-      );
-    if (checkedResult) {
-      return { result: checkedResult };
-    }
-    if (this.strategy.shouldRunPreTapStability(options)) {
-      const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
-        options,
-        target.observation,
-        options.action,
-        false,
-        signal,
-      );
-      if (!stable.ok) {
-        return { result: { success: false, error: stable.error } as TapOnElementResult };
-      }
-      this.replaceObservationHierarchy(target.observation, stable.viewHierarchy, true);
-      hierarchy = stable.viewHierarchy;
-      selection = { ...stable.selection, element: stable.tapElement };
-      const stableCheckedResult = this.ensureCheckedBeforeTap(
-        options,
-        stable.selection.element ?? stable.tapElement,
-        this.buildSelectedElementMetadata(selection),
-        searchUntil,
-      );
-      if (stableCheckedResult) {
-        return { result: stableCheckedResult };
-      }
-    }
-    return { selection, hierarchy };
-  }
-
-  private async executeOnAndroidDisplay(
-    options: TapVerificationOptions & { verification: AndroidTapVerification },
-    context: {
-      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-      selection: ElementSelectionResult;
-      signal?: AbortSignal;
-      onDispatched: () => void;
-      talkBack: AndroidDisplayTalkBackState;
-    },
-  ): Promise<TapOnFocusOutcome> {
-    const { target, signal } = context;
-    const prepared = await this.prepareAndroidDisplaySelection(options, context);
-    if ("result" in prepared) {
-      return prepared.result;
-    }
-    const { selection, hierarchy } = prepared;
-    const element = selection.element;
-    if (!element?.bounds) {
-      throw new TapTargetUnavailableError("Element not found on selected display", "not-found");
-    }
-    const selectedElement = this.buildSelectedElementMetadata(selection);
-    const resolvedLayer = resolvedElementLayer(hierarchy, element, this.device.platform);
-    if (options.action === "focus") {
-      if (!isFocusEditableElement(element)) {
-        return {
-          success: false,
-          action: options.action,
-          element,
-          selectedElement,
-          error: `Cannot focus ${describeFocusTarget(element, options)} because it is not an editable input`,
-        };
-      }
-      if (isElementKeyboardFocused(element)) {
-        return withResolvedLayer(
-          {
-            success: true,
-            action: options.action,
-            element,
-            selectedElement,
-            wasAlreadyFocused: true,
-            focusChanged: false,
-            focusVerified: true,
-            ...this.geometry.getElementCenter(element),
-          },
-          resolvedLayer,
-        );
-      }
-    }
-    const visibleBounds = this.visibleTapBounds(
-      selection,
-      hierarchy,
-      target.observation.screenSize,
-      options,
-    );
-    const point =
-      visibleBounds &&
-      this.resolveVisibleTapPoint(element, hierarchy, visibleBounds, {
-        options,
-        screenSize: target.observation.screenSize,
-      });
-    if (!point) {
-      throw new TapTargetUnavailableError(
-        "Matched element has no visible tap area on selected display",
-        this.tapPoints.visibilityFailureReason(selection, hierarchy, target.observation.screenSize),
-      );
-    }
-    const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
-    const displayWarnings: string[] = [...context.talkBack.warnings];
-    const dispatchAction = await this.androidDisplayDispatch(options, {
-      ...context,
-      onWarning: (warning) => displayWarnings.push(warning),
-    });
-    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
-    // earliest moment the gesture can take effect: reporting once it returns could put the
-    // dispatch after the navigation event it caused (#10196).
-    reportToolDispatched();
-    await dispatchAction(point);
-    if (preTapHash && this.strategy.retryTapIfNoChange) {
-      await this.retryTapIfNoChange(
-        preTapHash,
-        point,
-        options.action,
-        this.strategy.longPressDurationMs,
-        element,
-        {
-          ...this.withObservationScreenSize(options, target.observation),
-          verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
-        },
-        false,
-        target.observation.screenSize,
-        signal,
-        selection,
-      );
-    }
-    return withResolvedLayer(
-      {
-        success: true,
-        action: options.action,
-        element,
-        selectedElement,
-        ...warningsField(displayWarnings),
-      },
-      resolvedLayer,
-    );
-  }
-
-  /**
-   * Detect TalkBack once, before any element search, so a refusal (a non-default display)
-   * is not masked by a "not found" result or an already-satisfied ensureChecked. Unknown
-   * state keeps the raw gesture and carries the default route's warning.
-   */
-  private async resolveAndroidDisplayTalkBack(
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
-  ): Promise<AndroidDisplayTalkBackState> {
-    const warnings: string[] = [];
-    const enabled = await this.strategy.isAccessibilityServiceEnabled((warning) =>
-      warnings.push(warning),
-    );
-    const refusal = enabled ? talkBackDisplayRefusal(target.displayId) : undefined;
-    if (refusal) {
-      throw refusal;
-    }
-    return { enabled, warnings };
-  }
-
-  private async androidDisplayDispatch(
-    options: TapOnElementOptions,
-    context: {
-      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-      signal?: AbortSignal;
-      onDispatched: () => void;
-      onWarning?: (warning: string) => void;
-      talkBack: AndroidDisplayTalkBackState;
-    },
-  ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-    return androidDisplayTapDispatch(
-      this.accessibilityService,
-      this.adb,
-      {
-        action: options.action === "focus" ? "tap" : options.action,
-        duration: options.duration,
-      },
-      {
-        target: context.target,
-        signal: context.signal,
-        onDispatched: context.onDispatched,
-        timer: this.timer,
-        onWarning: context.onWarning,
-        talkBack: context.talkBack.enabled
-          ? {
-              strategy: this.talkBackStrategy,
-              driver: this.talkBackDriverFactory.createDriver(this.device),
-            }
-          : undefined,
-      },
-    );
-  }
-
-  private selectElementOnDisplay(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-  ): ElementSelectionResult {
-    if (options.action === "focus") {
-      const selection = this.findElementInHierarchy(options, hierarchy).selection;
-      if (selection.element) {
-        return selection;
-      }
-      // Focus lookup filters out inert nodes. Reuse inspect lookup only to
-      // report the editable-input error for a selector matching such a node.
-      const inspected = this.findElementInHierarchy(
-        { ...options, action: "tap" },
-        hierarchy,
-      ).selection;
-      return inspected.element && !isFocusEditableElement(inspected.element)
-        ? inspected
-        : selection;
-    }
-    return this.findElementInHierarchy(options, hierarchy).selection;
-  }
-
-  private async resolveAndroidDisplaySelection(
-    options: TapVerificationOptions,
-    observation: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<
-    { selection: ElementSelectionResult; stats: SearchUntilStats } | { result: TapOnElementResult }
-  > {
-    if (!observation.viewHierarchy) {
-      throw new ActionableError("Selected display has no view hierarchy");
-    }
-    // Preserve focus's inspect fallback for the editable-input error.
-    if (options.action === "focus") {
-      const selection = this.selectElementOnDisplay(
-        this.withObservationScreenSize(options, observation),
-        observation.viewHierarchy,
-      );
-      if (selection.element) {
-        return { selection, stats: { durationMs: 0, requestCount: 0, changeCount: 0 } };
-      }
-    }
-    const outcome = await this.searchForElement(options, observation, signal);
-    this.replaceObservationHierarchy(
-      observation,
-      outcome.viewHierarchy,
-      outcome.refreshedFromDevice,
-    );
-    if (!outcome.selection.element) {
-      try {
-        if (outcome.visibilityError) {
-          throw outcome.visibilityError;
-        }
-        // Vision screenshots are not display-aware. Omit the observation to keep
-        // the shared base error without invoking default-display vision fallback.
-        await this.handleElementNotFound(
-          options,
-          undefined,
-          outcome.containerFound,
-          signal,
-          outcome.selection,
-        );
-      } catch (error) {
-        logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
-        return {
-          result: markFocusFailure(
-            options.action,
-            {
-              ...this.createErrorResult(options.action, errorMessage(error)),
-              searchUntil: outcome.stats,
-            },
-            error,
-          ),
-        };
-      }
-    }
-    return outcome;
-  }
-
-  private async observedAndroidDisplayInteraction(
-    options: TapOnElementOptions,
-    context: {
-      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
-      signal?: AbortSignal;
-      onDispatchCompleted: () => void;
-    },
-  ): Promise<TapOnElementResult> {
-    const { target, signal } = context;
-    const talkBack = await this.resolveAndroidDisplayTalkBack(target);
-    const refresh: AndroidTapVerification["refresh"] = (timeoutMs) =>
-      refreshTargetDisplayHierarchy(
-        target,
-        this.hierarchyCapture,
-        timeoutMs,
-        () =>
-          this.staleDisplay(
-            target.observation.display.generation ??
-              this.displayTransitionReader.identityRevision(this.device.deviceId),
-          ),
-        signal,
-      );
-    const verificationOptions = { ...options, verification: { refresh } };
-    const resolved = await this.resolveAndroidDisplaySelection(
-      verificationOptions,
-      target.observation,
-      signal,
-    );
-    if ("result" in resolved) {
-      return resolved.result;
-    }
-    const { selection, stats } = resolved;
-    let tapTimestamp: number | undefined;
-    const result: Awaited<ReturnType<TapOnElement["executeOnAndroidDisplay"]>> =
-      await this.observedInteraction(
-        async () => {
-          const dispatchedResult = await this.executeOnAndroidDisplay(verificationOptions, {
-            target,
-            selection,
-            signal,
-            talkBack,
-            onDispatched: () => {
-              tapTimestamp = this.timer.now();
-            },
-          });
-          if (tapTimestamp !== undefined) {
-            context.onDispatchCompleted();
-          }
-          return dispatchedResult;
-        },
-        {
-          ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
-          display: target.observation.display.key,
-          previousObservation: target.observation,
-          signal,
-          ...(options.ensureChecked !== undefined
-            ? { observationHostTimestampProvider: () => tapTimestamp }
-            : {}),
-        },
-      );
-    result.searchUntil = stats;
-    if (tapTimestamp === undefined) {
-      target.assertCurrent();
-    } else {
-      this.checkPostActionDisplay(result, target.assertCurrent, signal);
-      if (result.staleDisplay) {
-        return this.unverifiableDisplayPostState(result, options);
-      }
-    }
-    if (result.success && result.skipped !== "already-checked") {
-      await this.applyEnsureCheckedResult(result, verificationOptions, signal);
-    }
-    return this.finalizeDisplayFocusResult(result, options, selection, target.observation);
-  }
-
-  private unverifiableDisplayPostState(
-    result: TapOnElementResult,
-    options: Pick<TapOnElementOptions, "action" | "ensureChecked">,
-  ): TapOnElementResult {
-    if (
-      !result.staleDisplay ||
-      (options.action !== "focus" && options.ensureChecked === undefined)
-    ) {
-      return result;
-    }
-    return withStaleDisplay(
-      { ...result, success: false, error: undefined },
-      new DispatchedObservationError(new StaleDisplayError(result.staleDisplay)),
-    );
-  }
-
-  private finalizeDisplayFocusResult(
-    result: TapOnElementResult & { wasAlreadyFocused?: boolean },
-    options: TapOnElementOptions,
-    selection: ElementSelectionResult,
-    previousObservation: ObserveResult,
-  ): TapOnElementResult {
-    if (options.action !== "focus" || !result.success || result.wasAlreadyFocused) {
-      return result;
-    }
-    const labelText =
-      selection.matchedElement !== result.element ? selection.matchedElement?.text : undefined;
-    result.focusVerified = this.verifyFocusedInputTarget(
-      options,
-      result.element,
-      result.observation,
-      labelText,
-      result.selectedElement?.indexInMatches,
-      previousObservation.viewHierarchy,
-    );
-    if (!result.focusVerified) {
-      result.success = false;
-      result.error = `Failed to confirm focus on editable input ${describeFocusTarget(result.element, options)}: the focused field could not be matched to the target`;
-    }
-    return result;
-  }
-
-  private async executeOnDisplay(
+  private executeOnDisplay(
     options: TapOnElementOptions,
     signal?: AbortSignal,
     recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<TapOnElementResult | undefined> {
-    const display = options.display;
-    let dispatchCompleted = false;
-    if (display !== undefined) {
-      try {
-        const unsupported = (
-          ["subtext", "accessibilityLink", "focusFirst", "screenReaderNavigation"] as const
-        ).find((key) => options[key] !== undefined);
-        if (unsupported) {
-          throw new ActionableError(unsupportedDisplayOptionMessage(unsupported));
-        }
-        if (options.ensureTap) {
-          options = { ...options, preTapStability: true, retryIfNoChange: true };
-        }
-        // Preserve unsupported-option precedence while sharing selector validation.
-        const needsValidation =
-          options.ensureChecked !== undefined ||
-          options.sibling !== undefined ||
-          options.textAny !== undefined ||
-          options.searchUntil !== undefined;
-        const validationError = needsValidation ? this.validateOptions(options) : null;
-        if (validationError) {
-          return this.createErrorResult(options.action, validationError);
-        }
-        if (options.searchUntil !== undefined) {
-          this.getSearchUntilDuration(options);
-        }
-        const target = await prepareTargetDisplayAction(
-          this.device,
-          display,
-          this.observeScreen,
-          this.adb,
-          {
-            lastRenderedObservation: this.lastRenderedObservation,
-            signal,
-            transitions: this.displayTransitionReader,
-          },
-        );
-        if (this.device.platform === "android") {
-          return await this.observedAndroidDisplayInteraction(options, {
-            target,
-            signal,
-            onDispatchCompleted: () => {
-              dispatchCompleted = true;
-            },
-          });
-        }
-      } catch (error) {
-        this.rethrowObservationAbort(error, signal, dispatchCompleted);
-        this.rethrowKeyboardOcclusion(error, options.action, recovery);
-        logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
-        const failure = this.completedDisplayFailure(error, dispatchCompleted);
-        return withStaleDisplay(
-          this.createErrorResult(options.action, errorMessage(failure), failure),
-          failure,
-        );
-      }
-    }
-    return undefined;
-  }
-
-  private didCompleteDisplayGesture(
-    result: TapOnElementResult & { wasAlreadyFocused?: boolean },
-    display?: string,
-  ): boolean {
-    return display !== undefined && result.success && !result.skipped && !result.wasAlreadyFocused;
-  }
-
-  private completedDisplayFailure(error: unknown, dispatchCompleted: boolean): unknown {
-    // Verification runs after the complete gesture block; in-block refusals and
-    // partial multi-stroke failures keep their existing dispatch semantics.
-    return dispatchCompleted && error instanceof StaleDisplayError
-      ? new DispatchedObservationError(error)
-      : error;
-  }
-
-  private rethrowKeyboardOcclusion(
-    error: unknown,
-    action: TapOnElementOptions["action"],
-    recovery?: { throwOnKeyboardOcclusion?: boolean },
-  ): void {
-    if (
-      recovery?.throwOnKeyboardOcclusion &&
-      this.device.platform === "android" &&
-      action === "focus" &&
-      error instanceof KeyboardOcclusionError
-    ) {
-      logger.debug(`Tap on element awaits IME recovery: ${errorMessage(error)}`, error);
-      throw error;
-    }
+    return this.explicitDisplay.execute(options, signal, recovery);
   }
 
   /**
@@ -2827,11 +2312,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         },
       );
 
-      completedDisplayGesture = this.didCompleteDisplayGesture(result, options.display);
+      completedDisplayGesture = didCompleteDisplayGesture(result, options.display);
       if (options.display !== undefined && result.staleDisplay) {
         // Legacy/iOS display gestures must not finalize optional post-state
         // metadata or confirm focus/checked state from an invalidated capture.
-        return this.unverifiableDisplayPostState(result, options);
+        return unverifiableDisplayPostState(result, options);
       }
 
       if (result.success && result.observation && result.element) {
@@ -2884,9 +2369,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       perf.end();
 
       // Only opted-in Android form orchestration receives the typed recovery signal.
-      this.rethrowKeyboardOcclusion(error, requestedAction, recovery);
+      rethrowKeyboardOcclusion(this.device.platform, error, requestedAction, recovery);
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
-      const failure = this.completedDisplayFailure(error, completedDisplayGesture);
+      const failure = completedDisplayFailure(error, completedDisplayGesture);
       if (failure instanceof StaleDisplayError || failure instanceof DispatchedObservationError) {
         return withStaleDisplay(this.createErrorResult(effectiveAction, failure.message), failure);
       }

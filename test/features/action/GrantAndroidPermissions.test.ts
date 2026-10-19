@@ -54,7 +54,7 @@ describe("GrantAndroidPermissions", () => {
       ]);
       adb.setCommandResponseSequence(
         "shell dumpsys package",
-        snapshots(permissionAction, userId).map((stdout) => ({ stdout, stderr: "" })),
+        snapshots(permissionAction, userId).map((stdout) => createExecResult(stdout, "")),
       );
       const action = new GrantAndroidPermissions(
         androidDevice,
@@ -97,7 +97,7 @@ describe("GrantAndroidPermissions", () => {
       );
       adb.setCommandResponseSequence(
         "shell dumpsys package",
-        snapshots(permissionAction, 0).map((stdout) => ({ stdout, stderr: "" })),
+        snapshots(permissionAction, 0).map((stdout) => createExecResult(stdout, "")),
       );
       const action = new GrantAndroidPermissions(
         androidDevice,
@@ -221,7 +221,7 @@ describe("GrantAndroidPermissions", () => {
     adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
     adb.setCommandResponseSequence(
       "shell dumpsys package",
-      snapshots("grant", 0).map((stdout) => ({ stdout, stderr: "" })),
+      snapshots("grant", 0).map((stdout) => createExecResult(stdout, "")),
     );
     const action = new GrantAndroidPermissions(
       androidDevice,

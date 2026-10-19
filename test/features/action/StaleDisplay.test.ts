@@ -305,11 +305,10 @@ describe("typed explicit-display fences G", () => {
           if (scenario.count) {
             h.transitions.transition(scenario.count);
           }
-          return {
-            stdout:
-              'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
-            stderr: "",
-          };
+          return createExecResult(
+            'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 100 x 200}',
+            "",
+          );
         });
       }
       const run = async () => {

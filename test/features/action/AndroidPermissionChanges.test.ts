@@ -31,7 +31,7 @@ function harness(before = egg, after = before) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence(
     "shell dumpsys package",
-    [before, after].map((stdout) => ({ stdout, stderr: "" })),
+    [before, after].map((stdout) => createExecResult(stdout, "")),
   );
   const factory = new FakeAdbClientFactory(adb);
   return {
@@ -376,7 +376,7 @@ test("app installed only for user 10 uses that user for get and grant verificati
   expect(before.permissions[0].state).toBe("denied");
   h.adb.setCommandResponseSequence(
     "shell dumpsys package",
-    [user10, flip(user10, read, true)].map((stdout) => ({ stdout, stderr: "" })),
+    [user10, flip(user10, read, true)].map((stdout) => createExecResult(stdout, "")),
   );
   const result = await h.action.execute("com.android.egg", { permissions: [read] });
   expect(result).toMatchObject({ success: true, userId: 10 });

@@ -5,7 +5,7 @@ import type { Element } from "../../src/models/Element";
 import type { GfxMetrics } from "../../src/models/GfxMetrics";
 import type { RawViewHierarchyResult } from "../../src/models/RawViewHierarchyResult";
 import type { TestHierarchyNode } from "../features/observe/observeScreenTestBuilders";
-import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../src/daemon/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
   hasPendingTerminalScreenshot,

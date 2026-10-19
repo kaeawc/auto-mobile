@@ -49,8 +49,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import {} from "../server/toolUnavailableError";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
+import {} from "./toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
@@ -119,7 +119,7 @@ import {
   ResourceUpdatedBroadcaster,
   type ResourceUpdateTargets,
   type ListChangedKind,
-} from "../server/listChangedBroadcast";
+} from "./listChangedBroadcast";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import {
   toolSelectionProfileUuidFromResponse,
@@ -152,7 +152,7 @@ import {
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { deviceAlreadyAssignedToAnotherSessionError } from "./inputDeviceOwnership";
-import { ToolRegistry } from "../server/toolRegistry";
+import { daemonToolRegistry } from "./toolRegistryPort";
 import { type CanonicalFrameDiscovery, type FrameDeviceIdentityPool } from "./frameDeviceIdentity";
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../features/deviceLifecycle/deviceLifecycleCore";
@@ -556,7 +556,7 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
 export type DeviceReadToolCallClassifier = (toolName: string, args: unknown) => boolean;
 
 const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, args) =>
-  ToolRegistry.getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
+  daemonToolRegistry().getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
 
 /**
  * Suffix of a device's read lane (#10969). A watcher's read of a device another session holds
@@ -771,7 +771,7 @@ export class UnixSocketServer {
    * the daemon-scoped store would otherwise keep one entry per connection forever.
    */
   forgetSessionToolBindings: (socketSessionId: string) => void = (socketSessionId) =>
-    daemonSessionToolBindingStore().forget(socketSessionId);
+    forgetDaemonSessionBindingScope(socketSessionId);
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
@@ -3874,7 +3874,7 @@ export class UnixSocketServer {
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
-    const registeredTool = ToolRegistry.getRegisteredTool(toolName);
+    const registeredTool = daemonToolRegistry().getRegisteredTool(toolName);
     // Direct IDE storage routes have a fixed exact-tool allowlist and may run
     // before any loopback MCP client has populated the process registry.
     const declaredDefault = registeredTool?.defaultEnabled ?? false;

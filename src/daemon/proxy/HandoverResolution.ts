@@ -1,6 +1,6 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import type { ListChangedKind } from "../../server/listChangedBroadcast";
+import type { ListChangedKind } from "../listChangedBroadcast";
 import {
   DAEMON_STALLED_CODE,
   PROXY_STALLED_CODE,

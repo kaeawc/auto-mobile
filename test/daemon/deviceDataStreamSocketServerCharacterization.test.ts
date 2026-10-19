@@ -43,7 +43,7 @@ function setup(authorizationFails = false) {
         ...fields,
       }),
     );
-    return socket.getWrittenMessages<Record<string, unknown>>();
+    return socket.getWrittenMessages();
   };
   return { server, socket, send, authorizations, apps };
 }

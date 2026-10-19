@@ -55,8 +55,6 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
    */
   getWrittenMessages(): unknown[];
   getWrittenMessages<T>(schema: FrameSchema<T>): T[];
-  /** @deprecated Asserts a frame type without checking it; pass a schema instead. */
-  getWrittenMessages<T>(): T[];
   getWrittenMessages(schema?: FrameSchema<unknown>): unknown[] {
     const lines = this.getWrittenDataString()
       .split("\n")

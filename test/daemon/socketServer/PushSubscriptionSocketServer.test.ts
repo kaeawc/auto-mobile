@@ -1,14 +1,11 @@
 import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
-import {
-  PushSubscriptionSocketServer,
-  SubscriptionResponse,
-} from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
+import { PushSubscriptionSocketServer } from "../../../src/daemon/socketServer/PushSubscriptionSocketServer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import type { Subscriber } from "../../../src/daemon/socketServer/SocketServerTypes";
-import { typedFrameSchema } from "../../helpers/wireMessageSchemas";
+import { pushSubscriptionFrameSchema, typedFrameSchema } from "../../helpers/wireMessageSchemas";
 
 interface TestFilter {
   deviceId: string | null;
@@ -197,8 +194,8 @@ describe("PushSubscriptionSocketServer", () => {
       const sentCount = server.pushData(data);
 
       expect(sentCount).toBe(2);
-      expect(socket1.getWrittenMessages()).toHaveLength(1);
-      expect(socket2.getWrittenMessages()).toHaveLength(1);
+      expect(socket1.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(1);
+      expect(socket2.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(1);
     });
 
     it("filters pushes by deviceId", () => {
@@ -209,8 +206,8 @@ describe("PushSubscriptionSocketServer", () => {
       const sentCount = server.pushData(data);
 
       expect(sentCount).toBe(1);
-      expect(socket1.getWrittenMessages()).toHaveLength(1);
-      expect(socket2.getWrittenMessages()).toHaveLength(0);
+      expect(socket1.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(1);
+      expect(socket2.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(0);
     });
 
     it("filters pushes by packageName", () => {
@@ -221,8 +218,8 @@ describe("PushSubscriptionSocketServer", () => {
       const sentCount = server.pushData(data);
 
       expect(sentCount).toBe(1);
-      expect(socket1.getWrittenMessages()).toHaveLength(1);
-      expect(socket2.getWrittenMessages()).toHaveLength(0);
+      expect(socket1.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(1);
+      expect(socket2.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(0);
     });
 
     it("filters by both deviceId and packageName", () => {
@@ -243,9 +240,9 @@ describe("PushSubscriptionSocketServer", () => {
       const sentCount = server.pushData(data);
 
       expect(sentCount).toBe(1);
-      expect(socket1.getWrittenMessages()).toHaveLength(1);
-      expect(socket2.getWrittenMessages()).toHaveLength(0);
-      expect(socket3.getWrittenMessages()).toHaveLength(0);
+      expect(socket1.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(1);
+      expect(socket2.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(0);
+      expect(socket3.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(0);
     });
   });
 
@@ -293,7 +290,7 @@ describe("PushSubscriptionSocketServer", () => {
       const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 99 };
       server.pushData(data);
 
-      const messages = socket.getWrittenMessages<TestPushMessage>();
+      const messages = socket.getWrittenMessages(pushSubscriptionFrameSchema);
       expect(messages).toHaveLength(1);
       expect(messages[0].type).toBe("test_push");
       expect(messages[0].data).toEqual(data);
@@ -342,16 +339,20 @@ describe("PushSubscriptionSocketServer", () => {
       server.pushData(event(1));
       server.pushData(event(2));
       server.pushData(event(2));
-      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(socket.getWrittenMessages(pushSubscriptionFrameSchema)).toHaveLength(0);
       expect(server.addBackfillEvent(subscriptionId, event(1))).toBe(true);
       socket.write(JSON.stringify({ type: "test_push", data: event(1), subscriptionId }) + "\n");
       await server.flushBackfill(subscriptionId);
       expect(
-        socket.getWrittenMessages<TestPushMessage>().map((message) => message.data.value),
+        socket
+          .getWrittenMessages(pushSubscriptionFrameSchema)
+          .map((message) => message.data?.value),
       ).toEqual([1, 2]);
       server.pushData(event(3));
       expect(
-        socket.getWrittenMessages<TestPushMessage>().map((message) => message.data.value),
+        socket
+          .getWrittenMessages(pushSubscriptionFrameSchema)
+          .map((message) => message.data?.value),
       ).toEqual([1, 2, 3]);
     });
 
@@ -365,7 +366,7 @@ describe("PushSubscriptionSocketServer", () => {
       expect(overflowing.socket.destroyed).toBe(true);
       expect(healthy.socket.destroyed).toBe(false);
       expect(server.getSubscriberCount()).toBe(1);
-      expect(overflowing.socket.getWrittenMessages<SubscriptionResponse>()).toMatchObject([
+      expect(overflowing.socket.getWrittenMessages(pushSubscriptionFrameSchema)).toMatchObject([
         {
           type: "error",
           success: false,
@@ -387,7 +388,7 @@ describe("PushSubscriptionSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(1);
       expect(
         socket
-          .getWrittenMessages<SubscriptionResponse>()
+          .getWrittenMessages(pushSubscriptionFrameSchema)
           .some((message) => message.code === "BACKFILL_QUEUE_OVERFLOW"),
       ).toBe(true);
     });
@@ -510,7 +511,7 @@ describe("PushSubscriptionSocketServer", () => {
       );
 
       expect(server.getSubscriberCount()).toBe(1);
-      const messages = socket.getWrittenMessages<SubscriptionResponse>();
+      const messages = socket.getWrittenMessages(pushSubscriptionFrameSchema);
       expect(messages).toHaveLength(1);
       // Matches src ~:206-210 exactly.
       expect(messages[0]).toEqual({
@@ -541,7 +542,7 @@ describe("PushSubscriptionSocketServer", () => {
       );
 
       expect(server.getSubscriberCount()).toBe(2);
-      expect(socket.getWrittenMessages<SubscriptionResponse>()).toMatchObject([
+      expect(socket.getWrittenMessages(pushSubscriptionFrameSchema)).toMatchObject([
         { id: "device-1", type: "subscription_response", subscriptionId: "testpush-1" },
         { id: "device-2", type: "subscription_response", subscriptionId: "testpush-2" },
       ]);
@@ -549,7 +550,7 @@ describe("PushSubscriptionSocketServer", () => {
       server.pushData({ deviceId: "device-1", packageName: "com.app", value: 1 });
       server.pushData({ deviceId: "device-2", packageName: "com.app", value: 2 });
 
-      expect(socket.getWrittenMessages<TestPushMessage>().slice(2)).toMatchObject([
+      expect(socket.getWrittenMessages(pushSubscriptionFrameSchema).slice(2)).toMatchObject([
         { type: "test_push", subscriptionId: "testpush-1", data: { value: 1 } },
         { type: "test_push", subscriptionId: "testpush-2", data: { value: 2 } },
       ]);
@@ -586,7 +587,7 @@ describe("PushSubscriptionSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(1);
       server.pushData({ deviceId: "device-1", packageName: "com.app", value: 1 });
       server.pushData({ deviceId: "device-2", packageName: "com.app", value: 2 });
-      expect(socket.getWrittenMessages<TestPushMessage>().slice(-1)).toMatchObject([
+      expect(socket.getWrittenMessages(pushSubscriptionFrameSchema).slice(-1)).toMatchObject([
         { type: "test_push", subscriptionId: "testpush-2", data: { value: 2 } },
       ]);
     });
@@ -611,7 +612,7 @@ describe("PushSubscriptionSocketServer", () => {
 
       expect(
         socket
-          .getWrittenMessages<SubscriptionResponse>()
+          .getWrittenMessages(pushSubscriptionFrameSchema)
           .filter((message) => message.type === "ping"),
       ).toHaveLength(1);
     });
@@ -634,7 +635,7 @@ describe("PushSubscriptionSocketServer", () => {
       await server.simulateLine(socket, JSON.stringify({ command: "frobnicate", id: "req-9" }));
 
       expect(server.getSubscriberCount()).toBe(0);
-      const messages = socket.getWrittenMessages<SubscriptionResponse>();
+      const messages = socket.getWrittenMessages(pushSubscriptionFrameSchema);
       expect(messages).toHaveLength(1);
       // Matches src ~:176-183 exactly.
       expect(messages[0]).toEqual({
@@ -685,7 +686,7 @@ it.each([
   server.authorizationError = error;
   const socket = new FakeSocket();
   await server.simulateLine(socket, JSON.stringify({ id: "auth", command: "subscribe" }));
-  const response = socket.getWrittenMessages()[0];
+  const response = socket.getWrittenMessages(pushSubscriptionFrameSchema)[0];
   expect(response).toMatchObject({ success: false, error: error.message });
   if (error instanceof InputDeviceOwnedError || error instanceof SessionNoLongerOwnsDeviceError) {
     expect(response).toMatchObject({ code: error.code, retryable: false, deviceId: "emu" });

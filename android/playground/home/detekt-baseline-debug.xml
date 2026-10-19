@@ -2,7 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongParameterList:HomeScreen.kt:@Composable fun HomeScreen</ID>
-    <ID>LongParameterList:HomeScreen.kt:@Composable fun HomeScreenCore</ID>
   </CurrentIssues>
 </SmellBaseline>

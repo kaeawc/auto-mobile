@@ -135,13 +135,14 @@ fun ExperimentsSection(
   )
 
   // Bottom Sheet for Experiments
-  if (showBottomSheet && selectedExperiment != null) {
+  val experiment = selectedExperiment
+  if (showBottomSheet && experiment != null) {
     ModalBottomSheet(onDismissRequest = { showBottomSheet = false }, sheetState = sheetState) {
       ExperimentBottomSheetContent(
-        experiment = selectedExperiment!!,
+        experiment = experiment,
         onTreatmentSelected = { treatment ->
           val updatedExperiments = experiments.map { exp ->
-            if (exp.name == selectedExperiment!!.name) {
+            if (exp.name == experiment.name) {
               exp.copy(treatment = treatment)
             } else exp
           }

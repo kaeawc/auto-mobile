@@ -157,8 +157,8 @@ final class SdkHierarchyClientTests: XCTestCase {
             limit: nil, remaining: nil, statusCode: 200, responseHeaders: [:],
             responseBody: "{}", contentType: "application/json"
         )
-        let ok = await makeClient(stub).setMockRules([rule])
-        XCTAssertTrue(ok)
+        let succeeded = await makeClient(stub).setMockRules([rule])
+        XCTAssertTrue(succeeded)
 
         let request = try XCTUnwrap(stub.recordedRequests.first)
         XCTAssertEqual(request.url?.path, "/network/mock")
@@ -170,8 +170,8 @@ final class SdkHierarchyClientTests: XCTestCase {
     }
 
     func testSetMockRulesFalseOnNon200() async {
-        let ok = await makeClient(StubHTTPTransport(status: 500)).setMockRules([])
-        XCTAssertFalse(ok)
+        let succeeded = await makeClient(StubHTTPTransport(status: 500)).setMockRules([])
+        XCTAssertFalse(succeeded)
     }
 
     // MARK: - Network mock rule report (#10101)
@@ -219,20 +219,20 @@ final class SdkHierarchyClientTests: XCTestCase {
 
     func testSetNetworkErrorSimulationHitsPath() async {
         let stub = StubHTTPTransport(status: 200)
-        let ok = await makeClient(stub)
+        let succeeded = await makeClient(stub)
             .setNetworkErrorSimulation(NetworkErrorSimulationDTO(
                 enabled: true,
                 errorType: "timeout",
                 limit: 1,
                 expiresAtEpochMs: nil
             ))
-        XCTAssertTrue(ok)
+        XCTAssertTrue(succeeded)
         XCTAssertEqual(stub.recordedRequests.first?.url?.path, "/network/error-simulation")
     }
 
     func testSetNetworkFaultRulesFalseOnTransportError() async {
-        let ok = await makeClient(StubHTTPTransport([.transportError])).setNetworkFaultRules([])
-        XCTAssertFalse(ok)
+        let succeeded = await makeClient(StubHTTPTransport([.transportError])).setNetworkFaultRules([])
+        XCTAssertFalse(succeeded)
     }
 
     // MARK: - addHighlight outcome classification

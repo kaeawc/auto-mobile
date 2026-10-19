@@ -90,7 +90,7 @@ final class WireModelEncodingPinTests: XCTestCase {
         ] {
             XCTAssertNil(object[key], key)
         }
-        XCTAssertFalse(try String(decoding: JSONEncoder().encode(bare), as: UTF8.self).contains("null"))
+        XCTAssertFalse(try XCTUnwrap(String(data: JSONEncoder().encode(bare), encoding: .utf8)).contains("null"))
         let empty = SdkViewHierarchy(
             timestamp: 0,
             bundleId: nil,

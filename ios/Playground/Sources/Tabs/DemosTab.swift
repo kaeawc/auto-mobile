@@ -488,10 +488,10 @@ struct HeavyComputationDemo: View {
             for i in 0 ..< iterations {
                 sum += sin(Double(i)) * cos(Double(i))
 
-                if i % updateInterval == 0 {
-                    let p = Double(i) / Double(iterations)
+                if i.isMultiple(of: updateInterval) {
+                    let fraction = Double(i) / Double(iterations)
                     DispatchQueue.main.async {
-                        progress = p
+                        progress = fraction
                     }
                 }
             }
@@ -1214,12 +1214,12 @@ struct ViewHierarchyDebugDemo: View {
             .gesture(
                 DragGesture(minimumDistance: 30)
                     .onEnded { value in
-                        let h = value.translation.width
-                        let v = value.translation.height
-                        if abs(h) > abs(v) {
-                            swipeDirection = h > 0 ? "right" : "left"
+                        let horizontal = value.translation.width
+                        let vertical = value.translation.height
+                        if abs(horizontal) > abs(vertical) {
+                            swipeDirection = horizontal > 0 ? "right" : "left"
                         } else {
-                            swipeDirection = v > 0 ? "down" : "up"
+                            swipeDirection = vertical > 0 ? "down" : "up"
                         }
                     }
             )

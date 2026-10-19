@@ -1,7 +1,7 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, ViewHierarchyResult } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { getAbortSignal } from "../../src/utils/AbortContext";

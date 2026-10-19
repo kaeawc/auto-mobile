@@ -15,7 +15,6 @@ import { clearCtrlProxyRegistries } from "./ctrlProxyRegistryCleanup";
 const androidDevice: BootedDevice = {
   deviceId: "preload-reset-android",
   platform: "android",
-  isEmulator: true,
   name: "Fake Android",
 };
 

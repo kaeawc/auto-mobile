@@ -373,6 +373,22 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): import("./AndroidCtrlProxyManagerHandle").AndroidCtrlProxyManagerHandle {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
+    return AndroidCtrlProxyManager.getRegisteredInstance(device, adbFactory);
+  }
+
+  /** The concrete manager behind the registry entry {@link getInstance} returns. */
+  public static getInstanceForTesting(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  ): AndroidCtrlProxyManager {
+    requireBootedDevice(device, "AndroidCtrlProxyManager.getInstanceForTesting");
+    return AndroidCtrlProxyManager.getRegisteredInstance(device, adbFactory);
+  }
+
+  private static getRegisteredInstance(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory,
+  ): AndroidCtrlProxyManager {
     return AndroidCtrlProxyManager.registry.get(
       device.deviceId,
       () => new AndroidCtrlProxyManager(device, adbFactory.create(device)),

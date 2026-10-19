@@ -6,6 +6,7 @@ import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
+import type { ExecResult } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";

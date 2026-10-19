@@ -124,7 +124,6 @@
 3	test/helpers/restartScenarioHarness.ts
 2	test/helpers/restartStopHarness.ts
 1	test/helpers/tapAtCoordinate.ts
-2	test/helpers/timerInteractionRig.ts
 1	test/lint/deviceToolsKillDeviceImportCasing.test.ts
 1	test/lint/expensiveHookWork.ts
 3	test/lint/posixPathLiteralExpectations.test.ts

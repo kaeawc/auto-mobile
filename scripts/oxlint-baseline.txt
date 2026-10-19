@@ -6,7 +6,6 @@
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	auto-mobile(max-class-lines)
 1	src/ctrlProxy/IosCtrlProxyBuilder.ts	auto-mobile(max-class-lines)
 1	src/ctrlProxy/RunnerReadinessService.ts	auto-mobile(max-class-lines)
-1	src/daemon/client.ts	auto-mobile(max-class-lines)
 1	src/daemon/daemon.ts	auto-mobile(max-class-lines)
 1	src/daemon/daemon.ts	eslint(complexity)
 1	src/daemon/daemonMcpProxy.ts	auto-mobile(max-class-lines)

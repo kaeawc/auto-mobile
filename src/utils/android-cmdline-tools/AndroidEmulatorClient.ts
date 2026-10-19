@@ -109,8 +109,6 @@ export {
   resetAndroidInventoryEnrichmentCache,
 } from "./AndroidDeviceInventoryScanner";
 
-export { EMULATOR_CONSOLE_KILL_BOUND_MS } from "./EmulatorKiller";
-
 function resolveReadinessPoller(
   poller: EmulatorReadinessPoller | undefined,
   createHost: () => EmulatorReadinessHost,

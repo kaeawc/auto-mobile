@@ -9,7 +9,6 @@ import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { logger } from "./logger";
 import { type Timer, defaultTimer } from "./SystemTimer";
 import { NodeVerifiedArtifactFileSystem } from "./NodeVerifiedArtifactFileSystem";
-export { NodeVerifiedArtifactFileSystem } from "./NodeVerifiedArtifactFileSystem";
 
 /** The filesystem surface the cache workflow itself touches (metadata sidecar + cleanup). */
 export interface VerifiedArtifactFileSystem {

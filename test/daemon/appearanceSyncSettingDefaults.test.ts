@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { AppearanceConfig } from "../../src/server/appearanceManager";
+import type { AppearanceConfig } from "../../src/models";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
 import { DeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
 import {

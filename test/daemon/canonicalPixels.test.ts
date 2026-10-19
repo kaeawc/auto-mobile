@@ -75,13 +75,13 @@ describe("convertHierarchyToCanonicalPixels", () => {
 
     expect(hierarchy.screenWidth).toBe(1170);
     expect(hierarchy.screenHeight).toBe(2532);
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+    expect(hierarchy.hierarchy.node!.$!["bounds"]).toEqual({
       left: 30,
       top: 60,
       right: 300,
       bottom: 180,
     });
-    expect(hierarchy.hierarchy.node!.node![0].$["bounds"]).toEqual({
+    expect(hierarchy.hierarchy.node!.node![0].$!["bounds"]).toEqual({
       left: 15,
       top: 15,
       right: 45,
@@ -102,7 +102,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
       pixelHeight: 2030,
     });
     // 375*2.5 = 937.5 -> 938; 812*2.5 = 2030 (integral)
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+    expect(hierarchy.hierarchy.node!.$!["bounds"]).toEqual({
       left: 0,
       top: 0,
       right: 938,
@@ -117,7 +117,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
       pixelWidth: 390,
       pixelHeight: 844,
     });
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+    expect(hierarchy.hierarchy.node!.$!["bounds"]).toEqual({
       left: 10,
       top: 20,
       right: 100,
@@ -138,7 +138,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
       pixelWidth: 300,
       pixelHeight: 600,
     });
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toBe("[0,0][100,200]");
+    expect(hierarchy.hierarchy.node!.$!["bounds"]).toBe("[0,0][100,200]");
   });
 
   describe("golden iosPointToPixel: element bounds point->pixel conversion", () => {
@@ -171,7 +171,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
           pixelWidth: vector.expectedPixelWidth,
           pixelHeight: vector.expectedPixelHeight,
         });
-        expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+        expect(hierarchy.hierarchy.node!.$!["bounds"]).toEqual({
           left: 0,
           top: 0,
           right: vector.expectedPixelWidth,
@@ -241,7 +241,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
       });
 
       expect(hierarchy.windows![0].bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
-      expect(hierarchy.windows![0].hierarchy!.$["bounds"]).toEqual({
+      expect(hierarchy.windows![0].hierarchy!.$!["bounds"]).toEqual({
         left: 15,
         top: 15,
         right: 45,
@@ -253,7 +253,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
         right: 9,
         bottom: 12,
       });
-      expect(hierarchy["accessibility-focused-element"]!.$["bounds"]).toEqual({
+      expect(hierarchy["accessibility-focused-element"]!.$!["bounds"]).toEqual({
         left: 6,
         top: 12,
         right: 18,

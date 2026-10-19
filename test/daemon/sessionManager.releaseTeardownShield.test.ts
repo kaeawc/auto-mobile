@@ -88,8 +88,18 @@ async function harness() {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
     barrier: () => new FakeDbWriteBarrier(),
     keepScreenAwakeRestorer: () => ({ restore: fake.restorer("keep-awake") }),
-    biometricEnrollmentRestorer: () => ({ restore: fake.restorer("biometric") }),
-    restorers: { networkCondition: () => ({ restore: fake.restorer("network") }) },
+    biometricEnrollmentRestorer: () => ({
+      restore: async () => {
+        await fake.restorer("biometric")();
+      },
+    }),
+    restorers: {
+      networkCondition: () => ({
+        restore: async () => {
+          await fake.restorer("network")();
+        },
+      }),
+    },
   });
   managers.push(manager);
   const utils = new FakeDeviceUtils();

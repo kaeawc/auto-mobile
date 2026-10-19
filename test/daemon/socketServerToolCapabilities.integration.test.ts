@@ -8,7 +8,9 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendSocketRequest } from "./helpers/socketRequest";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import type { DaemonResponse } from "../../src/daemon/types";
 
@@ -22,6 +24,7 @@ function createDaemonState(options?: { useLabeledSession?: boolean }) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getSessionForDevice: (deviceId: string) =>
         deviceId === device.deviceId
@@ -35,6 +38,7 @@ function createDaemonState(options?: { useLabeledSession?: boolean }) {
           : undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -65,21 +69,18 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
       isEnabled,
       setEnabled: async () => {},
     };
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevicesDetailed: async () => ({
-        devices: [device],
-        succeededPlatforms: new Set([device.platform]),
-      }),
-    } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    const deviceManager = new FakeDeviceManager();
+    deviceManager.bootedDevices = [device];
+    PlatformDeviceManagerFactory.setInstance(deviceManager);
     getInstanceCalls = 0;
     AndroidCtrlProxyClient.getInstance = mock(() => {
       getInstanceCalls++;
-      return {
+      return createAndroidTestClient(device, {
         setPreference: async () => {},
         removePreference: async () => {},
         clearPreferenceStore: async () => {},
-      };
-    }) as typeof AndroidCtrlProxyClient.getInstance;
+      });
+    });
     server = new UnixSocketServer(socketPath, createDaemonState(options), new FakeTimer(), null, {
       sessionToolSelectionService: profileService,
     });

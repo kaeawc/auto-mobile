@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { recoveryCoordinatorHarness as harness } from "../helpers/recoveryCoordinatorHarness";
+import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 
 const flushMicrotasks = async (): Promise<void> => {
@@ -434,7 +435,17 @@ describe("DeviceRecoveryCoordinator", () => {
 
   test("deferred recovery checks the live record after an awaited earlier entry", async () => {
     const { coordinator, port, records, timer } = harness();
-    const device = { id: "emulator-5554" } as PooledDevice;
+    const device: PooledDevice = {
+      id: "emulator-5554",
+      name: "emulator-5554",
+      platform: "android",
+      sessionId: null,
+      status: "idle",
+      lastUsedAt: 0,
+      assignmentCount: 0,
+      errorCount: 0,
+      incarnation: 1,
+    };
     const gate = Promise.withResolvers<void>();
     const recovered: string[] = [];
     port.recoverSessionBoundAndroidDeviceAfterAdbServerReset = async (id) => {

@@ -5,7 +5,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import {
   daemonStallLeaseExtension,
   OwnerConnectionIntervals,
@@ -21,7 +21,15 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const ID = "connected-stall-session";
-let rig: Awaited<ReturnType<typeof setUp>> | undefined;
+type Rig = {
+  timer: FakeTimer;
+  manager: SessionManager;
+  session: Session;
+  monitor: SessionHeartbeatMonitor;
+  heartbeat: () => Promise<void>;
+  reaped: string[];
+};
+let rig: Rig | undefined;
 // As in the neighbouring scenario suites, pay module/first-scan initialization outside tests.
 beforeAll(async () => {
   const warm = await setUp();
@@ -37,7 +45,7 @@ afterEach(async () => {
   rig = undefined;
 });
 
-async function setUp(connected: boolean | undefined = true) {
+async function setUp(connected: boolean | undefined = true): Promise<Rig> {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000_000);
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -47,6 +55,7 @@ async function setUp(connected: boolean | undefined = true) {
     getSessionManager: () => manager,
     getDevicePool: () => ({
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
     }),
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),

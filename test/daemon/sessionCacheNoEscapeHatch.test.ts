@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { Visitor, type Expression } from "oxc-parser";
+import { Visitor, type Expression, type PropertyKey } from "oxc-parser";
 import { parseGuardSource, relativePosix, typeScriptFiles } from "../lint/astGuard";
 
 /**
@@ -37,7 +37,7 @@ describe("production code writes SessionCacheData setter-only slots via setters 
       : undefined;
   }
 
-  function propertyKey(key: Expression): string | undefined {
+  function propertyKey(key: PropertyKey): string | undefined {
     if (key.type === "Identifier") {
       return key.name;
     }

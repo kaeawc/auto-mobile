@@ -1,5 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
+import { patchBinding } from "../helpers/patchBinding";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -113,7 +114,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await initializePool();
@@ -170,7 +171,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     {
       name: "bound sessionId with idle status",
       setup: () => {
-        entry().sessionId = "owner";
+        patchBinding(entry(), { sessionId: "owner" });
       },
       expected: {
         availability: "free",
@@ -184,7 +185,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
     {
       name: "busy status without a session",
       setup: () => {
-        entry().status = "busy";
+        patchBinding(entry(), { status: "busy" });
       },
       expected: {
         availability: "free",
@@ -390,7 +391,7 @@ describe("device hold current-behavior characterization (#11803)", () => {
       name: "deferred release with idle unbound pooled state",
       setup: async () => {
         const pending = Promise.withResolvers<void>();
-        entry().sessionId = "releasing";
+        patchBinding(entry(), { sessionId: "releasing" });
         const cleanup = spyOn(sessions, "getPendingDeviceCleanup").mockReturnValueOnce(
           pending.promise,
         );
@@ -401,8 +402,8 @@ describe("device hold current-behavior characterization (#11803)", () => {
           cleanup.mockRestore();
         }
         // The public mutable entry lets us isolate the retained fence, as in observation tests.
-        entry().sessionId = null;
-        entry().status = "idle";
+        patchBinding(entry(), { sessionId: null });
+        patchBinding(entry(), { status: "idle" });
         expect(sessions.hasDeviceCleanupInProgress(booted.deviceId)).toBe(false);
         cleanups.push(async () => {
           pending.resolve();
@@ -423,11 +424,11 @@ describe("device hold current-behavior characterization (#11803)", () => {
       name: "recoveringSessionLosses preparation with idle unbound pooled state",
       setup: async () => {
         await sessions.createSession("recovering", booted.deviceId, booted.platform);
-        entry().sessionId = "recovering";
+        patchBinding(entry(), { sessionId: "recovering" });
         const preparation = pool.prepareSessionPreservingRecovery(booted.deviceId);
         expect(preparation).toBeDefined();
         // Isolate the record from the separate pooled and reverse session-binding guards.
-        entry().sessionId = null;
+        patchBinding(entry(), { sessionId: null });
         const reverse = spyOn(sessions, "getSessionForDevice").mockReturnValue(null);
         cleanups.push(() => {
           try {

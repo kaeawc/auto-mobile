@@ -17,10 +17,13 @@ function createFakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
+      getDeviceLabels: () => undefined,
       getAllSessions: () => [],
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -66,6 +69,8 @@ describe("sequential startup-option reconciliation", () => {
       const manager: DaemonManagerLike = {
         status: async () => recordedStatus,
         start: async () => "started",
+        recoverControlState: async () => "restarted",
+        restartAdmitted: async () => "restarted",
         restart: async (options): Promise<DaemonRestartResult> => {
           restartedWith = options;
           await server!.close();

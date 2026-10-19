@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
+import type { DevicePool } from "../../src/daemon/devicePool";
+import { ReservationDevicePool } from "./helpers/ReservationDevicePool";
 import {
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
 import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -23,7 +25,7 @@ const DEVICE: BootedDevice = { name: "Pixel 8", platform: "android", deviceId: "
 interface PoolWorld {
   timer: FakeTimer;
   manager: SessionManager;
-  pool: DevicePool;
+  pool: ReservationDevicePool;
   releases: Array<{ sessionId: string; reason: string; upgradeOnly: boolean }>;
   /** Every autolock owner row write, in order. */
   autolockRows: Array<{ sessionId: string; mcpSessionId: string | null | undefined }>;
@@ -44,7 +46,7 @@ async function createPoolWorld(): Promise<PoolWorld> {
   deviceManager.bootedDevices = [DEVICE];
   const autolockRows: PoolWorld["autolockRows"] = [];
   const autolockRowGate: PoolWorld["autolockRowGate"] = {};
-  const pool = new DevicePool(
+  const pool = new ReservationDevicePool(
     createDevicePoolDependencies(manager, "ownership-regression-daemon", {
       timer,
       deviceManager,
@@ -148,7 +150,7 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
 
     expect(sessionId).toBeDefined();
     expect(pool.resolveAutolockSessionForMcpSession("closing-connection")).toBeUndefined();
-    expect(pool.hasConnectedMcpSessionOwner(sessionId!)).toBe(false);
+    expect(pool.hasConnectedOwner(sessionId!)).toBe(false);
   });
 
   test("an autolock acquired by a connection that closed mid-acquire is released on owner disconnect", async () => {
@@ -203,7 +205,7 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
         expect(outcome).toBe("not-attached");
       }
       expect(world.pool.resolveAutolockSessionForMcpSession("closing-connection")).toBeUndefined();
-      expect(world.pool.hasConnectedMcpSessionOwner(sessionId)).toBe(false);
+      expect(world.pool.hasConnectedOwner(sessionId)).toBe(false);
       world.timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
       await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
       expect(world.manager.getSession(sessionId)).toBeNull();
@@ -255,7 +257,7 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
     await attaching;
 
     expect(world.pool.resolveAutolockSessionForMcpSession("closing-connection")).toBeUndefined();
-    expect(world.pool.hasConnectedMcpSessionOwner(sessionId)).toBe(false);
+    expect(world.pool.hasConnectedOwner(sessionId)).toBe(false);
   });
 
   // Harness: autolockAttach profile, AUTOMOBILE_POOL_OWNERSHIP_SEED_BASE=112 shrank to an owner
@@ -298,7 +300,10 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
   // release handler) re-ran its full release cleanup. It now announces `{ upgradeOnly: true }`,
   // like releaseFinalizedSession's upgrade path (#10825).
   test("a terminal release racing a non-terminal one's persistence notifies a full release once", async () => {
-    for (const first of [PLAN_AUTO_RELEASE_REASON, "lazy-expiry"]) {
+    for (const first of [
+      PLAN_AUTO_RELEASE_REASON,
+      "lazy-expiry",
+    ] satisfies SessionReleaseReason[]) {
       const timer = new FakeTimer();
       const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const full: string[] = [];

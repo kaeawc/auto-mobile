@@ -42,6 +42,8 @@ import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import { isCallToolResult } from "@modelcontextprotocol/client";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();
@@ -123,15 +125,16 @@ async function createHarness(): Promise<Harness> {
   const server = new UnixSocketServer(socketPath, DaemonState.getInstance(), new FakeTimer());
   // The loopback MCP hop dispatches straight to the registered handler with the arguments the
   // socket server forwards, internal markers included.
-  server.mcpClientFactory = async () => ({
-    callTool: async ({ name, arguments: args }: { name: string; arguments?: unknown }) =>
-      await ToolRegistry.getTool(name)!.handler(args as Record<string, unknown>),
-    listTools: async () => ({ tools: [] }),
-    listResources: async () => ({ resources: [] }),
-    readResource: async () => ({ contents: [] }),
-    listResourceTemplates: async () => ({ resourceTemplates: [] }),
-    close: async () => {},
-  });
+  server.mcpClientFactory = async () =>
+    new StubMcpClient({
+      callTool: async ({ name, arguments: args }) => {
+        const result = await ToolRegistry.getTool(name)!.handler(args ?? {});
+        if (!isCallToolResult(result)) {
+          throw new Error(`tool ${name} did not return an MCP tool result`);
+        }
+        return result;
+      },
+    });
   await server.start();
   return { db, manager, pool, server, socketPath, clients: [] };
 }

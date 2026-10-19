@@ -1,7 +1,7 @@
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
-import { DevicePool } from "../../src/daemon/devicePool";
+import { DevicePool, type DeviceSessionExecutionCanceller } from "../../src/daemon/devicePool";
 import {
   SESSION_CREATE_WAIT_TIMEOUT_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
@@ -26,6 +26,15 @@ const SIM_A = "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA";
 const SIM_B = "BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB";
 const AVD_A = "emulator-5554";
 const AVD_B = "emulator-5556";
+
+/** A session-execution canceller that cancels nothing by session and answers device cancels itself. */
+function deviceExecutionCanceller(
+  cancelDeviceExecutions: NonNullable<DeviceSessionExecutionCanceller["cancelDeviceExecutions"]>,
+): DeviceSessionExecutionCanceller {
+  const canceller = async () => 0;
+  canceller.cancelDeviceExecutions = cancelDeviceExecutions;
+  return canceller;
+}
 
 describe("an undelivered rebind keeps the session's overrides on the device it goes back to", () => {
   let timer: FakeTimer;
@@ -346,15 +355,13 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     const entered = Promise.withResolvers<void>();
     const bindBack = Promise.withResolvers<number>();
     const pool = await androidPool({
-      cancelDeviceSessionExecutions: {
-        cancelDeviceExecutions: async (deviceId) => {
-          if (deviceId === AVD_B) {
-            entered.resolve();
-            return await bindBack.promise;
-          }
-          return 0;
-        },
-      },
+      cancelDeviceSessionExecutions: deviceExecutionCanceller(async (deviceId) => {
+        if (deviceId === AVD_B) {
+          entered.resolve();
+          return await bindBack.promise;
+        }
+        return 0;
+      }),
     });
     const routingCache = {
       displayPin: "main",

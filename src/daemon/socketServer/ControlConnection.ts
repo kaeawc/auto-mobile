@@ -21,10 +21,15 @@ export function isExpectedPeerClose(error: Error): boolean {
 }
 
 /** The slice of `net.Socket` a connection drives; tests pass a plain emitter. */
-export type ControlConnectionSocket = Pick<
-  Socket,
-  "on" | "setTimeout" | "destroy" | "destroyed" | "writableLength"
->;
+export interface ControlConnectionSocket extends Pick<Socket, "destroyed" | "writableLength"> {
+  // The connection never chains on these, so a stand-in need not return a `Socket`.
+  on(event: "data", listener: (data: Buffer) => void): unknown;
+  on(event: "close", listener: (hadError: boolean) => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "timeout" | "drain" | "pause" | "end" | "finish", listener: () => void): unknown;
+  setTimeout(timeoutMs: number): unknown;
+  destroy(): unknown;
+}
 
 export type ControlConnectionTraceEvent =
   | "socket_drain"

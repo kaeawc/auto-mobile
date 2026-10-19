@@ -349,7 +349,7 @@ function subscribeFailureResponse(
  */
 export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly connections = new Set<Socket>();
-  private readonly captures = new Map<string, DeviceCapture>();
+  protected readonly captures = new Map<string, DeviceCapture>();
   private readonly pendingStops = new Map<string, Promise<void>>();
   private readonly socketDeviceIds = new Map<Socket, string>();
   private readonly socketSessionUuids = new Map<Socket, string | undefined>();
@@ -1240,7 +1240,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     return true;
   }
 
-  private async reconfigureCapture(
+  protected async reconfigureCapture(
     deviceId: string,
     capture: DeviceCapture,
     hints: CaptureHints,

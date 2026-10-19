@@ -42,29 +42,10 @@ class Source implements H264CaptureSource {
 }
 class Relay extends VideoStreamSocketServer {
   snapshot() {
-    return (
-      Reflect.get(this, "captures") as Map<
-        string,
-        {
-          generation: number;
-          parser: object;
-          waitingForKeyFrame: Set<FakeSocket>;
-          lastEncodedDataMs: number | null;
-          firstEvidenceMs: number | null;
-          encodedSinceSourceFrame: boolean;
-          heartbeatTimer: unknown;
-          appliedHints: { fps?: number; size?: { width: number; height: number } };
-        }
-      >
-    ).get(device.deviceId)!;
+    return this.captures.get(device.deviceId)!;
   }
   async replaceHints(hints: { fps?: number }): Promise<void> {
-    const replace = Reflect.get(this, "reconfigureCapture") as (
-      deviceId: string,
-      capture: object,
-      hints: { fps?: number },
-    ) => Promise<void>;
-    await replace.call(this, device.deviceId, this.snapshot(), hints);
+    await this.reconfigureCapture(device.deviceId, this.snapshot(), hints);
   }
   async request(
     socket: FakeSocket,
@@ -108,7 +89,27 @@ function harness(platform: "android" | "ios" = "android") {
         primeH264ParameterSets: () => {},
         endOfH264Packet: () => {},
         writePcmAudioChunk: () => {},
-        getDescriptor: () => ({ streamId: config.streamId, state: "idle", iceServers: [] }),
+        getDescriptor: () => ({
+          streamId: config.streamId,
+          state: "idle",
+          whipEndpoint: "",
+          resourceUrl: null,
+          iceServers: [],
+          framesSent: 0,
+          packetsSent: 0,
+          audioPacketsSent: 0,
+          audioSamplesSent: 0,
+          readiness: {
+            lastEncodedFrameTimestampUs: null,
+            lastIdrTimestampUs: null,
+            idrRequestCount: null,
+            idrCompletionCount: null,
+            encodedAccessUnitCount: null,
+            publisherRtpPacketCount: null,
+            captureSourceState: "not_initialized",
+            lastSourceError: null,
+          },
+        }),
       }) satisfies WebRtcStreamPublisher,
   });
   const relay = new Relay(

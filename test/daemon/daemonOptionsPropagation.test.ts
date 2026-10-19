@@ -305,7 +305,7 @@ describe("daemon startup-option propagation", () => {
       ]),
     );
     expect(parseDaemonArgs(args)).toMatchObject(options);
-    expect(parseArgs(args)).toMatchObject({
+    expect(parseArgs(args, { warn: () => {} })).toMatchObject({
       a11yAuditMode: true,
       a11yLevel: "AAA",
       a11yFailureMode: "strict",

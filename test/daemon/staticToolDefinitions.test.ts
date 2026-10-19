@@ -62,7 +62,7 @@ describe("getStaticToolDefinitions", () => {
       }
       return definition;
     });
-    expect(getStaticToolDefinitions()).toEqual(expected);
+    expect<unknown>(getStaticToolDefinitions()).toEqual(expected);
   });
 
   test("preserves _meta (the MCP Apps UI pointer) for tools that carry it", () => {

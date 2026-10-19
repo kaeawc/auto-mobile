@@ -21,7 +21,7 @@ function executePlanFrame(): DaemonRequest {
 describe("resolveMcpRequestTimeoutMsOnce", () => {
   test("agrees with the uncached budget for ordinary and plan frames", () => {
     const frames: DaemonRequest[] = [
-      { id: "1", type: "mcp_request", method: "tools/list" },
+      { id: "1", type: "mcp_request", method: "tools/list", params: undefined },
       {
         id: "2",
         type: "mcp_request",

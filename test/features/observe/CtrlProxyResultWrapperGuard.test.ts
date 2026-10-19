@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
@@ -134,7 +135,7 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setCommandResponse("forward", createExecResult("8765", ""));
     adb.setDeviceStates([{ deviceId: androidDevice.deviceId, state: "device" }]);
     android = AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
       webSocketFactory: (url) => defaultWebSocketFactory(url),

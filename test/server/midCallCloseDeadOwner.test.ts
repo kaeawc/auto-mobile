@@ -167,7 +167,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
 
   function arrangedEach<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      test.each(table)(
+      test.each([...table])(
         name,
         async (row: T) => {
           await setUp();

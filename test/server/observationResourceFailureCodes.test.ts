@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { markedHierarchy } from "../helpers/observeFixture";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import {
@@ -185,7 +186,7 @@ describe("observation resource failure envelopes", () => {
       timer,
       ids,
     );
-    const result = { ...screen.createBaseResult(), viewHierarchy: device.name };
+    const result = { ...screen.createBaseResult(), viewHierarchy: markedHierarchy(device.name) };
     await screen.cacheObserveResult(result);
     return result;
   }
@@ -594,7 +595,9 @@ describe("observation resource failure envelopes", () => {
     store.update(deviceA.deviceId, "/fake/session.png");
     resolveSession();
     const context = { sessionUuid: "foreign", ownsSession: () => true };
-    expect(JSON.parse((await read(sessionUris[0], context)).text!).viewHierarchy).toBe("A");
+    expect(JSON.parse((await read(sessionUris[0], context)).text!).viewHierarchy.packageName).toBe(
+      "A",
+    );
     image(await read(sessionUris[1], context));
   });
 

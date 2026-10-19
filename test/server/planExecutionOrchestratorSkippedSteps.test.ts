@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import type { PlanExecutionResult } from "../../src/models";
+import type {
+  PlanDeviceFailure,
+  PlanExecutionResult,
+  PlanSkippedStep,
+  PlanStepWarnings,
+} from "../../src/models";
+import { activeVideoRecording } from "../helpers/planVideoFixtures";
 import * as planUtils from "../../src/server/planExecutorFactory";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
@@ -21,7 +27,7 @@ beforeEach(() => {
   execute = spyOn(planUtils, "executePlan").mockResolvedValue(base);
   // Inject the video boundary, like the video warnings harness, without resolving the real DB.
   start = spyOn(AndroidSegmentedPlanVideoSession.prototype, "startFirstSegment").mockResolvedValue(
-    undefined,
+    activeVideoRecording("skipped-steps"),
   );
   finalize = spyOn(AndroidSegmentedPlanVideoSession.prototype, "finalize").mockResolvedValue({
     filePaths: [],
@@ -82,13 +88,15 @@ test.each([true, false])(
   },
 );
 
-test.each([{ skippedSteps: undefined }, { skippedSteps: [] }])(
-  "no skips omits the skippedSteps key (%j)",
-  async ({ skippedSteps }) => {
-    execute.mockResolvedValue({ ...base, skippedSteps });
-    expect(await run()).not.toHaveProperty("skippedSteps");
-  },
-);
+const noSkippedSteps: Array<{ skippedSteps: PlanSkippedStep[] | undefined }> = [
+  { skippedSteps: undefined },
+  { skippedSteps: [] },
+];
+
+test.each(noSkippedSteps)("no skips omits the skippedSteps key (%j)", async ({ skippedSteps }) => {
+  execute.mockResolvedValue({ ...base, skippedSteps });
+  expect(await run()).not.toHaveProperty("skippedSteps");
+});
 
 test("failed criticalSection warnings reach the response without captureObserveSteps", async () => {
   const warnings = [
@@ -115,7 +123,12 @@ test("failed criticalSection warnings reach the response without captureObserveS
   expect(result).not.toHaveProperty("debug");
 });
 
-test.each([{ warnings: undefined }, { warnings: [] }])(
+const noWarnings: Array<{ warnings: PlanStepWarnings[] | undefined }> = [
+  { warnings: undefined },
+  { warnings: [] },
+];
+
+test.each(noWarnings)(
   "failure with no warnings omits the warnings key (%j)",
   async ({ warnings }) => {
     execute.mockResolvedValue({
@@ -165,15 +178,17 @@ test("all deviceFailures reach a failed response without captureObserveSteps", a
   expect(result).not.toHaveProperty("debug");
 });
 
-test.each([{ deviceFailures: undefined }, { deviceFailures: [] }])(
-  "no device failures omits the key (%j)",
-  async ({ deviceFailures }) => {
-    execute.mockResolvedValue({
-      ...base,
-      success: false,
-      deviceFailures,
-      failedStep: { stepIndex: 1, tool: "observe", error: "failure" },
-    });
-    expect(await run()).not.toHaveProperty("deviceFailures");
-  },
-);
+const noDeviceFailures: Array<{ deviceFailures: PlanDeviceFailure[] | undefined }> = [
+  { deviceFailures: undefined },
+  { deviceFailures: [] },
+];
+
+test.each(noDeviceFailures)("no device failures omits the key (%j)", async ({ deviceFailures }) => {
+  execute.mockResolvedValue({
+    ...base,
+    success: false,
+    deviceFailures,
+    failedStep: { stepIndex: 1, tool: "observe", error: "failure" },
+  });
+  expect(await run()).not.toHaveProperty("deviceFailures");
+});

@@ -1,69 +1,40 @@
 import { connect as netConnect } from "node:net";
-import { createHash } from "node:crypto";
 import { ActionableError, type BootedDevice } from "../../models";
-import { logger } from "../../utils/logger";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import { shellQuote } from "../../utils/shellQuote";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { VideoSourceAdb, VideoSourceAdbFactory } from "./videoSourceAdb";
+import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   exponentialBackoff,
   normalizeBackoff,
   type BackoffInput,
   type BackoffPolicy,
 } from "../../utils/Backoff";
-import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type { VideoSourceAdb, VideoSourceAdbFactory } from "./videoSourceAdb";
-import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import {
-  VideoServerJarProvider,
-  type JarIntegrityProbe,
-  type VideoServerJarIntegrity,
-} from "./VideoServerJarProvider";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { H264CaptureSource, H264CaptureSourceTelemetry } from "./H264CaptureSource";
+import { InMemoryActiveVideoSessionRegistry } from "./InMemoryActiveVideoSessionRegistry";
+import { VIDEO_SERVER_REMOTE_JAR_PATH, VideoServerJarDeployment } from "./VideoServerJarDeployment";
+import type { JarIntegrityProbe } from "./VideoServerJarProvider";
+import {
+  SAFE_SOCKET_NAME_PATTERN,
+  VIDEO_SERVER_MAIN_CLASS,
+  VIDEO_SERVER_SOCKET_PREFIX,
+  VideoServerLeases,
+} from "./VideoServerLeases";
+import { VideoServerStartup } from "./VideoServerStartup";
 import {
   VIDEO_SERVER_CODEC_ID_H264,
   VIDEO_SERVER_CODEC_ID_PCM16,
+  VideoServerStreamParser,
   type VideoServerPacket,
   type VideoServerStreamHeader,
-  VideoServerStreamParser,
 } from "./VideoServerStreamParser";
-import { InMemoryActiveVideoSessionRegistry } from "./InMemoryActiveVideoSessionRegistry";
 export { InMemoryActiveVideoSessionRegistry } from "./InMemoryActiveVideoSessionRegistry";
-
-/** Remote path the DEX jar is pushed to before launch. */
-export const VIDEO_SERVER_REMOTE_JAR_PATH = "/data/local/tmp/automobile-video.jar";
-/** Prefix for host-owned per-session LocalSocket names. */
-export const VIDEO_SERVER_SOCKET_PREFIX = "automobile_video";
-const VIDEO_SERVER_MAIN_CLASS = "dev.jasonpearson.automobile.video.VideoServer";
-/** Device-side directory containing JSON lease files for owned capture sessions. */
-export const VIDEO_SERVER_LEASE_DIRECTORY = "/data/local/tmp/automobile-video-sessions";
-/** A device heartbeat older than this is eligible for owned stale cleanup. */
-const STALE_LEASE_MS = 30_000;
-/**
- * Fallback staleness threshold for a lease that predates the
- * `heartbeatElapsedRealtimeMs` field (see `hasValidLeaseHeartbeat`). The
- * monotonic elapsed-realtime clock is unavailable, so we fall back to the
- * always-written wall-clock `heartbeatAtMs`. Wall clock can jump (NTP, manual
- * set, timezone), so this is deliberately several minutes rather than the 30 s
- * monotonic window — a jump smaller than this cannot cause a false reclaim.
- */
-const STALE_LEASE_WALL_CLOCK_MS = 5 * 60_000;
-/**
- * A lease *file* (unparseable `*.json` or orphaned `*.json.tmp`) whose mtime is
- * older than this is swept during reconcile. Conservative because a
- * `*.json.tmp` may be mid-rename by a live server; younger files are left alone.
- */
-const STALE_LEASE_FILE_SWEEP_MS = 5 * 60_000;
-// The optional trailing `proto=<v>` is the handshake version negotiation channel
-// (issue #4729): a pre-handshake device omits it, a handshake-capable device
-// advertises it. Non-greedy socket capture so the optional group binds correctly.
-const SESSION_READY_PATTERN =
-  /^VIDEO_SESSION_READY token=([^ ]+) pid=(\d+) socket=([^ ]+?)(?: proto=(\d+))?$/;
-/** Server stdout line printed after capture has fully started. */
-const STREAMING_STARTED_MARKER = "Streaming started";
-const VIDEO_STATS_PATTERN = /(?:^|\s)dropped=(\d+)(?:\s|$)/;
+export { VIDEO_SERVER_REMOTE_JAR_PATH } from "./VideoServerJarDeployment";
+export { VIDEO_SERVER_LEASE_DIRECTORY, VIDEO_SERVER_SOCKET_PREFIX } from "./VideoServerLeases";
 
 /**
  * Host→device command byte written back over the (bidirectional) socket to ask
@@ -180,39 +151,6 @@ export interface ActiveVideoSessionRegistry {
 /** Shared across sibling capture sessions in the daemon process. */
 export const defaultActiveVideoSessionRegistry: ActiveVideoSessionRegistry =
   new InMemoryActiveVideoSessionRegistry();
-
-interface RawVideoServerLease {
-  socketName: string;
-  /**
-   * SHA-256 hex of the session token (issue #4731). The lease never stores the raw token — it is
-   * the on-wire auth secret (issue #4729), so cleartext-at-rest would be a disclosure path. A lease
-   * owner re-derives this hash from the token it holds (see {@link hashSessionToken}) to confirm
-   * ownership; foreign-lease reclaim matches on the non-secret `socketName` instead.
-   */
-  sessionTokenHash: string;
-  ownerPid: number;
-  deviceSerial: string;
-  pid: number;
-  forwardPort: number;
-  startedAtMs: number;
-  heartbeatAtMs: number;
-  heartbeatElapsedRealtimeMs?: number;
-}
-
-/**
- * A validated lease read back from the device. Identical to the on-disk record: the raw token is no
- * longer recoverable from disk, so a parsed lease carries only the non-secret `socketName` (the
- * filename/id the reconcile+sweep match on) and the token's hash.
- */
-type VideoServerLease = RawVideoServerLease;
-
-/**
- * SHA-256 hex of a session token, matching the device's `sessionTokenSha256Hex` (issue #4731). Used
- * to confirm an owned lease belongs to this session without the token ever touching disk.
- */
-function hashSessionToken(token: string): string {
-  return createHash("sha256").update(token, "ascii").digest("hex");
-}
 
 const defaultConnector: SocketConnector = (port, signal) =>
   new Promise<StreamSocket>((resolve, reject) => {
@@ -379,164 +317,8 @@ function buildHandshakeFrame(token: string, version: number): Buffer {
   return frame;
 }
 
-/**
- * Parse one `adb forward --list` row (`<serial> tcp:<port> localabstract:<name>`)
- * into a video forward, or `null` when the row is not an `automobile_video_*`
- * TCP forward. Field order is not assumed — the `tcp:`/`localabstract:` tokens
- * are matched positionally-agnostically, mirroring `removeForwardIfMatching`.
- */
-function parseVideoForwardLine(line: string): { port: number; socketName: string } | null {
-  const fields = line.trim().split(/\s+/);
-  const destination = fields.find((field) =>
-    field.startsWith(`localabstract:${VIDEO_SERVER_SOCKET_PREFIX}_`),
-  );
-  const portField = fields.find((field) => field.startsWith("tcp:"));
-  if (destination === undefined || portField === undefined) {
-    return null;
-  }
-  const port = Number.parseInt(portField.slice("tcp:".length), 10);
-  if (!Number.isInteger(port) || port <= 0) {
-    return null;
-  }
-  return { port, socketName: destination.slice("localabstract:".length) };
-}
-
-/**
- * Parse the on-device jar-integrity probe output (issue #4733): the combined
- * stdout of `sha256sum <jar>` (a `<64-hex>  <path>` line) and `wc -c < <jar>` (a
- * bare byte count). Order-independent. Returns `null` on any missing/garbled
- * field — a partial or absent result (jar missing, `sha256sum`/`wc` unavailable)
- * is treated by the caller as "push needed", never as a match.
- */
-function parseRemoteJarIntegrity(output: string): VideoServerJarIntegrity | null {
-  let sha256: string | null = null;
-  let size: number | null = null;
-  for (const rawLine of output.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (line.length === 0) {
-      continue;
-    }
-    if (/^[0-9]+$/.test(line)) {
-      size = Number.parseInt(line, 10);
-      continue;
-    }
-    const shaMatch = /^([a-f0-9]{64})(?:\s|$)/.exec(line);
-    if (shaMatch) {
-      sha256 = shaMatch[1];
-    }
-  }
-  if (sha256 === null || size === null || !Number.isInteger(size) || size < 0) {
-    return null;
-  }
-  return { sha256, size };
-}
-
 function isSafeSessionToken(value: string): boolean {
   return /^[A-Za-z0-9-]{8,80}$/.test(value);
-}
-
-/** Lowercase SHA-256 hex, the only token-derived value now persisted (issue #4731). */
-function isSessionTokenHash(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-}
-
-/** Mirrors `VideoSessionArguments.SAFE_SOCKET_NAME` on the device side. */
-const SAFE_SOCKET_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
-
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function hasValidLeaseHeartbeat(lease: Record<string, unknown>): boolean {
-  const elapsedRealtimeMs = lease.heartbeatElapsedRealtimeMs;
-  return (
-    elapsedRealtimeMs === undefined || (isFiniteNumber(elapsedRealtimeMs) && elapsedRealtimeMs >= 0)
-  );
-}
-
-function isVideoServerLease(value: unknown): value is RawVideoServerLease {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const lease = value as Record<string, unknown>;
-  return [
-    isSessionTokenHash(lease.sessionTokenHash),
-    typeof lease.socketName === "string",
-    // The socket name is the on-disk filename/id (issue #4731); require the safe shape so it is
-    // never interpolated into a `cat`/`rm` path we did not expect.
-    typeof lease.socketName === "string" && SAFE_SOCKET_NAME_PATTERN.test(lease.socketName),
-    typeof lease.deviceSerial === "string",
-    isPositiveInteger(lease.ownerPid),
-    isPositiveInteger(lease.pid),
-    isPositiveInteger(lease.forwardPort),
-    isFiniteNumber(lease.startedAtMs),
-    isFiniteNumber(lease.heartbeatAtMs),
-    hasValidLeaseHeartbeat(lease),
-  ].every(Boolean);
-}
-
-function parseLeases(output: string): VideoServerLease[] {
-  return output.split(/\r?\n/).flatMap((line) => {
-    try {
-      const parsed: unknown = JSON.parse(line);
-      if (!isVideoServerLease(parsed)) {
-        return [];
-      }
-      return [parsed];
-    } catch (error) {
-      logger.debug(
-        `[PersistentEncoderH264Source] ignoring malformed video session lease: ${error}`,
-      );
-      return [];
-    }
-  });
-}
-
-/** Basenames the sweep is allowed to `rm`; guards against odd device output. */
-const LEASE_FILE_NAME_PATTERN = /^[A-Za-z0-9_.-]+\.json(?:\.tmp)?$/;
-
-/**
- * Parse the `sweepOrphanLeaseFiles` listing: a leading `NOW <epochSeconds>`
- * line emitted by `date +%s`, followed by `<mtimeSeconds> <path>` rows from
- * `stat -c '%Y %n'`. Returns the device wall clock in ms plus each file's
- * basename and mtime in ms. Rows whose basename fails the safe-name pattern are
- * dropped so the caller never issues a surprising `rm`.
- */
-function parseLeaseFileListing(output: string): {
-  nowEpochMs: number | null;
-  files: { name: string; mtimeMs: number }[];
-} {
-  let nowEpochMs: number | null = null;
-  const files: { name: string; mtimeMs: number }[] = [];
-  for (const line of output.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    if (trimmed.startsWith("NOW ")) {
-      const seconds = Number.parseInt(trimmed.slice(4).trim(), 10);
-      if (Number.isFinite(seconds) && seconds >= 0) {
-        nowEpochMs = seconds * 1_000;
-      }
-      continue;
-    }
-    const separator = trimmed.indexOf(" ");
-    if (separator <= 0) {
-      continue;
-    }
-    const mtimeSeconds = Number.parseInt(trimmed.slice(0, separator), 10);
-    const path = trimmed.slice(separator + 1).trim();
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    if (!Number.isFinite(mtimeSeconds) || mtimeSeconds < 0 || !LEASE_FILE_NAME_PATTERN.test(name)) {
-      continue;
-    }
-    files.push({ name, mtimeMs: mtimeSeconds * 1_000 });
-  }
-  return { nowEpochMs, files };
 }
 
 /**
@@ -552,6 +334,10 @@ function parseLeaseFileListing(output: string): {
  * (ADB factory, socket connector, timer) for device-free unit tests.
  */
 export class PersistentEncoderH264Source implements H264CaptureSource {
+  private readonly leases: VideoServerLeases;
+  private readonly jar: VideoServerJarDeployment;
+  private readonly startup: VideoServerStartup;
+
   private readonly options: PersistentEncoderH264SourceOptions;
   private readonly adbFactory: VideoSourceAdbFactory;
   private readonly connector: SocketConnector;
@@ -567,26 +353,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly maxServerRelaunchAttempts: number;
   private readonly serverRelaunchBackoff: BackoffPolicy;
   private readonly serverRelaunchHealthyWindowMs: number;
-  /**
-   * Injected host-integrity source, or `undefined` to lazily default to the
-   * shared {@link VideoServerJarProvider} singleton. Resolved on first use rather
-   * than in the constructor so the `??` default does not count against the
-   * constructor's complexity ratchet.
-   */
-  private readonly jarIntegrityProvider: JarIntegrityProbe | undefined;
-
-  /**
-   * Host-known expected sha256 + size of the local jar (issue #4733), memoized
-   * across relaunches because the on-disk jar does not change during a source's
-   * lifetime.
-   */
-  private expectedJarIntegrity: VideoServerJarIntegrity | null = null;
-  /**
-   * True once the on-device jar has been confirmed byte-identical to the expected
-   * host copy for the current launch. Set when the pre-push probe matches (push
-   * skipped) so the pre-launch verify can reuse that result; reset per session.
-   */
-  private remoteJarVerified = false;
 
   private server: AdbProcess | null = null;
   private socket: StreamSocket | null = null;
@@ -602,8 +368,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private negotiatedHandshakeVersion: number | null = null;
   private running = false;
   private teardownPromise: Promise<void> | null = null;
-  private resolveStartupAudioHeader: ((header: VideoServerStreamHeader) => void) | undefined;
-  private resolveStartupAudioPacket: ((packet: VideoServerPacket) => void) | undefined;
   private socketReconnectPromise: Promise<void> | null = null;
   private socketReconnectAbortController: AbortController | null = null;
   private telemetryInitialized = false;
@@ -613,9 +377,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private idrCompletionCount = 0;
   private pendingIdrRequests = 0;
   private encodedAccessUnitCount = 0;
-  private serverOutputObserver: ((chunk: Buffer) => void) | null = null;
-  private serverOutputBuffer = "";
-  private sawStreamingStarted = false;
   private serverStartupInProgress: AdbProcess | null = null;
   private serverStartupFailure: { server: AdbProcess; error: Error } | null = null;
   private serverRelaunchAttempts = 0;
@@ -646,11 +407,29 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       options.socketNameFactory ?? (() => makeOpaqueSocketName(defaultIdGenerator));
     this.activeVideoSessionRegistry =
       options.activeVideoSessionRegistry ?? defaultActiveVideoSessionRegistry;
-    this.jarIntegrityProvider = options.jarIntegrityProvider;
+    this.jar = new VideoServerJarDeployment(
+      options,
+      this.commandTimeoutMs,
+      (operation, ms, label) => this.withTimeout(operation, ms, label),
+    );
     const relaunchPolicy = PersistentEncoderH264Source.resolveRelaunchPolicy(options);
     this.maxServerRelaunchAttempts = relaunchPolicy.maxAttempts;
     this.serverRelaunchBackoff = relaunchPolicy.backoff;
     this.serverRelaunchHealthyWindowMs = relaunchPolicy.healthyWindowMs;
+    this.leases = new VideoServerLeases(
+      options,
+      this.adbFactory,
+      this.timer,
+      this.activeVideoSessionRegistry,
+      this.teardownTimeoutMs,
+      (operation, ms, label) => this.withTimeout(operation, ms, label),
+    );
+    this.startup = new VideoServerStartup(
+      options,
+      this.timer,
+      this.readyTimeoutMs,
+      () => this.session,
+    );
     this.validateTimings();
   }
 
@@ -832,16 +611,16 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     const session = this.createSession();
     this.session = session;
     this.deviceProcessId = null;
-    this.remoteJarVerified = false;
+    this.jar.remoteJarVerified = false;
     // Claim this session's socket name BEFORE reconcile opens/owns any forward,
     // so a sibling session's concurrent orphan sweep can never mistake our
     // about-to-be-created forward for a stranded one. Cleared in teardown().
     this.activeVideoSessionRegistry.add(this.options.device.deviceId, session.socketName);
-    await this.reconcileExpiredLeases(adb);
+    await this.leases.reconcileExpiredLeases(adb);
     if (!this.running) {
       return null;
     }
-    await this.ensureRemoteJar(adb);
+    await this.jar.ensureRemoteJar(adb);
     if (!this.running) {
       return null;
     }
@@ -859,136 +638,15 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     if (!this.running) {
       // This forward completed after stop() snapshotted its resources. It is
       // still ours only while it retains this session's destination.
-      await this.removeForwardIfMatching(adb, port, session.socketName);
+      await this.leases.removeForwardIfMatching(adb, port, session.socketName);
       return null;
     }
     this.forwardedPort = port;
     return port;
   }
 
-  /**
-   * Push the jar to `/data/local/tmp` only when the on-device copy does not
-   * already match the verified host bytes (issue #4733). The remote jar is
-   * sha256summed + sized through the ADB seam and compared against the host-known
-   * expected {@link VideoServerJarIntegrity}; a byte-identical remote copy skips
-   * the ~2.5 MB USB push (first-frame latency), otherwise the push runs. Any
-   * mismatch OR uncertainty (unreadable remote, missing `sha256sum`/`wc`, a probe
-   * timeout) pushes — correctness is never traded for the optimization. A skip is
-   * recorded in {@link remoteJarVerified} so the pre-launch verify can reuse it
-   * (the happy path hashes the remote once). Bounded by the launch-command
-   * timeout (issue #4741) like every other launch-path ADB call.
-   */
-  private async ensureRemoteJar(adb: VideoSourceAdb): Promise<void> {
-    const expected = await this.resolveExpectedJarIntegrity();
-    const remote = await this.statAndHashRemoteJar(adb);
-    if (remote !== null && remote.size === expected.size && remote.sha256 === expected.sha256) {
-      this.remoteJarVerified = true;
-      logger.info(
-        `[PersistentEncoderH264Source] on-device video-server jar already matches ` +
-          `(sha256=${expected.sha256}, size=${expected.size}); skipping push`,
-      );
-      return;
-    }
-    if (remote !== null) {
-      logger.info(
-        `[PersistentEncoderH264Source] on-device video-server jar differs ` +
-          `(expected sha256=${expected.sha256} size=${expected.size}, ` +
-          `remote sha256=${remote.sha256} size=${remote.size}); pushing`,
-      );
-    }
-    await this.withTimeout(
-      adb.executeCommand(`push "${this.options.jarPath}" ${VIDEO_SERVER_REMOTE_JAR_PATH}`, {
-        timeoutMs: this.commandTimeoutMs,
-      }),
-      this.commandTimeoutMs,
-      "adb push video-server jar",
-    );
-  }
-
-  /**
-   * Refuse to `app_process`-launch a jar whose on-device bytes DEFINITIVELY do
-   * not match the verified host copy (issue #4733) — a supply-chain / TOCTOU
-   * guard, since the jar runs in the screen/audio-capture context. Reuses the
-   * pre-push match when the push was skipped ({@link remoteJarVerified}); `adb
-   * forward` does not touch the jar, so that match still holds as the launch gate.
-   * Otherwise (a push just ran) it re-hashes the remote jar and throws an
-   * {@link ActionableError} on a definitive mismatch. An unreadable probe (device
-   * without `sha256sum`/`wc`, or a probe timeout) is not a mismatch: the push has
-   * already overwritten the remote with our trusted bytes, so — mirroring the
-   * handshake graceful-degrade — it logs and proceeds rather than regressing every
-   * such device to screenrecord.
-   */
-  private async verifyRemoteJarBeforeLaunch(adb: VideoSourceAdb): Promise<void> {
-    if (this.remoteJarVerified) {
-      return;
-    }
-    const expected = await this.resolveExpectedJarIntegrity();
-    const remote = await this.statAndHashRemoteJar(adb);
-    if (remote === null) {
-      logger.warn(
-        `[PersistentEncoderH264Source] could not hash the on-device jar at ${VIDEO_SERVER_REMOTE_JAR_PATH} ` +
-          "before launch; proceeding on the just-pushed trusted bytes (integrity verification degraded)",
-      );
-      return;
-    }
-    if (remote.size !== expected.size || remote.sha256 !== expected.sha256) {
-      throw new ActionableError(
-        `Refusing to launch video-server: the on-device jar at ${VIDEO_SERVER_REMOTE_JAR_PATH} failed ` +
-          `integrity verification (expected sha256=${expected.sha256} size=${expected.size}, got ` +
-          `sha256=${remote.sha256} size=${remote.size}). The bytes on the device do not match the ` +
-          "verified host copy; app_process will not be launched.",
-      );
-    }
-    this.remoteJarVerified = true;
-  }
-
-  /**
-   * Host-known expected sha256 + size of the local jar, memoized (issue #4733).
-   * Delegates to the injected {@link JarIntegrityProbe}, which hashes the actual
-   * bytes at {@link PersistentEncoderH264SourceOptions.jarPath} with the canonical
-   * calculator — correct for cache, override, and local-build jars alike.
-   */
-  private async resolveExpectedJarIntegrity(): Promise<VideoServerJarIntegrity> {
-    if (this.expectedJarIntegrity === null) {
-      const provider = this.jarIntegrityProvider ?? VideoServerJarProvider.getInstance();
-      const integrity = await provider.computeLocalJarIntegrity(this.options.jarPath);
-      this.expectedJarIntegrity = { sha256: integrity.sha256.toLowerCase(), size: integrity.size };
-    }
-    return this.expectedJarIntegrity;
-  }
-
-  /**
-   * Read the on-device jar's sha256 + byte size through the ADB seam, or `null`
-   * when it cannot be determined (issue #4733). A single `sh -c` runs
-   * `sha256sum` + `wc -c` on the constant remote path (no interpolation), bounded
-   * by the launch-command timeout. A missing jar, absent tooling, or a timeout
-   * yields `null` — the callers treat that as "push"/"refuse", never as a match.
-   */
-  private async statAndHashRemoteJar(adb: VideoSourceAdb): Promise<VideoServerJarIntegrity | null> {
-    const probe =
-      `sha256sum ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null; ` +
-      `wc -c < ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null`;
-    try {
-      const result = await this.withTimeout(
-        adb.executeCommand(`shell sh -c ${shellQuote(probe)}`, {
-          timeoutMs: this.commandTimeoutMs,
-        }),
-        this.commandTimeoutMs,
-        "adb hash video-server jar",
-      );
-      return parseRemoteJarIntegrity(result.stdout);
-    } catch (error) {
-      // Uncertainty is not fatal here: the caller pushes (or refuses to launch)
-      // on a null probe, so a wedged/absent probe never yields a false match.
-      logger.debug(
-        `[PersistentEncoderH264Source] unable to hash on-device video-server jar: ${error}`,
-      );
-      return null;
-    }
-  }
-
   private async spawnAndWaitForServer(adb: VideoSourceAdb): Promise<AdbProcess | null> {
-    await this.verifyRemoteJarBeforeLaunch(adb);
+    await this.jar.verifyRemoteJarBeforeLaunch(adb);
     if (!this.running) {
       return null;
     }
@@ -1002,7 +660,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       return null;
     }
     this.server = server;
-    this.attachServerOutputObserver(server);
+    this.startup.attachServerOutputObserver(server);
     server.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString().trim();
       if (text) {
@@ -1010,7 +668,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       }
     });
 
-    const ready = await this.waitForReady(server);
+    const ready = await this.startup.waitForReady(server);
     this.deviceProcessId = ready.pid;
     this.negotiatedHandshakeVersion = this.resolveHandshakeVersion(ready.protocolVersion);
     this.serverStartupInProgress = server;
@@ -1021,7 +679,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   private async connectToServer(server: AdbProcess, port: number): Promise<void> {
     this.throwIfServerStartupFailed(server);
     const streamingStarted = this.options.audioEnabled
-      ? this.waitForStreamingStarted(server)
+      ? this.startup.waitForStreamingStarted(server)
       : null;
     // The waiter is installed before connecting so a fast server cannot print
     // the marker in the gap between client connect and the later startup await.
@@ -1064,7 +722,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       this.socket = socket;
       // Authenticate the connection before anything reads the stream header.
       this.sendHandshake(socket);
-      const startupAudioReady = this.options.audioEnabled ? this.waitForStartupAudioReady() : null;
+      const startupAudioReady = this.options.audioEnabled
+        ? this.startup.waitForStartupAudioReady()
+        : null;
       let socketFailureMode: "startup" | "post-start" = this.options.audioEnabled
         ? "startup"
         : "post-start";
@@ -1083,7 +743,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
           }
           this.reconnectSocket(socket, error);
         },
-        (header) => this.resolveStartupAudioHeader?.(header),
+        (header) => this.startup.resolveStartupAudioHeader?.(header),
       );
 
       // For audio-enabled streams, REMOTE_SUBMIX initialization happens after the
@@ -1135,7 +795,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       if (this.server !== server) {
         return;
       }
-      this.detachServerOutputObserver(server);
+      this.startup.detachServerOutputObserver(server);
       this.server = null;
       if (this.serverStartupInProgress === server) {
         this.serverStartupFailure = {
@@ -1233,191 +893,6 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     return Math.min(advertised, VIDEO_SERVER_HANDSHAKE_VERSION);
   }
 
-  private waitForReady(
-    server: AdbProcess,
-  ): Promise<{ pid: number; protocolVersion: number | null }> {
-    const token = this.session?.token;
-    if (!token) {
-      throw new Error("Video server session token was unavailable.");
-    }
-    return new Promise<{ pid: number; protocolVersion: number | null }>((resolve, reject) => {
-      let settled = false;
-      let stdoutBuffer = "";
-      const finish = (fn: () => void): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        server.stdout.off("data", onData);
-        server.removeListener("exit", onExit);
-        server.removeListener("error", onError);
-        fn();
-      };
-      const timeout = this.timer.setTimeout(() => {
-        finish(() =>
-          reject(
-            new ActionableError(
-              `video-server did not become session-ready within ${this.readyTimeoutMs}ms. ` +
-                "Set AUTOMOBILE_VIDEO_SERVER_JAR to a current automobile-video.jar.",
-            ),
-          ),
-        );
-      }, this.readyTimeoutMs);
-      const onData = (chunk: Buffer): void => {
-        if (settled) {
-          return;
-        }
-        stdoutBuffer += chunk.toString();
-        const lines = stdoutBuffer.split(/\r?\n/);
-        stdoutBuffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const match = SESSION_READY_PATTERN.exec(line);
-          if (!match) {
-            continue;
-          }
-          if (match[1] !== token || match[3] !== this.session?.socketName) {
-            finish(() =>
-              reject(
-                new ActionableError(
-                  `video-server session readiness token mismatch (expected=${token}, got=${match[1]})`,
-                ),
-              ),
-            );
-            return;
-          }
-          const pid = Number.parseInt(match[2], 10);
-          if (!Number.isInteger(pid) || pid <= 0) {
-            finish(() =>
-              reject(new ActionableError("video-server returned an invalid session PID")),
-            );
-            return;
-          }
-          const protocolVersion = match[4] !== undefined ? Number.parseInt(match[4], 10) : null;
-          finish(() => resolve({ pid, protocolVersion }));
-          return;
-        }
-      };
-      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-        finish(() =>
-          reject(new Error(`video-server exited before ready (code=${code}, signal=${signal})`)),
-        );
-      };
-      const onError = (error: Error): void => finish(() => reject(error));
-
-      server.stdout.on("data", onData);
-      server.once("exit", onExit);
-      server.once("error", onError);
-    });
-  }
-
-  private waitForStreamingStarted(server: AdbProcess): Promise<void> {
-    if (this.sawStreamingStarted) {
-      return Promise.resolve();
-    }
-    return this.waitForServerLine(
-      server,
-      STREAMING_STARTED_MARKER,
-      `video-server did not start streaming within ${this.readyTimeoutMs}ms`,
-      "video-server exited before streaming started",
-    );
-  }
-
-  private waitForStartupAudioReady(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let muxAudioHeaderSeen = false;
-      const timeout = this.timer.setTimeout(() => {
-        finish(() =>
-          reject(
-            new ActionableError(
-              `video-server did not produce PCM audio within ${this.readyTimeoutMs}ms`,
-            ),
-          ),
-        );
-      }, this.readyTimeoutMs);
-
-      const finish = (fn: () => void): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        this.resolveStartupAudioHeader = undefined;
-        this.resolveStartupAudioPacket = undefined;
-        fn();
-      };
-
-      this.resolveStartupAudioHeader = (header) => {
-        if (header.muxed === true && header.audio === true) {
-          muxAudioHeaderSeen = true;
-          return;
-        }
-        finish(() => {
-          reject(
-            new ActionableError(
-              "Audio was requested, but video-server did not advertise muxed PCM audio. Rebuild or provide a current automobile-video.jar.",
-            ),
-          );
-        });
-      };
-
-      this.resolveStartupAudioPacket = (packet) => {
-        if (
-          muxAudioHeaderSeen &&
-          packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16 &&
-          packet.data.length > 0
-        ) {
-          finish(resolve);
-        }
-      };
-    });
-  }
-
-  private waitForServerLine(
-    server: AdbProcess,
-    marker: string,
-    timeoutMessage: string,
-    exitMessagePrefix: string,
-  ): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let stdoutBuffer = "";
-      const finish = (fn: () => void): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        server.stdout.off("data", onData);
-        server.removeListener("exit", onExit);
-        server.removeListener("error", onError);
-        fn();
-      };
-      const timeout = this.timer.setTimeout(() => {
-        finish(() => reject(new ActionableError(timeoutMessage)));
-      }, this.readyTimeoutMs);
-
-      const onData = (chunk: Buffer): void => {
-        if (settled) {
-          return; // stop accumulating once ready (or failed)
-        }
-        stdoutBuffer += chunk.toString();
-        if (stdoutBuffer.includes(marker)) {
-          finish(resolve);
-        }
-      };
-      const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-        finish(() => reject(new Error(`${exitMessagePrefix} (code=${code}, signal=${signal})`)));
-      };
-      const onError = (error: Error): void => finish(() => reject(error));
-
-      server.stdout.on("data", onData);
-      server.once("exit", onExit);
-      server.once("error", onError);
-    });
-  }
-
   /**
    * Send the pre-stream token handshake as the FIRST bytes on a freshly-connected
    * socket, before the server emits (or the client reads) any stream header (issue
@@ -1464,7 +939,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
             this.deliverVideoPacket(packet);
           } else if (packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
             this.options.onAudioData?.(packet.data);
-            this.resolveStartupAudioPacket?.(packet);
+            this.startup.resolveStartupAudioPacket?.(packet);
           }
         }
       },
@@ -1879,7 +1354,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     const server = this.server;
     this.server = null;
     if (server) {
-      this.detachServerOutputObserver(server);
+      this.startup.detachServerOutputObserver(server);
     }
     // Terminating the host `adb shell` process closes the exec stream, which
     // stops the device-side server for THIS session. We deliberately do NOT run
@@ -1894,7 +1369,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.deviceProcessId = null;
     this.session = null;
     if (session) {
-      await this.cleanupOwnedSession(session, port, deviceProcessId);
+      await this.leases.cleanupOwnedSession(session, port, deviceProcessId);
       // Release the socket-name claim only after cleanup removed our forward, so
       // a sibling sweep cannot reclaim it during the stop()-during-spawn window.
       this.activeVideoSessionRegistry.remove(this.options.device.deviceId, session.socketName);
@@ -1903,439 +1378,5 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         `[PersistentEncoderH264Source] refusing forward cleanup port=${port}: session identity is unavailable`,
       );
     }
-  }
-
-  private async reconcileExpiredLeases(adb: VideoSourceAdb): Promise<void> {
-    let leases: VideoServerLease[];
-    try {
-      const leaseListCommand =
-        `for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json; do ` +
-        '[ -f "$f" ] || continue; cat "$f"; printf "\\n"; done';
-      const result = await this.withTimeout(
-        adb.executeCommand(`shell sh -c ${shellQuote(leaseListCommand)}`),
-        this.teardownTimeoutMs,
-        "adb read video session leases",
-      );
-      leases = parseLeases(result.stdout);
-    } catch (error) {
-      logger.debug(`[PersistentEncoderH264Source] unable to read video session leases: ${error}`);
-      return;
-    }
-
-    // Sweep corrupt/orphaned files regardless of how many leases parsed: a
-    // wholly-unparseable directory yields zero leases but still needs cleanup.
-    await this.sweepOrphanLeaseFiles(
-      adb,
-      new Set(leases.map((lease) => `${lease.socketName}.json`)),
-    );
-
-    // Sweep host forwards with no backing lease at all (device server
-    // self-expired and deleted its own lease, or the daemon was SIGKILLed). Runs
-    // regardless of lease count — the whole point is that the lease is gone.
-    await this.sweepOrphanForwards(adb, new Set(leases.map((lease) => lease.socketName)));
-
-    if (leases.length === 0) {
-      return;
-    }
-    const deviceElapsedRealtimeMs = await this.readDeviceElapsedRealtimeMs(adb);
-    if (deviceElapsedRealtimeMs === null) {
-      logger.warn(
-        "[PersistentEncoderH264Source] unable to read device uptime; skipping stale-session cleanup",
-      );
-      return;
-    }
-
-    for (const lease of leases) {
-      const decision = this.classifyLeaseForReclaim(lease, deviceElapsedRealtimeMs);
-      if (decision === null) {
-        continue;
-      }
-      logger.info(
-        `[PersistentEncoderH264Source] stale-session-cleanup socket=${lease.socketName} reason=${decision}`,
-      );
-      await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
-      await this.terminateProcessIfMatching(adb, lease);
-      await this.removeLeaseIfMatching(adb, lease);
-    }
-  }
-
-  /**
-   * Decide whether a parsed lease should be reclaimed, returning a short reason
-   * string when it should and `null` when it should be left alone.
-   *
-   * Precedence deliberately puts the reboot check FIRST: emulator serials are
-   * port-based (`emulator-5554` -> `emulator-5556` across restarts), so a lease
-   * written under a prior serial is on the SAME device filesystem and must not
-   * be stranded. A negative elapsed-realtime age proves the lease predates the
-   * current boot, which is safe to reclaim regardless of the recorded serial.
-   * Only for leases NOT provably from a previous boot do we fall back to the
-   * conservative same-serial staleness checks.
-   */
-  private classifyLeaseForReclaim(
-    lease: VideoServerLease,
-    deviceElapsedRealtimeMs: number,
-  ): string | null {
-    const elapsedRealtimeMs = lease.heartbeatElapsedRealtimeMs;
-    if (elapsedRealtimeMs !== undefined && deviceElapsedRealtimeMs - elapsedRealtimeMs < 0) {
-      // elapsedRealtime resets when Android reboots. A negative age therefore
-      // proves this persisted lease belongs to a previous boot.
-      return "previous-boot";
-    }
-
-    if (lease.deviceSerial !== this.options.device.deviceId) {
-      // Same-boot lease under a different serial: too ambiguous to reclaim.
-      return null;
-    }
-
-    if (elapsedRealtimeMs === undefined) {
-      // Legacy/edge lease without the monotonic field. Fall back to the
-      // always-written wall clock with a conservative multi-minute threshold so
-      // the validator's tolerance and this loop stop disagreeing (issue #4783).
-      const wallAgeMs = this.timer.now() - lease.heartbeatAtMs;
-      return wallAgeMs >= STALE_LEASE_WALL_CLOCK_MS ? "wall-clock-stale" : null;
-    }
-
-    const ageMs = deviceElapsedRealtimeMs - elapsedRealtimeMs;
-    return ageMs >= STALE_LEASE_MS ? "elapsed-stale" : null;
-  }
-
-  /**
-   * Remove lease files that can never be reconciled through the normal path:
-   * unparseable `*.json` (basename not among the parsed lease tokens) and
-   * orphaned `*.json.tmp` files left by a SIGKILL between `writeText` and
-   * `renameTo`. Only files older than `STALE_LEASE_FILE_SWEEP_MS` (by device
-   * mtime) are swept, so a file mid-rename by a live server is left alone.
-   */
-  private async sweepOrphanLeaseFiles(
-    adb: VideoSourceAdb,
-    knownLeaseFileNames: ReadonlySet<string>,
-  ): Promise<void> {
-    let listing: { nowEpochMs: number | null; files: { name: string; mtimeMs: number }[] };
-    try {
-      const command =
-        `printf 'NOW %s\\n' "$(date +%s)"; ` +
-        `for f in ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json ${VIDEO_SERVER_LEASE_DIRECTORY}/*.json.tmp; do ` +
-        '[ -f "$f" ] || continue; stat -c \'%Y %n\' "$f"; done';
-      const result = await this.withTimeout(
-        adb.executeCommand(`shell sh -c ${shellQuote(command)}`),
-        this.teardownTimeoutMs,
-        "adb list stale video session lease files",
-      );
-      listing = parseLeaseFileListing(result.stdout);
-    } catch (error) {
-      logger.debug(
-        `[PersistentEncoderH264Source] unable to list video session lease files: ${error}`,
-      );
-      return;
-    }
-
-    if (listing.nowEpochMs === null) {
-      logger.debug(
-        "[PersistentEncoderH264Source] lease-file sweep skipped: no device clock in listing",
-      );
-      return;
-    }
-
-    for (const file of listing.files) {
-      const isTmp = file.name.endsWith(".json.tmp");
-      // A parseable, known `*.json` lease is handled by the reconcile loop.
-      if (!isTmp && knownLeaseFileNames.has(file.name)) {
-        continue;
-      }
-      const ageMs = listing.nowEpochMs - file.mtimeMs;
-      if (ageMs < STALE_LEASE_FILE_SWEEP_MS) {
-        continue;
-      }
-      logger.info(
-        `[PersistentEncoderH264Source] stale-lease-file-sweep name=${file.name} ageMs=${ageMs}`,
-      );
-      try {
-        await this.withTimeout(
-          adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${file.name}`),
-          this.teardownTimeoutMs,
-          "adb remove stale video session lease file",
-        );
-      } catch (error) {
-        logger.debug(
-          `[PersistentEncoderH264Source] stale-lease-file sweep failed name=${file.name}: ${error}`,
-        );
-      }
-    }
-  }
-
-  /**
-   * Sweep host `adb forward` entries pointing at an `automobile_video_*` abstract
-   * socket that have no backing lease and are not owned by a live/in-flight
-   * session. This is the only path that can reclaim a forward whose lease is
-   * already gone — the lease-driven loop above removes only forwards *named in*
-   * lease files, so a self-expired server's forward (lease self-deleted) or a
-   * SIGKILLed daemon's forward would otherwise leak until the adb server
-   * restarts (issue #4753).
-   *
-   * `removeForwardIfMatching` re-verifies the port↔destination before removing,
-   * so a port reused by an unrelated service is never touched.
-   */
-  private async sweepOrphanForwards(
-    adb: VideoSourceAdb,
-    leaseBackedSocketNames: ReadonlySet<string>,
-  ): Promise<void> {
-    let stdout: string;
-    try {
-      const listed = await this.withTimeout(
-        adb.executeCommand("forward --list"),
-        this.teardownTimeoutMs,
-        "adb forward --list for orphan sweep",
-      );
-      stdout = listed.stdout;
-    } catch (error) {
-      logger.debug(
-        `[PersistentEncoderH264Source] unable to list forwards for orphan sweep: ${error}`,
-      );
-      return;
-    }
-
-    const activeSocketNames = this.activeVideoSessionRegistry.active(this.options.device.deviceId);
-    const orphans: { port: number; socketName: string }[] = [];
-    for (const line of stdout.split(/\r?\n/)) {
-      const forward = parseVideoForwardLine(line);
-      if (forward === null) {
-        continue;
-      }
-      // A lease-backed forward is reclaimed by the lease-driven loop; a forward
-      // owned by a live/in-flight session (including this one) is not stranded.
-      if (
-        leaseBackedSocketNames.has(forward.socketName) ||
-        activeSocketNames.has(forward.socketName)
-      ) {
-        continue;
-      }
-      orphans.push(forward);
-    }
-
-    for (const orphan of orphans) {
-      logger.info(
-        `[PersistentEncoderH264Source] orphan-forward-sweep port=${orphan.port} socket=${orphan.socketName}`,
-      );
-      await this.removeForwardIfMatching(adb, orphan.port, orphan.socketName);
-    }
-  }
-
-  private async cleanupOwnedSession(
-    session: VideoServerSession,
-    port: number | null,
-    expectedProcessId: number | null,
-  ): Promise<void> {
-    const adb = this.adbFactory.create(this.options.device);
-    const lease = await this.readLease(adb, session.socketName);
-    if (lease && this.isOwnedSessionLease(lease, session, expectedProcessId)) {
-      await this.removeForwardIfMatching(adb, lease.forwardPort, lease.socketName);
-      await this.removeOwnedForward(adb, port, session.socketName, lease.forwardPort);
-      await this.terminateProcessIfMatching(adb, lease);
-      await this.removeLeaseIfMatching(adb, lease);
-      return;
-    }
-    if (lease) {
-      logger.warn(
-        `[PersistentEncoderH264Source] refusing owned-session process cleanup socket=${session.socketName}: lease identity or PID mismatch`,
-      );
-      await this.removeOwnedForward(adb, port, session.socketName);
-      return;
-    }
-    await this.removeOwnedForward(adb, port, session.socketName);
-  }
-
-  private isOwnedSessionLease(
-    lease: VideoServerLease,
-    session: VideoServerSession,
-    expectedProcessId: number | null,
-  ): boolean {
-    // A cancellation can arrive after the server persisted its lease but before
-    // VIDEO_SESSION_READY handed its PID back to the host. The lease identity
-    // plus terminateProcessIfMatching's argv check still make owned cleanup safe.
-    // The token itself is no longer on disk (issue #4731), so ownership is confirmed by
-    // re-hashing this session's token and matching the persisted hash.
-    return (
-      lease.sessionTokenHash === hashSessionToken(session.token) &&
-      lease.socketName === session.socketName &&
-      lease.ownerPid === session.ownerPid &&
-      lease.deviceSerial === session.deviceSerial &&
-      (expectedProcessId === null || lease.pid === expectedProcessId)
-    );
-  }
-
-  private async removeOwnedForward(
-    adb: VideoSourceAdb,
-    port: number | null,
-    socketName: string,
-    exceptPort?: number,
-  ): Promise<void> {
-    if (port !== null && port !== exceptPort) {
-      await this.removeForwardIfMatching(adb, port, socketName);
-    }
-  }
-
-  private async readLease(
-    adb: VideoSourceAdb,
-    socketName: string,
-  ): Promise<VideoServerLease | null> {
-    try {
-      const result = await this.withTimeout(
-        adb.executeCommand(`shell cat ${VIDEO_SERVER_LEASE_DIRECTORY}/${socketName}.json`),
-        this.teardownTimeoutMs,
-        "adb read owned video session lease",
-      );
-      return parseLeases(result.stdout).find((lease) => lease.socketName === socketName) ?? null;
-    } catch (error) {
-      logger.debug(
-        `[PersistentEncoderH264Source] unable to read owned video session lease: ${error}`,
-      );
-      return null;
-    }
-  }
-
-  private async terminateProcessIfMatching(
-    adb: VideoSourceAdb,
-    lease: VideoServerLease,
-  ): Promise<void> {
-    try {
-      const commandLine = await this.withTimeout(
-        adb.executeCommand(`shell cat /proc/${lease.pid}/cmdline`),
-        this.teardownTimeoutMs,
-        "adb read video-server process cmdline",
-      );
-      const argv = commandLine.stdout.split("\u0000");
-      if (commandLine.stdout.length === 0 || argv.every((argument) => argument.length === 0)) {
-        // An exited process needs no signal; forward and lease cleanup can safely continue.
-        logger.debug(
-          `[PersistentEncoderH264Source] stale-session process cleanup skipped socket=${lease.socketName}: process already exited`,
-        );
-        return;
-      }
-      // Match the non-secret `--socket-name` argv token, not `--session-token` (issue #4731): the
-      // lease no longer carries the raw token, and the opaque socket name gives the same PID-reuse
-      // protection — a recycled PID running something else will not carry our socket name.
-      const ownsSession = argv.some(
-        (argument, index) => argument === "--socket-name" && argv[index + 1] === lease.socketName,
-      );
-      if (!argv.includes(VIDEO_SERVER_MAIN_CLASS) || !ownsSession) {
-        logger.warn(
-          `[PersistentEncoderH264Source] refusing stale-session process cleanup socket=${lease.socketName}: PID/socket mismatch`,
-        );
-        return;
-      }
-      await this.withTimeout(
-        adb.executeCommand(`shell kill -2 ${lease.pid}`),
-        this.teardownTimeoutMs,
-        "adb terminate video-server process",
-      );
-    } catch (error) {
-      logger.debug(
-        `[PersistentEncoderH264Source] stale-session process cleanup skipped socket=${lease.socketName}: ${error}`,
-      );
-    }
-  }
-
-  private async removeForwardIfMatching(
-    adb: VideoSourceAdb,
-    port: number,
-    socketName: string,
-  ): Promise<void> {
-    try {
-      const listed = await this.withTimeout(
-        adb.executeCommand("forward --list"),
-        this.teardownTimeoutMs,
-        "adb forward --list",
-      );
-      const expectedPort = `tcp:${port}`;
-      const expectedDestination = `localabstract:${socketName}`;
-      const matches = listed.stdout.split(/\r?\n/).some((line) => {
-        const fields = line.trim().split(/\s+/);
-        return fields.includes(expectedPort) && fields.includes(expectedDestination);
-      });
-      if (!matches) {
-        logger.warn(
-          `[PersistentEncoderH264Source] refusing stale-session forward cleanup port=${port}: destination mismatch`,
-        );
-        return;
-      }
-      await this.withTimeout(
-        adb.executeCommand(`forward --remove tcp:${port}`),
-        this.teardownTimeoutMs,
-        "adb forward --remove",
-      );
-    } catch (error) {
-      logger.debug(`[PersistentEncoderH264Source] forward --remove failed: ${error}`);
-    }
-  }
-
-  private async removeLeaseIfMatching(adb: VideoSourceAdb, lease: VideoServerLease): Promise<void> {
-    const current = await this.readLease(adb, lease.socketName);
-    if (
-      current?.socketName !== lease.socketName ||
-      current.sessionTokenHash !== lease.sessionTokenHash ||
-      current.pid !== lease.pid
-    ) {
-      return;
-    }
-    try {
-      await this.withTimeout(
-        adb.executeCommand(`shell rm -f ${VIDEO_SERVER_LEASE_DIRECTORY}/${lease.socketName}.json`),
-        this.teardownTimeoutMs,
-        "adb remove video session lease",
-      );
-    } catch (error) {
-      logger.debug(`[PersistentEncoderH264Source] stale-session lease cleanup failed: ${error}`);
-    }
-  }
-
-  private attachServerOutputObserver(server: AdbProcess): void {
-    this.serverOutputBuffer = "";
-    this.sawStreamingStarted = false;
-    const observer = (chunk: Buffer): void => {
-      this.serverOutputBuffer += chunk.toString();
-      const lines = this.serverOutputBuffer.split(/\r?\n/);
-      this.serverOutputBuffer = lines.pop() ?? "";
-      if (lines.includes(STREAMING_STARTED_MARKER)) {
-        this.sawStreamingStarted = true;
-      }
-      for (const line of lines) {
-        if (!line.startsWith("VIDEO_STATS ")) {
-          continue;
-        }
-        const match = VIDEO_STATS_PATTERN.exec(line);
-        const droppedFrames = match ? Number(match[1]) : NaN;
-        if (Number.isSafeInteger(droppedFrames) && droppedFrames >= 0) {
-          this.options.onDroppedFrames?.(droppedFrames);
-        }
-      }
-    };
-    this.serverOutputObserver = observer;
-    server.stdout.on("data", observer);
-  }
-
-  private detachServerOutputObserver(server: AdbProcess): void {
-    if (this.serverOutputObserver) {
-      server.stdout.off("data", this.serverOutputObserver);
-    }
-    this.serverOutputObserver = null;
-    this.serverOutputBuffer = "";
-    this.sawStreamingStarted = false;
-  }
-
-  private async readDeviceElapsedRealtimeMs(adb: VideoSourceAdb): Promise<number | null> {
-    try {
-      const result = await this.withTimeout(
-        adb.executeCommand("shell cat /proc/uptime"),
-        this.teardownTimeoutMs,
-        "adb read device uptime",
-      );
-      const uptimeSeconds = Number.parseFloat(result.stdout.trim().split(/\s+/, 1)[0] ?? "");
-      if (Number.isFinite(uptimeSeconds) && uptimeSeconds >= 0) {
-        return Math.floor(uptimeSeconds * 1_000);
-      }
-    } catch (error) {
-      logger.debug(`[PersistentEncoderH264Source] unable to read device uptime: ${error}`);
-    }
-    return null;
   }
 }

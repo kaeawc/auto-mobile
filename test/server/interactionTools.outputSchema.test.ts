@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test"
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { toJSONSchema } from "zod/v4";
 import type { JsonSchemaValidator } from "@modelcontextprotocol/client";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import type { BootedDevice, KeyboardResult } from "../../src/models";
@@ -17,6 +18,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { readToolResponse } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 const interactionDeps: InteractionToolDependencies = {};
@@ -32,7 +34,7 @@ beforeAll(() => {
     const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
     // Disabled tools are still registered; use their registered schema directly.
     const schema =
-      definition?.outputSchema ?? ToolRegistry.getTool(name)!.outputSchema!.toJSONSchema();
+      definition?.outputSchema ?? toJSONSchema(ToolRegistry.getTool(name)!.outputSchema!);
     validators.set(name, provider.getValidator(schema));
   }
 });
@@ -51,7 +53,7 @@ async function checkResponse(
   isError?: boolean,
 ) {
   const tool = ToolRegistry.getTool(name)!;
-  const response = await tool.deviceAwareHandler!(device, args);
+  const response = readToolResponse(await tool.deviceAwareHandler!(device, args));
   expect(response.content).toEqual(createJSONToolResponse(payload).content);
   expect(response.isError).toBe(isError);
   // The SDK requires presence unless isError; it validates whenever content is present.
@@ -282,7 +284,7 @@ function indexSource(
     registrations: [],
   };
   const lateBound = new Map<string, string>();
-  const lateRegistrations: Array<{ variable: string; handler: ts.Node }> = [];
+  const lateRegistrations: Array<{ variable: string; handler: ts.Expression }> = [];
   function visit(node: ts.Node): void {
     if (ts.isFunctionDeclaration(node) && node.name) {
       index.bindings.set(node.name.text, node);

@@ -21,6 +21,8 @@ import {
  * Allows configuring device states and asserting operations
  */
 export class FakeDeviceUtils implements PlatformDeviceManager {
+  /** Optional on the interface; unset (the default) models a manager without an ADB transport. */
+  getAndroidListedDeviceStates?: PlatformDeviceManager["getAndroidListedDeviceStates"];
   private deviceImages: Map<Platform, DeviceInfo[]> = new Map();
   private hangingDeviceImagePlatforms: Set<Platform> = new Set();
   private listDeviceImagesCalls: Array<{ platform: SomePlatform; signal?: AbortSignal }> = [];

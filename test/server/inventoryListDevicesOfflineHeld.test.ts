@@ -1,4 +1,6 @@
 import { makePool } from "../helpers/makePool";
+import { listDevicesOutputSchema } from "../../src/server/deviceTools";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -15,7 +17,6 @@ import {
 } from "../../src/server/bootedDeviceResources";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -65,8 +66,8 @@ describe("listDevices tool vs booted resource for a held, adb-offline device", (
     await pool.assignDeviceToSession("session-held");
     // adb now lists the held emulator `offline`: online-only discovery drops it.
     manager.setBootedDevices("android", []);
-    (manager as PlatformDeviceManager).getAndroidListedDeviceStates = async (ids) =>
-      new Map(ids.map((id) => [id, "offline"]));
+    manager.getAndroidListedDeviceStates = async (ids) =>
+      new Map(Array.from(ids, (id) => [id, "offline"]));
     DaemonState.getInstance().initialize(sessions, pool);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => manager,
@@ -79,10 +80,8 @@ describe("listDevices tool vs booted resource for a held, adb-offline device", (
     expect(fromResource?.runtime.session?.sessionUuid).toBe("session-held");
 
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
-    const fromTool = payload.devices.find(
-      (d: { runtime: { deviceId: string } }) => d.runtime.deviceId === android.deviceId,
-    );
+    const payload = listDevicesOutputSchema.parse(toolStructured(response));
+    const fromTool = payload.devices.find((d) => d.runtime.deviceId === android.deviceId);
     expect(fromTool?.runtime.session?.sessionUuid).toBe("session-held");
     expect(fromTool?.runtime.poolStatus).toBe("assigned");
     expect(fromTool?.runtime.connection).toEqual(fromResource?.runtime.connection);

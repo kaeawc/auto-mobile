@@ -170,7 +170,7 @@ import {
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
-import { ToolRegistry } from "../server/toolRegistry";
+import { daemonToolRegistry } from "./toolRegistryPort";
 import {
   assertFrameTargetIdentityProven,
   canonicalFrameDeviceId,
@@ -617,7 +617,7 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
 export type DeviceReadToolCallClassifier = (toolName: string, args: unknown) => boolean;
 
 const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, args) =>
-  ToolRegistry.getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
+  daemonToolRegistry().getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
 
 /**
  * Suffix of a device's read lane (#10969). A watcher's read of a device another session holds
@@ -4632,7 +4632,7 @@ export class UnixSocketServer {
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
-    const registeredTool = ToolRegistry.getRegisteredTool(toolName);
+    const registeredTool = daemonToolRegistry().getRegisteredTool(toolName);
     // Direct IDE storage routes have a fixed exact-tool allowlist and may run
     // before any loopback MCP client has populated the process registry.
     const declaredDefault = registeredTool?.defaultEnabled ?? false;

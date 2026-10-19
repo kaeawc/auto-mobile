@@ -35,9 +35,9 @@ import {
 } from "../daemon/deviceControlTransportFailure";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
+  noActiveDeviceSessionPayload,
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
-  terminalSessionRefusalFields,
 } from "../daemon/deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
@@ -210,18 +210,6 @@ function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): Call
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
   const payload = boundSessionOwnershipLostPayload(error);
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
-}
-
-export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
-  return {
-    error: {
-      code: "no_active_device_session",
-      message: error.message,
-      reason: error.reason,
-      ...idleReleaseField(error.reason),
-      ...terminalSessionRefusalFields(),
-    },
-  };
 }
 
 function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedError): string {

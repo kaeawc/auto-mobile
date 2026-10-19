@@ -21,9 +21,8 @@ import {
 } from "./deviceToolsStartDevice";
 import { createLifecycleHandlers } from "./deviceToolsLifecycle";
 import { createListingHandlers } from "./deviceToolsListing";
+import { registerDaemonDeviceDeletion } from "../daemon/daemonDeviceDeletion";
 import {
-  TeardownDeviceArgs,
-  TeardownToolResponse,
   getAndroidSchema,
   getAppleSchema,
   getDeviceTeardownService,
@@ -210,29 +209,16 @@ export const teardownDeviceSchema = addSessionUuidToSchema(
     .strict(),
 );
 
-/** Runs the verified `deleteDevice` workflow (stop, destroy, verify absence) on the daemon's behalf. */
-export type DaemonDeviceDeletion = (
-  args: TeardownDeviceArgs,
-  signal?: AbortSignal,
-) => Promise<TeardownToolResponse>;
-
-let daemonDeviceDeletion: DaemonDeviceDeletion | undefined;
-
-/** The daemon's delete workflow, once the device tools are registered in this process. */
-export function getDaemonDeviceDeletion(): DaemonDeviceDeletion | undefined {
-  return daemonDeviceDeletion;
-}
-
 export function registerDeviceTools() {
   const { listDeviceImagesHandler, listDevicesHandler } = createListingHandlers();
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
   // The daemon's own deletions (abandoned broker bindings, #11174) run the same verified workflow with
   // no caller: the broker binding and session-holder refusals guard callers, not the daemon itself.
-  daemonDeviceDeletion = (args, signal) => {
+  registerDaemonDeviceDeletion((args, signal) => {
     const deps = getDeviceToolsDependencies();
     return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
-  };
+  });
 
   const provisionHandlers = createProvisionDeviceHandlers({
     bindBootedDeviceSession,

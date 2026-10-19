@@ -126,6 +126,7 @@ import {
   withItemsEnum,
 } from "./toolRegistryTypes";
 import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
+import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
 export type {
   ProgressCallback,
   DeviceAwareToolHandler,
@@ -1179,7 +1180,7 @@ export class ToolRegistryClass {
 }
 
 // Export a singleton instance
-export const ToolRegistry = new ToolRegistryClass();
+export const ToolRegistry = installDaemonToolRegistryPort(new ToolRegistryClass());
 
 // --- Compile-time enforcement of AC1 (issue #3222) ---
 // AC1 is a *type* guarantee: `callInternalTyped(name, …)` must thread the concrete

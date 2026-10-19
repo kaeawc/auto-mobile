@@ -125,11 +125,13 @@ import {
   PooledAvdIdentityError,
   ProvisionDeviceRollbackError,
 } from "../../src/server/deviceTools";
-import { sessionOwnershipLostPayload } from "../../src/daemon/deviceSessionResult";
+import {
+  noActiveDeviceSessionPayload,
+  sessionOwnershipLostPayload,
+} from "../../src/daemon/deviceSessionResult";
 import {
   mcpOverloadResult,
   noActiveDeviceSessionResult,
-  noActiveDeviceSessionPayload,
   deviceControlTransportFailureResult,
   ambiguousSessionSelectorResult,
 } from "../../src/server/proxyServer";

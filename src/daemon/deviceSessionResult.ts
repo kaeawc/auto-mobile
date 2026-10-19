@@ -61,6 +61,18 @@ export function appendHeartbeatExpiryMessage(
   return `${message} No heartbeat for ${ageMs} ms (limit ${limitMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
 }
 
+export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
+  return {
+    error: {
+      code: "no_active_device_session",
+      message: error.message,
+      reason: error.reason,
+      ...idleReleaseField(error.reason),
+      ...terminalSessionRefusalFields(),
+    },
+  };
+}
+
 /**
  * The fields every terminal-session refusal shares (#11098). The session UUID cannot be retried, so
  * `retryable` is false and `nextAction` says what to do instead.

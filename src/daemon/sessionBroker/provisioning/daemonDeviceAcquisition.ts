@@ -48,6 +48,7 @@ import {
   type BindingJournal,
   type BindingJournalInFlight,
 } from "../registry/bindingJournal";
+import { daemonToolRegistry } from "../../toolRegistryPort";
 import type {
   BindingJournalOwner,
   BindingProcessIdentity,
@@ -123,8 +124,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}) {
  * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
  */
 export const defaultBindingToolInvoker: BindingToolInvoker = async (name, args, signal) => {
-  const { ToolRegistry } = await import("../../../server/toolRegistry");
-  return await ToolRegistry.callInternal(name, args, undefined, signal);
+  return await daemonToolRegistry().callInternal(name, args, undefined, signal);
 };
 
 export interface DaemonBrokerDeviceAcquisitionHandle {

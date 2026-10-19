@@ -91,7 +91,7 @@ interface Surface {
 const surfaces: Surface[] = [
   {
     name: "default proxy tool result",
-    builders: ["src/server/proxyServer.ts#noActiveDeviceSessionPayload"],
+    builders: ["src/daemon/deviceSessionResult.ts#noActiveDeviceSessionPayload"],
     reasonKey: "reason",
     holder: (reason) => {
       const content = noActiveDeviceSessionResult(new DaemonConnectionSessionReleasedError(reason))

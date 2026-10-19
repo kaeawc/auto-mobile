@@ -13,6 +13,7 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
+import { ScenarioDaemon } from "./scenarioDaemon";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { FakeDaemonExitRecordFileSystem } from "../fakes/SafeDaemonManager";
 import {
@@ -661,7 +662,7 @@ export class LivenessScenario {
     const daemonInstance = daemonIds.next();
     // The process's own timers: they die with it, while the proxies' run on.
     const clock = new ProcessTimer(this.timer);
-    const daemon = new Daemon(
+    const daemon = new ScenarioDaemon(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),

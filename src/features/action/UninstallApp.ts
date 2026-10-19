@@ -51,7 +51,7 @@ const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
 
 export interface UninstallAppOptions {
-  simctl?: SimCtlClient;
+  simctl?: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   deviceAppUninstaller?: DeviceAppUninstaller;
   installedAppsRepository?: InstalledAppsStore;
   performanceTrackerFactory?: () => PerformanceTracker;
@@ -76,7 +76,7 @@ export class UninstallApp {
   private device: BootedDevice;
   private adbFactory: AdbClientFactory;
   private adb: AdbExecutor;
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   private deviceAppUninstaller: DeviceAppUninstaller;
   private installedAppsRepository: InstalledAppsStore;
   private createPerformanceTracker: () => PerformanceTracker;

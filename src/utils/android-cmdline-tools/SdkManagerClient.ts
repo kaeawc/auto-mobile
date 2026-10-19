@@ -3,11 +3,10 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { runAndroidCommand } from "./runAndroidCommand";
+import { runAndroidCommand, type AndroidCommandChild } from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
-  type HostChildProcess as ChildProcess,
   type HostProcessExecutor,
   type HostSpawnOptions as SpawnOptions,
 } from "../HostCommandExecutor";
@@ -49,8 +48,8 @@ export interface SdkManagerCommandResult {
 }
 
 export interface SdkManagerClientDependencies {
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-  existsSync: typeof existsSync;
+  spawn: (command: string, args: string[], options: SpawnOptions) => AndroidCommandChild;
+  existsSync: (path: string) => boolean;
   logger: Pick<typeof logger, "info" | "warn" | "error">;
   detectAndroidCommandLineTools: typeof detectAndroidCommandLineTools;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;

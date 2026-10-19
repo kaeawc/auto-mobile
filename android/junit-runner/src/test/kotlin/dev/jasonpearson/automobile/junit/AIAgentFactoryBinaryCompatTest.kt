@@ -44,9 +44,16 @@ class AIAgentFactoryBinaryCompatTest {
   private class StubMCPClient : AutoMobileAgent.MCPClient {
     override fun isConnected() = false
 
-    override fun connect(serverUrl: String) {}
+    val connectionUrls = mutableListOf<String>()
+    var disconnectCalls = 0
 
-    override fun disconnect() {}
+    override fun connect(serverUrl: String) {
+      connectionUrls.add(serverUrl)
+    }
+
+    override fun disconnect() {
+      disconnectCalls++
+    }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>) = ""
 
@@ -69,11 +76,8 @@ class AIAgentFactoryBinaryCompatTest {
     // Call the NEW 4-arg overload (unknown to LegacyThreeArgFactory's author) with a distinct
     // rawMcpClient; its default body must forward to the 3-arg override (dropping rawMcpClient —
     // the pre-#6145 behavior) rather than throwing AbstractMethodError.
-    try {
+    org.junit.jupiter.api.assertThrows<UnsupportedOperationException> {
       factory.createAIAgentWithMCPTools(config, mcpClient, 7, otherRawMcpClient)
-    } catch (e: UnsupportedOperationException) {
-      // Expected: the stub 3-arg override throws once actually invoked; reaching it proves the
-      // forwarding worked.
     }
 
     assertEquals(Triple(config, mcpClient, 7), factory.lastCallArgs)

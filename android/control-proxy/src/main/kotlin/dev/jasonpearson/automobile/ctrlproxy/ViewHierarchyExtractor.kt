@@ -312,31 +312,7 @@ internal constructor(
       return ViewHierarchy(error = "No windows available")
     }
 
-    // Find accessibility-focused node across all windows
-    var accessibilityFocusedNode: AccessibilityNodeInfo? = null
-    for (window in windows) {
-      val rootNode =
-        try {
-          window.root
-        } catch (error: Exception) {
-          Log.d(TAG, "Could not read window root for accessibility focus", error)
-          null
-        } ?: continue
-      try {
-        val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-        if (focusedInWindow != null) {
-          accessibilityFocusedNode = focusedInWindow
-          break
-        }
-      } finally {
-        rootNode.recycle()
-      }
-    }
-    // Fallback to activeWindowRoot if not found in windows list
-    if (accessibilityFocusedNode == null && activeWindowRoot != null) {
-      accessibilityFocusedNode =
-        activeWindowRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-    }
+    val accessibilityFocusedNode = findAccessibilityFocus(windows, activeWindowRoot)
 
     try {
       val windowEntries = mutableListOf<WindowEntry>()
@@ -384,30 +360,19 @@ internal constructor(
         try {
           rootNode = window.root
           if (rootNode == null) {
-            if (prototypeTitle) prototypeRootUnreadable = true
-            if (window.id == primaryAppWindowId) {
-              Log.w(
-                TAG,
-                "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
-              )
-              primaryAppWindowHasNullRoot = true
-            }
-            if (window.isActive) {
-              Log.w(
-                TAG,
-                "[HIERARCHY-DEBUG] Active window ${window.id} has null root node - accessibility service incomplete",
-              )
-              activeWindowHasNullRoot = true
-            } else {
-              Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
-            }
+            prototypeRootUnreadable = prototypeRootUnreadable || prototypeTitle
+            primaryAppWindowHasNullRoot =
+              primaryAppWindowHasNullRoot || window.id == primaryAppWindowId
+            activeWindowHasNullRoot = activeWindowHasNullRoot || window.isActive
+            logNullWindowRoot(window, primaryAppWindowId)
             continue
           }
           if (prototypeTitle) {
             val packageName = rootNode.packageName?.toString()
             prototypeRootRead = packageName != null
-            if (packageName == DEFAULT_CTRL_PROXY_PACKAGE) ownPrototypeWindowCaptured = true
-            if (!prototypeRootRead) prototypeRootUnreadable = true
+            ownPrototypeWindowCaptured =
+              ownPrototypeWindowCaptured || packageName == DEFAULT_CTRL_PROXY_PACKAGE
+            prototypeRootUnreadable = prototypeRootUnreadable || !prototypeRootRead
           }
           val windowLayer = window.layer
           if (window.isActive) {
@@ -458,16 +423,7 @@ internal constructor(
           if (element != null) {
             contentHiddenRegionRoots.add(element)
           }
-          // Skip optimization if disableAllFiltering is true
-          val processedElement =
-            if (disableAllFiltering) {
-              element
-            } else {
-              element?.let {
-                val optimizedList = optimizeHierarchy(it)
-                wrapOptimizedElements(optimizedList)
-              }
-            }
+          val processedElement = processWindowElement(element, disableAllFiltering)
           val packageName = rootNode.packageName?.toString()
           if (!intentChooserDetected && processedElement != null) {
             intentChooserDetected = detectIntentChooserIndicators(processedElement)
@@ -558,11 +514,11 @@ internal constructor(
           }
         mainPackageName = activeWindowRoot.packageName?.toString()
         if (!intentChooserDetected && mainHierarchy != null) {
-          intentChooserDetected = detectIntentChooserIndicators(mainHierarchy!!)
+          intentChooserDetected = detectIntentChooserIndicators(mainHierarchy)
         }
         if (notificationPermissionDetected != true && mainHierarchy != null) {
           notificationPermissionDetected =
-            detectNotificationPermissionDialog(mainHierarchy!!, mainPackageName)
+            detectNotificationPermissionDialog(mainHierarchy, mainPackageName)
         }
         val fallbackWindowId = activeWindowKey ?: DEFAULT_WINDOW_KEY
         if (mainHierarchy != null || fallbackReasons != null) {
@@ -589,7 +545,7 @@ internal constructor(
               packageName = mainPackageName,
               isActive = true,
               isFocused = true,
-              hierarchy = mainHierarchy!!,
+              hierarchy = mainHierarchy,
               windowBounds = windowInfos.firstOrNull { it.id == fallbackWindowId }?.bounds,
             )
           val existingIndex = windowEntries.indexOfFirst { it.windowId == fallbackWindowId }
@@ -734,6 +690,61 @@ internal constructor(
       accessibilityFocusedNode?.recycle()
     }
   }
+
+  private fun findAccessibilityFocus(
+    windows: List<AccessibilityWindowInfo>,
+    activeWindowRoot: AccessibilityNodeInfo?,
+  ): AccessibilityNodeInfo? {
+    var accessibilityFocusedNode: AccessibilityNodeInfo? = null
+    for (window in windows) {
+      val rootNode =
+        try {
+          window.root
+        } catch (error: Exception) {
+          Log.d(TAG, "Could not read window root for accessibility focus", error)
+          null
+        } ?: continue
+      try {
+        val focusedInWindow = rootNode.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        if (focusedInWindow != null) {
+          accessibilityFocusedNode = focusedInWindow
+          break
+        }
+      } finally {
+        rootNode.recycle()
+      }
+    }
+    // Fallback to activeWindowRoot if not found in windows list
+    if (accessibilityFocusedNode == null && activeWindowRoot != null) {
+      accessibilityFocusedNode =
+        activeWindowRoot.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+    }
+    return accessibilityFocusedNode
+  }
+
+  private fun logNullWindowRoot(window: AccessibilityWindowInfo, primaryAppWindowId: Int?) {
+    if (window.id == primaryAppWindowId) {
+      Log.w(
+        TAG,
+        "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
+      )
+    }
+    if (window.isActive) {
+      Log.w(
+        TAG,
+        "[HIERARCHY-DEBUG] Active window ${window.id} has null root node - accessibility service incomplete",
+      )
+    } else {
+      Log.d(TAG, "[HIERARCHY-DEBUG] Window ${window.id} has null root node, skipping")
+    }
+  }
+
+  private fun processWindowElement(
+    element: UIElementInfo?,
+    disableAllFiltering: Boolean,
+  ): UIElementInfo? =
+    if (disableAllFiltering) element
+    else element?.let { wrapOptimizedElements(optimizeHierarchy(it)) }
 
   private fun finishWindowScope(
     windowInfos: MutableList<WindowInfo>,
@@ -1099,6 +1110,24 @@ internal constructor(
     return if (hasIme || !anyWindowFocused) activeAppId ?: topAppId else null
   }
 
+  private fun extractChildNodes(
+    node: AccessibilityNodeInfo,
+    childCount: Int,
+    extract: (AccessibilityNodeInfo, Int) -> UIElementInfo?,
+  ): List<UIElementInfo> {
+    val children = mutableListOf<UIElementInfo>()
+    for (index in 0 until childCount) {
+      val child = node.getChild(index) ?: continue
+      try {
+        val childInfo = extract(child, index)
+        if (childInfo != null) children.add(childInfo)
+      } finally {
+        child.recycle()
+      }
+    }
+    return children
+  }
+
   /**
    * Recursively extracts node information with depth limiting, offscreen filtering, and zero-area
    * filtering.
@@ -1157,30 +1186,21 @@ internal constructor(
         budget.recordChildCapTruncation()
       }
 
-      for (i in 0 until childCount) {
-        val child = node.getChild(i)
-        if (child != null) {
-          try {
-            val childInfo =
-              extractNodeInfo(
-                child,
-                depth + 1,
-                textFilter,
-                screenDimensions,
-                dedupeTextContentDesc,
-                accessibilityFocusedNode,
-                parentPath = currentPath,
-                childIndex = i,
-                budget = budget,
-              )
-            if (childInfo != null) {
-              children.add(childInfo)
-            }
-          } finally {
-            child.recycle()
-          }
-        }
-      }
+      children.addAll(
+        extractChildNodes(node, childCount) { child, index ->
+          extractNodeInfo(
+            child,
+            depth + 1,
+            textFilter,
+            screenDimensions,
+            dedupeTextContentDesc,
+            accessibilityFocusedNode,
+            parentPath = currentPath,
+            childIndex = index,
+            budget = budget,
+          )
+        },
+      )
 
       if (elementBounds.hasZeroArea() && children.isEmpty()) {
         return null
@@ -2516,6 +2536,7 @@ internal constructor(
         node1.viewIdResourceName == node2.viewIdResourceName &&
         node1.text?.toString() == node2.text?.toString()
     } catch (e: Exception) {
+      Log.w(TAG, "Could not compare accessibility nodes", e)
       return false
     }
   }

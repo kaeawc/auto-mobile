@@ -37,7 +37,7 @@ async function setup() {
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(),
+    { idGenerator: new FakeIdGenerator() },
   );
   daemonClient.testHooks.attachSocket(socket);
   const fake = new FakeDaemonClient();

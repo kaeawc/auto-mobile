@@ -560,8 +560,40 @@ const defaultListInstalledAppsFactory: NonNullable<
 
 export type { AppResourceDependencies };
 
-// Dependency injection preserves this existing algorithm and its control flow.
-// oxlint-disable-next-line complexity
+function normalizeIosApps(
+  installedApps: Awaited<ReturnType<ListInstalledApps["executeIosDetailedResult"]>>["apps"],
+  isPhysicalDevice: boolean,
+) {
+  const apps: IosInstalledAppInfo[] = [];
+  const queryApps: AppsQueryAppInfo[] = [];
+  let iosTypeClassificationUnreliable = false;
+
+  for (const rawApp of installedApps) {
+    const bundleId = getIosInstalledAppBundleId(rawApp);
+    if (!bundleId) {
+      continue;
+    }
+    const version = extractIosVersion(rawApp);
+    const path = extractIosPath(rawApp);
+    if (isIosApplicationTypeUnclassified(rawApp, isPhysicalDevice)) {
+      iosTypeClassificationUnreliable = true;
+    }
+    const launchable = extractIosLaunchable(rawApp);
+    const info: IosInstalledAppInfo = {
+      bundleId,
+      type: extractIosApplicationType(rawApp, bundleId, isPhysicalDevice),
+      displayName: extractIosDisplayName(rawApp),
+      ...(version ? { version } : {}),
+      ...(path ? { path } : {}),
+      ...(launchable === undefined ? {} : { launchable }),
+    };
+    apps.push(info);
+    queryApps.push(toQueryIosApp(info));
+  }
+
+  return { apps, queryApps, iosTypeClassificationUnreliable };
+}
+
 async function fetchAppsForDevice(
   device: BootedDevice,
   timer: Timer = defaultTimer,
@@ -579,7 +611,6 @@ async function fetchAppsForDevice(
     const foregroundApp = queryApps.find((app) => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
     const launchabilityUnknown = isLaunchabilityUnknown(queryApps);
-    const unknownProfiles = launchabilityUnknownProfiles(queryApps);
 
     return {
       cacheable: result.successful,
@@ -596,44 +627,16 @@ async function fetchAppsForDevice(
         appsByPackage: buildAppsByPackage(userApps),
         queryApps,
         launchabilityUnknown,
-        launchabilityUnknownProfiles: unknownProfiles,
+        launchabilityUnknownProfiles: launchabilityUnknownProfiles(queryApps),
       },
     };
   }
 
   const result = await listInstalledApps.executeIosDetailedResult();
-  const apps: IosInstalledAppInfo[] = [];
-  const queryApps: AppsQueryAppInfo[] = [];
-  const isPhysicalDevice = isIosPhysicalUdid(device.deviceId);
-  let iosTypeClassificationUnreliable = false;
-
-  for (const app of result.apps) {
-    const bundleId = getIosInstalledAppBundleId(app);
-    if (!bundleId) {
-      continue;
-    }
-    const rawApp = app as Record<string, unknown>;
-    const displayName = extractIosDisplayName(rawApp);
-    const version = extractIosVersion(rawApp);
-    const path = extractIosPath(rawApp);
-    const type = extractIosApplicationType(rawApp, bundleId, isPhysicalDevice);
-    if (isIosApplicationTypeUnclassified(rawApp, isPhysicalDevice)) {
-      iosTypeClassificationUnreliable = true;
-    }
-    const launchable = extractIosLaunchable(rawApp);
-    const info: IosInstalledAppInfo = {
-      bundleId,
-      type,
-      displayName,
-      ...(version ? { version } : {}),
-      ...(path ? { path } : {}),
-      ...(launchable === undefined ? {} : { launchable }),
-    };
-    apps.push(info);
-    queryApps.push({
-      ...toQueryIosApp(info),
-    });
-  }
+  const { apps, queryApps, iosTypeClassificationUnreliable } = normalizeIosApps(
+    result.apps,
+    isIosPhysicalUdid(device.deviceId),
+  );
 
   return {
     cacheable: result.successful,
@@ -1239,26 +1242,10 @@ function unregisterDeviceAppResource(deviceId: string): void {
   invalidateMetadataCacheForDevice(deviceId);
 }
 
-// Dependency injection preserves this existing algorithm and its control flow.
-// oxlint-disable-next-line complexity
-export async function syncInstalledAppResourceRegistry(
-  deps: AppResourceDependencies = {},
-): Promise<boolean> {
-  const generation = ++installedAppResourceRegistryGeneration;
-  let devices: BootedDevice[] = [];
-  try {
-    devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
-  } catch (error) {
-    logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
-    // An unobservable device list says nothing about which devices disappeared: keep the registry
-    // and every device's installed-apps cache rather than treating all of them as gone.
-    return false;
-  }
-
-  if (generation !== installedAppResourceRegistryGeneration) {
-    return false;
-  }
-
+function reconcileInstalledAppResourceDevices(
+  devices: BootedDevice[],
+  deps: AppResourceDependencies,
+): string[] {
   const currentDeviceIds = new Set(devices.map((device) => device.deviceId));
   let changed = false;
 
@@ -1281,6 +1268,29 @@ export async function syncInstalledAppResourceRegistry(
   if (changed) {
     installedAppResourceRegistryRevision++;
   }
+
+  return disappearedDeviceIds;
+}
+
+export async function syncInstalledAppResourceRegistry(
+  deps: AppResourceDependencies = {},
+): Promise<boolean> {
+  const generation = ++installedAppResourceRegistryGeneration;
+  let devices: BootedDevice[] = [];
+  try {
+    devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
+  } catch (error) {
+    logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
+    // An unobservable device list says nothing about which devices disappeared: keep the registry
+    // and every device's installed-apps cache rather than treating all of them as gone.
+    return false;
+  }
+
+  if (generation !== installedAppResourceRegistryGeneration) {
+    return false;
+  }
+
+  const disappearedDeviceIds = reconcileInstalledAppResourceDevices(devices, deps);
 
   for (const deviceId of disappearedDeviceIds) {
     // All registry mutation above is synchronous, so a newer refresh cannot

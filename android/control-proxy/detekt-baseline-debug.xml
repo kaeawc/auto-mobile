@@ -114,8 +114,6 @@
     <ID>InjectDispatcher:CtrlProxy.kt:CtrlProxy$IO</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$Default</ID>
     <ID>InjectDispatcher:SavedPrototypeActivityDependencies.kt:SavedPrototypeActivityDependencies$IO</ID>
-    <ID>InjectDispatcher:ScreenshotController.kt:ScreenshotController$IO</ID>
-    <ID>InstanceOfCheckForException:DisplayIdentity.kt:PanelUniqueIdResolver$error is IllegalArgumentException</ID>
     <ID>LargeClass:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>
     <ID>LargeClass:GestureController.kt:GestureController</ID>
     <ID>LargeClass:PrototypeController.kt:PrototypeController</ID>
@@ -270,26 +268,14 @@
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun collectOcclusionNodes: Int</ID>
     <ID>LongParameterList:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
     <ID>LongParameterList:WebSocketServer.kt:WebSocketServer</ID>
-    <ID>NestedBlockDepth:ClipboardController.kt:ClipboardController$suspend fun performClipboard</ID>
-    <ID>NestedBlockDepth:NodeActionController.kt:NodeActionController$fun performAccessibilityLinkActivation</ID>
     <ID>NestedBlockDepth:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$override fun pin: PinOutcome</ID>
-    <ID>NestedBlockDepth:SettingsController.kt:SettingsController$suspend fun performSettingsList</ID>
-    <ID>NestedBlockDepth:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$@JvmOverloads fun extractFromAllWindows: ViewHierarchy</ID>
-    <ID>NestedBlockDepth:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$private fun extractNodeInfo: UIElementInfo?</ID>
     <ID>RedundantSuspendModifier:PrototypeTrace.kt:PrototypeTrace$suspend</ID>
     <ID>RedundantSuspendModifier:SavedPrototypeScreenState.kt:suspend</ID>
     <ID>RedundantSuspendModifier:WebSocketServer.kt:WebSocketServer$suspend</ID>
-    <ID>SwallowedException:ElementBounds.kt:ElementBounds.Companion$e: Exception</ID>
-    <ID>SwallowedException:PackageController.kt:PackageController$e: Exception</ID>
-    <ID>SwallowedException:PackageController.kt:PackageController$e: PackageManager.NameNotFoundException</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: Exception</ID>
     <ID>SwallowedException:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: IllegalStateException</ID>
     <ID>SwallowedException:PrototypeAssetController.kt:PrototypeAssetController$error: IllegalArgumentException</ID>
     <ID>SwallowedException:RetrofitPrototypeHttpClient.kt:RetrofitPrototypeHttpClient$error: ConnectException</ID>
-    <ID>SwallowedException:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: IllegalArgumentException</ID>
-    <ID>SwallowedException:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: SecurityException</ID>
-    <ID>SwallowedException:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$e: Exception</ID>
-    <ID>SwallowedException:WebSocketServer.kt:WebSocketServer.Companion$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AndroidPinnedShortcutPlatform.kt:AndroidPinnedShortcutPlatform$error: Exception</ID>
     <ID>TooGenericExceptionCaught:CaCertificateController.kt:CaCertificateController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:ClipboardController.kt:ClipboardController$e: Exception</ID>
@@ -398,7 +384,5 @@
     <ID>TooManyFunctions:TextInputController.kt:TextInputController</ID>
     <ID>TooManyFunctions:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>
     <ID>TooManyFunctions:WebSocketServer.kt:WebSocketServer</ID>
-    <ID>UnnecessaryNotNullOperator:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$mainHierarchy!!</ID>
-    <ID>UnsafeCallOnNullableType:TextInputController.kt:TextInputController$focusedNode!!</ID>
   </CurrentIssues>
 </SmellBaseline>

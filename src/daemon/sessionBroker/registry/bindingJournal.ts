@@ -1,47 +1,15 @@
 import type { DeviceInfo } from "../../../models/index";
-import {
-  androidBindingSpecSchema,
-  iosBindingSpecSchema,
-} from "../../../utils/provisionDeviceSpecSchemas";
-import {
-  exponentialBackoff,
-  normalizeBackoff,
-  type BackoffInput,
-  type BackoffPolicy,
-} from "../../../utils/Backoff";
+import { exponentialBackoff, normalizeBackoff, type BackoffPolicy } from "../../../utils/Backoff";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import type { Timer } from "../../../utils/SystemTimer";
-import type {
-  BindingDeletionResult,
-  BindingDeviceClaims,
-  BindingDeviceDeleter,
-  BindingInventory,
-  BindingRequestedSpec,
-  ManagedSpecMatcher,
-} from "../provisioning/reconciler";
-import { RegistryRetryPacing } from "./registryRetryPacing";
-import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
-import {
-  journalOwnersEqual,
-  sameBinding,
-  type AdvanceBindingJournalInput,
-  type BindingAssignmentRecord,
-  type BindingBindingCommit,
-  type BindingExecOwnerLiveness,
-  type BindingJournalEntry,
-  type BindingJournalOwner,
-  type BindingJournalPhase,
-  type BindingKey,
-  type BindingRegistry,
-  journalCreationPlatform,
-} from "./bindingRegistry";
-import { BindingJournalRemovalRegistryTimeout } from "./BindingJournalRemovalRegistryTimeout";
+import type { BindingDeletionResult } from "../provisioning/reconciler";
+import { BindingJournalDeviceLocator } from "./BindingJournalDeviceLocator";
 import { BindingJournalDriveCancelled } from "./BindingJournalDriveCancelled";
 import { BindingJournalInFlight } from "./BindingJournalInFlight";
-import { BindingJournalDeviceLocator } from "./BindingJournalDeviceLocator";
+import { emptyBindingCommit, recordedSpec, skippedReason, toRecord } from "./bindingJournalRecords";
 import { BindingJournalRemovalFlags } from "./BindingJournalRemovalFlags";
+import { BindingJournalRemovalRegistryTimeout } from "./BindingJournalRemovalRegistryTimeout";
 import { BindingJournalStageRunner } from "./BindingJournalStageRunner";
 import {
   BINDING_JOURNAL_MAX_ABANDONED_DELETES,
@@ -50,14 +18,51 @@ import {
   BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
   checkCancellation,
 } from "./bindingJournalSupport";
+import {
+  type BindingJournalBlockReason,
+  type BindingJournalDependencies,
+  type BindingJournalOwnerLiveness,
+  type BindingJournalPassResult,
+  type BindingJournalRedriveRecord,
+  type BindingJournalStageBudgets,
+  type BindingRedriveResult,
+  type DeletionStepOptions,
+  type DeletionStepResult,
+  type DriveOptions,
+  type Step,
+} from "./bindingJournalTypes";
+import {
+  journalCreationPlatform,
+  journalOwnersEqual,
+  sameBinding,
+  type AdvanceBindingJournalInput,
+  type BindingExecOwnerLiveness,
+  type BindingJournalEntry,
+  type BindingJournalOwner,
+  type BindingJournalPhase,
+  type BindingKey,
+} from "./bindingRegistry";
+import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
+import { RegistryRetryPacing } from "./registryRetryPacing";
+export {
+  type BindingJournalBlockReason,
+  type BindingJournalDependencies,
+  type BindingJournalOwnerLiveness,
+  type BindingJournalPassResult,
+  type BindingJournalRedriveRecord,
+  type BindingJournalStageBudgets,
+  type BindingRedriveResult,
+  type DeletionStepOptions,
+  type DeletionStepResult,
+} from "./bindingJournalTypes";
 
 export {
-  BindingJournalInFlight,
-  BindingJournalRemovalRegistryTimeout,
   BINDING_JOURNAL_MAX_ABANDONED_DELETES,
   BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS,
   BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
+  BindingJournalInFlight,
+  BindingJournalRemovalRegistryTimeout,
 };
 
 /**
@@ -96,17 +101,6 @@ export const BINDING_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS = 25;
 export const BINDING_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS = 1_000;
 export const BINDING_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
 
-export interface BindingJournalStageBudgets {
-  discoveryMs: number;
-  claimMs: number;
-  matchMs: number;
-  deleteGraceMs: number;
-}
-
-interface DriveOptions {
-  signal?: AbortSignal;
-}
-
 /** Bound on phase transitions one drive performs (each phase moves strictly forward). */
 const MAX_STEPS_PER_DRIVE = 6;
 
@@ -115,94 +109,6 @@ export const DEFAULT_BINDING_JOURNAL_BACKOFF = exponentialBackoff({
   multiplier: 2,
   maxDelayMs: 60_000,
 });
-
-export type BindingJournalOwnerLiveness = (owner: BindingJournalOwner) => boolean;
-
-export interface BindingJournalDependencies {
-  registry: BindingRegistry;
-  inventory: BindingInventory;
-  matcher: ManagedSpecMatcher;
-  deleter: BindingDeviceDeleter;
-  claims: BindingDeviceClaims;
-  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-  stageBudgets?: Partial<BindingJournalStageBudgets>;
-  /** This process's identity as a journal owner. */
-  owner: BindingJournalOwner;
-  /** Whether another owner is still driving its entries; default: its PID is running. */
-  isOwnerLive?: BindingJournalOwnerLiveness;
-  isExecOwnerLive?: BindingExecOwnerLiveness;
-  inFlight?: BindingJournalInFlight;
-  backoff?: BackoffInput;
-  isBusy?: (device: DeviceInfo) => string | undefined;
-}
-
-export type BindingJournalBlockReason =
-  | "discovery_incomplete"
-  | "device_busy"
-  | "cleanup_pending"
-  | "binding_settling"
-  | "binding_in_use"
-  | "reconcile_in_progress"
-  | "scope_not_valid";
-
-/** Summary of one redrive, for acquisition evidence and logs. */
-export interface BindingJournalRedriveRecord {
-  entryId: number;
-  kind: BindingJournalEntry["kind"];
-  phase: BindingJournalPhase;
-  outcome: "settled" | "blocked";
-  reason?: BindingJournalBlockReason;
-}
-
-export type BindingRedriveResult =
-  | { kind: "clear"; redriven: BindingJournalRedriveRecord[] }
-  | {
-      kind: "blocked";
-      reason: BindingJournalBlockReason;
-      message: string;
-      entry: BindingJournalEntry;
-      redriven: BindingJournalRedriveRecord[];
-    };
-
-export interface BindingJournalPassResult {
-  settled: BindingJournalRedriveRecord[];
-  blocked: BindingJournalRedriveRecord[];
-  /** Entries left to their live owner, in flight here, or not yet due. */
-  skipped: number;
-}
-
-export interface DeletionStepOptions {
-  /** Present when the caller already proved the device listed and unclaimed. */
-  device?: DeviceInfo;
-  deadlineMs?: number;
-  /** Cancels only the delete stage; an unverified delete is recorded for retry. */
-  signal?: AbortSignal;
-}
-
-export type DeletionStepResult =
-  | {
-      kind: "deleted";
-      entry: BindingJournalEntry;
-      assignment: BindingAssignmentRecord;
-      evidence?: unknown;
-    }
-  | {
-      kind: "blocked";
-      entry: BindingJournalEntry;
-      reason: BindingJournalBlockReason;
-      message: string;
-      evidence?: unknown;
-    };
-
-type Step =
-  | { kind: "next"; entry: BindingJournalEntry }
-  | { kind: "settled"; entry: BindingJournalEntry }
-  | {
-      kind: "blocked";
-      entry: BindingJournalEntry;
-      reason: BindingJournalBlockReason;
-      message: string;
-    };
 
 function blocked(
   entry: BindingJournalEntry,
@@ -1096,44 +1002,3 @@ export class BindingJournal {
 }
 
 /** Why an acquisition waits on an entry another live driver holds. */
-function skippedReason(entry: BindingJournalEntry): BindingJournalBlockReason {
-  if (entry.kind === "release") {
-    return "binding_settling";
-  }
-  return entry.phase === "deleting" ? "cleanup_pending" : "reconcile_in_progress";
-}
-
-function emptyBindingCommit(requestedSpec: unknown): BindingBindingCommit {
-  return {
-    stableDeviceId: null,
-    deviceName: null,
-    requestedSpec,
-    resolvedSpec: null,
-    specFingerprint: null,
-    state: "provisioning",
-  };
-}
-
-function toRecord(
-  result: Extract<Step, { kind: "settled" | "blocked" }>,
-): BindingJournalRedriveRecord {
-  return {
-    entryId: result.entry.id,
-    kind: result.entry.kind,
-    phase: result.entry.phase,
-    outcome: result.kind,
-    ...(result.kind === "blocked" ? { reason: result.reason } : {}),
-  };
-}
-
-/**
- * The entry's recorded requested spec, validated; undefined when it no longer parses. A managed
- * binding's requested spec may omit `deviceType` (owner decision Q4), so it is read with the managed
- * schema: reading it as an exact spec would turn an adoptable create into a deletion.
- */
-function recordedSpec(entry: BindingJournalEntry): BindingRequestedSpec | undefined {
-  const schema =
-    journalCreationPlatform(entry) === "android" ? androidBindingSpecSchema : iosBindingSpecSchema;
-  const parsed = schema.safeParse(entry.target.requestedSpec);
-  return parsed.success ? parsed.data : undefined;
-}

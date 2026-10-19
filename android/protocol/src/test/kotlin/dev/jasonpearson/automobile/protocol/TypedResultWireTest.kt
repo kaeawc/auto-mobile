@@ -133,11 +133,7 @@ class TypedResultWireTest {
 
   @Test
   fun `clipboard ca cert device owner ime action and select all keep the hand-built field order`() {
-    val ordered = Json {
-      classDiscriminator = "type"
-      encodeDefaults = true
-      explicitNulls = false
-    }
+    val ordered = orderedJson()
     fun text(response: WebSocketResponse) = ordered.encodeToString<WebSocketResponse>(response)
     assertEquals(
       """{"type":"clipboard_result","timestamp":1,"requestId":"r","action":"get","success":true,"totalTimeMs":2,"text":"t","perfTiming":{"a":1}}""",
@@ -199,11 +195,7 @@ class TypedResultWireTest {
 
   @Test
   fun `text, ime and event frames keep the hand-built field order`() {
-    val ordered = Json {
-      classDiscriminator = "type"
-      encodeDefaults = true
-      explicitNulls = false
-    }
+    val ordered = orderedJson()
     fun text(response: WebSocketResponse) = ordered.encodeToString<WebSocketResponse>(response)
     assertEquals(
       """{"type":"commit_text_result","timestamp":1,"requestId":"r","success":false,"totalTimeMs":2,"partialApplication":true,"committedUnits":3,"insertedText":"t","editorConsumed":true,"trace":["a"],"error":"e","perfTiming":{"a":1}}""",
@@ -245,6 +237,16 @@ class TypedResultWireTest {
       """{"type":"cancel_ime_commit_result","timestamp":1,"success":true,"targetRequestId":"t","partialApplication":false}""",
       text(CancelImeCommitResult(timestamp = 1, targetRequestId = "t", partialApplication = false)),
     )
+    assertEventFieldOrder(::text)
+  }
+
+  private fun orderedJson(): Json = Json {
+    classDiscriminator = "type"
+    encodeDefaults = true
+    explicitNulls = false
+  }
+
+  private fun assertEventFieldOrder(text: (WebSocketResponse) -> String) {
     assertEquals(
       """{"type":"screenshot_error","timestamp":1,"requestId":"r","error":"e","displayId":2,"panelUniqueId":"p"}""",
       text(

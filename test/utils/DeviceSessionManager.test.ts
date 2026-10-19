@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "events";
 import {
   DeviceSessionManager,
   createDefaultDeviceClientProvider,
@@ -10,6 +9,8 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreenCache } from "../fakes/FakeObserveScreenCache";
 import { FakeSimctl } from "../fakes/FakeSimctl";
@@ -67,16 +68,7 @@ function ipaBytes(): Buffer {
 }
 
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
-  // resetConnectionBudget() (issue #7538) and terminateStaleConnection()
-  // (issue #7554) are required DeviceService methods that most of these
-  // per-test overrides don't care about; default them to no-ops so a test
-  // exercising the enable/setup paths doesn't have to stub them just to
-  // avoid an unhandled-method crash.
-  return {
-    resetConnectionBudget: () => {},
-    terminateStaleConnection: () => {},
-    ...overrides,
-  } as unknown as AndroidCtrlProxy;
+  return Object.assign(new FakeCtrlProxy(), overrides);
 }
 
 type PushUpdateListener = (hierarchy: XCTestHierarchy) => void;
@@ -87,11 +79,7 @@ const pushedHierarchy: XCTestHierarchy = {
 };
 
 function stubIOSCtrlProxy(overrides: Partial<IosCtrlProxy>): IosCtrlProxy {
-  return {
-    resetConnectionBudget: () => {},
-    terminateStaleConnection: () => {},
-    ...overrides,
-  } as unknown as IosCtrlProxy;
+  return Object.assign(new FakeIOSCtrlProxy(), overrides);
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -837,11 +825,11 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       new FakeIOSCtrlProxy(),
       "verifyServiceReady",
     ).mockResolvedValue(true);
-    const iosClient = {
+    const iosClient = stubIOSCtrlProxy({
       isConnected: () => true,
       verifyServiceReady,
       onPushUpdate: () => () => {},
-    } as unknown as IosCtrlProxy;
+    });
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
@@ -1502,7 +1490,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("passes spawned Android emulator process into auto-start readiness wait", async () => {
-    const childProcess = new EventEmitter() as any;
+    const childProcess = new FakeChildProcess(new FakeTimer());
     const startedDevice: BootedDevice = {
       name: "mock-Pixel_9_Pro",
       deviceId: "mock-Pixel_9_Pro",
@@ -1543,7 +1531,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   test("holds the Android auto-start lease until a preempted emulator process exits", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-    const childProcess = new EventEmitter() as any;
+    const childProcess = new FakeChildProcess(new FakeTimer());
     Object.assign(childProcess, {
       exitCode: null,
       signalCode: null,
@@ -1608,13 +1596,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   describe("cancelled Android auto-start launch", () => {
     const AVD = "Pixel_9_Pro";
 
-    type FakeEmulatorChild = HostChildProcess & {
-      exitCode: number | null;
-      signalCode: NodeJS.Signals | null;
-    };
-
     function fakeEmulatorChild(pid: number | undefined) {
-      const child = new EventEmitter() as FakeEmulatorChild;
+      const child = new FakeChildProcess(new FakeTimer());
       const signals: string[] = [];
       child.pid = pid;
       child.exitCode = null;

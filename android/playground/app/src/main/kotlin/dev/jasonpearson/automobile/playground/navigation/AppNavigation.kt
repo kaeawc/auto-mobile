@@ -35,6 +35,7 @@ import dev.jasonpearson.automobile.demos.UxFlowStartScreen
 import dev.jasonpearson.automobile.demos.UxFlowSummaryScreen
 import dev.jasonpearson.automobile.demos.XmlSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.design.system.demo.DesignSystemDemoScreen
+import dev.jasonpearson.automobile.home.HomeNavigation
 import dev.jasonpearson.automobile.home.HomeScreen
 import dev.jasonpearson.automobile.login.ui.LoginScreen
 import dev.jasonpearson.automobile.mediaplayer.VideoPlayerScreen
@@ -424,55 +425,58 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             HomeScreen(
               initialSelectedTab = homeDestination.selectedTab,
               initialSelectedSubTab = homeDestination.selectedSubTab,
-              onNavigateToVideoPlayer = { videoId ->
-                Log.d(TAG, "Navigating to VideoPlayerScreen with videoId: $videoId")
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "VideoPlayerScreen",
-                  "video_selection",
-                )
-                backStack.add(VideoPlayerDestination(videoId))
-              },
-              onNavigateToDemos = {
-                Log.d(TAG, "Navigating to DemoIndexScreen")
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "DemoIndexScreen",
-                  "demo_selection",
-                )
-                backStack.add(DemoIndexDestination)
-              },
-              onNavigateToSlides = { slideIndex ->
-                Log.d(TAG, "Navigating to SlidesScreen with slideIndex: $slideIndex")
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "SlidesScreen",
-                  "slides_selection",
-                )
-                backStack.add(SlidesDestination(slideIndex))
-              },
-              onLogout = {
-                Log.d(TAG, "Logout initiated, navigating to LoginScreen")
-                if (userPreferences.isGuestMode) {
-                  userPreferences.isGuestMode = false
-                } else {
-                  userPreferences.isAuthenticated = false
-                }
-                NavigationTracker.trackNavigation("HomeScreen", "LoginScreen", "logout")
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
-              onGuestModeNavigateToLogin = {
-                Log.d(TAG, "Guest mode to login, navigating to LoginScreen")
-                userPreferences.isGuestMode = false
-                NavigationTracker.trackNavigation(
-                  "HomeScreen",
-                  "LoginScreen",
-                  "guest_to_login",
-                )
-                backStack.clear()
-                backStack.add(LoginDestination)
-              },
+              navigation =
+                HomeNavigation(
+                  onNavigateToVideoPlayer = { videoId ->
+                    Log.d(TAG, "Navigating to VideoPlayerScreen with videoId: $videoId")
+                    NavigationTracker.trackNavigation(
+                      "HomeScreen",
+                      "VideoPlayerScreen",
+                      "video_selection",
+                    )
+                    backStack.add(VideoPlayerDestination(videoId))
+                  },
+                  onNavigateToDemos = {
+                    Log.d(TAG, "Navigating to DemoIndexScreen")
+                    NavigationTracker.trackNavigation(
+                      "HomeScreen",
+                      "DemoIndexScreen",
+                      "demo_selection",
+                    )
+                    backStack.add(DemoIndexDestination)
+                  },
+                  onNavigateToSlides = { slideIndex ->
+                    Log.d(TAG, "Navigating to SlidesScreen with slideIndex: $slideIndex")
+                    NavigationTracker.trackNavigation(
+                      "HomeScreen",
+                      "SlidesScreen",
+                      "slides_selection",
+                    )
+                    backStack.add(SlidesDestination(slideIndex))
+                  },
+                  onLogout = {
+                    Log.d(TAG, "Logout initiated, navigating to LoginScreen")
+                    if (userPreferences.isGuestMode) {
+                      userPreferences.isGuestMode = false
+                    } else {
+                      userPreferences.isAuthenticated = false
+                    }
+                    NavigationTracker.trackNavigation("HomeScreen", "LoginScreen", "logout")
+                    backStack.clear()
+                    backStack.add(LoginDestination)
+                  },
+                  onGuestModeNavigateToLogin = {
+                    Log.d(TAG, "Guest mode to login, navigating to LoginScreen")
+                    userPreferences.isGuestMode = false
+                    NavigationTracker.trackNavigation(
+                      "HomeScreen",
+                      "LoginScreen",
+                      "guest_to_login",
+                    )
+                    backStack.clear()
+                    backStack.add(LoginDestination)
+                  },
+                ),
               modifier = Modifier.destinationSemanticModifier<HomeDestination>(),
             )
           }

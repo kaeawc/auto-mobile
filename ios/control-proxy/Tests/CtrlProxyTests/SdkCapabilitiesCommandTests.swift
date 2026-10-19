@@ -260,7 +260,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
 
         XCTAssertEqual(capabilityResponse?.available, false)
         XCTAssertEqual(capabilityResponse?.capabilities, [])
-        XCTAssertEqual(networkResponse?.ok, false)
+        XCTAssertEqual(networkResponse?.success, false)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 0)
     }
@@ -286,7 +286,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         XCTAssertEqual(capabilityResponse?.bundleId, "com.example.sdk")
         XCTAssertTrue(capabilityResponse?.capabilities.contains("network_error_simulation") == true)
         XCTAssertTrue(capabilityResponse?.capabilities.contains("magic_tap") == true)
-        XCTAssertEqual(networkResponse?.ok, true)
+        XCTAssertEqual(networkResponse?.success, true)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 1)
     }

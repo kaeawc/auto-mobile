@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { ActionableError } from "../../src/models/ActionableError";
 import { isAndroidEmulatorSerial } from "../../src/utils/androidSerial";
 import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -22,7 +23,9 @@ import {
  * Fake implementation of PlatformDeviceManager for testing
  * Allows configuring device states and asserting operations
  */
-export class FakeDeviceUtils implements PlatformDeviceManager {
+type FakeDeviceUtilsContract = Pick<PlatformDeviceManager, keyof PlatformDeviceManager>;
+
+export class FakeDeviceUtils implements FakeDeviceUtilsContract {
   /** Optional on the interface; unset (the default) models a manager without an ADB transport. */
   getAndroidListedDeviceStates?: PlatformDeviceManager["getAndroidListedDeviceStates"];
   private deviceImages: Map<Platform, DeviceInfo[]> = new Map();
@@ -473,17 +476,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       return this.mockChildProcesses.get(device.name) ?? null;
     }
 
-    // Return a minimal mock ChildProcess
-    return {
-      on: () => null,
-      once: () => null,
-      off: () => null,
-      kill: () => false,
-      stdout: null,
-      stderr: null,
-      stdin: null,
-      pid: 12345,
-    } as any as ChildProcess;
+    return new FakeDeviceLaunchProcess();
   }
 
   async killDevice(device: BootedDevice): Promise<void> {
@@ -532,5 +525,24 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       deviceId: device.deviceId || `mock-${device.name}`,
       source: device.source,
     };
+  }
+}
+
+type FakeDeviceLaunchProcessContract = Pick<ChildProcess, keyof ChildProcess>;
+
+/** A synthetic launch exits synchronously when cancelled; it owns no real process. */
+class FakeDeviceLaunchProcess extends EventEmitter implements FakeDeviceLaunchProcessContract {
+  pid = 12345;
+  stdin = null;
+  stdout = null;
+  stderr = null;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  unref(): void {}
+  kill(): boolean {
+    this.exitCode = 0;
+    this.emit("exit", 0, null);
+    return false;
   }
 }

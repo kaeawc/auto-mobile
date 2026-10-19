@@ -20,7 +20,7 @@ public enum FrameProtocol {
     public static let magic: UInt32 = 0x3146_4D41
     /// Offset where the checksummed field bytes begin.
     static let fieldsOffset = 8
-    public static let audioSampleRate: UInt32 = 8_000
+    public static let audioSampleRate: UInt32 = 8000
     public static let audioChannelCount: UInt32 = 1
 
     /// Encoded-video discriminator (issue #4787). The header carries no type
@@ -79,7 +79,7 @@ public enum FrameProtocol {
             // `data` was allocated with `Data(count: headerSize)` (headerSize > 0), so
             // the buffer is non-empty and baseAddress is non-nil. All offsets are
             // multiples of 4, so the aligned stores are valid.
-            let base = ptr.baseAddress!  // swiftlint:disable:this force_unwrapping
+            guard let base = ptr.baseAddress else { preconditionFailure("Non-empty header buffer has no base address") }
             base.storeBytes(of: magic.littleEndian, as: UInt32.self)
             base.advanced(by: 8).storeBytes(of: header.width.littleEndian, as: UInt32.self)
             base.advanced(by: 12).storeBytes(of: header.height.littleEndian, as: UInt32.self)
@@ -88,9 +88,9 @@ public enum FrameProtocol {
         }
         // CRC over a no-copy slice of the header's field bytes rather than a fresh
         // `subdata` allocation — this runs once per emitted record (every frame).
-        let checksum = crc32(data[fieldsOffset..<headerSize])
+        let checksum = crc32(data[fieldsOffset ..< headerSize])
         data.withUnsafeMutableBytes { ptr in
-            let base = ptr.baseAddress!  // swiftlint:disable:this force_unwrapping
+            guard let base = ptr.baseAddress else { preconditionFailure("Non-empty header buffer has no base address") }
             base.advanced(by: 4).storeBytes(of: checksum.littleEndian, as: UInt32.self)
         }
         return data
@@ -112,7 +112,9 @@ public enum FrameProtocol {
         payloadLength: Int,
         isKeyframe: Bool,
         presentationTimestampMs: UInt32
-    ) -> Data {
+    )
+        -> Data
+    {
         let keyframeBit = isKeyframe ? encodedVideoKeyframeBit : 0
         return encodeHeader(Header(
             width: 0,
@@ -149,7 +151,7 @@ public enum FrameProtocol {
             // Guarded above by `data.count >= headerSize` (headerSize > 0), so the
             // buffer is non-empty and baseAddress is non-nil. `loadUnaligned` has no
             // alignment requirement, so a header at an odd address is safe (#3627).
-            let base = ptr.baseAddress!  // swiftlint:disable:this force_unwrapping
+            guard let base = ptr.baseAddress else { return nil }
             let marker = UInt32(littleEndian: base.loadUnaligned(as: UInt32.self))
             guard marker == magic else { return nil }
             let stored = UInt32(littleEndian: base.advanced(by: 4).loadUnaligned(as: UInt32.self))
@@ -164,15 +166,13 @@ public enum FrameProtocol {
         }
     }
 
-    private static let crc32Table: [UInt32] = {
-        (0..<256).map { index -> UInt32 in
-            var remainder = UInt32(index)
-            for _ in 0..<8 {
-                remainder = (remainder & 1) != 0 ? 0xEDB8_8320 ^ (remainder >> 1) : remainder >> 1
-            }
-            return remainder
+    private static let crc32Table: [UInt32] = (0 ..< 256).map { index -> UInt32 in
+        var remainder = UInt32(index)
+        for _ in 0 ..< 8 {
+            remainder = (remainder & 1) != 0 ? 0xEDB8_8320 ^ (remainder >> 1) : remainder >> 1
         }
-    }()
+        return remainder
+    }
 
     /// CRC-32 (IEEE 802.3, reflected, polynomial 0xEDB88320) — the standard CRC
     /// used by zip/gzip/PNG. Implemented here because Foundation ships no CRC-32

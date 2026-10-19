@@ -18,6 +18,16 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     this.acceptingRequests = true;
   }
 
+  /** Whether a forward is queued under this execution key. */
+  hasForwardTail(key: string): boolean {
+    return this.mcpForwardTails.has(key);
+  }
+
+  /** Wait for every in-flight request handler, however each one ends. */
+  async settleActiveRequestHandlers(): Promise<void> {
+    await Promise.allSettled([...this.activeRequestHandlers]);
+  }
+
   connect(socket: Socket): void {
     this.handleConnection(socket);
   }

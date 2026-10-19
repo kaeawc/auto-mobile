@@ -167,12 +167,20 @@ import {
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_HELD_BY_RECOVERY_CODE,
-  SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
 } from "../models/deviceAcquisitionRefusals";
 import { SessionNoLongerOwnsDeviceError } from "../models/sessionNoLongerOwnsDevice";
-import { DAEMON_SESSION_NOT_ACTIVE_CODE, DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import { DAEMON_SESSION_NOT_ACTIVE_CODE } from "./types";
+import {
+  DaemonSessionCreationRejectedError,
+  SessionHeldByRecoveryError,
+  SessionRebindingError,
+  SessionSuspectError,
+  SessionTerminalReleaseInProgressError,
+  TERMINAL_RELEASE_IN_PROGRESS_DETAIL,
+  TerminalSessionError,
+} from "./sessionErrors";
 import {
   isExpiryReleaseReason,
   isIdleReleaseReason,
@@ -188,7 +196,6 @@ import {
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { type TerminalReleaseIntent, type TerminalReleaseJournal } from "./terminalReleaseJournal";
 import { NoopTerminalReleaseJournal } from "./NoopTerminalReleaseJournal";
 import { ENV } from "../config/env";
@@ -635,126 +642,20 @@ export interface SessionReleaseSnapshot {
   };
 }
 
-/**
- * A session under a kill's terminal release reservation cannot be bound, rebound or reserved again
- * (#11146). It has its own wire code, serialized with `retryable: false` (#11189): the session UUID
- * ends with that release, so only a new UUID (or nothing, for a second kill) can follow. It carries
- * `nextAction: "acquire_new_session"` so runners retry under a fresh session (#11231).
- */
-export class SessionTerminalReleaseInProgressError extends ActionableError {
-  readonly code = SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE;
-  readonly retryable = false;
-  /** The UUID can never recover; a fresh session can (#11098, #11231). */
-  readonly nextAction = ACQUIRE_NEW_SESSION_NEXT_ACTION;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly deviceId: string,
-    detail: string,
-  ) {
-    super(
-      `Session ${sessionUuid} ${detail} (code ${SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE}, device '${deviceId}').`,
-    );
-    this.name = "SessionTerminalReleaseInProgressError";
-  }
-}
-
 export {
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_HELD_BY_RECOVERY_CODE,
 };
 export { SessionNoLongerOwnsDeviceError };
-
-/**
- * A terminal-release reservation (killDevice) raced the session's own rebind to another device
- * (#11166). The rebind settles on its own, so retrying the shutdown afterwards is safe; it is
- * serialized `retryable: true` with a `retryAfterMs` hint (#11189).
- */
-export class SessionRebindingError extends ActionableError {
-  readonly code = SESSION_REBINDING_CODE;
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Session ${sessionUuid} is rebinding devices (code ${SESSION_REBINDING_CODE}); ` +
-        "retry shutdown after it settles.",
-    );
-    this.name = "SessionRebindingError";
-  }
-}
-
-/** A late control call waits for session-preserving recovery before judging idle expiry. */
-export class SessionHeldByRecoveryError extends ActionableError {
-  readonly code = SESSION_HELD_BY_RECOVERY_CODE;
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly deviceId: string,
-  ) {
-    super(
-      `Session ${sessionUuid} is past its idle deadline and its device ${deviceId} is being recovered ` +
-        `(code ${SESSION_HELD_BY_RECOVERY_CODE}); retry after the recovery settles to receive ` +
-        "either the live session or the terminal idle answer.",
-    );
-    this.name = "SessionHeldByRecoveryError";
-  }
-}
-
-const TERMINAL_RELEASE_IN_PROGRESS_DETAIL =
-  "is being terminally released from its device; use a new session UUID";
-
-export class TerminalSessionError extends Error {
-  constructor(
-    readonly sessionUuid: string,
-    readonly release: SessionReleaseSnapshot,
-  ) {
-    super(
-      (release.releaseReason === "explicit-release"
-        ? `Session ${sessionUuid} was released and cannot be reused. `
-        : `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. `) +
-        "Acquire a new device with getAndroid or getApple.",
-    );
-    this.name = "TerminalSessionError";
-  }
-}
-
-/**
- * A tool call reached a session whose owner's lease expired and that is held
- * inside its suspect window (#10051). Nothing runs against it until its owner
- * restores it with a heartbeat from the owner token.
- */
-export class SessionSuspectError extends ActionableError {
-  /** Travels on the socket response so a proxy can tell "restorable" from "gone" (#10053). */
-  readonly code = DAEMON_SESSION_SUSPECT_CODE;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly remainingMs: number,
-  ) {
-    super(
-      `Session ${sessionUuid} missed a liveness heartbeat and is being restored; its device ` +
-        `stays reserved for ${Math.ceil(remainingMs / 1000)}s. Retry this call now, without ` +
-        `waiting. If the retry says the session was released, acquire a device again with ` +
-        `getAndroid or getApple.`,
-    );
-    this.name = "SessionSuspectError";
-  }
-}
-
-/** A new session cannot be published after the daemon has begun shutdown. */
-export class DaemonSessionCreationRejectedError extends ActionableError {
-  constructor(
-    readonly sessionUuid: string,
-    readonly release?: SessionReleaseSnapshot,
-  ) {
-    super(`Cannot create device session ${sessionUuid}: the daemon is shutting down.`);
-    this.name = "DaemonSessionCreationRejectedError";
-  }
-}
+export {
+  DaemonSessionCreationRejectedError,
+  SessionHeldByRecoveryError,
+  SessionRebindingError,
+  SessionSuspectError,
+  SessionTerminalReleaseInProgressError,
+  TerminalSessionError,
+} from "./sessionErrors";
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
@@ -10234,6 +10135,11 @@ export class SessionManager {
   /**
    * Stop cleanup timer (called on daemon shutdown)
    */
+  /** @internal Typed view of private state for unit tests; not part of the public API. */
+  get testHooks() {
+    return { sessions: this.sessions } as const;
+  }
+
   stopCleanupTimer(): void {
     if (this.cleanupTimer) {
       this.timer.clearInterval(this.cleanupTimer);

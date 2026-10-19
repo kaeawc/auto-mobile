@@ -17,7 +17,10 @@ import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseI
 import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
 import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
-import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  type DeviceSessionPersistence,
+} from "../db/deviceSessionRepository";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
@@ -37,10 +40,14 @@ export type ManagedAdbServerShutdown = () => Promise<void>;
  * Injectable collaborators of `Daemon`. Every field is optional and defaults to the
  * production implementation; tests pass fakes by name instead of by position.
  */
+/** The session store the daemon drives: persistence plus its startup expiry and autolock stamps. */
+export type DaemonDeviceSessionStore = DeviceSessionPersistence &
+  Pick<DeviceSessionRepository, "markAutolockSession" | "markStaleActiveSessionsExpired">;
+
 export interface DaemonDependencies {
   installedAppsRepository?: InstalledAppsStore;
   timer?: Timer;
-  deviceSessionRepository?: DeviceSessionRepository;
+  deviceSessionRepository?: DaemonDeviceSessionStore;
   idGenerator?: IdGenerator;
   databaseInitializer?: DatabaseInitializer;
   startupFailureTracker?: StartupFailureTracker;

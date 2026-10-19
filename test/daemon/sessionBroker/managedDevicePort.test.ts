@@ -56,7 +56,7 @@ const IOS = {
     runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
     osVersion: "27",
     compatibility: "supported",
-  },
+  } as const,
   provenance: {
     catalogSource: "fake-simctl",
     catalogRevision: "ios-1",

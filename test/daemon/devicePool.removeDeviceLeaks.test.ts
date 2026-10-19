@@ -1,3 +1,4 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { makePool } from "../helpers/makePool";
 import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
 import type { VirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
@@ -103,10 +104,10 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
 
   arranged("drops released-device captures for a removed device", async () => {
     const device = pool.getDevice("emulator-5554")!;
-    device.sessionId = "s1";
+    patchDeviceBinding(device, { sessionId: "s1" });
     pool.testHooks.captureReleasedDevice("s1", "emulator-5554");
     expect(pool.testHooks.releasedDeviceCaptures.has("s1")).toBe(true);
-    device.sessionId = null;
+    patchDeviceBinding(device, { sessionId: null });
 
     await pool.removeDevice("emulator-5554");
 

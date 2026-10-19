@@ -1,9 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { timedHold } from "../../../helpers/timedReleaseHold";
 import { SessionManager, TerminalSessionError } from "../../../../src/daemon/sessionManager";
-import {
-  handleDaemonRequest,
-  type DaemonStateAccess,
-} from "../../../../src/daemon/daemonRequestHandlers";
+import { deliverDaemonHeartbeat } from "../../../helpers/daemonHeartbeatHandler";
 import {
   ManagedExecutionReowner,
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
@@ -339,9 +337,9 @@ describe("managed ownership release", () => {
     await h.reowner.reown([SESSION], { rehydrated: true });
     h.behavior.busy = false;
     const startedMs = h.timer.now();
-    const hold = h.reowner.releaseDeviceHold(SESSION);
+    const hold = timedHold(h.reowner.releaseDeviceHold(SESSION));
     const release = h.manager.releaseSession(SESSION);
-    expect(await hold?.settled).toBe("teardown");
+    expect(await hold.settled).toBe("teardown");
     expect(h.confirmed).toEqual([SESSION]); // The re-owner, rather than the drain, supplies proof.
     await release;
     await h.reowner.whenIdle();
@@ -359,7 +357,7 @@ describe("managed ownership release", () => {
     h.behavior.busy = true;
     h.behavior.busyMark = true;
     await h.reowner.reown([SESSION], { rehydrated: true });
-    const hold = h.reowner.releaseDeviceHold(SESSION);
+    const hold = timedHold(h.reowner.releaseDeviceHold(SESSION));
     const release = h.manager.releaseSession(SESSION);
     await drainMicrotasks(100); // The expedited attempt fails; the next attempt uses regular cadence.
     h.timer.advanceTime(REGISTRY_RETRY_MAX_DELAY_MS - 1);
@@ -369,7 +367,7 @@ describe("managed ownership release", () => {
     expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
     h.behavior.busy = false;
     h.timer.advanceTime(1);
-    expect(await hold?.settled).toBe("teardown");
+    expect(await hold.settled).toBe("teardown");
     expect(h.confirmed).toEqual([SESSION]);
     await release;
     expect(h.writes).toEqual(["restore"]);
@@ -401,7 +399,7 @@ describe("managed ownership release", () => {
       h.behavior.busy = true;
       h.behavior.busyMark = true;
       await h.reowner.reown([SESSION], { rehydrated: true });
-      const hold = h.reowner.releaseDeviceHold(SESSION);
+      const hold = timedHold(h.reowner.releaseDeviceHold(SESSION));
       release = h.manager.releaseSession(SESSION);
       await drainMicrotasks(100); // The hold's single expedited attempt fails while busy.
       await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1, () =>
@@ -417,7 +415,7 @@ describe("managed ownership release", () => {
         ),
       ).toHaveLength(0);
       h.timer.advanceTime(1);
-      expect(await hold?.settled).toBe("skip-device-writes");
+      expect(await hold.settled).toBe("skip-device-writes");
       await drainMicrotasks(100);
       expect(h.manager.getReleasingSession(SESSION)).not.toBeNull();
       expect(h.reowner.isReleaseHeld(SESSION)).toBe(false);
@@ -608,17 +606,7 @@ describe("managed ownership release", () => {
         await h.reowner.reown([SESSION], { rehydrated: true });
         const session = h.manager.getSession(SESSION)!;
         h.manager.setRotation(session, { accelerometerRotation: 1, userRotation: 0 });
-        expect(
-          await handleDaemonRequest(
-            {
-              id: "owner-heartbeat",
-              type: "daemon_request",
-              method: "daemon/heartbeat",
-              params: { sessionId: SESSION },
-            },
-            { isInitialized: () => true, getSessionManager: () => h.manager } as DaemonStateAccess,
-          ),
-        ).toMatchObject({ success: true });
+        await deliverDaemonHeartbeat(h.manager, SESSION);
         h.timer.setCurrentTime(h.timer.now() + session.heartbeatTimeoutMs + SUSPECT_GRACE_MS + 1);
         expect(h.manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
         if (trigger === "retry-tick") {

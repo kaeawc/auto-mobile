@@ -1,3 +1,4 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import type { DeviceInfo } from "../../src/models";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
@@ -41,7 +42,7 @@ test.each([
   const h = await harness();
   const device = h.pool.getDevice(h.device.deviceId)!;
   if (kind === "busy" || kind === "error") {
-    device.status = kind;
+    patchDeviceBinding(device, kind === "error" ? { health: "error" } : { status: "busy" });
   } else if (kind === "identityReconcileOwner") {
     device.identityReconcileOwner = Symbol("reconcile");
   } else if (kind === "identityUnresolved") {
@@ -273,8 +274,8 @@ test("observation declines bound/busy/error rows before collecting recovery fact
     const writable: { sessionId: string | null } = device;
     writable.sessionId = "owner";
     expect(h.safe()).toBe(false);
-    device.sessionId = null;
-    device.status = "busy";
+    patchDeviceBinding(device, { sessionId: null });
+    patchDeviceBinding(device, { status: "busy" });
     expect(h.safe()).toBe(false);
     markDeviceError(device);
     expect(h.safe()).toBe(false);

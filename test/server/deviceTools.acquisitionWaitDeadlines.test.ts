@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
@@ -61,6 +62,7 @@ function observe(promise: Promise<unknown>) {
 }
 
 describe("device acquisition wait deadlines", () => {
+  useFakeCtrlProxyManagerHost();
   let timer: FakeTimer;
   let deviceUtils: FakeDeviceUtils;
   let sessionManager: SessionManager;

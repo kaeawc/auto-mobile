@@ -30,8 +30,8 @@ const interactionDeps: InteractionToolDependencies = {};
 // Every system rotation setting reads "1"; the device has no secure device_state_rotation_lock.
 const systemSettingsOne = async (namespace: SettingsNamespace) =>
   namespace === "secure"
-    ? { success: true, found: false }
-    : { success: true, found: true, value: "1" };
+    ? { success: true, found: false, totalTimeMs: 0 }
+    : { success: true, found: true, value: "1", totalTimeMs: 0 };
 
 const printStates = readFileSync(
   new URL("../fixtures/android-display/foldpf-print-states.txt", import.meta.url),
@@ -99,11 +99,11 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsGet",
-      ).mockResolvedValue({ success: true, found: true, value: "0" });
+      ).mockResolvedValue({ success: true, found: true, value: "0", totalTimeMs: 0 });
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
-      ).mockResolvedValue({ success: true });
+      ).mockResolvedValue({ success: true, totalTimeMs: 0 });
       const controller = new AbortController();
       controller.abort();
       try {
@@ -189,7 +189,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const settingsPut = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
-    ).mockResolvedValue({ success: false });
+    ).mockResolvedValue({ success: false, totalTimeMs: 0 });
     const rotate = new Rotate(device, adb, timer);
     rotate.awaitIdle = new AwaitIdle(device, { create: () => adb }, timer);
     interactionDeps.rotateFactory = () => rotate;
@@ -278,7 +278,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const settingsPut = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
-    ).mockResolvedValue({ success: false });
+    ).mockResolvedValue({ success: false, totalTimeMs: 0 });
     interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
     const observed = bypassObservation();
     try {
@@ -310,12 +310,12 @@ describe("registered interaction handlers honor cancellation", () => {
       "requestSettingsGet",
     ).mockImplementation(async () => {
       controller.abort();
-      return { success: true, found: true, value: "1" };
+      return { success: true, found: true, value: "1", totalTimeMs: 0 };
     });
     const settingsPut = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
-    ).mockResolvedValue({ success: false });
+    ).mockResolvedValue({ success: false, totalTimeMs: 0 });
     interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
     const observed = bypassObservation();
     try {
@@ -349,11 +349,11 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsGet",
-      ).mockResolvedValue({ success: true, found: true, value: state });
+      ).mockResolvedValue({ success: true, found: true, value: state, totalTimeMs: 0 });
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
-      ).mockResolvedValue({ success: false });
+      ).mockResolvedValue({ success: false, totalTimeMs: 0 });
       interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
       const observed = bypassObservation();
       try {
@@ -416,7 +416,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
-      ).mockResolvedValue({ success: false });
+      ).mockResolvedValue({ success: false, totalTimeMs: 0 });
       const rotate = new Rotate(device, adb, timer);
       rotate.awaitIdle = new FakeAwaitIdle();
       interactionDeps.rotateFactory = () => rotate;
@@ -464,7 +464,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const timer = new FakeTimer();
       const cleanup = cleanupDeadline(timer);
       const controller = new AbortController();
-      const disable = Promise.withResolvers<{ success: boolean }>();
+      const disable = Promise.withResolvers<{ success: boolean; totalTimeMs: number }>();
       const restored = Promise.withResolvers<void>();
       const restoreStarted = Promise.withResolvers<void>();
       const cleared = spyOn(timer, "clearTimeout").mockImplementation((handle) => {
@@ -486,7 +486,7 @@ describe("registered interaction handlers honor cancellation", () => {
           return disable.promise;
         }
         restoreStarted.resolve();
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       });
       interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
       const observed = bypassObservation();
@@ -516,7 +516,7 @@ describe("registered interaction handlers honor cancellation", () => {
           await expect(pending).rejects.toThrow("accelerometer_rotation may be left changed");
           expect(settingsPut.mock.calls.map((call) => call[2])).toEqual(["0"]);
         }
-        disable.resolve({ success: true });
+        disable.resolve({ success: true, totalTimeMs: 0 });
         await restoreStarted.promise;
         await restored.promise;
         if (mode === "settled") {
@@ -566,7 +566,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
-      ).mockResolvedValue({ success: false });
+      ).mockResolvedValue({ success: false, totalTimeMs: 0 });
       interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
       const observed = bypassObservation();
       try {
@@ -613,7 +613,7 @@ describe("registered interaction handlers honor cancellation", () => {
       if (key === "accelerometer_rotation" && value === "1") {
         controller.abort();
       }
-      return { success: false };
+      return { success: false, totalTimeMs: 0 };
     });
     const rotate = new Rotate(device, adb, timer);
     rotate.awaitIdle = new FakeAwaitIdle();

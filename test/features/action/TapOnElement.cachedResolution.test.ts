@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createExecResult } from "../../../src/utils/execResult";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import {
@@ -529,7 +530,7 @@ function cachedTapAny(current: ObserveResult, cached = page([row("Old", 1700)], 
     elementSelector: new ResolverElementSelector(),
     accessibilityService: unreachableCtrlProxy,
   });
-  tap.observedInteraction = (callback) => callback({ ...cached });
+  tap.observedInteraction = runBlockWith(() => ({ ...cached }));
   const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
   tap.testHooks.setRefreshViewHierarchy(
     async (_defaultRefresh, timeoutMs) =>
@@ -563,7 +564,7 @@ describe("tapAny TalkBack off cached safety", () => {
 
   test("missing cached target polls once with no additional read", async () => {
     const h = cachedTapAny(page([row("Current", 300)], "Current"));
-    h.tap.observedInteraction = (callback) => callback(page([], "Old"));
+    h.tap.observedInteraction = runBlockWith(() => page([], "Old"));
     const result = await h.tap.execute({ action: "longPress", selectionStrategy: "first" });
     expect(result.success).toBe(true);
     expect(h.captures.requests).toHaveLength(1);
@@ -591,7 +592,7 @@ describe("tapAny TalkBack fresh selection", () => {
         talkBackDriverFactory: { createDriver: () => driver },
         elementSelector: new ResolverElementSelector(),
       });
-      tap.observedInteraction = (callback) => callback({ ...cached });
+      tap.observedInteraction = runBlockWith(() => ({ ...cached }));
       let reads = 0;
       tap.testHooks.setRefreshViewHierarchy(async () =>
         ++reads === 1 ? fresh.viewHierarchy! : null,
@@ -623,7 +624,7 @@ describe("tapAny TalkBack fresh selection", () => {
       talkBackDriverFactory: { createDriver: () => driver },
       elementSelector: new ResolverElementSelector(),
     });
-    tap.observedInteraction = (callback) => callback({ ...cached });
+    tap.observedInteraction = runBlockWith(() => ({ ...cached }));
     tap.testHooks.setRefreshViewHierarchy(async () => null);
     const result = await tap.execute({ action: "longPress" });
     expect(result.success).toBe(false);
@@ -708,7 +709,7 @@ describe("tapAny TalkBack retry freshness", () => {
       talkBackDriverFactory: { createDriver: () => driver },
       elementSelector: new ResolverElementSelector(),
     });
-    tap.observedInteraction = (callback) => callback({ ...before });
+    tap.observedInteraction = runBlockWith(() => ({ ...before }));
     let reads = 0;
     tap.testHooks.setRefreshViewHierarchy(async () =>
       ++reads <= 2 ? before.viewHierarchy! : after.viewHierarchy!,

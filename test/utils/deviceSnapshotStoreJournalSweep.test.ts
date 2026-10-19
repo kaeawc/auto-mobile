@@ -1,7 +1,7 @@
 import { loggerCallsWithPrefix } from "../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { useScratchRoot } from "../helpers/scratchRoot";
-import { promises as fs, type Dirent } from "fs";
+import { promises as fs, type Dirent, type PathLike } from "fs";
 import * as path from "path";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
@@ -10,6 +10,11 @@ import {
   noOpSnapshotDirectorySync,
   noOpSnapshotFileSync,
 } from "../helpers/deviceSnapshotStoreSync";
+
+// Exercise only the directory-entry overload used by snapshot enumeration.
+const directoryFs: {
+  readdir(directory: PathLike, options: { withFileTypes: true }): Promise<Dirent[]>;
+} = fs;
 
 const LIMITS = { maxEntries: 50, maxScopeDirectories: 64 };
 
@@ -63,11 +68,11 @@ describe("snapshot journal enumeration and discard", () => {
       ...["aside", "journal", "temp"].map((snapshotName) => ({ snapshotName, options: undefined })),
       ...["aside", "journal", "temp"].map((snapshotName) => ({
         snapshotName,
-        options: { platform: "android", avdName: "Pixel" },
+        options: { platform: "android" as const, avdName: "Pixel" },
       })),
       ...["aside", "journal", "temp"].map((snapshotName) => ({
         snapshotName,
-        options: { platform: "ios", deviceId: "UDID" },
+        options: { platform: "ios" as const, deviceId: "UDID" },
       })),
     ]);
     expect(truncated).toBe(false);
@@ -81,16 +86,16 @@ describe("snapshot journal enumeration and discard", () => {
     await artifact("ordinary/nested.replacing");
     await artifact("android/Pixel/ordinary/nested.journal.replacing");
     await artifact("ios/UDID/ordinary/nested.replacing");
-    const readdir = fs.readdir.bind(fs);
+    const readdir = directoryFs.readdir.bind(directoryFs);
     // Backslashes are path separators on Windows, so inject these names instead of creating them.
-    const read = spyOn(fs, "readdir").mockImplementation(async (directory, options) => {
+    const read = spyOn(directoryFs, "readdir").mockImplementation(async (directory, options) => {
       if (options && typeof options === "object" && options.withFileTypes === true) {
         const entries = await readdir(directory, options);
         if (directory === root) {
           return [...entries, syntheticDirent(root, "bad\\name.replacing")];
         }
         if (directory === path.join(root, "android")) {
-          return [...entries, syntheticDirent(directory, "bad\\scope", true)];
+          return [...entries, syntheticDirent(String(directory), "bad\\scope", true)];
         }
         return entries;
       }

@@ -37,42 +37,8 @@ async function flush(): Promise<void> {
     await Promise.resolve();
   }
 }
-function fakeFixture() {
-  const timer = timerFixture();
-  const fake = new FakeIosTunnelClient();
-  // The manager asks `idevice_id` whether the device is attached before it tunnels.
-  const manager = IOSCtrlProxyManager.createForTesting(
-    device,
-    timer,
-    undefined,
-    fake,
-    new FakeProcessExecutor(),
-  );
-  manager.testHooks.setState({ servicePort: 8765 });
-  return { timer, fake, manager };
-}
-function realFixture(remoteMode = false) {
-  const timer = timerFixture();
-  const events: string[] = [];
-  const children: FakeChildProcess[] = [];
-  const executor = new (class extends FakeProcessExecutor {
-    override spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess {
-      events.push(`spawn:${command}:${args.join(",")}`);
-      const child = new FakeChildProcess(timer);
-      child.simulateSpawn = () => {};
-      child.kill = (signal) => {
-        events.push(`kill:${signal ?? "SIGTERM"}`);
-        child.killed = true;
-        child.exitCode = 0;
-        child.emit("exit", 0, null);
-        return true;
-      };
-      children.push(child);
-      this.setNextSpawnProcess(child);
-      return super.spawn(command, args, options);
-    }
-  })();
-  const remote: RemoteRunner = {
+function remoteFixture(events: string[], remoteMode: boolean): RemoteRunner {
+  return {
     isEnabled: () => remoteMode,
     isRunningInDocker: () => remoteMode,
     isAvailable: async () => true,
@@ -99,8 +65,47 @@ function realFixture(remoteMode = false) {
       return { success: true, data: { running: true } };
     },
   };
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+}
+
+function fakeFixture(remoteMode = false) {
+  const timer = timerFixture();
+  const fake = new FakeIosTunnelClient();
+  // The manager asks `idevice_id` whether the device is attached before it tunnels.
+  const remote = remoteFixture([], remoteMode);
+  const manager = IOSCtrlProxyManager.createForTestingWithOptions({
     device,
+    timer,
+    tunnelClient: fake,
+    processExecutor: new FakeProcessExecutor(),
+    remoteRunner: remote,
+  });
+  manager.testHooks.setState({ servicePort: 8765 });
+  return { timer, fake, manager, remote };
+}
+function realFixture(remoteMode = false, targetDevice = device) {
+  const timer = timerFixture();
+  const events: string[] = [];
+  const children: FakeChildProcess[] = [];
+  const executor = new (class extends FakeProcessExecutor {
+    override spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess {
+      events.push(`spawn:${command}:${args.join(",")}`);
+      const child = new FakeChildProcess(timer);
+      child.simulateSpawn = () => {};
+      child.kill = (signal) => {
+        events.push(`kill:${signal ?? "SIGTERM"}`);
+        child.killed = true;
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+        return true;
+      };
+      children.push(child);
+      this.setNextSpawnProcess(child);
+      return super.spawn(command, args, options);
+    }
+  })();
+  const remote = remoteFixture(events, remoteMode);
+  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+    targetDevice,
     timer,
     undefined,
     executor,
@@ -165,8 +170,7 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
     expect(fake.stops).toEqual([{ clearDevicePort: true }]);
   });
   test("remote start and restart preserve the computed device port when explicitly undefined", async () => {
-    const { manager, fake } = fakeFixture();
-    keep(spyOn(manager, "useRemoteRunner").mockReturnValue(true));
+    const { manager, fake } = fakeFixture(true);
     fake.devicePort = 9100;
     await manager.startIproxyTunnel({ devicePort: undefined });
     manager.testHooks.setState({ servicePort: 8766 });
@@ -184,11 +188,12 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
     ]);
   });
   test("local undefined uses the service port and remote defined overrides the retained port", async () => {
-    const { manager, fake } = fakeFixture();
+    const { manager, fake, remote } = fakeFixture();
     fake.devicePort = 9100;
     await manager.startIproxyTunnel({ devicePort: undefined });
     expect(fake.starts[0].devicePort).toBe(8765);
-    keep(spyOn(manager, "useRemoteRunner").mockReturnValue(true));
+    keep(spyOn(remote, "isEnabled").mockReturnValue(true));
+    keep(spyOn(remote, "isRunningInDocker").mockReturnValue(true));
     await manager.startIproxyTunnel({ devicePort: 9200 });
     expect(fake.starts[1].devicePort).toBe(9200);
   });
@@ -416,7 +421,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
           : ["unsupervise", `spawn:iproxy:8765,8765,${device.deviceId}`, "readiness-failed"],
       );
       expect(client.localPort).toBe(8765);
-      expect(client.diagnostics.processId).toBe(remoteMode ? 123 : children[0].pid);
+      expect(client.diagnostics.processId).toBe(remoteMode ? 123 : children[0].pid!);
       if (!remoteMode) {
         expect(children[0].killed).toBe(false);
       }
@@ -565,10 +570,12 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
         }),
       );
       keep(
-        spyOn(manager, "isRunnerStillOwnedWithinShutdownDeadline").mockImplementation(async () => {
-          events.push("runner-ownership");
-          return false;
-        }),
+        spyOn(manager.diagnostics.processClient, "checkRunnerOwnership").mockImplementation(
+          async () => {
+            events.push("runner-ownership");
+            return "foreign";
+          },
+        ),
       );
       remote.stopIproxy = async () => {
         events.push("remote-stop:123");
@@ -593,18 +600,17 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     },
   );
   test("simulator supervised probe returns before detection and disconnect uses manager identity before start", async () => {
-    const { manager, supervisor, events } = realFixture();
+    const targetDevice = { ...device, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+    const { manager, supervisor, events } = realFixture(false, targetDevice);
     const detection = spyOn(
       manager.diagnostics.deviceDetector,
       "isDeviceDetected",
     ).mockResolvedValue(false);
     keep(detection);
-    const simulator = spyOn(manager, "isSimulator").mockReturnValue(true);
-    keep(simulator);
     expect(await supervisor.isAlive()).toBe(true);
     expect(detection).not.toHaveBeenCalled();
     expect(events).toEqual([]);
-    simulator.mockReturnValue(false);
+    targetDevice.deviceId = device.deviceId;
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     keep(warning);
     expect(await supervisor.isAlive()).toBe(true);

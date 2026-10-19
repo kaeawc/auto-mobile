@@ -606,7 +606,8 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     });
 
     const firstLaunch = await client.startEmulator("Pixel_9_Pro");
-    firstLaunch!.emit("exit", 0);
+    expect(firstLaunch).toBe(firstChild);
+    firstChild.emit("exit", 0);
     fakeAdb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
     await client.startEmulator("Pixel_9_Pro");
 
@@ -1266,7 +1267,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(
       scopedFactory.commandLog.some((command) => command.startsWith("emulator-5558:get-state")),
     ).toBe(false);
-    secondLaunch!.emit("exit", 0);
+    expect(secondLaunch).toBe(secondChild);
+    secondChild.emit("exit", 0);
   });
 
   test("does not infer an unknown emulator when a pre-launch snapshot fails", async () => {
@@ -1323,8 +1325,10 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(
       scopedFactory.commandLog.some((command) => command.startsWith("emulator-5558:get-state")),
     ).toBe(false);
-    firstLaunch!.emit("exit", 0);
-    secondLaunch!.emit("exit", 0);
+    expect(firstLaunch).toBe(firstChild);
+    firstChild.emit("exit", 0);
+    expect(secondLaunch).toBe(secondChild);
+    secondChild.emit("exit", 0);
   });
 
   test("keeps an exited launch port reserved while ADB still reports its serial", async () => {
@@ -1368,7 +1372,8 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     });
 
     const firstLaunch = await client.startEmulator("am-api33-ga-arm64");
-    firstLaunch!.emit("exit", 0);
+    expect(firstLaunch).toBe(firstChild);
+    firstChild.emit("exit", 0);
     await client.startEmulator("am-api33-ga-arm64");
 
     expect(spawnedArgs).toEqual([

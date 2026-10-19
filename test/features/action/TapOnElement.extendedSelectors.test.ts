@@ -1,3 +1,5 @@
+import { flatHierarchyFromFixture } from "../../helpers/flatHierarchyFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -188,7 +190,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { text: "Login", action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -201,7 +203,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { elementId: "com.app:id/btn", action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -214,7 +216,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { testTag: "message_row_42", action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -227,7 +229,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { text: "Accept Terms", sibling: true, action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -240,7 +242,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { elementId: "com.app:id/label", sibling: true, action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -259,7 +261,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -281,7 +283,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
+        { hierarchy: { node: createFlatNodeForTest({}) }, screenWidth: 200, screenHeight: 200 },
       );
 
       expect(result.selection.element).toBe(visibleElement);
@@ -303,7 +305,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
+        { hierarchy: { node: createFlatNodeForTest({}) }, screenWidth: 200, screenHeight: 200 },
       );
 
       expect(result.selection.element).toBeNull();
@@ -318,7 +320,7 @@ describe("TapOnElement extended selectors", () => {
         { textAny: ["Done", "Add"], action: "tap" },
         {
           hierarchy: {
-            node: {
+            node: createFlatNodeForTest({
               $: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } },
               node: [
                 {
@@ -343,7 +345,7 @@ describe("TapOnElement extended selectors", () => {
                   },
                 },
               ],
-            },
+            }),
           },
           screenWidth: 200,
           screenHeight: 200,
@@ -365,7 +367,7 @@ describe("TapOnElement extended selectors", () => {
 
       tapOn.findElementInHierarchy(
         { text: "Email", sibling: true, action: "tap", selectionStrategy: "random" },
-        { hierarchy: { node: {} } },
+        { hierarchy: { node: createFlatNodeForTest({}) } },
       );
 
       expect(selector.lastStrategy).toBe("random");
@@ -550,10 +552,14 @@ describe("TapOnElement extended selectors", () => {
           selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
         });
         // The initial tree has one match; the refreshed capture may introduce another.
-        const initialHierarchy: ViewHierarchyResult = { hierarchy: { node: { $: element } } };
+        const initialHierarchy: ViewHierarchyResult = {
+          hierarchy: { node: createFlatNodeForTest({ $: element }) },
+        };
         tapOn.observedInteraction = (callback) =>
           callback(
             buildObserveResult({
+              updatedAt: 0,
+              systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
               viewHierarchy: initialHierarchy,
               screenSize: { width: 1080, height: 2400 },
             }),
@@ -876,7 +882,7 @@ describe("TapOnElement extended selectors", () => {
 
 describe("capture-local synthetic element ids", () => {
   test("a sibling leaving the capture makes the old id stale and requires re-observe", async () => {
-    const before = structuredClone(scrollCapture.viewHierarchy);
+    const before = flatHierarchyFromFixture(structuredClone(scrollCapture.viewHierarchy));
     const mapping = assignStableViewIds(before.hierarchy);
     const oldId = "s2-3340048129449c01-2";
     const removedUuid = [...mapping].find(([, id]) => id === "s2-3340048129449c01-1")?.[0];
@@ -884,7 +890,7 @@ describe("capture-local synthetic element ids", () => {
 
     // No captured pair has this suffix disappearance. Remove only a sibling
     // subtree from the real scroll capture, then run the unchanged generator.
-    const after = structuredClone(scrollCapture.viewHierarchy);
+    const after = flatHierarchyFromFixture(structuredClone(scrollCapture.viewHierarchy));
     const removeSibling = (node: Record<string, unknown>): void => {
       if (Array.isArray(node.node)) {
         node.node = node.node.filter((child) => child["view-id"] !== removedUuid);

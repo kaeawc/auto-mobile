@@ -136,7 +136,7 @@ export interface InstallAppOptions {
   hostExecutor?: HostCommandExecutor;
   buildToolsLocator?: AndroidBuildToolsLocator;
   performanceTrackerFactory?: () => PerformanceTracker;
-  simctl?: SimCtlClient;
+  simctl?: Pick<SimCtlClient, "installApp" | "listAppsOrThrow" | "terminateApp" | "uninstallApp">;
   deviceAppInstaller?: DeviceAppInstaller;
   plist?: PlistReader;
   installedAppsRepository?: InstalledAppsStore;
@@ -177,7 +177,7 @@ export class InstallApp {
   private hostExecutor: HostCommandExecutor;
   private buildToolsLocator: AndroidBuildToolsLocator;
   private createPerformanceTracker: () => PerformanceTracker;
-  private simctl: SimCtlClient;
+  private simctl: NonNullable<InstallAppOptions["simctl"]>;
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
   private physicalAppLister?: IosPhysicalAppLister;

@@ -117,14 +117,14 @@ export interface TerminateAppCall extends ActionCall {
 }
 
 export interface TerminateAppOptions extends DisplayFenceDependencies {
-  simctl?: SimCtlClient;
+  simctl?: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   timer?: Timer;
   deviceTerminator?: DeviceAppTerminator;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
 export class TerminateApp extends BaseVisualChange {
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "listAppsOrThrow" | "terminateApp">;
   private deviceTerminator: DeviceAppTerminator;
   private cacheInvalidator: DeviceWindowCacheInvalidator;
 

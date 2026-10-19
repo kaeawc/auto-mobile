@@ -1,7 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -35,24 +34,14 @@ test("a stale refresh entry cannot replace a runtime confirmed by newer discover
     const stale = { ...original, name: "Pixel_7_API_34", observedAt: 9 };
     manager.bootedDevices = [stale];
 
-    const fold = pool as unknown as {
-      foldObservationIntoPooledEntry(
-        entry: PooledDevice,
-        observation: BootedDevice,
-        source: "refresh",
-      ): Promise<boolean>;
-      replacePooledDeviceForRuntimeIdentity(
-        entry: PooledDevice,
-        observation: BootedDevice,
-      ): Promise<boolean>;
-    };
-    const replace = fold.replacePooledDeviceForRuntimeIdentity.bind(pool);
     let replacementAttempts = 0;
-    fold.replacePooledDeviceForRuntimeIdentity = async (entry, observation) => {
-      replacementAttempts++;
-      return replace(entry, observation);
-    };
-    const replaced = await fold.foldObservationIntoPooledEntry(pooled, stale, "refresh");
+    pool.testHooks.replacePooledDeviceForRuntimeIdentity.intercept(
+      (replace) => async (entry, observation) => {
+        replacementAttempts++;
+        return replace(entry, observation);
+      },
+    );
+    const replaced = await pool.testHooks.foldObservationIntoPooledEntry(pooled, stale, "refresh");
 
     expect(replaced).toBe(false);
     expect(replacementAttempts).toBe(0);

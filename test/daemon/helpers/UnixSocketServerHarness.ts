@@ -181,6 +181,11 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     };
   }
 
+  /** The booted-device lookup the ide/* handlers run before acting on a serial. */
+  lookupBootedDevicesForIde(platform: "android" | "ios", serial: string): Promise<BootedDevice[]> {
+    return this.listBootedDevicesForIdeAction(platform, serial);
+  }
+
   /** Sockets that currently own an open streamed gesture. */
   get ownedGestureOwnerCount(): number {
     return this.ownedGestures.ownerCount;

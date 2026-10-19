@@ -98,19 +98,13 @@ function bind(
   deviceId: string,
   connection: string | undefined,
 ): Promise<string> {
-  return pool.bindOrReuseDeviceSession(
+  return pool.bindOrReuseDeviceSession({
     sessionId,
     deviceId,
-    "android",
-    undefined,
-    undefined,
-    undefined,
-    false,
-    undefined,
-    undefined,
-    undefined,
-    connection,
-  );
+    platform: "android",
+    allowSessionRebind: false,
+    mcpSessionId: connection,
+  });
 }
 
 const deviceOf = (sessionId: string): string =>
@@ -342,19 +336,13 @@ describe("a derived label session is judged and recorded as its base", () => {
       const before = ownership(w);
       const idle = idleDevice(w);
 
-      const bound = w.pool.bindOrReuseDeviceSession(
-        session,
-        idle,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        rebind,
-        undefined,
-        undefined,
-        undefined,
-        OTHER,
-      );
+      const bound = w.pool.bindOrReuseDeviceSession({
+        sessionId: session,
+        deviceId: idle,
+        platform: "android",
+        allowSessionRebind: rebind,
+        mcpSessionId: OTHER,
+      });
 
       await expect(bound).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
       expect(ownership(w)).toEqual(before);

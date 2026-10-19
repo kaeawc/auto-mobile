@@ -132,19 +132,13 @@ function acquire(path: "bind" | "autolock", device: BootedDevice, owner = "a") {
   let settled = false;
   const result = runWithAbortSignal(controller.signal, () =>
     path === "bind"
-      ? pool.bindOrReuseDeviceSession(
-          owner,
-          device.deviceId,
-          device.platform,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          owner,
-        )
+      ? pool.bindOrReuseDeviceSession({
+          sessionId: owner,
+          deviceId: device.deviceId,
+          platform: device.platform,
+          allowSessionRebind: false,
+          mcpSessionId: owner,
+        })
       : pool.autolockDevice(device.deviceId, device.platform, owner),
   ).then(
     (value) => {

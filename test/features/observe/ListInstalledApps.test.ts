@@ -1,8 +1,6 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
-import {
-  CtrlProxyInstalledPackageSource,
-  ListInstalledApps,
-} from "../../../src/features/observe/ListInstalledApps";
+import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
+import { CtrlProxyInstalledPackageSource } from "../../../src/features/observe/CtrlProxyInstalledPackageSource";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";

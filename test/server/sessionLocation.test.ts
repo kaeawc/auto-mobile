@@ -429,7 +429,11 @@ describe("session route cleanup", () => {
     registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
     try {
       await pool.initializeWithDevices([device]);
-      await pool.bindOrReuseDeviceSession("session", device.deviceId, "ios");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session",
+        deviceId: device.deviceId,
+        platform: "ios",
+      });
       const state = new DeviceState(device, {
         timer,
         routeRegistry: registry,
@@ -452,9 +456,13 @@ describe("session route cleanup", () => {
       expect(pending).not.toBeNull();
       await pool.releaseDevice(device.deviceId, "session");
       expect(pool.getDevice(device.deviceId)?.status).toBe("busy");
-      await expect(pool.bindOrReuseDeviceSession("new", device.deviceId, "ios")).rejects.toThrow(
-        "cleanup",
-      );
+      await expect(
+        pool.bindOrReuseDeviceSession({
+          sessionId: "new",
+          deviceId: device.deviceId,
+          platform: "ios",
+        }),
+      ).rejects.toThrow("cleanup");
       timer.advanceTime(250);
       await pending;
       await flush();
@@ -626,7 +634,11 @@ describe("session route cleanup", () => {
       let writes = 0;
       try {
         await pool.initializeWithDevices([device]);
-        await pool.bindOrReuseDeviceSession("session", deviceId, "android");
+        await pool.bindOrReuseDeviceSession({
+          sessionId: "session",
+          deviceId,
+          platform: "android",
+        });
         registry.start(deviceId, points, 1000, 500, true, async (_point, options) => {
           signal = options.signal;
           attempts++;
@@ -651,7 +663,7 @@ describe("session route cleanup", () => {
         expect(pool.getDevice(deviceId)?.status).toBe("busy");
         expect(pool.getStats().idle).toBe(0);
         await expect(
-          pool.bindOrReuseDeviceSession("new-owner", deviceId, "android"),
+          pool.bindOrReuseDeviceSession({ sessionId: "new-owner", deviceId, platform: "android" }),
         ).rejects.toThrow("cleanup");
         let settled = false;
         void cleanup?.then(() => {

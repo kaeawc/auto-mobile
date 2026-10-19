@@ -18,6 +18,7 @@ import { withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
 import { getAbortSignal } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import { parseIosMajorVersion } from "../../utils/ios-cmdline-tools/iosVersion";
+import { UnobservablePhotosAuthorizationVerifier } from "./UnobservablePhotosAuthorizationVerifier";
 
 /** ORCHESTRATOR-CHOSEN: 27.0 is the only captured runtime showing this inference; 26.5 does not. */
 export const IMPLIED_ADD_ONLY_MIN_IOS_MAJOR = 27;
@@ -34,13 +35,6 @@ export type PhotosAuthorizationStatus =
 
 export interface PhotosAuthorizationVerifier {
   verifyReadWrite(deviceId: string, appId: string): Promise<PhotosAuthorizationStatus>;
-}
-
-/** Host TCC readback cannot observe the target app's effective PhotoKit status. */
-export class UnobservablePhotosAuthorizationVerifier implements PhotosAuthorizationVerifier {
-  async verifyReadWrite(_deviceId: string, _appId: string): Promise<PhotosAuthorizationStatus> {
-    return "unobservable";
-  }
 }
 
 export interface IosSimulatorPermissionCommandResult {

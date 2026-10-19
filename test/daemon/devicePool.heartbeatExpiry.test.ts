@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -23,8 +24,12 @@ async function setup() {
     timeoutMs: 1_000,
     heartbeatTimeoutMs: 1_000,
   });
-  await pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
-  manager.recordHeartbeat("owner");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "owner",
+    deviceId: device.deviceId,
+    platform: "android",
+  });
+  await deliverDaemonHeartbeat(manager, "owner");
   manager.stopCleanupTimer();
   return { timer, persistence, manager, pool, device };
 }

@@ -6,12 +6,13 @@ import {
   createDefaultAndroidAvdCreator,
   resolveIosProvisioningSelection,
 } from "./deviceProvisioning";
-import type { DeviceProvisioner } from "./deviceProvisioning";
+import type { DeviceProvisioner, IosSimulatorCreator } from "./deviceProvisioning";
 import { MultiPlatformDeviceManager } from "./deviceUtils";
-import type { PlatformDeviceManager } from "./deviceUtils";
+import type { DeviceManagerSimCtl, PlatformDeviceManager } from "./deviceUtils";
 import {
   SimulatorStillShuttingDownError,
   SimCtlClient,
+  type SimCtl,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 import { logger } from "../utils/logger";
@@ -139,8 +140,13 @@ export interface CiIosBootConfiguration {
   recovery: DeviceBootRecovery;
 }
 
+/** Exactly the simctl calls CI boot makes: provisioning, the device manager, and the erase step. */
+export type CiIosBootSimctl = DeviceManagerSimCtl &
+  IosSimulatorCreator &
+  Pick<SimCtl, "eraseSimulator">;
+
 export interface CiIosBootConfigurationDependencies {
-  simctl: SimCtlClient;
+  simctl: CiIosBootSimctl;
 }
 
 /** True only in the CI environment where AutoMobile owns the simulator lifecycle. */

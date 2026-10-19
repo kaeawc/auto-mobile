@@ -220,7 +220,7 @@ export class InMemoryControlSocket {
     timer: Timer;
     connectionIds: ConnectionIdQueue;
     loopback: McpClientFactory;
-    startupOptions?: ConstructorParameters<typeof UnixSocketServer>[5];
+    startupOptions?: ConstructorParameters<typeof UnixSocketServer>[4];
     daemonInstance?: string;
   }): InMemoryControlSocket {
     const daemonInstance = deps.daemonInstance;
@@ -336,9 +336,9 @@ export class InMemoryDaemonClient extends DaemonClient {
     if (!socket) {
       throw new DaemonUnavailableError(`Daemon socket not found: ${IN_MEMORY_SOCKET_PATH}`);
     }
-    socket.on("data", (data: Buffer) => this.simulateIncomingDataForTesting(data));
+    socket.on("data", (data: Buffer) => this.testHooks.simulateIncomingData(data));
     socket.on("close", () => this.socketClosed(socket));
-    this.attachSocketForTesting(socket as unknown as Duplex);
+    this.testHooks.attachSocket(socket as unknown as Duplex);
   }
 
   /** The socket this client is connected on now, if it is. */

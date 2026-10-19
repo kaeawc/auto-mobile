@@ -2,9 +2,13 @@ import { describe, expect, spyOn, test } from "bun:test";
 import * as systemUiAnr from "../../src/server/deviceToolsSystemUiAnr";
 import { prepareStartDeviceRunnerReadiness } from "../../src/server/deviceTools";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
-import type { DaemonState } from "../../src/daemon/daemonState";
-import type { DevicePool, PooledDevice } from "../../src/daemon/devicePool";
-import type { SessionManager, Session } from "../../src/daemon/sessionManager";
+import type { PooledDevice } from "../../src/daemon/devicePool";
+import type { Session } from "../../src/daemon/sessionManager";
+import type {
+  ReadinessDaemonState,
+  ReadinessDevicePool,
+  ReadinessSessionManager,
+} from "../../src/features/deviceLifecycle/startDeviceReadinessTypes";
 import type { DeviceBootService } from "../../src/devices/deviceBootService";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -18,6 +22,13 @@ type Scenario =
   | "wrong-owner"
   | "session-failure"
   | "pool-failure";
+
+/** A collaborator method this scenario must not reach; calling it fails the test loudly. */
+function unexercised(name: string): () => never {
+  return () => {
+    throw new Error(`${name} must not be called in this scenario`);
+  };
+}
 
 describe("deviceTools preserved-session release caller ordering", () => {
   test.each([
@@ -36,10 +47,9 @@ describe("deviceTools preserved-session release caller ordering", () => {
     const finished = new Error("callback exercised");
     const failure = new Error("release failed");
     let live = !scenario.startsWith("missing");
-    const manager: Pick<
-      SessionManager,
-      "getSession" | "findSession" | "hasSession" | "releaseSessionIfOwned"
-    > = {
+    const manager: ReadinessSessionManager = {
+      getDeviceLabels: unexercised("getDeviceLabels"),
+      releaseSession: unexercised("releaseSession"),
       getSession: () => (scenario.startsWith("missing") ? null : session),
       findSession: () => (scenario.startsWith("missing") ? null : session),
       hasSession: () => live,
@@ -52,7 +62,17 @@ describe("deviceTools preserved-session release caller ordering", () => {
         return "replacement";
       },
     };
-    const pool: Pick<DevicePool, "getDevice" | "releaseDevice"> = {
+    const pool: ReadinessDevicePool = {
+      reserveDeviceForReadiness: unexercised("reserveDeviceForReadiness"),
+      reserveDeviceForShutdown: unexercised("reserveDeviceForShutdown"),
+      captureAutolockSessionForMcpSession: unexercised("captureAutolockSessionForMcpSession"),
+      replaceDeviceForSystemUiAnrRecovery: unexercised("replaceDeviceForSystemUiAnrRecovery"),
+      retireDeviceAfterSystemUiAnrRecoveryFailure: unexercised(
+        "retireDeviceAfterSystemUiAnrRecoveryFailure",
+      ),
+      noteLatePlatformShutdownSettled: unexercised("noteLatePlatformShutdownSettled"),
+      markIntentionalShutdown: unexercised("markIntentionalShutdown"),
+      clearIntentionalShutdown: unexercised("clearIntentionalShutdown"),
       getDevice: (id) =>
         id === "old"
           ? ({ id, sessionId: "s1" } as PooledDevice)
@@ -66,11 +86,11 @@ describe("deviceTools preserved-session release caller ordering", () => {
         }
       },
     };
-    const daemonState = {
+    const daemonState: ReadinessDaemonState = {
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => pool,
-    } as unknown as DaemonState;
+    };
     const reboot = spyOn(systemUiAnr, "rebootAndroidAfterSystemUiAnr").mockImplementation(
       async (context) => {
         if (scenario === "wrong-owner") {

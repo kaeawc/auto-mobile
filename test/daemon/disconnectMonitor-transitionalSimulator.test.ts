@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
@@ -87,7 +88,13 @@ async function simulatorMonitor() {
   manager.bootedDevices = [HELD, UNHELD];
   await pool.addDevice(HELD, image(HELD));
   await pool.addDevice(UNHELD, image(UNHELD));
-  await pool.bindOrReuseDeviceSession(SESSION, HELD.deviceId, "ios", image(HELD), undefined, HELD);
+  await pool.bindOrReuseDeviceSession({
+    sessionId: SESSION,
+    deviceId: HELD.deviceId,
+    platform: "ios",
+    sourceImage: image(HELD),
+    expectedIdentity: HELD,
+  });
 
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
@@ -110,7 +117,7 @@ async function simulatorMonitor() {
   const pollFor = async (ms: number) => {
     for (let elapsed = 0; elapsed < ms; elapsed += POLL_MS) {
       if (sessions.getSession(SESSION)) {
-        sessions.recordHeartbeat(SESSION);
+        await deliverDaemonHeartbeat(sessions, SESSION);
       }
       timer.advanceTime(POLL_MS);
       await daemon.deviceDisconnectMonitor.run();

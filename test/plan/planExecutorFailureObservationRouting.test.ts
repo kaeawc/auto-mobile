@@ -5,7 +5,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -20,7 +20,7 @@ describe("PlanExecutor failure observation device routing", () => {
     device: z.string().optional(),
   });
   type Params = z.infer<typeof schema>;
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let sessionManager: SessionManager;
   let observations: Params[];
   let stepCalls: Params[];
@@ -36,7 +36,7 @@ describe("PlanExecutor failure observation device routing", () => {
     failingDevices = [];
     throwFailure = false;
     const timer = new FakeTimer();
-    executor = new DefaultPlanExecutor(timer);
+    executor = createDefaultPlanExecutor(timer);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     await sessionManager.createSession(baseSessionUuid, "device-A", "android");
     await sessionManager.createSession("session-for-B", "device-B", "android");

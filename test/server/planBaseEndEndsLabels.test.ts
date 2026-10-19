@@ -83,19 +83,13 @@ const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async ()
     sessionManager.onSessionRelease((id, _deviceId, reason) => {
       released.push([id, reason]);
     });
-    await pool.bindOrReuseDeviceSession(
-      BASE,
-      deviceA.deviceId,
-      "ios",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: BASE,
+      deviceId: deviceA.deviceId,
+      platform: "ios",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     sessionManager.setDeviceReadiness(BASE, "automationReady");
     const baseIdleDeadline = sessionManager.peekSession(BASE)!.expiresAt;
 
@@ -255,19 +249,13 @@ describe("a plan whose base idles out while its steps run on a label", () => {
         const label = sessionManager.getSession(LABEL_B);
         expect(label?.sessionId).toBe(LABEL_B);
         await expect(
-          pool.bindOrReuseDeviceSession(
-            "5e550000-0000-4000-8000-0000000000ff",
-            deviceB.deviceId,
-            "ios",
-            undefined,
-            undefined,
-            undefined,
-            false,
-            undefined,
-            undefined,
-            undefined,
-            STRANGER,
-          ),
+          pool.bindOrReuseDeviceSession({
+            sessionId: "5e550000-0000-4000-8000-0000000000ff",
+            deviceId: deviceB.deviceId,
+            platform: "ios",
+            allowSessionRebind: false,
+            mcpSessionId: STRANGER,
+          }),
         ).rejects.toBeInstanceOf(InputDeviceOwnedError);
         expect(plan.hunt.poolHolder(deviceB.deviceId)).toBe(LABEL_B);
         expect(sessionManager.getSession(LABEL_B)).toBe(label);

@@ -29,10 +29,16 @@ import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/Skelet
 import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/android/types";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError } from "../../models/ActionableError";
 import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
 import { keyboardNodeClickTargetError } from "./keyboardNodeClickTarget";
 import { resolveSignalCall, type ActionCall } from "./ActionCall";
+import {
+  KeyboardOpenIndeterminateError,
+  keyboardOpenIndeterminateMessage,
+} from "./KeyboardOpenIndeterminateError";
+import { DefaultKeyboardHierarchyProvider } from "./DefaultKeyboardHierarchyProvider";
+
+export { KeyboardOpenIndeterminateError };
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -67,34 +73,6 @@ export function selectKeyboardHierarchyCache(
   androidCache: () => KeyboardHierarchyCache,
 ): KeyboardHierarchyCache {
   return platform === "ios" ? iosCache() : androidCache();
-}
-
-export class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
-  private viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy">;
-  private cache: KeyboardHierarchyCache;
-
-  constructor(
-    viewHierarchy: Pick<ViewHierarchy, "getViewHierarchy">,
-    cache: KeyboardHierarchyCache,
-  ) {
-    this.viewHierarchy = viewHierarchy;
-    this.cache = cache;
-  }
-
-  async getViewHierarchy(
-    signal?: AbortSignal,
-    options?: KeyboardHierarchyReadOptions,
-  ): Promise<ViewHierarchyResult | null> {
-    if (options?.forceFresh) {
-      this.cache.invalidateCache();
-    }
-    return this.viewHierarchy.getViewHierarchy(undefined, {
-      skipWaitForFresh: false,
-      minTimestamp: 0,
-      signal,
-      timeoutMs: options?.timeoutMs,
-    });
-  }
 }
 
 type KeyboardDetection = {
@@ -137,18 +115,6 @@ type NodeClickOutcome =
   | { kind: "sent" }
   | { kind: "unconfirmed"; error?: string };
 
-function keyboardOpenIndeterminateMessage(dispatched: string, reason?: string): string {
-  return `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`;
-}
-
-/** A cancelled open whose click/tap was already sent: the device may have applied it. */
-export class KeyboardOpenIndeterminateError extends ActionableError {
-  constructor(dispatched: string, reason?: string) {
-    super(keyboardOpenIndeterminateMessage(dispatched, reason));
-    this.name = "KeyboardOpenIndeterminateError";
-  }
-}
-
 function sameBounds(a: ElementBounds[] | undefined, b: ElementBounds[]): boolean {
   return (
     a?.length === b.length &&
@@ -170,6 +136,8 @@ export class Keyboard {
   private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
   private static readonly IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS = 2_000;
   private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
+  /** Bound on the follow-up keyboard detect after a close request. */
+  private static readonly CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS = 2000;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private hierarchyProvider: KeyboardHierarchyProvider;
@@ -363,11 +331,19 @@ export class Keyboard {
     try {
       throwIfAborted(signal);
       const detected = await awaitWhileRequestIsLive(
-        raceWithDeadline(client.requestKeyboard("detect", 2000, undefined, signal), {
-          timer: this.timer,
-          timeoutMs: 2000,
-          label: "Keyboard close follow-up detect",
-        }),
+        raceWithDeadline(
+          client.requestKeyboard(
+            "detect",
+            Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            undefined,
+            signal,
+          ),
+          {
+            timer: this.timer,
+            timeoutMs: Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            label: "Keyboard close follow-up detect",
+          },
+        ),
         signal,
       );
       return detected.success && !detected.open;

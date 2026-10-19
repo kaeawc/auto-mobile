@@ -210,7 +210,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
     });
 
     test("is a no-op: a defaulted insert already stores a real timestamp", async () => {
-      await repairUp(db as unknown as Kysely<unknown>);
+      await repairUp(db);
       await db
         .insertInto("navigation_apps")
         .values({ app_id: "fresh", updated_at: "2026-07-03T00:00:00.000Z" })

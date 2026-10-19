@@ -51,7 +51,7 @@ describe("TopLevelUnionFlattener module", () => {
     expect(result.if).toEqual({ properties: { kind: { const: "a" } }, required: ["kind"] });
     expect(result.then).toEqual({ required: ["aOnly"] });
     // Second branch's requirement is chained via else.
-    expect((result.else as any).then).toEqual({ required: ["bOnly"] });
+    expect(result.else).toMatchObject({ then: { required: ["bOnly"] } });
   });
 
   // Issue #4187: `mergedProperties` was a `{}` map guarded by `!mergedProperties[key]`,

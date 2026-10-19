@@ -395,7 +395,11 @@ describe("device identity replacement IME quarantine", () => {
   });
 
   it("session release keeps quarantine on the same pooled incarnation", async () => {
-    await pool.bindOrReuseDeviceSession("ime-owner", device.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "ime-owner",
+      deviceId: device.deviceId,
+      platform: "android",
+    });
     const captured = pool.getDevice(device.deviceId);
     await manager.releaseSession("ime-owner");
     await pool.releaseDevice(device.deviceId, "ime-owner");

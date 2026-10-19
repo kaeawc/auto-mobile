@@ -1,14 +1,16 @@
+import { convertIosHierarchy } from "../../../helpers/iosHierarchyConverter";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { assignStableViewIds } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
 import type {
   HierarchyDelegateContext,
-  XCTestHierarchy,
+  IosRunnerWireHierarchy,
+  IosRunnerWireNode,
 } from "../../../../src/features/observe/ios/types";
+import { decodeRunnerWireHierarchy } from "../../../../src/features/observe/ios/decodeRunnerWireHierarchy";
 import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
-import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
 import {
   nodeAttributes,
@@ -21,16 +23,11 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { makeViewHierarchyCtrlProxy } from "../../../helpers/androidViewHierarchyClient";
 import { spyOnIosClientInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
-interface CaptureNode extends Record<string, unknown> {
-  className?: string;
-  text?: string;
-  bounds?: [number, number, number, number];
-  extras?: Record<string, string>;
-  node?: CaptureNode | CaptureNode[];
-  "view-id"?: string;
-}
+/** A captured wire node: the runner's own spelling, typed by the wire contract. */
+type CaptureNode = IosRunnerWireNode;
 
 interface Capture {
   structuredContent: { viewHierarchy: { hierarchy: CaptureNode } };
@@ -63,14 +60,8 @@ function formsRow(root: CaptureNode): CaptureNode {
   return row;
 }
 
-function runnerHierarchy(root: CaptureNode): XCTestHierarchy {
-  return {
-    packageName: "test.app",
-    updatedAt: 0,
-    // Captured wire nodes use dashed ids and tuple bounds; the converter accepts
-    // both spellings even though XCTestHierarchy declares camel-case/object bounds.
-    hierarchy: structuredClone(root) as unknown as XCTestHierarchy["hierarchy"],
-  };
+function runnerHierarchy(root: CaptureNode): IosRunnerWireHierarchy {
+  return { packageName: "test.app", updatedAt: 0, hierarchy: structuredClone(root) };
 }
 
 function normalizedFormsId(result: ViewHierarchyResult): string {
@@ -135,7 +126,7 @@ beforeAll(() => {
 describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () => {
   test("normalization keeps one Forms & Input id across both real captures", () => {
     const ids = [injected, notInjected].map((root) =>
-      normalizedFormsId(normalizeIosHierarchy(runnerHierarchy(root))),
+      normalizedFormsId(normalizeIosHierarchy(convertIosHierarchy(runnerHierarchy(root)))),
     );
     expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
   });
@@ -143,10 +134,12 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
   test("normalization also excludes SDK children in raw XCUITest windows", () => {
     const ids = [injected, notInjected].map((root) => {
       const source = runnerHierarchy(root);
-      const result = normalizeIosHierarchy({
-        ...source,
-        windows: [{ windowLayer: 2, hierarchy: structuredClone(source.hierarchy) }],
-      });
+      const result = normalizeIosHierarchy(
+        convertIosHierarchy({
+          ...source,
+          windows: [{ windowLayer: 2, hierarchy: structuredClone(source.hierarchy) }],
+        }),
+      );
       const window = result.windows?.[0];
       if (!window?.hierarchy) {
         throw new Error("Normalized capture has no window hierarchy");
@@ -161,15 +154,16 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
     const client = new FakeIOSCtrlProxy(timer);
     const getInstance = spyOnIosClientInstance(client);
     try {
+      const androidProxy = new FakeCtrlProxy(timer);
       const reader = new ViewHierarchy(
         { deviceId: "sdk-identity-ios-test", platform: "ios", name: "Test iPhone" },
         new FakeAdbClientFactory(),
-        new FakeCtrlProxy(timer) as unknown as AndroidCtrlProxyClient,
+        makeViewHierarchyCtrlProxy(androidProxy),
         timer,
       );
       const ids: string[] = [];
       for (const root of [injected, notInjected]) {
-        client.setHierarchyData(runnerHierarchy(root));
+        client.setHierarchyData(decodeRunnerWireHierarchy(runnerHierarchy(root)));
         ids.push(normalizedFormsId(await reader.getiOSViewHierarchy()));
       }
       expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
@@ -182,7 +176,7 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
     "observe and convert-then-normalize action ids agree for the %s capture",
     (suffix) => {
       const root = suffix === "injected" ? injected : notInjected;
-      const observed = normalizeIosHierarchy(runnerHierarchy(root));
+      const observed = normalizeIosHierarchy(convertIosHierarchy(runnerHierarchy(root)));
       const action = normalizeIosHierarchy(
         converter().convertToViewHierarchyResult(runnerHierarchy(root)),
       );

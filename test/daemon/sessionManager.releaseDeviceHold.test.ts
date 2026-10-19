@@ -407,10 +407,16 @@ test("bind refusal uses the real derived hold and resets its bound at early conf
   manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
   const release = manager.releaseSession(SESSION, "daemon-shutdown");
   async function refusedBind() {
-    const refusal = await pool.bindOrReuseDeviceSession("next-session", DEVICE, "android").then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const refusal = await pool
+      .bindOrReuseDeviceSession({
+        sessionId: "next-session",
+        deviceId: DEVICE,
+        platform: "android",
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     if (!(refusal instanceof DeviceCleanupInProgressError)) {
       throw new Error(`Expected cleanup refusal, got ${String(refusal)}`);
     }

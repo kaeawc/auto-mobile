@@ -3,6 +3,7 @@ import { logger } from "../../src/utils/logger";
 import { DaemonClient } from "../../src/daemon/client";
 import { isDaemonNotification, type DaemonNotification } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 // Issue #3223: the daemon control socket carries server-pushed notification
 // frames alongside request/response frames. These tests drive the private
@@ -34,17 +35,22 @@ describe("isDaemonNotification", () => {
 
 describe("DaemonClient notification frames", () => {
   test("skips blank lines and continues after a malformed frame while retaining partial data", () => {
-    const client = new DaemonClient("/fake/socket", 1000, new FakeTimer());
+    const client = new DaemonClient(
+      "/fake/socket",
+      1000,
+      new FakeTimer(),
+      ISOLATED_DAEMON_RECOVERY,
+    );
     const received: string[] = [];
     client.onNotification((notification) => received.push(notification.method));
     const errors = spyOn(logger, "error").mockImplementation(() => {});
     try {
-      client.simulateIncomingDataForTesting(
+      client.testHooks.simulateIncomingData(
         Buffer.from('\n  \n{bad}\n{"type":"daemon_notification",'),
       );
       expect(received).toEqual([]);
       expect(errors).toHaveBeenCalledTimes(1);
-      client.simulateIncomingDataForTesting(
+      client.testHooks.simulateIncomingData(
         Buffer.from('"method":"notifications/tools/list_changed"}\n'),
       );
       expect(received).toEqual(["notifications/tools/list_changed"]);
@@ -55,7 +61,12 @@ describe("DaemonClient notification frames", () => {
   });
 
   test("routes notification frames to registered handlers", () => {
-    const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
+    const client = new DaemonClient(
+      "/tmp/never-connected.sock",
+      1000,
+      new FakeTimer(),
+      ISOLATED_DAEMON_RECOVERY,
+    );
     const received: DaemonNotification[] = [];
     client.onNotification((notification) => {
       received.push(notification);
@@ -69,7 +80,12 @@ describe("DaemonClient notification frames", () => {
   });
 
   test("notification frames interleaved with responses do not disturb response handling", () => {
-    const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
+    const client = new DaemonClient(
+      "/tmp/never-connected.sock",
+      1000,
+      new FakeTimer(),
+      ISOLATED_DAEMON_RECOVERY,
+    );
     const received: string[] = [];
     client.onNotification((notification) => {
       received.push(notification.method);
@@ -85,7 +101,12 @@ describe("DaemonClient notification frames", () => {
   });
 
   test("a throwing handler does not block sibling handlers", () => {
-    const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
+    const client = new DaemonClient(
+      "/tmp/never-connected.sock",
+      1000,
+      new FakeTimer(),
+      ISOLATED_DAEMON_RECOVERY,
+    );
     const received: string[] = [];
     client.onNotification(() => {
       throw new Error("handler boom");
@@ -101,7 +122,12 @@ describe("DaemonClient notification frames", () => {
   });
 
   test("onNotification returns an unsubscribe function", () => {
-    const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
+    const client = new DaemonClient(
+      "/tmp/never-connected.sock",
+      1000,
+      new FakeTimer(),
+      ISOLATED_DAEMON_RECOVERY,
+    );
     const received: string[] = [];
     const unsubscribe = client.onNotification((notification) => {
       received.push(notification.method);

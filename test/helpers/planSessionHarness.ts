@@ -115,16 +115,13 @@ export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<Pl
   );
   const connected = new FakeDeviceSessionManager();
   connected.setConnectedDevices(devices);
-  const overrides: Array<[string, unknown]> = [
-    ["deviceSessionManager", connected],
-    ["toolCallRepository", { async recordToolCall(): Promise<void> {} }],
-    ["navigationToolCallRecorder", { record: () => undefined }],
-  ];
-  for (const [key, value] of overrides) {
-    const original: unknown = Reflect.get(ToolRegistry, key);
-    restores.push(() => Reflect.set(ToolRegistry, key, original));
-    Reflect.set(ToolRegistry, key, value);
-  }
+  const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+  restores.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));
+  ToolRegistry.setCollaboratorsForTesting({
+    deviceSessionManager: connected,
+    toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    navigationToolCallRecorder: { record: () => undefined },
+  });
 
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();

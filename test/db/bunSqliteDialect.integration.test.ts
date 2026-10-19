@@ -4,7 +4,12 @@ import { Database } from "bun:sqlite";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BunSqliteConnectionState, BunSqliteDialect } from "../../src/db/bunSqliteDialect";
+import {
+  BunSqliteConnectionState,
+  BunSqliteDialect,
+  type BunSqliteHandle,
+  type BunSqliteStatement,
+} from "../../src/db/bunSqliteDialect";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { logger } from "../../src/utils/logger";
@@ -108,7 +113,7 @@ interface FakeRunResult {
   lastInsertRowid: number | bigint;
 }
 
-class FakeStatement {
+class FakeStatement implements BunSqliteStatement {
   finalized = false;
 
   constructor(
@@ -157,7 +162,7 @@ class FakeStatement {
   }
 }
 
-class FakeDatabase {
+class FakeDatabase implements BunSqliteHandle {
   readonly calls: Array<{ method: "all" | "run"; sql: string; params: unknown[] }> = [];
   readonly preparedStatements: FakeStatement[] = [];
   readonly prepareCalls: string[] = [];
@@ -214,11 +219,11 @@ class FakeDatabase {
 }
 
 function makeState(db: FakeDatabase): BunSqliteConnectionState {
-  return new BunSqliteConnectionState(db as unknown as never);
+  return new BunSqliteConnectionState(db);
 }
 
 function rawQuery(sql: string, parameters: unknown[] = []): CompiledQuery {
-  return { sql, parameters } as unknown as CompiledQuery;
+  return CompiledQuery.raw(sql, parameters);
 }
 
 /**
@@ -622,7 +627,7 @@ describe("BunSqliteConnectionState — C6 word-boundary RETURNING detection", ()
   test("a real compiled Kysely .returning() query IS treated as row-returning", async () => {
     const db = new FakeDatabase();
     const kysely = new Kysely<{ foo: { id: number; name: string } }>({
-      dialect: new BunSqliteDialect({ database: db as unknown as never }),
+      dialect: new BunSqliteDialect({ database: db }),
     });
 
     const compiled = kysely
@@ -712,7 +717,7 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
     let opened = false;
     const state = new BunSqliteConnectionState(() => {
       opened = true;
-      return new FakeDatabase() as unknown as never;
+      return new FakeDatabase();
     });
 
     state.close();

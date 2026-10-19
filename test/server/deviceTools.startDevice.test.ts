@@ -1177,12 +1177,12 @@ describe("startDevice handler", () => {
     const recoveryImage = { ...androidImage, deviceId: "emulator-5556" };
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      androidDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeMatcher.setBootedResult(androidDevice);
@@ -1256,12 +1256,12 @@ describe("startDevice handler", () => {
       const pooledAnrDevice = { ...androidDevice };
       fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
       await pool.initializeWithDevices([pooledAnrDevice]);
-      await pool.bindOrReuseDeviceSession(
-        "owner-session",
-        pooledAnrDevice.deviceId,
-        "android",
-        recoveryImage,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: pooledAnrDevice.deviceId,
+        platform: "android",
+        sourceImage: recoveryImage,
+      });
       const reserve = pool.reserveDeviceForShutdown.bind(pool);
       pool.reserveDeviceForShutdown = async (...args) => {
         const reservation = await reserve(...args);
@@ -1377,7 +1377,12 @@ describe("startDevice handler", () => {
 
     fakeDeviceUtils.setBootedDevices("android", [anrDevice]);
     await pool.initializeWithDevices([anrDevice]);
-    await pool.bindOrReuseDeviceSession("owner-session", anrDevice.deviceId, "android", anrImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: anrDevice.deviceId,
+      platform: "android",
+      sourceImage: anrImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [anrImage, siblingImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -1448,12 +1453,12 @@ describe("startDevice handler", () => {
     const pooledAnrDevice = { ...androidDevice };
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeMatcher.setBootedResult(pooledAnrDevice);
@@ -1627,12 +1632,12 @@ describe("startDevice handler", () => {
     const replacementProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -1692,12 +1697,12 @@ describe("startDevice handler", () => {
     const replacementProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -1764,12 +1769,12 @@ describe("startDevice handler", () => {
     const replacementProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -1842,12 +1847,12 @@ describe("startDevice handler", () => {
     const replacementProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     daemonSessionManager.releaseSessionIfOwned = async () => {
       throw new Error("cleanup persistence failed");
     };
@@ -1910,12 +1915,12 @@ describe("startDevice handler", () => {
     const replacementProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -1977,12 +1982,12 @@ describe("startDevice handler", () => {
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      androidDevice.deviceId,
-      "android",
-      androidImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidDevice.deviceId,
+      platform: "android",
+      sourceImage: androidImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(androidDevice);
@@ -2034,12 +2039,12 @@ describe("startDevice handler", () => {
       fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
       fakeDeviceUtils.setDeviceImages("android", [androidImage]);
       await pool.initializeWithDevices([androidDevice]);
-      await pool.bindOrReuseDeviceSession(
-        "owner-session",
-        androidDevice.deviceId,
-        "android",
-        androidImage,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "owner-session",
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+        sourceImage: androidImage,
+      });
       DaemonState.getInstance().initialize(daemonSessionManager, pool);
       fakeMatcher.setBootedResult(androidDevice);
       const mark = pool.markIntentionalShutdown.bind(pool);
@@ -2168,12 +2173,12 @@ describe("startDevice handler", () => {
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      androidDevice.deviceId,
-      "android",
-      androidImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidDevice.deviceId,
+      platform: "android",
+      sourceImage: androidImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(androidDevice);
@@ -2239,12 +2244,12 @@ describe("startDevice handler", () => {
     const replacementProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
     await pool.initializeWithDevices([pooledAnrDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      pooledAnrDevice.deviceId,
-      "android",
-      recoveryImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: pooledAnrDevice.deviceId,
+      platform: "android",
+      sourceImage: recoveryImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -2302,12 +2307,12 @@ describe("startDevice handler", () => {
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      androidDevice.deviceId,
-      "android",
-      androidImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidDevice.deviceId,
+      platform: "android",
+      sourceImage: androidImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(androidDevice);
@@ -2351,12 +2356,12 @@ describe("startDevice handler", () => {
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
-    await pool.bindOrReuseDeviceSession(
-      "owner-session",
-      androidDevice.deviceId,
-      "android",
-      androidImage,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: androidDevice.deviceId,
+      platform: "android",
+      sourceImage: androidImage,
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(androidDevice);
@@ -3655,7 +3660,11 @@ describe("startDevice handler", () => {
     );
     fakeDeviceUtils.setBootedDevices("android", [handset]);
     await pool.initializeWithDevices([handset]);
-    await pool.bindOrReuseDeviceSession("handset-holder", handset.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "handset-holder",
+      deviceId: handset.deviceId,
+      platform: "android",
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const entry = pool.getDevice(handset.deviceId)!;
     const incarnation = entry.incarnation;
@@ -3736,7 +3745,11 @@ describe("startDevice handler", () => {
         name: "Old_Pixel_AVD",
       },
     ]);
-    await pool.bindOrReuseDeviceSession("stale-session", androidDevice.deviceId, "android");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "stale-session",
+      deviceId: androidDevice.deviceId,
+      platform: "android",
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     fakeMatcher.setBootedResult(androidDevice);
@@ -3896,7 +3909,11 @@ describe("startDevice handler", () => {
     const originalName = { ...physicalIphone, name: "Jason's iPhone" };
     fakeDeviceUtils.setBootedDevices("ios", [originalName]);
     await pool.initializeWithDevices([originalName]);
-    await pool.bindOrReuseDeviceSession("owner-session", physicalIphone.deviceId, "ios");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "owner-session",
+      deviceId: physicalIphone.deviceId,
+      platform: "ios",
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
     // The same hardware comes back under a different display name.
@@ -3931,7 +3948,11 @@ describe("startDevice handler", () => {
     const originalName = { ...simulator, name: "iPhone 15" };
     fakeDeviceUtils.setBootedDevices("ios", [originalName]);
     await pool.initializeWithDevices([originalName]);
-    await pool.bindOrReuseDeviceSession("stale-session", simulator.deviceId, "ios");
+    await pool.bindOrReuseDeviceSession({
+      sessionId: "stale-session",
+      deviceId: simulator.deviceId,
+      platform: "ios",
+    });
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
     fakeDeviceUtils.setBootedDevices("ios", [{ ...simulator, name: "iPhone 16" }]);

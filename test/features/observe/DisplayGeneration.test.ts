@@ -15,7 +15,6 @@ import { resetObserveCacheStore } from "../../../src/features/observe/cache/Obse
 import type { BootedDevice, DisplayRef, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
@@ -390,17 +389,11 @@ test("capture sequences 7, absent, 3 and CtrlProxy client replacement never rewi
   h.panel("cover");
   const folded = await h.screen.execute(options);
   expect(folded.display.generation).toBe(1);
-  AndroidCtrlProxyClient.registerForTesting(
-    new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-    h.device.deviceId,
-  );
+  AndroidCtrlProxyClient.getInstance(h.device, new FakeAdbClientFactory(new FakeAdbExecutor()));
   for (const sequence of [7, undefined, 3]) {
     if (sequence === undefined) {
       AndroidCtrlProxyClient.removeInstance(h.device.deviceId);
-      AndroidCtrlProxyClient.registerForTesting(
-        new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-        h.device.deviceId,
-      );
+      AndroidCtrlProxyClient.getInstance(h.device, new FakeAdbClientFactory(new FakeAdbExecutor()));
     }
     h.panel("cover", { captureSequence: sequence });
     const result = await h.screen.execute(options);

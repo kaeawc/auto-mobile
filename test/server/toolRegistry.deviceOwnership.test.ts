@@ -1,10 +1,13 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
+import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetHitTestDeviceReadFactory,
-  setHitTestDeviceReadFactory,
 } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
@@ -30,7 +33,11 @@ import {
   isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+isolateToolRegistry();
+
+const interactionDeps: InteractionToolDependencies = {};
 /**
  * A device another live session holds runs device-aware tools only for its holder, as `input/*`
  * already enforces (#10698). An end-to-end run found `rotate` sent with the desktop observer's
@@ -46,9 +53,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   const observer = "d0000000-0000-4000-8000-000000000001";
 
   let ran: Array<{ name: string; deviceId: string }>;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
@@ -99,12 +104,14 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([held, free]);
     devices = fakeDeviceSessionManager;
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -128,7 +135,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     await sessionManager.createSession(agent, held.deviceId, "android");
     sessionManager.setDeviceReadiness(agent, "automationReady");
 
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     registerObserveTools({
       deviceReadAccess: { listBooted: async () => [held, free], isAuthorized: () => true },
       // Watching a held device runs observe's own read-only capture, not the audit runner.
@@ -152,9 +159,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     dispatched = undefined;
     callerSignal = undefined;
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
@@ -249,18 +254,18 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     ["identifyInteractions", {}],
   ] as Array<[string, Record<string, unknown>]>) {
     test(`a sessionless ${name} on a held device watches it without readiness (#10965)`, async () => {
-      setHitTestDeviceReadFactory((device) => ({
+      interactionDeps.hitTestDeviceReadFactory = (device) => ({
         executeDeviceRead: async () => {
           ran.push({ name: "hitTest", deviceId: device.deviceId });
           return loadAndroidHomeObserve().observe;
         },
-      }));
+      });
       setDebugModeEnabled(true); // identifyInteractions is debugOnly
       try {
         await call(name, { ...args, platform: "android", deviceId: held.deviceId });
       } finally {
         setDebugModeEnabled(false);
-        resetHitTestDeviceReadFactory();
+        delete interactionDeps.hitTestDeviceReadFactory;
       }
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
       expect(devices.getSetCurrentDeviceCalls()).toEqual([]);

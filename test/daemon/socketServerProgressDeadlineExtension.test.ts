@@ -1,12 +1,18 @@
 import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/server";
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import type { Client } from "@modelcontextprotocol/client";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
@@ -27,10 +33,11 @@ import { PROGRESS_NOTIFICATION_METHOD, type DaemonRequest } from "../../src/daem
  * HTTP server -- no socket, no queue, no session state beyond what
  * `withSocketSessionAutolockKey`'s session-released check reads.
  */
-function createFakeDaemonState() {
+function createFakeDaemonState(): DaemonStateAccess {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
@@ -41,11 +48,12 @@ function createFakeDaemonState() {
       releaseDevice: async () => {},
       resolveAutolockSessionForMcpSession: () => undefined,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 
-function createServer(fakeTimer: FakeTimer): UnixSocketServer {
-  return createTestUnixSocketServer(
+function createServer(fakeTimer: FakeTimer): UnixSocketServerHarness {
+  return createHarnessServer(
     join(tmpdir(), `progress-deadline-${randomUUID()}.sock`),
     createFakeDaemonState(),
     fakeTimer,
@@ -61,8 +69,8 @@ interface CapturedCallToolOptions {
 }
 
 function callHandleIdeRequest(
-  server: UnixSocketServer,
-  mcpClient: unknown,
+  server: UnixSocketServerHarness,
+  mcpClient: Client,
   request: DaemonRequest,
   timeoutMs: number,
   socketSessionId: string,
@@ -70,19 +78,7 @@ function callHandleIdeRequest(
   originalTimeoutMs: number = timeoutMs,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return (
-    server as unknown as {
-      handleIdeRequest: (
-        c: unknown,
-        r: DaemonRequest,
-        t: number,
-        s: string,
-        d: ProgressExtendableDeadline,
-        o: number,
-        signal?: AbortSignal,
-      ) => Promise<unknown>;
-    }
-  ).handleIdeRequest(
+  return server.forwardIdeRequest(
     mcpClient,
     request,
     timeoutMs,
@@ -101,7 +97,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
       const server = createServer(timer);
       const controller = new AbortController();
       const started = Promise.withResolvers<void>();
-      const completed = Promise.withResolvers<unknown>();
+      const completed = Promise.withResolvers<Awaited<ReturnType<Client["readResource"]>>>();
       const timeoutError = new Error("resource read timed out");
       const abortError = new Error("client cancelled resource read");
       const readResource = mock((_params: { uri: string }, options?: CapturedCallToolOptions) => {
@@ -122,7 +118,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
       const uri = "automobile:devices/booted/android";
       const forwarded = callHandleIdeRequest(
         server,
-        { readResource },
+        new StubMcpClient({ readResource }),
         { id: "resource-options", type: "mcp_request", method: "resources/read", params: { uri } },
         1_000,
         "socket-resource-options",
@@ -174,7 +170,13 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const callTool = mock(async (_params: unknown, _options?: CapturedCallToolOptions) => ({
       content: [],
     }));
-    const client = { listTools, listResources, listResourceTemplates, readResource, callTool };
+    const client = new StubMcpClient({
+      listTools,
+      listResources,
+      listResourceTemplates,
+      readResource,
+      callTool,
+    });
     const uri = "automobile:devices/booted/android";
     for (const method of [
       "tools/list",
@@ -212,34 +214,17 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const timeoutMs = 30_000;
     const deadline = new ProgressExtendableDeadline(fakeTimer.now(), timeoutMs);
     const originalRemainingMs = deadline.value - fakeTimer.now();
-    const result = { content: [{ type: "text", text: "forwarded" }] };
+    const result = { content: [{ type: "text" as const, text: "forwarded" }] };
     let opened = 0;
     server.mcpClientFactory = async () => {
       opened++;
-      return {
-        callTool: async () => result,
-        listTools: async () => ({ tools: [] }),
-        listResources: async () => ({ resources: [] }),
-        readResource: async () => ({ contents: [] }),
-        listResourceTemplates: async () => ({ resourceTemplates: [] }),
-        close: async () => {},
-      };
+      return new StubMcpClient({ callTool: async () => result });
     };
 
     fakeTimer.advanceTime(20_000);
     deadline.extendOnProgress(fakeTimer.now(), timeoutMs);
     fakeTimer.advanceTime(15_000);
     expect(originalRemainingMs - fakeTimer.now()).toBeLessThan(0);
-    const internals = server as unknown as {
-      requireRemainingMcpForwardBudget: (
-        request: DaemonRequest,
-        timeout: number,
-        deadline: ProgressExtendableDeadline,
-        phase: string,
-      ) => number;
-      remainingMcpForwardBudget: (input: { deadline: ProgressExtendableDeadline }) => number;
-      forwardMcpRequest: (input: unknown) => Promise<unknown>;
-    };
     const request: DaemonRequest = {
       id: "recovery-request",
       type: "mcp_request",
@@ -247,12 +232,10 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
       params: { name: "observe", arguments: {} },
       progressToken: "recovery-token",
     };
-    expect(internals.remainingMcpForwardBudget({ deadline })).toBe(15_000);
-    expect(
-      internals.requireRemainingMcpForwardBudget(request, timeoutMs, deadline, "recovery"),
-    ).toBe(15_000);
+    expect(server.remainingForwardBudget(deadline)).toBe(15_000);
+    expect(server.requireForwardBudget(request, timeoutMs, deadline, "recovery")).toBe(15_000);
     await expect(
-      internals.forwardMcpRequest({
+      server.forwardRequest({
         request,
         route: { executionKey: "execution", clientKey: "forward-client" },
         socketSessionId: "socket-forward",
@@ -266,25 +249,17 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
   test("propagates owner-socket cancellation to an abort-ignoring late acquisition", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);
-    const completed = Promise.withResolvers<unknown>();
+    const completed = Promise.withResolvers<Awaited<ReturnType<Client["callTool"]>>>();
     const socketSessionId = "socket-late-acquisition";
-    (
-      server as unknown as {
-        clientSockets: Map<string, { destroyed: boolean }>;
-      }
-    ).clientSockets.set(socketSessionId, { destroyed: false });
-    const requestSignal = (
-      server as unknown as {
-        mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
-      }
-    ).mcpRequestSignal(socketSessionId);
+    server.state.clientSockets.set(socketSessionId, new FakeSocket());
+    const requestSignal = server.requestSignalFor(socketSessionId);
     let forwardedSignal: AbortSignal | undefined;
-    const fakeMcpClient = {
-      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
-        forwardedSignal = options.signal;
+    const fakeMcpClient = new StubMcpClient({
+      callTool: async (_params, options) => {
+        forwardedSignal = options?.signal;
         return await completed.promise;
       },
-    };
+    });
     const request: DaemonRequest = {
       id: "late-acquisition",
       type: "mcp_request",
@@ -303,9 +278,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     );
     await Promise.resolve();
 
-    (server as unknown as { abortMcpRequests: (sessionId: string) => void }).abortMcpRequests(
-      socketSessionId,
-    );
+    server.abortSessionMcpRequests(socketSessionId);
     expect(forwardedSignal?.aborted).toBe(true);
 
     // A late transport result cannot clear cancellation. The MCP server's
@@ -318,57 +291,85 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
 
   test("starts queued MCP work already aborted after its owner socket disconnected", () => {
     const server = createServer(new FakeTimer());
-    const requestSignal = (
-      server as unknown as {
-        mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
-      }
-    ).mcpRequestSignal("disconnected-before-forward");
+    const requestSignal = server.requestSignalFor("disconnected-before-forward");
 
     expect(requestSignal.signal.aborted).toBe(true);
-    expect((requestSignal.signal.reason as Error).message).toBe("Daemon MCP client disconnected");
+    expect(requestSignal.signal.reason).toMatchObject({
+      message: "Daemon MCP client disconnected",
+    });
     requestSignal.dispose();
   });
 
   test("propagates owner-socket cancellation and timeout to discovery list SDK calls", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);
+    type Options = Parameters<Client["listTools"]>[1];
     const discoveryRequests = [
-      { method: "tools/list", result: { tools: [] } },
-      { method: "resources/list", result: { resources: [] } },
-      { method: "resources/list-templates", result: { resourceTemplates: [] } },
-    ] as const;
+      {
+        method: "tools/list",
+        install: (capture: (options: Options) => void) => {
+          const completed = Promise.withResolvers<Awaited<ReturnType<Client["listTools"]>>>();
+          const result = { tools: [] };
+          return {
+            client: new StubMcpClient({
+              listTools: async (_params, options) => {
+                capture(options);
+                return await completed.promise;
+              },
+            }),
+            settle: () => completed.resolve(result),
+            result,
+          };
+        },
+      },
+      {
+        method: "resources/list",
+        install: (capture: (options: Options) => void) => {
+          const completed = Promise.withResolvers<Awaited<ReturnType<Client["listResources"]>>>();
+          const result = { resources: [] };
+          return {
+            client: new StubMcpClient({
+              listResources: async (_params, options) => {
+                capture(options);
+                return await completed.promise;
+              },
+            }),
+            settle: () => completed.resolve(result),
+            result,
+          };
+        },
+      },
+      {
+        method: "resources/list-templates",
+        install: (capture: (options: Options) => void) => {
+          const completed =
+            Promise.withResolvers<Awaited<ReturnType<Client["listResourceTemplates"]>>>();
+          const result = { resourceTemplates: [] };
+          return {
+            client: new StubMcpClient({
+              listResourceTemplates: async (_params, options) => {
+                capture(options);
+                return await completed.promise;
+              },
+            }),
+            settle: () => completed.resolve(result),
+            result,
+          };
+        },
+      },
+    ];
 
-    for (const { method, result } of discoveryRequests) {
-      const completed = Promise.withResolvers<unknown>();
+    for (const { method, install } of discoveryRequests) {
       const socketSessionId = `socket-${method}`;
-      (
-        server as unknown as {
-          clientSockets: Map<string, { destroyed: boolean }>;
-        }
-      ).clientSockets.set(socketSessionId, { destroyed: false });
-      const requestSignal = (
-        server as unknown as {
-          mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
-        }
-      ).mcpRequestSignal(socketSessionId);
-      let capturedOptions: CapturedCallToolOptions | undefined;
-      const fakeMcpClient = {
-        listTools: async (_params?: unknown, options?: CapturedCallToolOptions) => {
-          capturedOptions = options;
-          return await completed.promise;
-        },
-        listResources: async (_params?: unknown, options?: CapturedCallToolOptions) => {
-          capturedOptions = options;
-          return await completed.promise;
-        },
-        listResourceTemplates: async (_params?: unknown, options?: CapturedCallToolOptions) => {
-          capturedOptions = options;
-          return await completed.promise;
-        },
-      };
+      server.state.clientSockets.set(socketSessionId, new FakeSocket());
+      const requestSignal = server.requestSignalFor(socketSessionId);
+      let capturedOptions: Options;
+      const { client, settle, result } = install((options) => {
+        capturedOptions = options;
+      });
       const forwarded = callHandleIdeRequest(
         server,
-        fakeMcpClient,
+        client,
         { id: method, type: "mcp_request", method, params: {} },
         1_000,
         socketSessionId,
@@ -380,12 +381,10 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
 
       expect(capturedOptions?.timeout).toBe(1_000);
       expect(capturedOptions?.signal).toBe(requestSignal.signal);
-      (server as unknown as { abortMcpRequests: (sessionId: string) => void }).abortMcpRequests(
-        socketSessionId,
-      );
+      server.abortSessionMcpRequests(socketSessionId);
       expect(capturedOptions?.signal?.aborted).toBe(true);
 
-      completed.resolve(result);
+      settle();
       await expect(forwarded).resolves.toEqual(result);
       requestSignal.dispose();
     }
@@ -398,12 +397,12 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const deadline = new ProgressExtendableDeadline(fakeTimer.now(), initialTimeoutMs);
 
     let capturedOptions: CapturedCallToolOptions | undefined;
-    const fakeMcpClient = {
-      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
+    const fakeMcpClient = new StubMcpClient({
+      callTool: async (_params, options) => {
         capturedOptions = options;
         return { content: [] };
       },
-    };
+    });
 
     const request: DaemonRequest = {
       id: "1",
@@ -443,17 +442,17 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const initialTimeoutMs = 30_000;
     const deadline = new ProgressExtendableDeadline(fakeTimer.now(), initialTimeoutMs);
 
-    const fakeMcpClient = {
-      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
+    const fakeMcpClient = new StubMcpClient({
+      callTool: async (_params, options) => {
         // Simulate slow device work: tick progress every 20s, well past what
         // the ORIGINAL 30s deadline would have allowed, for 100s total.
         for (let i = 0; i < 5; i++) {
           fakeTimer.advanceTime(20_000);
-          options.onprogress?.({ progress: i + 1, total: 5 });
+          options?.onprogress?.({ progress: i + 1, total: 5 });
         }
         return { content: [] };
       },
-    };
+    });
 
     const request: DaemonRequest = {
       id: "2",
@@ -490,12 +489,12 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const originalDeadlineValue = deadline.value;
 
     let capturedOptions: CapturedCallToolOptions | undefined;
-    const fakeMcpClient = {
-      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
+    const fakeMcpClient = new StubMcpClient({
+      callTool: async (_params, options) => {
         capturedOptions = options;
         return { content: [] };
       },
-    };
+    });
 
     const request: DaemonRequest = {
       id: "3",
@@ -530,14 +529,9 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
    */
   function createAbortAwareFakeMcpClient(
     work: (options: CapturedCallToolOptions) => void | Promise<void>,
-  ): {
-    callTool: (...args: unknown[]) => Promise<unknown>;
-    captured: () => CapturedCallToolOptions;
-  } {
-    let captured: CapturedCallToolOptions | undefined;
-    return {
-      callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
-        captured = options;
+  ): StubMcpClient {
+    return new StubMcpClient({
+      callTool: async (_params, options = {}) => {
         return await new Promise((resolve, reject) => {
           if (options.signal?.aborted) {
             reject(new Error(String(options.signal.reason)));
@@ -551,8 +545,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
             .catch(reject);
         });
       },
-      captured: () => captured!,
-    };
+    });
   }
 
   test("a queued-start request still gets FULL-WINDOW extensions per tick, not the queue-depleted remainder (#6222 review, P1)", async () => {
@@ -674,77 +667,61 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
  */
 describe("pushProgressNotification is independent of the general notification subscription (#6222 review, P2)", () => {
   function createServerWithFakeSocket(): {
-    server: UnixSocketServer;
+    server: UnixSocketServerHarness;
     sessionId: string;
-    writes: string[];
+    socket: FakeSocket<Record<string, unknown>>;
   } {
-    const server = createTestUnixSocketServer(
+    const server = createHarnessServer(
       join(tmpdir(), `progress-subscription-${randomUUID()}.sock`),
-      { isInitialized: () => false },
+      { ...createFakeDaemonState(), isInitialized: () => false },
       new FakeTimer(),
     );
     const sessionId = "socket-unsubscribed";
-    const writes: string[] = [];
-    const fakeSocket = {
-      destroyed: false,
-      write: (data: string) => {
-        writes.push(data);
-        return true;
-      },
-    };
-    (server as unknown as { clientSockets: Map<string, unknown> }).clientSockets.set(
-      sessionId,
-      fakeSocket,
-    );
-    return { server, sessionId, writes };
+    const socket = new FakeSocket<Record<string, unknown>>();
+    server.state.clientSockets.set(sessionId, socket);
+    return { server, sessionId, socket };
   }
 
   function push(
-    server: UnixSocketServer,
+    server: UnixSocketServerHarness,
     sessionId: string,
     progressToken: string | number,
     progress: number,
   ): void {
-    (
-      server as unknown as {
-        pushProgressNotification: (s: string, id: string, t: string | number, p: number) => void;
-      }
-    ).pushProgressNotification(sessionId, "request-1", progressToken, progress);
+    server.pushProgress(sessionId, "request-1", progressToken, progress);
   }
 
   test("delivers a progress tick to a session that never subscribed to general notifications", () => {
-    const { server, sessionId, writes } = createServerWithFakeSocket();
+    const { server, sessionId, socket } = createServerWithFakeSocket();
 
     // Deliberately never send DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD for this
     // session -- it is not in `notificationSubscribers` at all.
     push(server, sessionId, "tok-1", 1);
 
-    expect(writes.length).toBe(1);
-    const frame = JSON.parse(writes[0]);
-    expect(frame.method).toBe(PROGRESS_NOTIFICATION_METHOD);
-    expect(frame.progressToken).toBe("tok-1");
-    expect(frame.requestId).toBe("request-1");
-    expect(frame.progress).toBe(1);
+    expect(socket.writes.length).toBe(1);
+    expect(socket.responses[0]).toMatchObject({
+      method: PROGRESS_NOTIFICATION_METHOD,
+      progressToken: "tok-1",
+      requestId: "request-1",
+      progress: 1,
+    });
   });
 
   test("still skips a torn-down (destroyed) socket, subscribed or not", () => {
-    const { server, sessionId, writes } = createServerWithFakeSocket();
-    const destroyedSocket = (
-      server as unknown as { clientSockets: Map<string, { destroyed: boolean }> }
-    ).clientSockets.get(sessionId)!;
-    destroyedSocket.destroyed = true;
+    const { server, sessionId, socket } = createServerWithFakeSocket();
+    socket.destroyed = true;
 
     push(server, sessionId, "tok-2", 1);
 
-    expect(writes.length).toBe(0);
+    expect(socket.writes.length).toBe(0);
   });
 
   test("still skips a session with no known socket at all", () => {
-    const { server, writes } = createServerWithFakeSocket();
+    const { server, socket } = createServerWithFakeSocket();
 
     push(server, "no-such-session", "tok-3", 1);
 
-    expect(writes.length).toBe(0);
+    expect(socket.writes.length).toBe(0);
   });
 });
 
@@ -758,17 +735,18 @@ describe("request timeout preserves iOS text dispatch evidence", () => {
         const started = Promise.withResolvers<void>();
         let key: string | undefined;
         const timeout = new Error("Request timed out after 4000ms");
-        const callTool = (
-          _params: { arguments: Record<string, unknown> },
-          options: CapturedCallToolOptions,
-        ) => {
-          key = _params.arguments[INTERNAL_LIVE_DEADLINE_KEY_PARAM] as string;
+        const callTool: Client["callTool"] = (params, options) => {
+          const liveKey = params.arguments?.[INTERNAL_LIVE_DEADLINE_KEY_PARAM];
+          if (typeof liveKey !== "string") {
+            throw new Error("missing live deadline key");
+          }
+          key = liveKey;
           if (dispatched) {
-            getLiveTextRequestState(key)?.dispatched();
+            getLiveTextRequestState(liveKey)?.dispatched();
           }
           return new Promise<never>((_resolve, reject) => {
-            const handle = timer.setTimeout(() => reject(timeout), options.timeout ?? 4000);
-            options.signal?.addEventListener(
+            const handle = timer.setTimeout(() => reject(timeout), options?.timeout ?? 4000);
+            options?.signal?.addEventListener(
               "abort",
               () => {
                 timer.clearTimeout(handle);
@@ -781,7 +759,7 @@ describe("request timeout preserves iOS text dispatch evidence", () => {
         };
         const pending = callHandleIdeRequest(
           server,
-          { callTool },
+          new StubMcpClient({ callTool }),
           {
             id: "text-expiry",
             type: "mcp_request",
@@ -800,11 +778,15 @@ describe("request timeout preserves iOS text dispatch evidence", () => {
         timer.advanceTime(4000);
         const result = await pending;
         if (dispatched) {
-          const response = result as { isError: boolean; content: [{ text: string }] };
-          const failure = JSON.parse(response.content[0].text);
-          expect(response.isError).toBe(true);
-          expect(failure.retryable).toBe(false);
-          expect(failure.error).toContain("Do not retry automatically.");
+          expect(result).toMatchObject({ isError: true });
+          expect(result).toMatchObject({
+            content: expect.arrayContaining([
+              expect.objectContaining({ text: expect.stringMatching(/"retryable":\s*false/) }),
+              expect.objectContaining({
+                text: expect.stringContaining("Do not retry automatically."),
+              }),
+            ]),
+          });
         } else if (progress) {
           expect(result).toBe(timeout.message);
         } else {

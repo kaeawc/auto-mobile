@@ -605,7 +605,12 @@ describe("DevicePool", () => {
           deviceId: "emulator-5554",
         },
       ];
-      await devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android", images[0]);
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-2",
+        deviceId: "emulator-5554",
+        platform: "android",
+        sourceImage: images[0],
+      });
       releaseOpen.resolve();
       await drainUntil(
         () => incidentCompleted && !devicePool.isSessionRecoveryInFlight("session-1"),

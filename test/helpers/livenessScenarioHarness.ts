@@ -23,11 +23,12 @@ import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DaemonMcpProxy, type DaemonMcpProxyConfig } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
 import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import { appearanceSocketResponseSchema } from "./wireMessageSchemas";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
@@ -195,6 +196,8 @@ export interface LivenessScenarioOptions {
    * {@link LivenessScenario.holdAsManagedExecution}). Without it the host has no registry.
    */
   bindings?: boolean;
+  /** Build each stdio proxy, e.g. as a `DaemonMcpProxy` subclass that exposes a test seam. */
+  proxyFactory?: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
 }
 
 /** Drops a dead daemon's listeners on process-wide registries. Teardown only, never wiring. */
@@ -255,7 +258,6 @@ const HOST_TOUCHING_DAEMON_METHODS = [
   "writePidFile",
   "persistPidFileData",
   "startHttpIngress",
-  "startHttpServer",
   "bindControlSocket",
   "startServicesAfterSocketBind",
   "startAuxiliarySocket",
@@ -451,6 +453,7 @@ export class LivenessScenario {
   /** The loopback MCP transports the running daemon's socket server holds open, by bound session. */
   private readonly loopbackTransports = new Set<{ sessionUuid: string | undefined }>();
   private readonly bindingsEnabled: boolean;
+  private readonly proxyFactory: (config: DaemonMcpProxyConfig) => DaemonMcpProxy;
   private bindings: BindingRegistry | undefined;
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
@@ -491,6 +494,7 @@ export class LivenessScenario {
     this.realStartAdmission = options.realStartAdmission ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
     this.bindingsEnabled = options.bindings ?? false;
+    this.proxyFactory = options.proxyFactory ?? ((config) => new DaemonMcpProxy(config));
   }
 
   static async start(options: LivenessScenarioOptions = {}): Promise<LivenessScenario> {
@@ -895,7 +899,7 @@ export class LivenessScenario {
         }
       },
     };
-    const proxy = new DaemonMcpProxy({
+    const proxy = this.proxyFactory({
       // A new client per connection attempt, as src/index.ts builds one.
       clientFactory: () => {
         if (client) {
@@ -967,19 +971,13 @@ export class LivenessScenario {
         this.minted = await pool.autolockDevice(deviceId, PLATFORM, connection);
       } else {
         this.minted = `scenario-session-${++this.mintCount}`;
-        await pool.bindOrReuseDeviceSession(
-          this.minted,
+        await pool.bindOrReuseDeviceSession({
+          sessionId: this.minted,
           deviceId,
-          PLATFORM,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          connection,
-        );
+          platform: PLATFORM,
+          allowSessionRebind: false,
+          mcpSessionId: connection,
+        });
       }
       // Acquisition prepared the device, as getAndroid's readiness setup records.
       manager.setDeviceReadiness(this.minted, "automationReady");
@@ -1109,19 +1107,13 @@ export class LivenessScenario {
    */
   async acquireTokenless(deviceId: string = this.deviceIds[0]!): Promise<string> {
     const sessionId = `desktop-session-${++this.mintCount}`;
-    await this.daemon.pool.bindOrReuseDeviceSession(
+    await this.daemon.pool.bindOrReuseDeviceSession({
       sessionId,
       deviceId,
-      PLATFORM,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      DESKTOP_CONNECTION,
-    );
+      platform: PLATFORM,
+      allowSessionRebind: false,
+      mcpSessionId: DESKTOP_CONNECTION,
+    });
     return sessionId;
   }
 
@@ -1225,7 +1217,7 @@ export class LivenessScenario {
       }),
     );
     await internals.pendingBySocket.get(socket);
-    const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0]!;
+    const response = socket.getWrittenMessages(appearanceSocketResponseSchema)[0]!;
     return { response, applied };
   }
 

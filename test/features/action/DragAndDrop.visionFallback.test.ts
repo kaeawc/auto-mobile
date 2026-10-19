@@ -76,10 +76,8 @@ describe("DragAndDrop vision fallback", () => {
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
-    } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as any,
-    );
+    });
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
   });
 
   afterEach(() => {
@@ -92,8 +90,8 @@ describe("DragAndDrop vision fallback", () => {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
     });
-    (dnd as any).observeScreen = fakeObserveScreen;
     return dnd;
   };
 
@@ -168,8 +166,8 @@ describe("DragAndDrop vision fallback", () => {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
     });
-    (dnd as any).observeScreen = fakeObserveScreen;
 
     const result = await dnd.execute({
       source: { text: "MissingSource" },

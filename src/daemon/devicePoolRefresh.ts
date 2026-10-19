@@ -1,5 +1,6 @@
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, Platform } from "../models";
 import type {
@@ -313,8 +314,8 @@ export class DevicePoolRefresh {
   }
 
   private logDiscoveryEnvironment(): void {
-    const androidHome = process.env.ANDROID_HOME || "(not set)";
-    const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
+    const androidHome = readEnvRaw(AMBIENT_ENV.ANDROID_HOME) || "(not set)";
+    const androidSdkRoot = readEnvRaw(AMBIENT_ENV.ANDROID_SDK_ROOT) || "(not set)";
     logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
   }
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { expireIfDue } from "../helpers/expireIfDue";
 import type { Kysely } from "kysely";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
@@ -6,6 +7,7 @@ import {
 } from "../../src/daemon/constants";
 import {
   handleDaemonRequest,
+  type DaemonMethodResult,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
@@ -43,13 +45,17 @@ const idleRefusal = {
   details: { sessionUuid: SESSION, reason: "cleanup-expired", idle: true },
   releaseReason: "cleanup-expired",
   idle: true,
-};
+} satisfies DaemonMethodResult;
 const bareNotFound = {
   success: false,
   code: DAEMON_SESSION_NOT_FOUND_CODE,
   error: `Session not found: ${SESSION}`,
-};
-const idleNotFound = { ...bareNotFound, releaseReason: "cleanup-expired", idle: true };
+} satisfies DaemonMethodResult;
+const idleNotFound = {
+  ...bareNotFound,
+  releaseReason: "cleanup-expired",
+  idle: true,
+} satisfies DaemonMethodResult;
 
 describe("registerSession during lazy idle expiry (#12042)", () => {
   let db: Kysely<Database>;
@@ -162,7 +168,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
 
   test("a finished idle release refuses registration", async () => {
     expireWithoutLookup();
-    expect(manager.getSession(SESSION)).toBeNull();
+    expect(expireIfDue(manager, SESSION)).toBeNull();
     finishRestore();
     await manager.waitForSessionRelease(SESSION);
 
@@ -349,7 +355,11 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
       expect(await sessionInfo()).toEqual(bareNotFound);
       finishRestore();
       await release;
-      const released = { ...bareNotFound, releaseReason: "expired", idle: true };
+      const released = {
+        ...bareNotFound,
+        releaseReason: "expired",
+        idle: true,
+      } satisfies DaemonMethodResult;
       expect(await heartbeat()).toEqual(released);
       expect(await sessionInfo()).toEqual(released);
     } finally {
@@ -365,7 +375,11 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     try {
       await drainUntil(() => restoreStarted, { description: "CLI idle keep-awake restore" });
       expectPreFenceRestore();
-      const released = { ...bareNotFound, releaseReason: "cli-idle-timeout", idle: true };
+      const released = {
+        ...bareNotFound,
+        releaseReason: "cli-idle-timeout",
+        idle: true,
+      } satisfies DaemonMethodResult;
       expect(await manager.getReleasedSessionReason(SESSION)).toBe("cli-idle-timeout");
       expect(await heartbeat()).toEqual(released);
       finishRestore();

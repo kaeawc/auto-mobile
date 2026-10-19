@@ -168,14 +168,24 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
 
     const refusal = await pool
-      .bindOrReuseDeviceSession("someone-else", SIM_A, "ios", undefined, undefined, ios(SIM_A))
+      .bindOrReuseDeviceSession({
+        sessionId: "someone-else",
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      })
       .catch((error: unknown) => error);
 
     expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
     expect((refusal as Error).message).toContain("row-a");
     expect(pool.getDevice(SIM_A)?.sessionId).toBeNull();
     await expect(
-      pool.bindOrReuseDeviceSession("row-a", SIM_A, "ios", undefined, undefined, ios(SIM_A)),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "row-a",
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      }),
     ).resolves.toBe("row-a");
   });
 
@@ -207,7 +217,12 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     bindingExecSession = "slot-exec";
 
     await expect(
-      pool.bindOrReuseDeviceSession("slot-exec", SIM_A, "ios", undefined, undefined, ios(SIM_A)),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "slot-exec",
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      }),
     ).resolves.toBe("slot-exec");
     expect(pool.getDevice(SIM_A)?.sessionId).toBe("slot-exec");
 
@@ -224,7 +239,12 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
 
     await expect(
-      pool.bindOrReuseDeviceSession("someone-else", SIM_A, "ios", undefined, undefined, ios(SIM_A)),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "someone-else",
+        deviceId: SIM_A,
+        platform: "ios",
+        expectedIdentity: ios(SIM_A),
+      }),
     ).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
   });
 

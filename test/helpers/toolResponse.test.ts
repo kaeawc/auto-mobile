@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readToolResponse, toolIsError, toolJson, toolStructured, toolText } from "./toolResponse";
+import {
+  readToolResponse,
+  toolField,
+  toolIsError,
+  toolJson,
+  toolStructured,
+  toolText,
+} from "./toolResponse";
 
 describe("toolResponse helpers", () => {
   const ok = { content: [{ type: "text", text: '{"a":1}' }], structuredContent: { b: 2 } };
@@ -17,7 +24,21 @@ describe("toolResponse helpers", () => {
     expect(() => readToolResponse({ content: "x" })).toThrow("invalid response");
     expect(() => toolText({ content: [] })).toThrow("no text in content[0]");
     expect(() => toolText({ content: [{ type: "image" }] })).toThrow("no text");
-    expect(() => toolJson({ content: [{ text: "[1]" }] })).toThrow("not a JSON object");
+    expect(() => toolText({ content: [{ type: "image", text: "looks like text" }] })).toThrow(
+      "no text",
+    );
+    expect(() => toolJson({ content: [{ type: "text", text: "[1]" }] })).toThrow(
+      "not a JSON object",
+    );
     expect(() => toolStructured({ content: [] })).toThrow("no structuredContent");
+  });
+
+  test("toolField reads own structuredContent keys and tolerates missing payloads", () => {
+    const response = { content: [], structuredContent: { success: true } };
+    expect(toolField(response, "success")).toBe(true);
+    expect(toolField(response, "missing")).toBeUndefined();
+    expect(toolField(response, "toString")).toBeUndefined();
+    expect(toolField({ content: [] }, "success")).toBeUndefined();
+    expect(toolField(undefined, "success")).toBeUndefined();
   });
 });

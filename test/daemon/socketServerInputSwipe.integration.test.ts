@@ -11,11 +11,13 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -28,7 +30,7 @@ import {
 
 describe("UnixSocketServer input/swipe", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
@@ -72,11 +74,11 @@ describe("UnixSocketServer input/swipe", () => {
     const createMcpClient = mock(async () => {
       throw new Error("input/swipe should not create an MCP client");
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -126,13 +128,15 @@ describe("UnixSocketServer input/swipe", () => {
       return { success: true };
     });
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      requestDrag,
-      getScreenScaleMetadata: () => null,
-      requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      createIosTestClient(iosDevice, {
+        requestDrag,
+        getScreenScaleMetadata: () => null,
+        requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
+      }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -176,12 +180,14 @@ describe("UnixSocketServer input/swipe", () => {
       args[10]?.();
       return { success: true };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      requestDrag,
-      getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      createIosTestClient(iosDevice, {
+        requestDrag,
+        getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
+      }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -219,14 +225,14 @@ describe("UnixSocketServer input/swipe", () => {
         return { success: true };
       },
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
     const mcpAutolockSessions = new Map<string, string>();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
@@ -248,9 +254,7 @@ describe("UnixSocketServer input/swipe", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = server.sessionIds[0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -288,12 +292,12 @@ describe("UnixSocketServer input/swipe", () => {
       inFlight -= 1;
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const [first, second] = await Promise.all([
@@ -335,11 +339,11 @@ describe("UnixSocketServer input/swipe", () => {
       }
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, { requestSwipe }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const first = sendRequest(socketPath, "input/swipe", {
@@ -386,7 +390,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("surfaces platform discovery failures before device targeting errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([], new Set()));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -404,7 +408,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("rejects missing and non-numeric coordinates with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/swipe", {
@@ -433,7 +437,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("rejects duration outside the supported bounds", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const zero = await sendRequest(socketPath, "input/swipe", {
@@ -478,10 +482,7 @@ describe("UnixSocketServer input/swipe", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-    spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
-    const deviceRequest = spyOn(client, "requestSwipe").mockImplementation(
+    const deviceRequest = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
         args[9]?.throwIfAborted();
         args[8]?.();
@@ -491,12 +492,18 @@ describe("UnixSocketServer input/swipe", () => {
         return { success: true, totalTimeMs: 1 };
       },
     );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, {
+        getScreenScaleMetadata: () => null,
+        requestSwipe: deviceRequest,
+      }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-swipe-after-dispatch-session";
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/swipe", {
       platform: "android",
@@ -537,10 +544,7 @@ describe("UnixSocketServer input/swipe", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-    spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
-    const deviceRequest = spyOn(client, "requestSwipe").mockImplementation(
+    const deviceRequest = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
         operationStarted.resolve();
         await releaseOperation.promise;
@@ -550,12 +554,18 @@ describe("UnixSocketServer input/swipe", () => {
         return { success: true, totalTimeMs: 1 };
       },
     );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(androidDevice, {
+        getScreenScaleMetadata: () => null,
+        requestSwipe: deviceRequest,
+      }),
+    );
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const sessionId = "direct-swipe-before-dispatch-session";
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/swipe", {
       platform: "android",

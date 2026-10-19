@@ -16,8 +16,8 @@ import type { SetTextOptions } from "../DeviceService";
 import {
   resolveTextCtrlProxyTimeoutMs,
   getTextRequestDeadlineMs,
-  TextIndeterminateError,
 } from "../../action/textTransportTimeout";
+import { TextIndeterminateError } from "../../action/TextIndeterminateError";
 import { combineWithAmbientAbort, getRequestContext } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";

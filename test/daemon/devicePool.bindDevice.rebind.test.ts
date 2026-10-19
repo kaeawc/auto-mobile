@@ -48,7 +48,11 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
 
-      const sessionId = await devicePool.bindOrReuseDeviceSession("session-1", "sim-1", "ios");
+      const sessionId = await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "sim-1",
+        platform: "ios",
+      });
 
       expect(sessionId).toBe("session-1");
       const device = devicePool.getDevice("sim-1");
@@ -76,7 +80,11 @@ describe("DevicePool", () => {
         await devicePool.removeDisconnectedDevice(captured.id, false);
         expect(devicePool.getDevice(captured.id)).toBe(captured);
         await expect(
-          devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "session-1",
+            deviceId: device.deviceId,
+            platform: device.platform,
+          }),
         ).rejects.toThrow(/shutting down/);
 
         process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
@@ -97,7 +105,11 @@ describe("DevicePool", () => {
       await devicePool.refreshDevices();
       expect(devicePool.getAvailableDeviceCount()).toBe(1);
       await expect(
-        devicePool.bindOrReuseDeviceSession("session-1", device.deviceId, device.platform),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: device.deviceId,
+          platform: device.platform,
+        }),
       ).resolves.toBe("session-1");
     });
 
@@ -106,17 +118,18 @@ describe("DevicePool", () => {
         createBootedDevice("emulator-old"),
         createBootedDevice("emulator-new"),
       ]);
-      await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-old",
+        platform: "android",
+      });
 
-      await devicePool.bindOrReuseDeviceSession(
-        "session-1",
-        "emulator-new",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-new",
+        platform: "android",
+        allowSessionRebind: true,
+      });
 
       expect(devicePool.getDevice("emulator-old")).toMatchObject({
         sessionId: null,
@@ -141,7 +154,7 @@ describe("DevicePool", () => {
       let sessionCancellations: string[];
       let cancelImpl: () => Promise<number>;
 
-      beforeEach(async () => {
+      async function arrangeHarness(): Promise<void> {
         cancellations = [];
         sessionCancellations = [];
         cancelImpl = async () => 1;
@@ -174,76 +187,95 @@ describe("DevicePool", () => {
           createBootedDevice("emulator-old"),
           createBootedDevice("emulator-new"),
         ]);
-        await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
-      });
+        await devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: "emulator-old",
+          platform: "android",
+        });
+      }
+
+      // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+      function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+        test(
+          name,
+          async () => {
+            await arrangeHarness();
+            await fn();
+          },
+          timeout,
+        );
+      }
 
       const rebind = () =>
-        devicePool.bindOrReuseDeviceSession(
-          "session-1",
-          "emulator-new",
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
-
-      test("cancels work on the old device, excluding the caller, before it goes idle", async () => {
-        expect(cancellations).toEqual([]);
-
-        await rebind();
-
-        expect(cancellations).toHaveLength(1);
-        const [cancellation] = cancellations;
-        expect(cancellation).toMatchObject({
-          deviceId: "emulator-old",
-          excludeExecutionId: "set-active-device-execution",
-          onlySessionUuid: "session-1",
-          oldDeviceStatus: "busy",
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: "emulator-new",
+          platform: "android",
+          allowSessionRebind: true,
         });
-        // The caller-visible reason says what happened and is not a device-lost outcome.
-        expect(cancellation.reason).toBeInstanceOf(ActionableError);
-        expect(cancellation.reason).not.toBeInstanceOf(DeviceLostError);
-        expect(cancellation.reason).toHaveProperty(
-          "message",
-          expect.stringMatching(
-            /Session session-1 was rebound from device 'emulator-old' to another device/,
-          ),
-        );
-        // Only device-bound work on the old device is cancelled: a session-wide
-        // cancel would also stop calls already running on the new device.
-        expect(sessionCancellations).toEqual([]);
-        expect(devicePool.getDevice("emulator-old")).toMatchObject({
-          sessionId: null,
-          status: "idle",
-        });
-      });
 
-      test("keeps the old device out of the pool until cancelled work has settled", async () => {
-        const settled = Promise.withResolvers<number>();
-        const cancelStarted = Promise.withResolvers<void>();
-        cancelImpl = () => {
-          cancelStarted.resolve();
-          return settled.promise;
-        };
+      arranged(
+        "cancels work on the old device, excluding the caller, before it goes idle",
+        async () => {
+          expect(cancellations).toEqual([]);
 
-        const rebinding = rebind();
-        await cancelStarted.promise;
+          await rebind();
 
-        expect(cancellations).toHaveLength(1);
-        expect(devicePool.getDevice("emulator-old")?.status).toBe("busy");
-        expect(devicePool.getDevice("emulator-old")?.sessionId).toBe("session-1");
+          expect(cancellations).toHaveLength(1);
+          const [cancellation] = cancellations;
+          expect(cancellation).toMatchObject({
+            deviceId: "emulator-old",
+            excludeExecutionId: "set-active-device-execution",
+            onlySessionUuid: "session-1",
+            oldDeviceStatus: "busy",
+          });
+          // The caller-visible reason says what happened and is not a device-lost outcome.
+          expect(cancellation.reason).toBeInstanceOf(ActionableError);
+          expect(cancellation.reason).not.toBeInstanceOf(DeviceLostError);
+          expect(cancellation.reason).toHaveProperty(
+            "message",
+            expect.stringMatching(
+              /Session session-1 was rebound from device 'emulator-old' to another device/,
+            ),
+          );
+          // Only device-bound work on the old device is cancelled: a session-wide
+          // cancel would also stop calls already running on the new device.
+          expect(sessionCancellations).toEqual([]);
+          expect(devicePool.getDevice("emulator-old")).toMatchObject({
+            sessionId: null,
+            status: "idle",
+          });
+        },
+      );
 
-        settled.resolve(1);
-        await rebinding;
+      arranged(
+        "keeps the old device out of the pool until cancelled work has settled",
+        async () => {
+          const settled = Promise.withResolvers<number>();
+          const cancelStarted = Promise.withResolvers<void>();
+          cancelImpl = () => {
+            cancelStarted.resolve();
+            return settled.promise;
+          };
 
-        expect(devicePool.getDevice("emulator-old")).toMatchObject({
-          sessionId: null,
-          status: "idle",
-        });
-      });
+          const rebinding = rebind();
+          await cancelStarted.promise;
 
-      test("still releases the old device when the canceller fails", async () => {
+          expect(cancellations).toHaveLength(1);
+          expect(devicePool.getDevice("emulator-old")?.status).toBe("busy");
+          expect(devicePool.getDevice("emulator-old")?.sessionId).toBe("session-1");
+
+          settled.resolve(1);
+          await rebinding;
+
+          expect(devicePool.getDevice("emulator-old")).toMatchObject({
+            sessionId: null,
+            status: "idle",
+          });
+        },
+      );
+
+      arranged("still releases the old device when the canceller fails", async () => {
         cancelImpl = async () => {
           throw new Error("drain failed");
         };
@@ -257,70 +289,80 @@ describe("DevicePool", () => {
         expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-new");
       });
 
-      test("with the real tracker, stops only the rebinding session's work with a clear message", async () => {
-        const tracker = new ExecutionTracker(
-          fakeTimer,
-          new FakeIdGenerator(["own", "peer", "sessionless", "caller", "pending"]),
-        );
-        devicePool = makePool({
-          ambientExecutionIdReader: { getExecutionId: () => "caller" },
-          cancelDeviceSessionExecutions: Object.assign(
-            tracker.cancelDeviceSessionExecutions.bind(tracker),
-            { cancelDeviceExecutions: tracker.cancelDeviceExecutions.bind(tracker) },
-          ),
+      arranged(
+        "with the real tracker, stops only the rebinding session's work with a clear message",
+        async () => {
+          const tracker = new ExecutionTracker(
+            fakeTimer,
+            new FakeIdGenerator(["own", "peer", "sessionless", "caller", "pending"]),
+          );
+          devicePool = makePool({
+            ambientExecutionIdReader: { getExecutionId: () => "caller" },
+            cancelDeviceSessionExecutions: Object.assign(
+              tracker.cancelDeviceSessionExecutions.bind(tracker),
+              { cancelDeviceExecutions: tracker.cancelDeviceExecutions.bind(tracker) },
+            ),
+          });
+          await initializeLiveDevices([
+            createBootedDevice("emulator-old"),
+            createBootedDevice("emulator-new"),
+          ]);
+          await devicePool.bindOrReuseDeviceSession({
+            sessionId: "session-1",
+            deviceId: "emulator-old",
+            platform: "android",
+          });
+          const own = tracker.startExecution("observe", undefined, "session-1");
+          const peer = tracker.startExecution("observe", undefined, "session-2");
+          const sessionless = tracker.startExecution("observe");
+          const caller = tracker.startExecution("setActiveDevice", undefined, "session-1");
+          // Admitted for session-1 but not yet bound to the old device when the rebind lands (#9958).
+          const pending = tracker.startExecution("tapOn", undefined, "session-1");
+          for (const execution of [own, peer, sessionless, caller]) {
+            tracker.bindDeviceExecution(execution.id, "emulator-old");
+          }
+
+          await rebind();
+
+          expect(() => tracker.bindDeviceExecution(pending.id, "emulator-old")).toThrow(
+            /was rebound from device 'emulator-old'/,
+          );
+          expect(() => tracker.bindDeviceExecution(own.id, "emulator-old")).toThrow(
+            ActionableError,
+          );
+          tracker.bindDeviceExecution(pending.id, "emulator-new");
+          tracker.bindDeviceExecution(peer.id, "emulator-old");
+          tracker.bindDeviceExecution(sessionless.id, "emulator-old");
+
+          const reason = own.abortController.signal.reason;
+          expect(reason).toBeInstanceOf(ActionableError);
+          expect(reason).not.toBeInstanceOf(DeviceLostError);
+          expect(reason.message).toContain("was rebound from device 'emulator-old'");
+          expect(peer.abortController.signal.aborted).toBe(false);
+          expect(sessionless.abortController.signal.aborted).toBe(false);
+          expect(caller.abortController.signal.aborted).toBe(false);
+        },
+      );
+
+      arranged("does not cancel anything when the session stays on the same device", async () => {
+        await devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: "emulator-old",
+          platform: "android",
+          allowSessionRebind: true,
         });
-        await initializeLiveDevices([
-          createBootedDevice("emulator-old"),
-          createBootedDevice("emulator-new"),
-        ]);
-        await devicePool.bindOrReuseDeviceSession("session-1", "emulator-old", "android");
-        const own = tracker.startExecution("observe", undefined, "session-1");
-        const peer = tracker.startExecution("observe", undefined, "session-2");
-        const sessionless = tracker.startExecution("observe");
-        const caller = tracker.startExecution("setActiveDevice", undefined, "session-1");
-        // Admitted for session-1 but not yet bound to the old device when the rebind lands (#9958).
-        const pending = tracker.startExecution("tapOn", undefined, "session-1");
-        for (const execution of [own, peer, sessionless, caller]) {
-          tracker.bindDeviceExecution(execution.id, "emulator-old");
-        }
-
-        await rebind();
-
-        expect(() => tracker.bindDeviceExecution(pending.id, "emulator-old")).toThrow(
-          /was rebound from device 'emulator-old'/,
-        );
-        expect(() => tracker.bindDeviceExecution(own.id, "emulator-old")).toThrow(ActionableError);
-        tracker.bindDeviceExecution(pending.id, "emulator-new");
-        tracker.bindDeviceExecution(peer.id, "emulator-old");
-        tracker.bindDeviceExecution(sessionless.id, "emulator-old");
-
-        const reason = own.abortController.signal.reason;
-        expect(reason).toBeInstanceOf(ActionableError);
-        expect(reason).not.toBeInstanceOf(DeviceLostError);
-        expect(reason.message).toContain("was rebound from device 'emulator-old'");
-        expect(peer.abortController.signal.aborted).toBe(false);
-        expect(sessionless.abortController.signal.aborted).toBe(false);
-        expect(caller.abortController.signal.aborted).toBe(false);
-      });
-
-      test("does not cancel anything when the session stays on the same device", async () => {
-        await devicePool.bindOrReuseDeviceSession(
-          "session-1",
-          "emulator-old",
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
 
         expect(cancellations).toEqual([]);
         expect(devicePool.getDevice("emulator-old")?.sessionId).toBe("session-1");
       });
 
-      test("does not cancel when a rebind is refused", async () => {
+      arranged("does not cancel when a rebind is refused", async () => {
         await expect(
-          devicePool.bindOrReuseDeviceSession("session-1", "emulator-new", "android"),
+          devicePool.bindOrReuseDeviceSession({
+            sessionId: "session-1",
+            deviceId: "emulator-new",
+            platform: "android",
+          }),
         ).rejects.toThrow(/already assigned to device/);
 
         expect(cancellations).toEqual([]);
@@ -349,22 +391,23 @@ describe("DevicePool", () => {
       });
 
       const rebind = (sessionId: string) =>
-        devicePool.bindOrReuseDeviceSession(
+        devicePool.bindOrReuseDeviceSession({
           sessionId,
-          "emulator-new",
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
+          deviceId: "emulator-new",
+          platform: "android",
+          allowSessionRebind: true,
+        });
 
       test("allows another session to drive the old device after rebind", async () => {
         const sessionId = await devicePool.autolockDevice("emulator-old", "android", "mcp-1");
         expect(sessionId).toBeDefined();
 
         await rebind(sessionId!);
-        await devicePool.bindOrReuseDeviceSession("next-owner", "emulator-old", "android");
+        await devicePool.bindOrReuseDeviceSession({
+          sessionId: "next-owner",
+          deviceId: "emulator-old",
+          platform: "android",
+        });
 
         expect(() => devicePool.assertAutolockAccess("emulator-old", "next-owner")).not.toThrow();
         expect(devicePool.getDevice("emulator-old")).toMatchObject({
@@ -392,7 +435,11 @@ describe("DevicePool", () => {
           ),
         ).toBeUndefined();
         await devicePool.releaseDevice("emulator-new", sessionId!);
-        await devicePool.bindOrReuseDeviceSession("next-owner", "emulator-old", "android");
+        await devicePool.bindOrReuseDeviceSession({
+          sessionId: "next-owner",
+          deviceId: "emulator-old",
+          platform: "android",
+        });
 
         expect(() => devicePool.assertAutolockAccess("emulator-old", "next-owner")).not.toThrow();
         expect(devicePool.getDevice("emulator-old")?.autolockSessionId).toBeUndefined();
@@ -511,7 +558,11 @@ describe("DevicePool", () => {
           status: "idle",
           autolockSessionId: undefined,
         });
-        await devicePool.bindOrReuseDeviceSession("next-owner", "emulator-old", "android");
+        await devicePool.bindOrReuseDeviceSession({
+          sessionId: "next-owner",
+          deviceId: "emulator-old",
+          platform: "android",
+        });
         expect(() => devicePool.assertAutolockAccess("emulator-old", "next-owner")).not.toThrow();
       });
     });
@@ -524,7 +575,11 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [reconnected];
 
       await expect(
-        devicePool.bindOrReuseDeviceSession("session-1", reconnected.deviceId, "android"),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: reconnected.deviceId,
+          platform: "android",
+        }),
       ).resolves.toBe("session-1");
 
       expect(devicePool.getDevice(reconnected.deviceId)).toMatchObject({
@@ -591,14 +646,12 @@ describe("DevicePool", () => {
       ];
 
       await expect(
-        devicePool.bindOrReuseDeviceSession(
-          "session-1",
-          "emulator-5554",
-          "android",
-          undefined,
-          undefined,
-          createBootedDevice("emulator-5554", "android", "New Pixel"),
-        ),
+        devicePool.bindOrReuseDeviceSession({
+          sessionId: "session-1",
+          deviceId: "emulator-5554",
+          platform: "android",
+          expectedIdentity: createBootedDevice("emulator-5554", "android", "New Pixel"),
+        }),
       ).rejects.toThrow(/Device pool identity mismatch.*Old Pixel/);
 
       expect(devicePool.getDevice("emulator-5554")?.sessionId).toBeNull();

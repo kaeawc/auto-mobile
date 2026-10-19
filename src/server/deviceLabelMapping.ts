@@ -1,11 +1,17 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { releasePlanSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { ActionableError } from "../models";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import type { SessionOptions } from "./ToolExecutionContext";
-import type { DeviceLabelMap, SessionExecutionMetadata } from "../daemon/sessionManager";
+import type {
+  DeviceLabelMap,
+  SessionExecutionMetadata,
+  SessionManager,
+} from "../daemon/sessionManager";
+import type { DevicePool } from "../daemon/devicePool";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { logger } from "../utils/logger";
+import { holdTaskDeviceLeases } from "./tasks/runAsTask";
 import { combineAbortSignals } from "../utils/AbortContext";
 
 const buildDeviceLabelList = (labels: string[]): string[] => {
@@ -50,14 +56,10 @@ export const buildDeviceLabelMap = (
   return map;
 };
 
-export const getDeviceLabelMap = (baseSessionUuid: string): DeviceLabelMap | null => {
-  if (!DaemonState.getInstance().isInitialized()) {
-    return null;
-  }
-
-  const sessionManager = DaemonState.getInstance().getSessionManager();
-  return sessionManager.getDeviceLabels(baseSessionUuid) ?? null;
-};
+export const getDeviceLabelMap = (
+  baseSessionUuid: string,
+  daemon: DaemonContext = defaultDaemonContext,
+): DeviceLabelMap | null => daemon.sessionManager()?.getDeviceLabels(baseSessionUuid) ?? null;
 
 /**
  * Whether a plan's label map gives it sessions other than its base. `buildDeviceLabelMap` maps the
@@ -84,10 +86,10 @@ export const failedPlanSessionHoldable = (baseSessionUuid: string): boolean =>
  * (`baseSessionUuid ?? sessionUuid`). A derived label session maps back to its base so the
  * reported `sessionHeld` comes from the same id as the release (#11111).
  */
-export const planLifecycleSessionUuid = (sessionUuid: string): string =>
-  (DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getSessionManager().getBaseSessionOfDerivedLabel(sessionUuid)
-    : undefined) ?? sessionUuid;
+export const planLifecycleSessionUuid = (
+  sessionUuid: string,
+  daemon: DaemonContext = defaultDaemonContext,
+): string => daemon.sessionManager()?.getBaseSessionOfDerivedLabel(sessionUuid) ?? sessionUuid;
 
 /**
  * No general pool/boot parallel-start limit exists in devicePool.ts. Its
@@ -180,6 +182,19 @@ export const setUpLabelSessionsConcurrently = async (options: {
   signal?.throwIfAborted();
 };
 
+/** The pool and session manager multi-device plans allocate through; throws when the daemon is not initialized. */
+export function requireMultiDeviceDaemon(): {
+  devicePool: DevicePool;
+  sessionManager: SessionManager;
+} {
+  const devicePool = defaultDaemonContext.fullDevicePool();
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!devicePool || !sessionManager) {
+    throw new ActionableError("Multi-device plans require an active daemon session.");
+  }
+  return { devicePool, sessionManager };
+}
+
 export const registerDeviceLabelMap = async (
   baseSessionUuid: string,
   labels: string[],
@@ -188,12 +203,11 @@ export const registerDeviceLabelMap = async (
   execution?: SessionExecutionMetadata,
   signal?: AbortSignal,
 ): Promise<DeviceLabelMap> => {
-  if (!DaemonState.getInstance().isInitialized()) {
+  const devicePool = defaultDaemonContext.fullDevicePool();
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!devicePool || !sessionManager) {
     throw new ActionableError("Device labels require an active daemon session.");
   }
-
-  const devicePool = DaemonState.getInstance().getDevicePool();
-  const sessionManager = DaemonState.getInstance().getSessionManager();
   const deviceLabelMap = buildDeviceLabelMap(labels, baseSessionUuid, primaryLabel);
 
   if (Object.keys(deviceLabelMap).length === 0) {
@@ -204,6 +218,8 @@ export const registerDeviceLabelMap = async (
   // expiry checker uses it to keep every labeled session alive for the active
   // base-plan execution while allocation/setup crosses an idle deadline.
   sessionManager.setDeviceLabels(baseSessionUuid, deviceLabelMap);
+  // As an MCP task (#13088) the plan holds each label session alive until the task settles.
+  holdTaskDeviceLeases(Object.values(deviceLabelMap));
   await createToolExecutionContext(
     baseSessionUuid,
     sessionManager,
@@ -244,17 +260,16 @@ export const releaseDeviceLabelSessions = async (
   baseSessionUuid: string,
   excludeExecutionId: string | undefined = getToolSelectionContext()?.execution?.executionId,
 ): Promise<string[]> => {
-  if (!DaemonState.getInstance().isInitialized()) {
-    return [];
-  }
-
   const map = getDeviceLabelMap(baseSessionUuid);
   if (!map) {
     return [];
   }
 
-  const devicePool = DaemonState.getInstance().getDevicePool();
-  const sessionManager = DaemonState.getInstance().getSessionManager();
+  const devicePool = defaultDaemonContext.devicePoolWrites();
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!devicePool || !sessionManager) {
+    return [];
+  }
   const sessions = new Set(Object.values(map));
   const released: string[] = [];
 

@@ -254,7 +254,11 @@ describe("DownloadsFixtureService (#7007)", () => {
     const staging = Promise.withResolvers<StageSharedStorageResult>();
     try {
       await devicePool.initializeWithDevices([androidDevice]);
-      await devicePool.bindOrReuseDeviceSession("session-1", androidDevice.deviceId, "android");
+      await devicePool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+      });
       DaemonState.getInstance().initialize(sessionManager, devicePool);
       const service = createDownloadsFixtureService({
         resolveActiveSession: () => activeAndroid("session-1"),

@@ -1,10 +1,10 @@
+import type { MediaType, MediaView } from "../../models/MediaView";
 import type { Element } from "../../models/Element";
 import { ElementBounds } from "../../models/ElementBounds";
 import { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 
-export type MediaType = "image" | "video" | "loading" | "mixed";
 export type FlattenedElementEntry = {
   element: Element;
   index: number;
@@ -12,16 +12,7 @@ export type FlattenedElementEntry = {
   text?: string;
 };
 
-export interface MediaView {
-  viewId?: string;
-  className: string;
-  mediaType: MediaType;
-  bounds: ElementBounds;
-  contentDescription?: string;
-  resourceId?: string;
-  sourceUrl?: string;
-  isLoading?: boolean;
-}
+export type { MediaType, MediaView };
 
 interface PatternSet {
   image: RegExp[];

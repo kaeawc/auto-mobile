@@ -62,7 +62,7 @@ describe("behaviour-driving JSON columns are validated on read (#11859)", () => 
   test("failure group with wrong-shaped aggregates falls back and logs", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1000000);
-    const repo = new FailureAnalyticsRepository(timer, db);
+    const repo = new FailureAnalyticsRepository(db, timer);
     await repo.recordFailure({
       type: "crash",
       signature: "sig",

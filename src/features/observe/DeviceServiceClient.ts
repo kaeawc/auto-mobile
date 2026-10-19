@@ -24,7 +24,7 @@ import {
 } from "./ScreenshotBackoffScheduler";
 
 import WebSocket from "ws";
-import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -39,14 +39,20 @@ import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExec
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
-import type { DelegateContext } from "./shared/types";
+import type { CtrlSocket, DelegateContext } from "./shared/types";
+import {
+  createConnectionTestHooks,
+  type DeviceServiceClientConnectionTestHooks,
+} from "./DeviceServiceClientConnectionTestHooks";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
+import { RealCtrlProxyWebSocketInTestError } from "./RealCtrlProxyWebSocketInTestError";
+import { ObserverPendingRequestTimeoutError } from "./ObserverPendingRequestTimeoutError";
 
 /**
  * Factory function type for creating WebSocket instances.
  * Used for testing to inject fake WebSocket implementations.
  */
-export type WebSocketFactory = (url: string) => WebSocket;
+export type WebSocketFactory = (url: string) => CtrlSocket;
 
 /**
  * Env flag a unit test sets (`1`/`true`/`yes`) to opt into a real WebSocket from
@@ -59,20 +65,6 @@ export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = "AUTOMOBILE_ALLOW_REAL_CTRL_
 function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
   const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
-}
-
-/**
- * Thrown by {@link assertUnitTestRealWebSocketAllowed}. It is a test-harness
- * misconfiguration, not a connect failure: every catch on the connect path
- * rethrows it before recording a failed attempt, so a leaking unit test fails
- * loudly and never counts toward the platform clients' service recovery or
- * restart (which would act on an attached device).
- */
-export class RealCtrlProxyWebSocketInTestError extends ActionableError {
-  constructor(message: string) {
-    super(message);
-    this.name = "RealCtrlProxyWebSocketInTestError";
-  }
 }
 
 /** Rethrow {@link RealCtrlProxyWebSocketInTestError} from a connect-path catch that would otherwise degrade it. */
@@ -166,12 +158,6 @@ const LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER = 2;
 // periodic health-check tick.
 const REQUEST_TIMEOUT_LIVENESS_THRESHOLD = 3;
 
-export class ObserverPendingRequestTimeoutError extends Error {
-  constructor() {
-    super("Owner's in-flight request exceeded the observer hierarchy deadline");
-  }
-}
-
 /**
  * Abstract base class for device service WebSocket clients.
  *
@@ -192,9 +178,21 @@ export abstract class DeviceServiceClient {
     signal?.throwIfAborted();
   }
   // Connection state
-  protected ws: WebSocket | null = null;
+  protected ws: CtrlSocket | null = null;
+
+  /** @internal Typed socket view for unit tests; production code must not use it. */
+  get connectionTestHooks(): DeviceServiceClientConnectionTestHooks {
+    return createConnectionTestHooks({
+      getSocket: () => this.ws,
+      setSocket: (socket) => {
+        this.ws = socket;
+      },
+      requestManager: this.requestManager,
+      deliverMessage: (data) => this.handleMessage(data),
+    });
+  }
   /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */
-  private lifecycleSocket: WebSocket | null = null;
+  private lifecycleSocket: CtrlSocket | null = null;
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
@@ -222,7 +220,7 @@ export abstract class DeviceServiceClient {
   // the socket eventually resolves; a wedged handshake would otherwise keep
   // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
   // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
-  private pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
+  private pendingConnectAbort: { socket: CtrlSocket; abort: () => void } | null = null;
   // Counts callers currently awaiting connectWebSocket(), so a per-caller
   // cancellation only aborts a shared pending handshake after every caller leaves.
   protected pendingConnectJoiners: number = 0;
@@ -551,7 +549,7 @@ export abstract class DeviceServiceClient {
    * Finish a lost connection exactly once, even when replacement beats its close event.
    * Socket identity is the connection token; late events cannot clean up a replacement.
    */
-  private finishEstablishedConnection(socket: WebSocket): void {
+  private finishEstablishedConnection(socket: CtrlSocket): void {
     if (this.ws !== socket) {
       return;
     }
@@ -683,13 +681,13 @@ export abstract class DeviceServiceClient {
     }
   }
 
-  private clearPendingConnectAbort(socket: WebSocket): void {
+  private clearPendingConnectAbort(socket: CtrlSocket): void {
     if (this.pendingConnectAbort?.socket === socket) {
       this.pendingConnectAbort = null;
     }
   }
 
-  private clearLifecycleSocket(socket: WebSocket): void {
+  private clearLifecycleSocket(socket: CtrlSocket): void {
     if (this.lifecycleSocket === socket) {
       this.lifecycleSocket = null;
     }
@@ -969,7 +967,7 @@ export abstract class DeviceServiceClient {
     }
   }
 
-  private cleanUpStaleSocket(staleSocket: WebSocket): void {
+  private cleanUpStaleSocket(staleSocket: CtrlSocket): void {
     this.finishEstablishedConnection(staleSocket);
     this.clearLifecycleSocket(staleSocket);
     try {
@@ -1104,7 +1102,7 @@ export abstract class DeviceServiceClient {
    * synchronous ws.send failure otherwise bypasses the request awaiter's error
    * path and leaves that registration pending until a later timeout or close.
    */
-  private protectRegisteredRequestSends(ws: WebSocket): void {
+  private protectRegisteredRequestSends(ws: CtrlSocket): void {
     const send = ws.send.bind(ws) as (data: WebSocket.Data, ...args: unknown[]) => void;
     ws.send = ((data: WebSocket.Data, ...args: unknown[]) => {
       try {
@@ -1122,7 +1120,7 @@ export abstract class DeviceServiceClient {
         );
         throw error;
       }
-    }) as WebSocket["send"];
+    }) as CtrlSocket["send"];
   }
 
   private requestIdFromWireData(data: WebSocket.Data): string | undefined {
@@ -1281,7 +1279,7 @@ export abstract class DeviceServiceClient {
    * rather than restarted, so back-to-back callers cannot pile up deadlines
    * or double-count a single failure.
    */
-  private startLivenessProbe(ws: WebSocket): void {
+  private startLivenessProbe(ws: CtrlSocket): void {
     if (this.livenessDeadlineTimeoutId !== null) {
       return;
     }

@@ -347,7 +347,11 @@ class ScheduleWorld {
     const { pool } = this.daemon;
     const sessionId = autolock
       ? await pool.autolockDevice(DEVICE, "android")
-      : await pool.bindOrReuseDeviceSession("expiry-property-session", DEVICE, "android");
+      : await pool.bindOrReuseDeviceSession({
+          sessionId: "expiry-property-session",
+          deviceId: DEVICE,
+          platform: "android",
+        });
     if (!sessionId) {
       throw new Error("the pool did not acquire the device");
     }

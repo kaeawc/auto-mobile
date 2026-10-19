@@ -143,22 +143,21 @@ describe("start admission and owner resume for restart reservations", () => {
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    const previousSessionManager: unknown = Reflect.get(ToolRegistry, "deviceSessionManager");
-    const previousToolCalls: unknown = Reflect.get(ToolRegistry, "toolCallRepository");
+    const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
     const deviceSessions = new FakeDeviceSessionManager();
     deviceSessions.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessions);
-    Reflect.set(ToolRegistry, "toolCallRepository", { recordToolCall: async () => {} });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     cleanups.push(() => {
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       timer.reset();
       expect(timer.getPendingTimeoutCount()).toBe(0);
       restorePipeline();
-      Reflect.set(ToolRegistry, "deviceSessionManager", previousSessionManager);
-      Reflect.set(ToolRegistry, "toolCallRepository", previousToolCalls);
-      expect(Reflect.get(ToolRegistry, "deviceSessionManager")).toBe(previousSessionManager);
-      expect(Reflect.get(ToolRegistry, "toolCallRepository")).toBe(previousToolCalls);
+      ToolRegistry.setCollaboratorsForTesting(previousCollaborators);
+      expect(ToolRegistry.getCollaboratorsForTesting()).toEqual(previousCollaborators);
     });
     lastManagerFactory = () => manager;
     setDeviceToolsDependencies({
@@ -185,19 +184,14 @@ describe("start admission and owner resume for restart reservations", () => {
         ),
       ).toBe(holder);
     } else {
-      await pool.bindOrReuseDeviceSession(
-        holder,
-        device.deviceId,
+      await pool.bindOrReuseDeviceSession({
+        sessionId: holder,
+        deviceId: device.deviceId,
         platform,
-        undefined,
-        undefined,
-        device,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        options.connection,
-      );
+        expectedIdentity: device,
+        allowSessionRebind: false,
+        mcpSessionId: options.connection,
+      });
     }
     // Keep idle expiry beyond the fixed restart window, so the retry pin measures that window.
     const live = sessions.getSession(holder)!;
@@ -865,15 +859,13 @@ describe("start admission and owner resume for restart reservations", () => {
       await f.pool.initializeWithDevices([f.device, spare]);
       f.manager.setBootedDevices("android", [f.device, spare]);
       await f.call("restartControl", { sessionUuid: HOLDER });
-      await f.pool.bindOrReuseDeviceSession(
-        HOLDER,
-        spare.deviceId,
-        "android",
-        undefined,
-        undefined,
-        spare,
-        true,
-      );
+      await f.pool.bindOrReuseDeviceSession({
+        sessionId: HOLDER,
+        deviceId: spare.deviceId,
+        platform: "android",
+        expectedIdentity: spare,
+        allowSessionRebind: true,
+      });
     };
     await expect(f.start(undefined, HOLDER)).rejects.toThrow(
       "already assigned to a different device",

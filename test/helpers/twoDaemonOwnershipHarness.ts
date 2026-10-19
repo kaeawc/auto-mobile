@@ -943,20 +943,14 @@ export class TwoDaemonWorld {
     this.launch(
       `c${client.index} acquire ${device.deviceId} via ${process.name}`,
       async () => {
-        const bound = await process.pool.bindOrReuseDeviceSession(
+        const bound = await process.pool.bindOrReuseDeviceSession({
           sessionId,
-          device.deviceId,
-          "android",
-          undefined,
-          undefined,
-          undefined,
-          false,
-          undefined,
-          undefined,
-          undefined,
-          connection,
-          false,
-        );
+          deviceId: device.deviceId,
+          platform: "android",
+          allowSessionRebind: false,
+          mcpSessionId: connection,
+          oneShotCli: false,
+        });
         this.log(`  c${client.index} bound ${device.deviceId} -> ${bound} on ${process.name}`);
         if (process.dead) {
           return;

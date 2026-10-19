@@ -6,6 +6,7 @@ import {
   PlatformVideoCaptureBackend,
   clampBitrateKbps,
 } from "../../../src/features/video/PlatformVideoCaptureBackend";
+import { unsupportedVideoPlatformError } from "../../../src/features/video/unsupportedVideoPlatformError";
 import type {
   RecordingHandle,
   VideoCaptureConfig,
@@ -79,29 +80,12 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       await expect(backend.start(configWithoutDevice)).rejects.toThrow("Device is required");
     });
 
-    test("rejects unsupported platform", async () => {
-      const unsupportedDevice: BootedDevice = {
-        platform: "windows" as any,
-        deviceId: "test",
-        name: "Test Device",
-      };
-
-      const config: VideoCaptureConfig = {
-        recordingId: "test-recording",
-        outputDirectory: tempDir,
-        outputPath: path.join(tempDir, "video.mp4"),
-        fileName: "video.mp4",
-        startedAt: new Date().toISOString(),
-        qualityPreset: "low",
-        targetBitrateKbps: 1000,
-        maxThroughputMbps: 5,
-        fps: 15,
-        maxArchiveSizeMb: 2048,
-        format: "mp4",
-        device: unsupportedDevice,
-      };
-
-      await expect(backend.start(config)).rejects.toThrow("Unsupported platform");
+    test("names an unsupported platform in the rejection", () => {
+      // A device descriptor off the wire can carry a platform outside the union; start() reaches
+      // this error only through that path, which the static types close.
+      expect(unsupportedVideoPlatformError("windows").message).toContain(
+        "Unsupported platform for video recording: windows",
+      );
     });
   });
 
@@ -285,7 +269,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         recordingId: "test",
         outputPath: path.join(tempDir, "test.mp4"),
         startedAt: new Date().toISOString(),
-        backendHandle: { wrong: "type" } as any,
+        backendHandle: { wrong: "type" },
       };
 
       await expect(backend.stop(invalidHandle)).rejects.toThrow();
@@ -399,7 +383,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       outputPath: string,
       fakeProcess: FakeChildProcess,
       exitPromise: Promise<void> = Promise.resolve(),
-    ): RecordingHandle {
+    ) {
       const androidHandle = {
         kind: "android" as const,
         process: fakeProcess,
@@ -423,7 +407,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         recordingId: "test-stop-sequence",
         outputPath,
         startedAt: new Date().toISOString(),
-        backendHandle: androidHandle as any,
+        backendHandle: androidHandle,
+        androidHandle,
       };
     }
 
@@ -653,8 +638,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       };
 
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
-      (handle.backendHandle as any).exitPromise = exitPromise;
-      (handle.backendHandle as any).exitState.exitCode = null;
+      handle.androidHandle.exitPromise = exitPromise;
+      handle.androidHandle.exitState.exitCode = null;
 
       await writeVideoFixture(handle.outputPath, "fake-video");
       await backend.stop(handle);
@@ -1089,11 +1074,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     // rather than a self-healing `?? reimplementation` fallback keeping the test
     // green against a method that no longer exists.
     function resolve(backendInstance: PlatformVideoCaptureBackend, maxDuration?: number): number {
-      return (
-        backendInstance as unknown as {
-          resolveAndroidTimeLimit(maxDuration?: number): number;
-        }
-      ).resolveAndroidTimeLimit(maxDuration);
+      return backendInstance.resolveAndroidTimeLimit(maxDuration);
     }
 
     test.each([

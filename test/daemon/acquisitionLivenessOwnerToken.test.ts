@@ -369,10 +369,15 @@ function holderClocks(session: Session) {
 
 async function explicitImageRefusal(s: LivenessScenario): Promise<InputDeviceOwnedError> {
   const error = await s.daemon.pool
-    .bindOrReuseDeviceSession("rival-image-session", "emulator-5554", "android", {
-      name: "Pixel_emulator-5554",
+    .bindOrReuseDeviceSession({
+      sessionId: "rival-image-session",
+      deviceId: "emulator-5554",
       platform: "android",
-      isRunning: true,
+      sourceImage: {
+        name: "Pixel_emulator-5554",
+        platform: "android",
+        isRunning: true,
+      },
     })
     .catch((error: unknown) => error);
   expect(error).toBeInstanceOf(InputDeviceOwnedError);

@@ -15,7 +15,7 @@ import type {
   TalkBackSwipeRunner,
   VoiceOverSwipeRunner,
 } from "../../../../src/features/action/swipeon/types";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
@@ -42,14 +42,14 @@ const CONTAINER_ELEMENT: Element = {
   bounds: { left: 0, top: 0, right: 400, bottom: 900 },
   "resource-id": "test:id/list",
   scrollable: true,
-} as unknown as Element;
+};
 
 const TARGET_ELEMENT: Element = {
   bounds: { left: 10, top: 200, right: 390, bottom: 250 },
   "resource-id": "test:id/target",
   text: "Target Item",
   scrollable: false,
-} as unknown as Element;
+};
 
 function makeScrollUntilVisible({
   accessibilityDetector,
@@ -75,7 +75,7 @@ function makeScrollUntilVisible({
    */
   resolveObservation?: (callIdx: number) => ObserveResult;
   talkBackExecutor: TalkBackSwipeRunner;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   device?: BootedDevice;
   voiceOverExecutor?: VoiceOverSwipeRunner;
 }): ScrollUntilVisible {
@@ -107,10 +107,10 @@ function makeScrollUntilVisible({
     device,
     resolver: scrollResolver,
     geometry: fakeGeometry,
-    observeScreen: fakeObserveScreen as any,
+    observeScreen: fakeObserveScreen,
     accessibilityService,
     accessibilityDetector,
-    adb: new FakeAdbClient() as any,
+    adb: new FakeAdbClient(),
     featureFlags,
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
@@ -246,7 +246,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     test("forwards the injected featureFlags to detectMethod (#3925 regression)", async () => {
       scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       lookup.nextElementByText = TARGET_ELEMENT;
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
@@ -395,7 +395,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         bounds: { left: 10, top: 200, right: 390, bottom: 250 },
         text: "Target Item",
         scrollable: false,
-      } as unknown as Element;
+      };
 
       scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       lookup.nextElementByText = elementWithoutId;
@@ -507,9 +507,9 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
     const talkBackExecutor = new TalkBackSwipeExecutor(
       DEVICE,
       gesture,
-      fakeCtrlProxy as any,
+      fakeCtrlProxy,
       detector,
-      new FakeAdbClient() as any,
+      new FakeAdbClient(),
       timer,
     );
     const scrolledForward = () =>

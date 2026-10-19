@@ -22,12 +22,13 @@ import {
 const DEFAULT_HIGHLIGHT_TIMEOUT_MS = 5000;
 
 export interface HighlightDeviceClient {
+  /** The device reply is untrusted wire data: `VisualHighlight` validates it against a schema. */
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<HighlightOperationResult>;
+  ): Promise<unknown>;
 }
 
 const normalizeNullableNumber = (value: number | null | undefined): number | undefined =>
@@ -148,7 +149,7 @@ export class VisualHighlight {
     return result.data;
   }
 
-  private parseHighlightResponse(response: HighlightOperationResult): HighlightOperationResult {
+  private parseHighlightResponse(response: unknown): HighlightOperationResult {
     const result = highlightResponseSchema.safeParse(response);
     if (!result.success) {
       const message = result.error.issues.map((issue) => issue.message).join("; ");
@@ -171,13 +172,16 @@ export class VisualHighlight {
   }
 }
 
+type HighlightAdder = Pick<VisualHighlight, "addHighlight">;
+type HighlightDeviceReadiness = Pick<DeviceReadiness, "ensureDeviceReady">;
+
 export class VisualHighlightClient {
-  private readonly deviceSessionManager: DeviceReadiness;
-  private readonly visualHighlightFactory: (device: BootedDevice) => VisualHighlight;
+  private readonly deviceSessionManager: HighlightDeviceReadiness;
+  private readonly visualHighlightFactory: (device: BootedDevice) => HighlightAdder;
 
   constructor(
-    deviceSessionManager: DeviceReadiness = DeviceReadiness.getInstance(),
-    visualHighlightFactory: (device: BootedDevice) => VisualHighlight = (device) =>
+    deviceSessionManager: HighlightDeviceReadiness = DeviceReadiness.getInstance(),
+    visualHighlightFactory: (device: BootedDevice) => HighlightAdder = (device) =>
       new VisualHighlight(device),
   ) {
     this.deviceSessionManager = deviceSessionManager;
@@ -197,7 +201,7 @@ export class VisualHighlightClient {
     return result;
   }
 
-  private async resolveHighlight(options: HighlightOptions): Promise<VisualHighlight> {
+  private async resolveHighlight(options: HighlightOptions): Promise<HighlightAdder> {
     if (options.device) {
       if (options.device.platform !== options.platform) {
         throw new ActionableError(

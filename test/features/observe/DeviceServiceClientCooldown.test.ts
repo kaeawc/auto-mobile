@@ -1,5 +1,8 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { DeviceServiceClient } from "../../../src/features/observe/DeviceServiceClient";
+import {
+  DeviceServiceClient,
+  type WebSocketFactory,
+} from "../../../src/features/observe/DeviceServiceClient";
 import {
   FakeWebSocket,
   createInstantFailureWebSocketFactory,
@@ -28,7 +31,7 @@ class TestDeviceServiceClient extends DeviceServiceClient {
 
   constructor(
     timer: FakeTimer,
-    wsFactory: (url: string) => WebSocket,
+    wsFactory: WebSocketFactory,
     config: {
       maxConnectionAttempts?: number;
       connectionResetMs?: number;

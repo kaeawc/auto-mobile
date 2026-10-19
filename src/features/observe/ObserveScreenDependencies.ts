@@ -10,8 +10,7 @@ import type { PredictiveUIState } from "./interfaces/PredictiveUIState";
 import type { ObserveResultCacheStore } from "./cache/ObserveResultCacheStore";
 import type { ScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
-import type { HierarchyCollector } from "./collectors/HierarchyCollector";
-import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort, HierarchyCollectorPort } from "./collectors/collectorPorts";
 import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
@@ -49,16 +48,16 @@ export interface ObserveScreenDependencies {
 
   // Composed services. If omitted, defaults are built from the data sources above.
   screenshotRecorder?: ObserveScreenshotRecorder;
-  hierarchyCollector?: HierarchyCollector;
+  hierarchyCollector?: HierarchyCollectorPort;
   onAvailabilityLost?: (reason: string) => void;
   daemonState?: Pick<DaemonStateLike, "isInitialized" | "getSessionManager">;
-  deviceStateCollector?: DeviceStateCollector;
+  deviceStateCollector?: DeviceStateCollectorPort;
   activeWindowAttributionReconciler?: ActiveWindowAttributionReconciler;
   windowIdentityFreshnessResolver?: WindowIdentityFreshnessResolver;
   iosLockStateProbe?: IosLockStateProbe;
-  performanceAuditor?: PerformanceAuditor;
-  accessibilityAuditor?: AccessibilityAuditor;
-  accessibilityStateDetector?: AccessibilityStateDetector;
+  performanceAuditor?: Pick<PerformanceAuditor, "run">;
+  accessibilityAuditor?: Pick<AccessibilityAuditor, "run">;
+  accessibilityStateDetector?: Pick<AccessibilityStateDetector, "run">;
 
   // Rejects cross-platform (stale) hierarchies. Defaults to RealHierarchyPlatformValidator.
   platformValidator?: HierarchyPlatformValidator;

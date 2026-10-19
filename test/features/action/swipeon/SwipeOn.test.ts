@@ -13,6 +13,7 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
 import type { Element, ViewHierarchyResult } from "../../../../src/models";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
   const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
@@ -33,13 +34,13 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     bounds: { left: 0, top: 0, right: 1000, bottom: 2000 },
     "resource-id": LIST_ID,
     scrollable: true,
-  } as unknown as Element;
+  };
 
   const target: Element = {
     bounds: { left: 10, top: 500, right: 990, bottom: 600 },
     "resource-id": "test:id/target",
     text: "Target Item",
-  } as unknown as Element;
+  };
 
   const createObserveResult = (hierarchyId: string): ObserveResult => ({
     timestamp: 0,
@@ -55,7 +56,8 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     fakeCtrlProxy.getActionHistory().some((call) => call.action === "scroll_forward");
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
@@ -63,7 +65,6 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       awaitIdle: fakeAwaitIdle,
       window: fakeWindow,
     });
-    (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
     return swipeOn;
   };
 
@@ -224,7 +225,7 @@ describe("SwipeOn boomerang", () => {
   });
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
@@ -318,7 +319,8 @@ describe("SwipeOn lookFor validation", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const createSwipeOn = () => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,

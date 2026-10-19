@@ -1,6 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   const existingColumn = await sql<{ name: string }>`
     SELECT name FROM pragma_table_info('device_teardown_operations')
     WHERE name = 'owner_token'
@@ -14,6 +14,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.alterTable("device_teardown_operations").dropColumn("owner_token").execute();
 }

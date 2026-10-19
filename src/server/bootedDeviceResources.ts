@@ -24,7 +24,7 @@ import {
 } from "../utils/configuredDeviceInventory";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { Session } from "../daemon/sessionManager";
 import type {
@@ -83,9 +83,9 @@ import {
 import { withRemainingBudget } from "../utils/withRemainingBudget";
 import {
   AndroidOrientationReader,
-  IosOrientationReader,
   type OrientationReader,
 } from "../features/action/OrientationReader";
+import { IosOrientationReader } from "../features/action/IosOrientationReader";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { TTLCache } from "../utils/cache/Cache";
@@ -1162,8 +1162,8 @@ interface DaemonDeviceContext {
 }
 
 function readDaemonDeviceContext(): DaemonDeviceContext {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const daemon = defaultDaemonContext;
+  if (!daemon.isInitialized()) {
     return {
       devicePool: null,
       sessionsById: null,
@@ -1176,7 +1176,7 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   let sessionsById: Map<string, Session> | null = null;
   let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
-    devicePool = daemonState.getDevicePool();
+    devicePool = daemon.requireFullDevicePool();
     poolStatus = {
       enabled: true,
       idle: 0,
@@ -1190,14 +1190,14 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
   }
 
   try {
-    const sessions = daemonState.getSessionManager().getAllSessions();
+    const sessions = daemon.requireSessionManager().getAllSessions();
     sessionsById = new Map(sessions.map((session) => [session.sessionId, session]));
   } catch (error) {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
 
   try {
-    const registry = daemonState.getDeviceSessionRegistry();
+    const registry = daemon.requireDeviceSessionRegistry();
     resolveDeviceSessionUuid = (deviceId) =>
       registry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null;
   } catch (error) {

@@ -220,7 +220,11 @@ request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined wi
 `speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
 by the schema and the action before any dispatch. Velocity follows from swipe
 distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
-what was dispatched so the fling can be reproduced. With `boomerang`, `durationMs`
+what was dispatched so the fling can be reproduced, and a single successful swipe also
+reports `velocityPxPerSecond` (native px/s, points/s on iOS), computed with the same helper as
+`swipeAt` from `effectiveDurationMs` when the iOS runner clamped the stroke, else `duration`.
+It is omitted when the route ignored the duration (`durationIgnored`, the TalkBack semantic
+scroll), for `boomerang` (`duration` is both legs) and for `lookFor` searches. With `boomerang`, `durationMs`
 applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
 existing 5000 ms boomerang budget still applies. `swipeAt.durationMs` shares these
 bounds; `lookFor` and `boomerang` do not apply to `swipeAt`. Real limits: the value sent is the
@@ -1084,7 +1088,7 @@ key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
 non-default display is sent as the panel's logical `displayId` and needs a
-CtrlProxy advertising `prototype_display_id_v1`; an older APK is refused with an
+CtrlProxy advertising `prototype_display_id_v2`; an older APK is refused with an
 error rather than showing the prototype on the default display. An unknown or
 disconnected panel is refused with the usual disconnected-panel guidance. If the
 panel disappears while the prototype is up (fold), the device dismisses it with
@@ -1764,9 +1768,9 @@ To rotate **without zooming**, keep the finger distance constant: pass
 together with <code>rotationDegrees</code>. <code>direction</code> is still a required
 argument but is ignored when the distance does not change, so the fingers never
 drift toward a zoom; equal distances are clamped and (on iOS) rounded together
-so they stay equal. Negative and larger-than-360 values are passed through as
-given. This is a two-finger rotate gesture, not the device <code>rotate</code>
-tool, which changes screen orientation.
+so they stay equal. Negative values are passed through as given. This is a
+two-finger rotate gesture, not the device <code>rotate</code> tool, which changes
+screen orientation.
 
 ```json
 { "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
@@ -3206,8 +3210,8 @@ Unset or other env values express no preference and use the daemon's effective s
 
 AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
 (`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
-answer a `tools/call` with a task handle instead of blocking. `startDevice` opts in; `executePlan`,
-`installApp` and recording start and stop follow. Short interaction tools stay synchronous.
+answer a `tools/call` with a task handle instead of blocking. `startDevice`, `executePlan` and
+`installApp` opt in; recording start and stop follow. Short interaction tools stay synchronous.
 
 To opt in, a client declares the extension on **every request** that may return a task, and on
 every `tasks/*` request, in the per-request capabilities:
@@ -3245,6 +3249,22 @@ every `tasks/*` request, in the per-request capabilities:
   client need not heartbeat a session it has not seen yet. Once the task is terminal, the
   client heartbeats that session as after a synchronous `startDevice`. Cancelling during the
   boot stops it and leaves no session bound, as cancelling a synchronous call does.
+- While an `executePlan` task is `working`, the daemon heartbeats the plan's session and, for a
+  multi-device plan, each label session once it is allocated; the plan keeps its session's plan
+  lock as a synchronous plan does. `tasks/cancel` aborts the running step, unwinds the plan as a
+  cancelled request would (its cleanup and session release still run) and releases the lock.
+  A plan whose steps fail completes with the same `isError` result as the synchronous call;
+  a call the synchronous path answers with a JSON-RPC error (invalid arguments, for one)
+  reports `failed` with that error.
+- An `installApp` task holds the session it installs onto while `working`. `tasks/get` settles
+  with the same result the synchronous call returns (a failed install is a completed task whose
+  result has `isError: true`). `tasks/cancel` aborts the `adb install` / `simctl install` process;
+  the task reports `cancelled` and the installed-app inventory is re-read. An APK only partly
+  transferred is never committed: the device discards the abandoned install session, so the
+  previously installed version (if any) stays as it was. If the transfer had already finished and
+  the device was committing, the install may still land; the re-read inventory shows the truth.
+  The Android uninstall-and-reinstall downgrade recovery, once its uninstall has run, finishes the
+  reinstall even if cancelled, so the app is not left removed.
 - A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
   creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
 - Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that
@@ -3255,10 +3275,16 @@ every `tasks/*` request, in the per-request capabilities:
 - The stdio proxy relays the extension: it advertises it to a client whose `initialize` declared
   it, forwards each request's declaration and the `tasks/*` requests to the daemon, and answers
   with the daemon's results and errors unchanged. Its tasks belong to the proxy process rather
-  than to one daemon connection, so polling keeps working after the proxy reconnects. A
-  device-binding call (`startDevice`, `getAndroid`, `getApple`, `provisionDevice`,
-  `setActiveDevice`) stays synchronous through the proxy for now: the proxy binds the device
-  session from that call's result.
+  than to one daemon connection, so polling keeps working after the proxy reconnects.
+- A device-binding call (`startDevice` today) runs as a task through the proxy too. The proxy
+  binds the device session when a `tasks/get` first reports the task `completed`, before it
+  answers that poll, exactly as it binds from the synchronous result; later tool calls route to
+  that session. It binds once per task, however often the task is polled and across proxy
+  reconnects. A `failed` or `cancelled` task binds nothing, and neither does a session the daemon
+  released before the completed poll (that poll answers an error). Poll the task to completion:
+  until then the proxy holds no binding for it, and the proxy stops waiting on a task left
+  unpolled for 10 minutes. A synchronous `startDevice` re-checks a device still finishing its
+  previous session's cleanup; as a task, that refusal is the task's result.
 
 ## Checks
 

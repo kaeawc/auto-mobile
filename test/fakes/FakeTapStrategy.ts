@@ -16,6 +16,10 @@ import type { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 export class FakeTapStrategy implements TapStrategy {
   longPressDurationMs: number = 500;
   retryTapIfNoChange: boolean = false;
+  warnsOnDisabledElement: boolean = true;
+  settlesPostTapChange: boolean = true;
+  verifiesRefreshedDisplay: boolean = true;
+  promotesClickableAncestor: boolean = true;
 
   private readonly iosClip = new IosTapStrategy({
     name: "fake",

@@ -64,8 +64,7 @@ export class TouchFrameReconstructor {
     const evValue = match[3];
 
     if (evType === "EV_ABS") {
-      this.handleAbsEvent(evCode, evValue);
-      return null;
+      return this.handleAbsEvent(evCode, evValue, arrivedAt);
     }
 
     if (evType === "EV_SYN") {
@@ -83,7 +82,7 @@ export class TouchFrameReconstructor {
     return null;
   }
 
-  private handleAbsEvent(evCode: string, evValue: string): void {
+  private handleAbsEvent(evCode: string, evValue: string, arrivedAt: number): RawTouchFrame | null {
     const value = parseInt(evValue, 16);
 
     switch (evCode) {
@@ -100,12 +99,21 @@ export class TouchFrameReconstructor {
             slot.trackingId = -1;
           }
         } else {
+          const slot = this.getOrCreateSlot();
+          if (slot.trackingId >= 0 && slot.trackingId !== value) {
+            // The kernel may write a new tracking id into an active slot without an
+            // intermediate -1 (#13129). The old contact ended: report it released now,
+            // before the slot is reused, so the new id starts a fresh contact.
+            const ended = this.endedByReplacement(slot, arrivedAt);
+            slot.trackingId = value;
+            return ended;
+          }
           // New or continuing contact. Per-slot axes (tool type, distance, tilt) are kept across a
           // new tracking id: the kernel only re-sends an ABS_MT_* / ABS_TILT_* value when it changes,
           // so a second pen contact on the slot arrives without them, and a finger replacing a pen
           // arrives with an explicit tool type 0. Stylus buttons are node-wide and never stored on
           // the slot, and a finger contact is reported without the retained tilt (withPenState).
-          this.getOrCreateSlot().trackingId = value;
+          slot.trackingId = value;
         }
         break;
 
@@ -125,6 +133,20 @@ export class TouchFrameReconstructor {
         this.handlePenAbsEvent(evCode, value);
         break;
     }
+    return null;
+  }
+
+  /** Synthetic frame ending `replaced` while every other active slot stays down. */
+  private endedByReplacement(replaced: TouchSlot, arrivedAt: number): RawTouchFrame {
+    const activeSlots: TouchSlot[] = [];
+    for (const [, slot] of this.slots) {
+      if (slot.slotId !== replaced.slotId && slot.trackingId >= 0 && !this.isMtPenHovering(slot)) {
+        activeSlots.push(this.withPenState({ ...slot }));
+      }
+    }
+    this.releasedSlots.delete(replaced.slotId);
+    this.touchingSlots.delete(replaced.slotId);
+    return { arrivedAt, activeSlots, releasedSlots: [replaced.slotId] };
   }
 
   private handlePenAbsEvent(evCode: string, value: number): void {

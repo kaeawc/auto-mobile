@@ -35,6 +35,9 @@ import {
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { name: "iPhone Peer", deviceId: "IOS-PEER", platform: "ios" };
 

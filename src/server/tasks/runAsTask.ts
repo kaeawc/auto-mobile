@@ -14,7 +14,10 @@ const INTERNAL_ERROR = -32603;
 export interface TaskWorkContext {
   readonly taskId: string;
   readonly signal: AbortSignal;
-  /** Keep this device session's lease alive until the task is terminal (#4668 decision 2). */
+  /**
+   * Keep this device session's lease alive until the task is terminal (#4668 decision 2).
+   * Idempotent per session: a session already held by this task is not held twice.
+   */
   holdDeviceLease(sessionUuid: string): void;
   /** Pause in `input_required` until `tasks/update` answers every request key. */
   requestInput(requests: JsonObject): Promise<JsonObject>;
@@ -26,6 +29,29 @@ const taskContextStorage = new AsyncLocalStorage<TaskWorkContext>();
 /** The task the current async context runs under, if any. */
 export function currentTaskContext(): TaskWorkContext | undefined {
   return taskContextStorage.getStore();
+}
+
+/**
+ * Hold each named device session's lease for the task the current async context runs under;
+ * nothing outside a task. Blank entries are skipped.
+ */
+export function holdTaskDeviceLeases(sessionUuids: Iterable<string | undefined>): void {
+  const task = currentTaskContext();
+  for (const sessionUuid of task ? sessionUuids : []) {
+    if (sessionUuid) {
+      task?.holdDeviceLease(sessionUuid);
+    }
+  }
+}
+
+/**
+ * As an MCP task the client does not heartbeat for the call: keep the device session it runs on
+ * alive until the task settles (#4668). A no-op outside a task or without a session.
+ */
+export function holdSessionForCurrentTask(sessionUuid: string | undefined): void {
+  if (sessionUuid) {
+    currentTaskContext()?.holdDeviceLease(sessionUuid);
+  }
 }
 
 export interface TaskRunOptions {
@@ -71,10 +97,15 @@ function progressMessage(progress: number, total?: number, message?: string): st
 
 function taskWorkContext(task: RunningTask, holds: Array<() => void>, options: TaskRunOptions) {
   const keepalive = options.keepalive ?? noopTaskLeaseKeepalive;
+  const held = new Set<string>();
   const context: TaskWorkContext = {
     taskId: task.taskId,
     signal: task.signal,
     holdDeviceLease(sessionUuid) {
+      if (held.has(sessionUuid)) {
+        return;
+      }
+      held.add(sessionUuid);
       holds.push(keepalive.hold({ taskId: task.taskId, ownerKey: task.ownerKey, sessionUuid }));
     },
     requestInput: (requests) => task.requestInput(requests),

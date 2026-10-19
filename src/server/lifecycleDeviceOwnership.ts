@@ -1,12 +1,12 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
+import { defaultDaemonContext, type DevicePoolReads } from "../daemon/daemonContext";
+import type { SessionManager } from "../daemon/sessionManager";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
   assertInputRequesterHoldsDevice,
   InputDeviceOwnedError,
 } from "../daemon/inputDeviceOwnership";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import {
@@ -24,28 +24,13 @@ export const LIFECYCLE_TOOL_REMEDY =
   "call it with the holding session's sessionUuid, wait for the holder to release the device, " +
   "or pass force: true to stop it anyway.";
 
-/** Who is asking: the call's routing session and the MCP connection it came over. */
-export interface LifecycleRequester {
-  sessionUuid: string | undefined;
-  mcpSessionId: string | undefined;
-}
-
-/**
- * The requester of a plain (`ToolRegistry.register`) tool call. Such tools never pass through
- * device-aware target resolution, so the routing session (an explicit, admitted `sessionUuid` or
- * the connection's bound session) comes from the ambient tool-selection context.
- */
-export function lifecycleRequester(args: object): LifecycleRequester {
-  const mcpSessionId: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
-  const explicitSessionUuid: unknown = Reflect.get(args, "sessionUuid");
-  return {
-    sessionUuid:
-      getToolSelectionContext()?.routingSessionUuid ??
-      (typeof explicitSessionUuid === "string" && explicitSessionUuid.trim().length > 0
-        ? explicitSessionUuid
-        : undefined),
-    mcpSessionId: typeof mcpSessionId === "string" ? mcpSessionId : undefined,
-  };
+/** The session and pool views together, or undefined when the daemon is not initialized. */
+function initializedLifecycleViews():
+  | { sessionManager: SessionManager; pool: DevicePoolReads }
+  | undefined {
+  const sessionManager = defaultDaemonContext.sessionManager();
+  const pool = defaultDaemonContext.devicePool();
+  return sessionManager && pool ? { sessionManager, pool } : undefined;
 }
 
 /** Resolve once before synchronous stop guards; shutdown reuses this evidence for its capture. */
@@ -57,11 +42,10 @@ export async function resolveRestartStopIdentity(input: {
   /** Identity of an already-stopped image from teardown's existing target resolution. */
   stoppedStableId?: string;
 }): Promise<RestartStopIdentity | undefined> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const pool = defaultDaemonContext.devicePool();
+  if (!pool) {
     return undefined;
   }
-  const pool = daemonState.getDevicePool();
   const { device, dependencies, deadlineMs, signal, stoppedStableId } = input;
   if (!pool.hasRestartHandoffReservation?.(device.platform)) {
     return undefined;
@@ -113,14 +97,13 @@ export function assertLifecycleCallerHoldsDevice(input: {
   checkRestartHold?: boolean;
 }): void {
   const { toolName, device, requester, force } = input;
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const views = initializedLifecycleViews();
+  if (!views) {
     return;
   }
-  const sessionManager = daemonState.getSessionManager();
+  const { sessionManager, pool } = views;
   const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
-  assertNotForeignBindingFromSnapshot(daemonState, input);
-  const pool = daemonState.getDevicePool();
+  assertNotForeignBindingFromSnapshot(views, input);
   assertLifecycleCallerMayStopRestartReservation(input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
   if (!owner) {
@@ -167,11 +150,10 @@ export function assertLifecycleCallerMayStopRestartReservation({
   stableIds,
   stopIdentity,
 }: Parameters<typeof assertLifecycleCallerHoldsDevice>[0]): void {
-  const daemonState = DaemonState.getInstance();
-  if (!checkRestartHold || !daemonState.isInitialized()) {
+  const pool = checkRestartHold ? defaultDaemonContext.devicePool() : undefined;
+  if (!pool) {
     return;
   }
-  const pool = daemonState.getDevicePool();
   const identity = {
     platform: device.platform,
     stableIds: stableIds?.filter((id): id is string => id !== undefined),
@@ -198,7 +180,7 @@ export function assertLifecycleCallerMayStopRestartReservation({
 }
 
 function assertRestartStopIdentityConfirmed(
-  pool: ReturnType<DaemonState["getDevicePool"]>,
+  pool: DevicePoolReads,
   device: { deviceId: string; platform: Platform },
   requester: LifecycleRequester,
   identity: {
@@ -219,7 +201,7 @@ function assertRestartStopIdentityConfirmed(
 }
 
 function assertNotStoppingAnotherRestartHold(
-  pool: ReturnType<DaemonState["getDevicePool"]>,
+  pool: DevicePoolReads,
   {
     toolName,
     device,
@@ -228,7 +210,7 @@ function assertNotStoppingAnotherRestartHold(
     Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
     "toolName" | "device" | "requester"
   >,
-  reservation: ReturnType<ReturnType<DaemonState["getDevicePool"]>["restartReservationForStop"]>,
+  reservation: ReturnType<DevicePoolReads["restartReservationForStop"]>,
 ): void {
   if (!reservation || reservation.owned) {
     return;
@@ -277,15 +259,15 @@ export function assertLifecycleTargetNotHeldByOtherDaemon(input: {
   device: { deviceId: string; platform: Platform };
   force: boolean;
 }): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const pool = defaultDaemonContext.devicePool();
+  if (!pool) {
     return Promise.resolve();
   }
-  return checkForeignHolder(daemonState.getDevicePool(), input);
+  return checkForeignHolder(pool, input);
 }
 
 async function checkForeignHolder(
-  pool: Pick<ReturnType<DaemonState["getDevicePool"]>, "assertNotClaimedByForeignDaemon">,
+  pool: Pick<DevicePoolReads, "assertNotClaimedByForeignDaemon">,
   input: {
     toolName: string;
     device: { deviceId: string; platform: Platform };
@@ -316,7 +298,7 @@ async function checkForeignHolder(
  * already holding this device in the pool; a current snapshot still judges the registry first.
  */
 function assertNotForeignBindingFromSnapshot(
-  daemonState: DaemonStateLike,
+  { sessionManager, pool }: { sessionManager: SessionManager; pool: DevicePoolReads },
   input: {
     toolName: string;
     device: { deviceId: string; platform: Platform };
@@ -324,9 +306,8 @@ function assertNotForeignBindingFromSnapshot(
     stableIds?: ReadonlyArray<string | undefined>;
   },
 ): void {
-  const pool = daemonState.getDevicePool();
   const gate = bindingPoolGate(pool);
-  const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
+  const requesterSessionUuid = baseRequesterSession(sessionManager, input.requester);
   const managedRefusal = gate.bindingRefusalFor?.({
     action: input.toolName,
     deviceId: input.device.deviceId,
@@ -348,14 +329,14 @@ function assertNotForeignBindingFromSnapshot(
 }
 
 function baseRequesterSession(
-  daemonState: DaemonStateLike,
+  sessionManager: SessionManager,
   requester: LifecycleRequester,
 ): string | undefined {
   if (!requester.sessionUuid) {
     return undefined;
   }
   return (
-    resolveToolSelectionBaseSessionUuid(requester.sessionUuid, daemonState.getSessionManager()) ??
+    resolveToolSelectionBaseSessionUuid(requester.sessionUuid, sessionManager) ??
     requester.sessionUuid
   );
 }
@@ -372,12 +353,12 @@ export async function assertLifecycleCallerNotOnForeignBinding(input: {
   requester: LifecycleRequester;
   stableIds?: ReadonlyArray<string | undefined>;
 }): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const views = initializedLifecycleViews();
+  if (!views) {
     return;
   }
-  const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
-  await bindingPoolGate(daemonState.getDevicePool()).assertNotAssignedToBinding?.({
+  const requesterSessionUuid = baseRequesterSession(views.sessionManager, input.requester);
+  await bindingPoolGate(views.pool).assertNotAssignedToBinding?.({
     action: input.toolName,
     deviceId: input.device.deviceId,
     platform: input.device.platform,

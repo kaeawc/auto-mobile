@@ -25,7 +25,7 @@ import { logger } from "../utils/logger";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
-import { lifecycleRequester } from "./lifecycleDeviceOwnership";
+import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { TerminalSessionError } from "../daemon/sessionManager";
 import {
   resolveTransportDeadlineMs,
@@ -33,7 +33,7 @@ import {
   resolveLiveTransportDeadlineSubscriber,
 } from "./formTools";
 import { reserveAndroidStartupLease } from "./deviceToolsStartupLease";
-import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import type { createBootAndPrepareDevice } from "./deviceToolsStartDevice";
 import {
   AcquisitionStage,
   DevicePreparationBudgets,
@@ -199,9 +199,7 @@ async function awaitFailedAcquisitionCleanup(
 }
 
 type AcquisitionHooks = {
-  getBootAndPrepareDevice: () => ReturnType<
-    typeof createStartDeviceHandlers
-  >["bootAndPrepareDevice"];
+  bootAndPrepareDevice: ReturnType<typeof createBootAndPrepareDevice>;
 };
 
 async function reserveStartStableDeviceLifecycle(
@@ -454,7 +452,7 @@ async function reserveStartDeviceLifecycleReservations(
 }
 
 async function prepareDevice(
-  getBootAndPrepareDevice: AcquisitionHooks["getBootAndPrepareDevice"],
+  bootAndPrepareDevice: AcquisitionHooks["bootAndPrepareDevice"],
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   progress?: ProgressCallback,
@@ -529,7 +527,7 @@ async function prepareDevice(
       ),
     );
     setAcquisitionStage(budgets, "booting the device");
-    return await getBootAndPrepareDevice()(args, budgets, deps, deviceUtils, {
+    return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, {
       autolockEnabled,
       deviceMatcher: deviceMatcher,
       bootDeadlineMs: bootDeadlineMs,
@@ -775,10 +773,10 @@ type PrepareDevice = (
 ) => ReturnType<typeof prepareDevice>;
 
 export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
-  const { getBootAndPrepareDevice } = hooks;
+  const { bootAndPrepareDevice } = hooks;
   const prepare: PrepareDevice = (args, budgets, progress, signal) =>
     runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
-      prepareDevice(getBootAndPrepareDevice, args, budgets, progress, signal),
+      prepareDevice(bootAndPrepareDevice, args, budgets, progress, signal),
     );
   return {
     prepareDevice: prepare,

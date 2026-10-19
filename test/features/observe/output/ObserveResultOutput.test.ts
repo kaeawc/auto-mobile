@@ -9,13 +9,23 @@ import {
 import {
   loadAndroidHomeObserve,
   loadAndroidRawTrimCandidatesObserve,
+  loadDiffFixture,
   loadIosFractionalObserve,
   loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
+import {
+  observeResultFromWire,
+  type WireHierarchyNodeSlot,
+  type WireObserveResult,
+} from "../../../../src/features/observe/output/observeResultWire";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
-import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
+import {
+  createFlatNodeForTest,
+  createObserveResultForTest,
+  flatNodeAttributes,
+} from "../flatHierarchyBuilders";
 
 // The first cl100k encode in a process pays the tokenizer's JIT warm-up (~20 ms on the
 // baseline fixture); pay it here rather than in whichever test measures first.
@@ -36,9 +46,7 @@ beforeAll(() => {
  */
 
 /** Normalize a `node` slot (single or array, as real captures vary) to array. */
-function toNodeArray(
-  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined,
-): ViewHierarchyNode[] {
+function toNodeArray(node: WireHierarchyNodeSlot | undefined): ViewHierarchyNode[] {
   if (!node) {
     return [];
   }
@@ -55,6 +63,37 @@ function collectNodes(node: ViewHierarchyNode | undefined): ViewHierarchyNode[] 
     out.push(...collectNodes(child));
   }
   return out;
+}
+
+/** Rebuilds a node tree keeping only the attributes `keep` accepts; the input is left untouched. */
+function filterNodeAttributes(
+  node: ViewHierarchyNode,
+  keep: (key: string, value: unknown) => boolean,
+): ViewHierarchyNode {
+  const kept = Object.fromEntries(
+    Object.entries(node).filter(([key, value]) => key === "node" || keep(key, value)),
+  );
+  return node.node === undefined
+    ? kept
+    : { ...kept, node: node.node.map((child) => filterNodeAttributes(child, keep)) };
+}
+
+/** A copy of `obs` whose hierarchy nodes keep only the attributes `keep` accepts. */
+function withFilteredAttributes(
+  obs: ObserveResult,
+  keep: (key: string, value: unknown) => boolean,
+): ObserveResult {
+  const root = obs.viewHierarchy?.hierarchy?.node;
+  if (!obs.viewHierarchy || !root) {
+    return obs;
+  }
+  return {
+    ...obs,
+    viewHierarchy: {
+      ...obs.viewHierarchy,
+      hierarchy: { ...obs.viewHierarchy.hierarchy, node: filterNodeAttributes(root, keep) },
+    },
+  };
 }
 
 /** All hierarchy nodes reachable from an observe result's viewHierarchy. */
@@ -76,6 +115,10 @@ const DEFAULT_FALSE_BOOLEAN_KEYS = [
   "selected",
   "password",
 ] as const;
+
+function isDefaultFalseBooleanKey(key: string): boolean {
+  return DEFAULT_FALSE_BOOLEAN_KEYS.some((candidate) => candidate === key);
+}
 
 /** The documented positional order of a compacted bounds tuple. */
 type BoundsTuple = [number, number, number, number];
@@ -434,23 +477,23 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: createFlatNodeForTest({
               "view-id": "distinct-uuid",
+              "resource-id": "android:id/content",
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
       };
-      (obs.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>)["resource-id"] =
-        "android:id/content";
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
       expect(out.viewHierarchy!.hierarchy!.node!["view-id"]).toBe("distinct-uuid");
     });
 
     test("preserves duplicate view-id when referenced by occludedByViewId", () => {
-      const obs: ObserveResult = {
+      const wire: WireObserveResult = {
+        ...createObserveResultForTest(),
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -476,14 +519,15 @@ describe("sanitizeObserveResult", () => {
                 node: [],
                 $: {},
               },
-            ] as any,
+            ],
           },
         },
       };
 
-      const out = sanitizeObserveResult(obs, DROP_NONE);
-      const [covered, overlay, unreferenced] = out.viewHierarchy!.hierarchy!
-        .node as unknown as Array<Record<string, unknown>>;
+      const out = sanitizeObserveResult(observeResultFromWire(wire), DROP_NONE);
+      const [covered, overlay, unreferenced] = toNodeArray(out.viewHierarchy!.hierarchy!.node).map(
+        flatNodeAttributes,
+      );
 
       expect(covered.occludedByViewId).toBe("id/overlay");
       expect(covered["view-id"]).toBeUndefined();
@@ -498,7 +542,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: createFlatNodeForTest({
               clickable: "false",
               "long-clickable": false,
               focusable: "true",
@@ -507,13 +551,13 @@ describe("sanitizeObserveResult", () => {
               "resource-id": "id/keep",
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
       };
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
-      const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
 
       // Default-false booleans (string or boolean form) are dropped.
       expect(node).not.toHaveProperty("clickable");
@@ -533,26 +577,20 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: createFlatNodeForTest({
               enabled: enabled,
               "resource-id": "id/keep",
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
       });
 
       const enabledTrue = sanitizeObserveResult(makeObs("true"), DROP_NONE);
       const enabledFalse = sanitizeObserveResult(makeObs("false"), DROP_NONE);
-      const trueNode = enabledTrue.viewHierarchy!.hierarchy!.node as unknown as Record<
-        string,
-        unknown
-      >;
-      const falseNode = enabledFalse.viewHierarchy!.hierarchy!.node as unknown as Record<
-        string,
-        unknown
-      >;
+      const trueNode = flatNodeAttributes(enabledTrue.viewHierarchy!.hierarchy!.node);
+      const falseNode = flatNodeAttributes(enabledFalse.viewHierarchy!.hierarchy!.node);
 
       // enabled defaults to true → absence is lossless; a disabled control is high-signal.
       expect(trueNode).not.toHaveProperty("enabled");
@@ -569,18 +607,12 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("measurably shrinks false booleans over a real raw hierarchy capture", () => {
-      const obs = loadAndroidRawTrimCandidatesObserve();
-      for (const node of allHierarchyNodes(obs)) {
-        const attrs = node as unknown as Record<string, unknown>;
-        delete attrs.enabled;
-        for (const [key, value] of Object.entries(attrs)) {
-          if (value === "") {
-            delete attrs[key];
-          }
-        }
-      }
+      const obs = withFilteredAttributes(
+        loadAndroidRawTrimCandidatesObserve(),
+        (key, value) => key !== "enabled" && value !== "",
+      );
       const falseBooleanCandidates = allHierarchyNodes(obs).filter((node) => {
-        const attrs = node as unknown as Record<string, unknown>;
+        const attrs = flatNodeAttributes(node);
         return DEFAULT_FALSE_BOOLEAN_KEYS.some((key) => attrs[key] === "false");
       });
       expect(falseBooleanCandidates.length).toBeGreaterThan(0);
@@ -592,16 +624,12 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("measurably shrinks empty-string fields over a real raw hierarchy capture", () => {
-      const obs = loadAndroidRawTrimCandidatesObserve();
-      for (const node of allHierarchyNodes(obs)) {
-        const attrs = node as unknown as Record<string, unknown>;
-        delete attrs.enabled;
-        for (const key of DEFAULT_FALSE_BOOLEAN_KEYS) {
-          delete attrs[key];
-        }
-      }
+      const obs = withFilteredAttributes(
+        loadAndroidRawTrimCandidatesObserve(),
+        (key) => key !== "enabled" && !isDefaultFalseBooleanKey(key),
+      );
       const emptyStringCandidates = allHierarchyNodes(obs).filter((node) =>
-        Object.values(node as unknown as Record<string, unknown>).some((value) => value === ""),
+        Object.values(flatNodeAttributes(node)).some((value) => value === ""),
       );
       expect(emptyStringCandidates.length).toBeGreaterThan(0);
 
@@ -612,20 +640,12 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("measurably shrinks enabled=true over a real raw hierarchy capture", () => {
-      const obs = loadAndroidRawTrimCandidatesObserve();
-      for (const node of allHierarchyNodes(obs)) {
-        const attrs = node as unknown as Record<string, unknown>;
-        for (const key of DEFAULT_FALSE_BOOLEAN_KEYS) {
-          delete attrs[key];
-        }
-        for (const [key, value] of Object.entries(attrs)) {
-          if (value === "") {
-            delete attrs[key];
-          }
-        }
-      }
+      const obs = withFilteredAttributes(
+        loadAndroidRawTrimCandidatesObserve(),
+        (key, value) => !isDefaultFalseBooleanKey(key) && value !== "",
+      );
       const enabledTrueCandidates = allHierarchyNodes(obs).filter(
-        (node) => (node as unknown as Record<string, unknown>).enabled === "true",
+        (node) => flatNodeAttributes(node).enabled === "true",
       );
       expect(enabledTrueCandidates.length).toBeGreaterThan(0);
 
@@ -638,16 +658,21 @@ describe("sanitizeObserveResult", () => {
     test("per-node trim does not touch rawViewHierarchy (raw stays raw)", () => {
       const { observe } = loadAndroidHomeObserve();
       observe.rawViewHierarchy = {
-        hierarchy: {
-          node: {
-            "view-id": "android:id/content",
-            "resource-id": "android:id/content",
-            clickable: "false",
-            text: "",
-            node: [],
-            $: {},
+        json: JSON.stringify({
+          hierarchy: {
+            node: {
+              "view-id": "android:id/content",
+              "resource-id": "android:id/content",
+              clickable: "false",
+              text: "",
+              node: [],
+              $: {},
+            },
           },
-        } as any,
+        }),
+        source: "accessibility-service",
+        timestamp: 0,
+        device: { deviceId: "fingerprint", platform: "android" },
       };
       const rawBefore = JSON.stringify(observe.rawViewHierarchy);
 
@@ -776,17 +801,18 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "resource-id": "id/no-bounds", node: [], $: {} } as any,
+            node: createFlatNodeForTest({ "resource-id": "id/no-bounds", node: [], $: {} }),
           },
         },
       };
       const out = sanitizeObserveResult(obs, COMPACT);
-      const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
       expect(node.bounds).toBeUndefined();
     });
 
     test("compacts bounds on an array-shaped root and nested children", () => {
-      const obs: ObserveResult = {
+      const wire: WireObserveResult = {
+        ...createObserveResultForTest(),
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -801,14 +827,15 @@ describe("sanitizeObserveResult", () => {
                 ],
               },
               { "resource-id": "b", bounds: { left: 9, top: 10, right: 11, bottom: 12 } },
-            ] as any,
+            ],
           },
         },
       };
-      const out = sanitizeObserveResult(obs, COMPACT);
-      const roots = out.viewHierarchy!.hierarchy!.node as unknown as Array<Record<string, unknown>>;
+      const out = sanitizeObserveResult(observeResultFromWire(wire), COMPACT);
+      const rootNodes = toNodeArray(out.viewHierarchy!.hierarchy!.node);
+      const roots = rootNodes.map(flatNodeAttributes);
       expect(roots[0].bounds).toEqual([1, 2, 3, 4]);
-      expect((roots[0].node as Array<Record<string, unknown>>)[0].bounds).toEqual([5, 6, 7, 8]);
+      expect(flatNodeAttributes(toNodeArray(rootNodes[0].node)[0]).bounds).toEqual([5, 6, 7, 8]);
       expect(roots[1].bounds).toEqual([9, 10, 11, 12]);
     });
 
@@ -819,7 +846,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: createFlatNodeForTest({
               "resource-id": "id/root",
               "view-id": "id/root", // dup → trimmed
               clickable: "false", // default-false → trimmed
@@ -827,7 +854,7 @@ describe("sanitizeObserveResult", () => {
               bounds: { left: 0, top: 0, right: 100, bottom: 200 },
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
         elements: { clickable: [], scrollable: [], text: [], media: [] },
@@ -837,7 +864,7 @@ describe("sanitizeObserveResult", () => {
         trimNodes: true,
         compact: true,
       });
-      const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const node = flatNodeAttributes(out.viewHierarchy!.hierarchy!.node);
       expect(node.bounds).toEqual([0, 0, 100, 200]);
       expect(node["view-id"]).toBeUndefined();
       expect(node.clickable).toBeUndefined();
@@ -867,58 +894,66 @@ describe("sanitizeObserveResult", () => {
   describe("compact flattens EVERY bounds site, not just nodes (#2978)", () => {
     /** Observe result seeded with a bounds object at every distinct site. */
     function makeMultiSiteObserve(): ObserveResult {
-      return {
+      return createObserveResultForTest({
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
-        focusedElement: { bounds: { left: 1, top: 2, right: 3, bottom: 4 } } as any,
-        accessibilityFocusedElement: { bounds: { left: 9, top: 10, right: 11, bottom: 12 } } as any,
-        awaitedElement: { bounds: { left: 13, top: 14, right: 15, bottom: 16 } } as any,
+        focusedElement: { bounds: { left: 1, top: 2, right: 3, bottom: 4 } },
+        accessibilityFocusedElement: {
+          bounds: { left: 9, top: 10, right: 11, bottom: 12 },
+        },
+        awaitedElement: { bounds: { left: 13, top: 14, right: 15, bottom: 16 } },
         elements: {
-          clickable: [{ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" } as any],
-          scrollable: [{ bounds: { left: 30, top: 31, right: 32, bottom: 33 } } as any],
-          text: [{ bounds: { left: 40, top: 41, right: 42, bottom: 43 } } as any],
-          media: [{ bounds: { left: 50, top: 51, right: 52, bottom: 53 } } as any],
+          clickable: [{ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" }],
+          scrollable: [{ bounds: { left: 30, top: 31, right: 32, bottom: 33 } }],
+          text: [{ bounds: { left: 40, top: 41, right: 42, bottom: 43 } }],
+          media: [
+            {
+              className: "android.widget.ImageView",
+              mediaType: "image",
+              bounds: { left: 50, top: 51, right: 52, bottom: 53 },
+            },
+          ],
         },
         viewHierarchy: {
           systemInsets: { top: 1, bottom: 2, left: 3, right: 4 },
           hierarchy: {
-            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } as any,
-            node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: createFlatNodeForTest({
               "resource-id": "root",
               bounds: { left: 60, top: 61, right: 62, bottom: 63 },
-            } as any,
+            }),
           },
-          windows: [{ bounds: { left: 70, top: 71, right: 72, bottom: 73 } } as any],
+          windows: [{ bounds: { left: 70, top: 71, right: 72, bottom: 73 } }],
           contentHiddenRegions: [
             { bounds: { left: 80, top: 81, right: 82, bottom: 83 }, reason: "x", areaPercent: 1 },
           ],
         },
-      } as ObserveResult;
+      });
     }
 
     test("flattens elements[].bounds across all four element buckets", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const e = out.elements!;
-      expect((e.clickable[0] as any).bounds).toEqual([20, 21, 22, 23]);
-      expect((e.scrollable[0] as any).bounds).toEqual([30, 31, 32, 33]);
-      expect((e.text[0] as any).bounds).toEqual([40, 41, 42, 43]);
-      expect((e.media[0] as any).bounds).toEqual([50, 51, 52, 53]);
+      expect(Reflect.get(e.clickable[0], "bounds")).toEqual([20, 21, 22, 23]);
+      expect(Reflect.get(e.scrollable[0], "bounds")).toEqual([30, 31, 32, 33]);
+      expect(Reflect.get(e.text[0], "bounds")).toEqual([40, 41, 42, 43]);
+      expect(Reflect.get(e.media[0], "bounds")).toEqual([50, 51, 52, 53]);
     });
 
     test("flattens the Hierarchy root, window, and content-hidden-region bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const vh = out.viewHierarchy!;
-      expect((vh.hierarchy as any).bounds).toEqual([0, 0, 1080, 2400]);
-      expect((vh.windows![0] as any).bounds).toEqual([70, 71, 72, 73]);
-      expect((vh.contentHiddenRegions![0] as any).bounds).toEqual([80, 81, 82, 83]);
+      expect(Reflect.get(vh.hierarchy, "bounds")).toEqual([0, 0, 1080, 2400]);
+      expect(Reflect.get(vh.windows![0], "bounds")).toEqual([70, 71, 72, 73]);
+      expect(Reflect.get(vh.contentHiddenRegions![0], "bounds")).toEqual([80, 81, 82, 83]);
     });
 
     test("flattens focused / accessibility-focused / awaited element bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
-      expect((out.focusedElement as any).bounds).toEqual([1, 2, 3, 4]);
-      expect((out.accessibilityFocusedElement as any).bounds).toEqual([9, 10, 11, 12]);
-      expect((out.awaitedElement as any).bounds).toEqual([13, 14, 15, 16]);
+      expect(Reflect.get(out.focusedElement, "bounds")).toEqual([1, 2, 3, 4]);
+      expect(Reflect.get(out.accessibilityFocusedElement, "bounds")).toEqual([9, 10, 11, 12]);
+      expect(Reflect.get(out.awaitedElement, "bounds")).toEqual([13, 14, 15, 16]);
     });
 
     test("NEVER compacts systemInsets (a {top,bottom,left,right} object, not bounds)", () => {
@@ -931,17 +966,22 @@ describe("sanitizeObserveResult", () => {
     test("leaves rawViewHierarchy untouched (raw stays raw)", () => {
       const obs = makeMultiSiteObserve();
       obs.rawViewHierarchy = {
-        hierarchy: {
-          node: { "resource-id": "raw", bounds: { left: 90, top: 91, right: 92, bottom: 93 } },
-        },
-      } as any;
+        json: JSON.stringify({
+          hierarchy: {
+            node: { "resource-id": "raw", bounds: { left: 90, top: 91, right: 92, bottom: 93 } },
+          },
+        }),
+        source: "accessibility-service",
+        timestamp: 0,
+        device: { deviceId: "fingerprint", platform: "android" },
+      };
       const rawBefore = JSON.stringify(obs.rawViewHierarchy);
 
       const out = sanitizeObserveResult(obs, COMPACT);
 
       expect(JSON.stringify(out.rawViewHierarchy)).toBe(rawBefore);
       // ...while the processed hierarchy WAS compacted (proves the skip is targeted).
-      expect((out.viewHierarchy!.hierarchy.node as any).bounds).toEqual([60, 61, 62, 63]);
+      expect(Reflect.get(out.viewHierarchy!.hierarchy.node, "bounds")).toEqual([60, 61, 62, 63]);
     });
 
     test("is output-only across every site (input object never mutated)", () => {
@@ -1171,10 +1211,11 @@ describe("sanitizeObserveResult", () => {
       // `long_press_card` fixture (an exact-fill content-desc descendant) through
       // the full sanitize path: if provenance is lost, the exact-fill child is
       // dropped and the card comes back label:"Long press me" (geometry fallback).
+      const scrollBefore = loadDiffFixture("scroll-before");
       const observe: ObserveResult = {
-        ...(scrollBeforeFixture as unknown as ObserveResult),
+        ...scrollBefore,
         elements: new DefaultObserveElementCollector().collect(
-          scrollBeforeFixture.viewHierarchy as NonNullable<ObserveResult["viewHierarchy"]>,
+          scrollBefore.viewHierarchy!,
           "android",
         ),
       };
@@ -1249,12 +1290,13 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { class: "android.view.View", ...attrs, node: [], $: {} } as any,
+            node: createFlatNodeForTest({ class: "android.view.View", ...attrs, node: [], $: {} }),
           },
         },
       };
-      return sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!
-        .node as unknown as Record<string, unknown>;
+      return flatNodeAttributes(
+        sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!.node,
+      );
     }
 
     test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", (key) => {
@@ -1306,17 +1348,22 @@ describe("sanitizeObserveResult", () => {
   describe("bounds-compaction shape table (A3/P4)", () => {
     /** Compact a single node whose `bounds` is `input`; return the emitted bounds. */
     function compactNodeBounds(input: unknown): unknown {
+      // `bounds` is deliberately off-model (malformed shapes), so it enters through an open record.
+      const malformed: Record<string, unknown> = { bounds: input };
       const obs: ObserveResult = {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "resource-id": "r", bounds: input as any, node: [], $: {} } as any,
+            node: createFlatNodeForTest({ "resource-id": "r", ...malformed, node: [], $: {} }),
           },
         },
       };
-      return (sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node as any).bounds;
+      return Reflect.get(
+        sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node!,
+        "bounds",
+      );
     }
 
     const ROWS: ReadonlyArray<readonly [string, unknown, unknown]> = [
@@ -1371,7 +1418,7 @@ describe("sanitizeObserveResult", () => {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
-        viewHierarchy: { hierarchy: { node: { "resource-id": "r" } as any } },
+        viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ "resource-id": "r" }) } },
       };
       expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({
         top: 5,
@@ -1390,7 +1437,17 @@ describe("sanitizeObserveResult", () => {
   // still drop the redundant gfx field. An `if (metrics.x)` refactor treats `0`
   // as falsy and re-ships the redundancy — this table is the guard.
   describe("gfx-trim 0-boundary table (A5)", () => {
-    const GFX_AUDIT_PAIRS: ReadonlyArray<readonly [string, string]> = [
+    type FrameAuditKey =
+      | "p50Ms"
+      | "p90Ms"
+      | "p95Ms"
+      | "p99Ms"
+      | "missedVsyncCount"
+      | "slowUiThreadCount"
+      | "frameDeadlineMissedCount";
+    const GFX_AUDIT_PAIRS: ReadonlyArray<
+      readonly [FrameAuditKey, keyof NonNullable<ObserveResult["gfxMetrics"]>]
+    > = [
       ["p50Ms", "percentile50thMs"],
       ["p90Ms", "percentile90thMs"],
       ["p95Ms", "percentile95thMs"],
@@ -1420,7 +1477,7 @@ describe("sanitizeObserveResult", () => {
       "a 0-valued audit %s still drops redundant gfxMetrics.%s",
       (auditKey, gfxKey) => {
         const { observe } = loadAndroidHomeObserve();
-        const m = observe.performanceAudit!.metrics as unknown as Record<string, unknown>;
+        const m = observe.performanceAudit!.metrics;
         // Null every frame replacement so ONLY the tested field's 0 can drive a drop.
         for (const [ak] of GFX_AUDIT_PAIRS) {
           m[ak] = null;
@@ -1488,11 +1545,12 @@ describe("sanitizeObserveResult", () => {
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
-          hierarchy: { node: { "resource-id": "r", ...attrs, node: [], $: {} } as any },
+          hierarchy: {
+            node: createFlatNodeForTest({ "resource-id": "r", ...attrs, node: [], $: {} }),
+          },
         },
       };
-      return sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!
-        .node as unknown as Record<string, unknown>;
+      return flatNodeAttributes(sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node);
     }
 
     const UNICODE_TEXTS: ReadonlyArray<readonly [string, string]> = [
@@ -1620,7 +1678,9 @@ describe("sanitizeObserveResult", () => {
       updatedAt: 0,
       screenSize: { width: 1, height: 1 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: { "resource-id": "r", node: [], $: {} } as any } },
+      viewHierarchy: {
+        hierarchy: { node: createFlatNodeForTest({ "resource-id": "r", node: [], $: {} }) },
+      },
     };
 
     test("compact on a bounds-free observation does not grow it", () => {

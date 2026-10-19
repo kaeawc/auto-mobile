@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -75,7 +84,26 @@ class ReadyNamespaceManager extends DaemonManager {
   }
 }
 
-const dirs: string[] = [];
+// One private root under the worktree scratch dir (not a predictable os.tmpdir() path) is made
+// in beforeAll and removed in afterAll; each test only mkdirs its own empty subdirectory.
+let scratchRoot = "";
+let scratchCount = 0;
+
+beforeAll(() => {
+  const base = join(process.cwd(), "scratch/data");
+  mkdirSync(base, { recursive: true });
+  scratchRoot = mkdtempSync(join(base, "namespace-unit-"));
+});
+
+afterAll(() => {
+  rmSync(scratchRoot, { recursive: true, force: true });
+});
+
+function nextScratchDir(): string {
+  const dir = join(scratchRoot, `t${scratchCount++}`);
+  mkdirSync(dir);
+  return dir;
+}
 
 // A manager that reaches start() opens a daemon launch log under the resolved
 // AutoMobile data dir, which must never be the developer's real ~/.auto-mobile.
@@ -86,9 +114,7 @@ let originalLogDir: string | undefined;
 beforeEach(() => {
   originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
   originalLogDir = process.env.AUTOMOBILE_LOG_DIR;
-  const scratchDataDir = join(process.cwd(), "scratch/data");
-  mkdirSync(scratchDataDir, { recursive: true });
-  isolatedDataDir = mkdtempSync(join(scratchDataDir, "namespace-unit-data-"));
+  isolatedDataDir = nextScratchDir();
   process.env.AUTOMOBILE_DATA_DIR = isolatedDataDir;
   // Launch logs honor this override before DATA_DIR; isolate both even when the
   // caller already supplied a scratch log directory for the whole test process.
@@ -106,13 +132,7 @@ afterEach(() => {
   } else {
     process.env.AUTOMOBILE_LOG_DIR = originalLogDir;
   }
-  if (isolatedDataDir !== undefined) {
-    rmSync(isolatedDataDir, { recursive: true, force: true });
-    isolatedDataDir = undefined;
-  }
-  for (const dir of dirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  isolatedDataDir = undefined;
 });
 
 function createHarness(
@@ -255,17 +275,8 @@ function createHarness(
   };
 }
 
-// Per-test directory created with mkdtemp under the worktree scratch dir (not a
-// predictable os.tmpdir() path), so the pid/lock files written into it are private.
-function makeHarnessDir(): string {
-  const base = join(process.cwd(), "scratch/data");
-  mkdirSync(base, { recursive: true });
-  return mkdtempSync(join(base, "namespace-unit-"));
-}
-
 function harness() {
-  const dir = makeHarnessDir();
-  dirs.push(dir);
+  const dir = nextScratchDir();
   const socket = join(dir, "private socket.sock");
   const pidPath = join(dir, "daemon.pid");
   const lockPath = join(dir, "daemon.lock");
@@ -274,8 +285,7 @@ function harness() {
 }
 
 function defaultNamespaceHarness() {
-  const dir = makeHarnessDir();
-  dirs.push(dir);
+  const dir = nextScratchDir();
   return createHarness(dir, {
     socket: DEFAULT_SOCKET_PATH,
     pidPath: DEFAULT_PID_FILE_PATH,

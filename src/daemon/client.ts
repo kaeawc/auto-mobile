@@ -493,34 +493,26 @@ export class DaemonClient {
     this.framer = this.createInboundFramer();
   }
 
-  /** Test-only seam for attaching an in-memory socket. */
-  attachSocketForTesting(socket: Duplex): void {
-    this.socket = socket;
-    this.connected = true;
-    this.inboundClosed = false;
-    this.framer = this.createInboundFramer();
-  }
-
-  /** Test-only seam for delivering a daemon frame. */
-  simulateIncomingDataForTesting(data: Buffer): void {
-    this.handleData(data);
-  }
-
-  /** Test-only seam for locating a pending request by its progress token. */
-  findPendingRequestIdByProgressTokenForTesting(
-    progressToken: string | number,
-  ): string | undefined {
-    for (const [requestId, pending] of this.pendingRequests) {
-      if (pending.progressToken === progressToken) {
-        return requestId;
-      }
-    }
-    return undefined;
-  }
-
-  /** Test-only seam for checking whether a request remains pending. */
-  hasPendingRequestForTesting(requestId: string): boolean {
-    return this.pendingRequests.has(requestId);
+  /** @internal Typed view of private state for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      /** Attaches an in-memory socket. */
+      attachSocket: (socket: Duplex): void => {
+        this.socket = socket;
+        this.connected = true;
+        this.inboundClosed = false;
+        this.framer = this.createInboundFramer();
+      },
+      /** Delivers a daemon frame. */
+      simulateIncomingData: (data: Buffer): void => this.handleData(data),
+      /** Locates a pending request by its progress token. */
+      findPendingRequestIdByProgressToken: (progressToken: string | number): string | undefined =>
+        [...this.pendingRequests].find(
+          ([, pending]) => pending.progressToken === progressToken,
+        )?.[0],
+      /** Checks whether a request remains pending. */
+      hasPendingRequest: (requestId: string): boolean => this.pendingRequests.has(requestId),
+    };
   }
 
   /**

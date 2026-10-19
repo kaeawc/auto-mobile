@@ -6,11 +6,11 @@ import { createTapStrategy } from "../../../src/features/action/strategies/creat
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
-import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Sanity-check the platform-agnostic TapStrategy contract. Tests
@@ -48,11 +48,11 @@ describe("TapStrategy", () => {
   };
 
   const buildViewHierarchy = (device: BootedDevice): ViewHierarchy =>
-    new ViewHierarchy(device, { create: () => new FakeAdbClient() as any });
+    new ViewHierarchy(device, new FakeAdbClientFactory());
 
   const minimalHierarchy: ViewHierarchyResult = {
-    hierarchy: { $: {}, node: [] },
-  } as any;
+    hierarchy: {},
+  };
 
   describe("FakeTapStrategy", () => {
     let fake: FakeTapStrategy;
@@ -116,11 +116,7 @@ describe("TapStrategy", () => {
       device: androidDevice,
       build: () => {
         const detector = new FakeAccessibilityDetector();
-        const strategy = new AndroidTapStrategy(
-          androidDevice,
-          new FakeAdbClient() as any,
-          detector,
-        );
+        const strategy = new AndroidTapStrategy(androidDevice, new FakeAdbClient(), detector);
         return {
           strategy,
           setA11y: (enabled) =>
@@ -213,16 +209,16 @@ describe("TapStrategy", () => {
   });
 
   // Regression guard for #3925: the tap strategies must forward the injected
-  // FeatureFlagService to detection so `force-accessibility-mode` /
+  // FeatureFlagReader to detection so `force-accessibility-mode` /
   // `accessibility-auto-detect` apply to tapOn exactly as they do to observe.
   describe("force-accessibility-mode feature flag threading (#3925)", () => {
-    const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+    const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
     it("AndroidTapStrategy forwards featureFlags to detectMethod", async () => {
       const detector = new FakeAccessibilityDetector();
       const strategy = new AndroidTapStrategy(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         detector,
         sentinelFlags,
       );
@@ -241,7 +237,7 @@ describe("TapStrategy", () => {
       const detector = new FakeAccessibilityDetector();
       const strategy = createTapStrategy(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         detector,
         new FakeIosVoiceOverDetector(),
         sentinelFlags,
@@ -254,7 +250,7 @@ describe("TapStrategy", () => {
       const detector = new FakeIosVoiceOverDetector();
       const strategy = createTapStrategy(
         iosDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeAccessibilityDetector(),
         detector,
         sentinelFlags,
@@ -268,7 +264,7 @@ describe("TapStrategy", () => {
     it("returns an AndroidTapStrategy for Android devices", () => {
       const strategy = createTapStrategy(
         androidDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeAccessibilityDetector(),
         new FakeIosVoiceOverDetector(),
       );
@@ -279,7 +275,7 @@ describe("TapStrategy", () => {
     it("returns an IosTapStrategy for iOS devices", () => {
       const strategy = createTapStrategy(
         iosDevice,
-        new FakeAdbClient() as any,
+        new FakeAdbClient(),
         new FakeAccessibilityDetector(),
         new FakeIosVoiceOverDetector(),
       );
@@ -311,4 +307,27 @@ describe("clipNavigationTapBounds", () => {
     });
     expect(strategy.clipNavigationTapBounds(bounds, hierarchy, undefined, [])).toEqual({ bounds });
   });
+});
+
+test("platform tap refinements are Android-only capabilities of the strategy", () => {
+  const android = createTapStrategy(
+    { name: "a", deviceId: "emulator-5554", platform: "android" },
+    new FakeAdbClient(),
+    new FakeAccessibilityDetector(),
+    new FakeIosVoiceOverDetector(),
+  );
+  const ios = createTapStrategy(
+    { name: "i", deviceId: "sim", platform: "ios" },
+    new FakeAdbClient(),
+    new FakeAccessibilityDetector(),
+    new FakeIosVoiceOverDetector(),
+  );
+  const flags = (s: TapStrategy) => [
+    s.warnsOnDisabledElement,
+    s.settlesPostTapChange,
+    s.verifiesRefreshedDisplay,
+    s.promotesClickableAncestor,
+  ];
+  expect(flags(android)).toEqual([true, true, true, true]);
+  expect(flags(ios)).toEqual([false, false, false, false]);
 });

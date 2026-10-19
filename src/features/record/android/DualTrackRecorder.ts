@@ -97,7 +97,7 @@ export class DualTrackRecorder {
   private activeEmitter: GestureEmitter | null = null;
   private unsubscribeA11y: (() => void) | null = null;
   /** Reference to the real AndroidCtrlProxyClient when not in test mode */
-  private activeA11y: AndroidCtrlProxyClient | null = null;
+  private activeA11y: Pick<AndroidCtrlProxyClient, "notifyRecordingStopped"> | null = null;
   private stopped = false;
   private firstTouchTrackFailure?: TouchTrackFailure;
   /** Rotation/size timeline for the touch track; built at start in real mode (#10174). */
@@ -243,7 +243,9 @@ export class DualTrackRecorder {
   // Private: display geometry (rotation / size) during the recording
   // -------------------------------------------------------------------------
 
-  private subscribeDisplayChanges(a11yClient?: AndroidCtrlProxyClient): void {
+  private subscribeDisplayChanges(
+    a11yClient?: Pick<AndroidCtrlProxyClient, "onDisplayTransition">,
+  ): void {
     const source = this.displaySource ?? (a11yClient ? clientDisplaySource(a11yClient) : undefined);
     const geometry = this.geometry;
     if (source && geometry) {
@@ -754,7 +756,9 @@ async function readStartRotation(
  * Adapt the CtrlProxy client's single-slot display observer to a subscription,
  * chaining any observer already installed and restoring it on unsubscribe.
  */
-function clientDisplaySource(client: AndroidCtrlProxyClient): DisplayChangeSource {
+function clientDisplaySource(
+  client: Pick<AndroidCtrlProxyClient, "onDisplayTransition">,
+): DisplayChangeSource {
   return {
     onDisplayChange(listener) {
       const previous = client.onDisplayTransition;

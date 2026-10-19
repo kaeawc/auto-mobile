@@ -1,16 +1,6 @@
-import {
-  emulatorProcessEscapeHint,
-  EmulatorStillRunningError,
-  markEmulatorStopDispatched,
-  type EmulatorProcessIdentity,
-  type EmulatorSerialDescription,
-  type EmulatorProcessStopper,
-} from "./EmulatorProcessStop";
-import { AdbCommandTimeoutError } from "./AdbClient";
 import { errorMessage } from "../describeUnknownError";
-import { existsSync } from "node:fs";
-import { extname, resolve, isAbsolute } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
+import { ENV, readEnvRaw } from "../../config/env";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
 import { runExecSeam } from "../ExecSeam";
@@ -21,27 +11,15 @@ import {
   type HostChildProcess as ChildProcess,
   type SpawnFn,
 } from "../HostCommandExecutor";
-import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
-import { toActionableError } from "../../models/ActionableError";
-import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
-import type { AdmitColdBoot, BootAdmission } from "../../models/BootAdmission";
+import { BootedDevice, DeviceInfo, ExecResult } from "../../models";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";
-import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
-import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { defaultTimer, Timer } from "../SystemTimer";
-import { raceWithDeadline } from "../raceWithDeadline";
-import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../AbortContext";
-import { trackAmbient } from "../PerfContext";
-import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { BunPortAvailabilityChecker, type PortAvailabilityChecker } from "../PortManager";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
-import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
+import { FileAvdConfigReader, validateAvdMemory } from "./AvdConfigReader";
 import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
-import { androidProfileFormFactor } from "../../models/formFactor";
-import type { AdbDeviceState } from "./interfaces/AdbExecutor";
-import { redactAndroidCommandOutput } from "./redactAndroidCommandOutput";
 import {
   defaultEmulatorConsoleBusyRegistry,
   type EmulatorConsoleBusyRegistry,
@@ -54,52 +32,68 @@ import {
 import {
   DefaultEmulatorPortReservations,
   resetEmulatorLaunchReservations,
-  type EmulatorDeviceIdReservation,
   type EmulatorPortReservationDeps,
   type EmulatorPortReservations,
 } from "./EmulatorPortReservations";
 import {
   DefaultAndroidDeviceInventoryScanner,
-  ANDROID_INVENTORY_AVD_LIST_CAP_MS,
-  configuredAvdArchitecture,
-  inventoryEnrichmentState,
   type AndroidDeviceInventoryDeps,
   type AndroidDeviceInventoryScanner,
   type BootedDeviceScan,
   type BootedDeviceScanOptions,
-  type ReadinessDiagnostic,
 } from "./AndroidDeviceInventoryScanner";
 import {
   throwIfReadinessAborted,
   isUnknownEmulatorName,
-  readinessDiagnostic,
   unknownEmulatorName,
-  type TargetReadinessState,
 } from "./emulatorReadinessEvaluation";
 import {
   DefaultEmulatorReadinessPoller,
-  MIN_EMULATOR_POLLING_INTERVAL_MS,
   type EmulatorReadinessHost,
   type EmulatorReadinessPoller,
-  type OfflineTracker,
 } from "./EmulatorReadinessPoller";
 import {
   DefaultEmulatorLauncher,
-  type AndroidEmulatorLaunchOutcome,
-  boundedEmulatorOutputTail,
   type EmulatorLauncher,
   type EmulatorLauncherHost,
-  type LaunchFailureCategory,
 } from "./EmulatorLauncher";
 import {
   accelerationCheckCategory,
   detectArchitecturePanic,
   detectCorruptImage,
-  detectDeviceIdFromEmulatorOutput,
   detectDisplayError,
-  detectSandboxMprotect,
   launchFailureCategory,
 } from "./emulatorLaunchFailure";
+import {
+  appendCategory,
+  classifyEmulatorExitOutput,
+  DefaultEmulatorLaunchDiagnostics,
+  formatEarlyExitError,
+  sandboxFailure,
+  type ArchitectureCompatibilityResult,
+  type EmulatorLaunchDiagnostics,
+} from "./EmulatorLaunchDiagnostics";
+import {
+  DefaultEmulatorAvdCatalog,
+  type EmulatorAvdCatalog,
+  type ListAvdsOptions,
+} from "./EmulatorAvdCatalog";
+import { DefaultEmulatorCommandRunner, type EmulatorCommandRunner } from "./EmulatorCommandRunner";
+import {
+  DefaultEmulatorLaunchCoordinator,
+  type EmulatorLaunchCoordinator,
+} from "./EmulatorLaunchCoordinator";
+import { DefaultEmulatorLaunchTargets, type EmulatorLaunchTargets } from "./EmulatorLaunchTargets";
+import type {
+  AndroidEmulatorLaunchHandle,
+  AndroidEmulatorLaunchRequest,
+  AndroidEmulatorReadinessOptions,
+} from "./AndroidEmulatorLaunchTypes";
+export type {
+  AndroidEmulatorLaunchHandle,
+  AndroidEmulatorLaunchRequest,
+  AndroidEmulatorReadinessOptions,
+} from "./AndroidEmulatorLaunchTypes";
 export {
   EmulatorExitedDuringReadinessError,
   boundedEmulatorOutputTail,
@@ -115,36 +109,7 @@ export {
   resetAndroidInventoryEnrichmentCache,
 } from "./AndroidDeviceInventoryScanner";
 
-export const EMULATOR_CONSOLE_KILL_BOUND_MS = 10_000;
-interface EmulatorKillOptions {
-  timeoutMs?: number;
-  signal?: AbortSignal;
-  force?: boolean;
-  processStop?: { stopper: EmulatorProcessStopper; expectedAvdName?: string };
-  /** Internal absolute deadline, set before discovery. */
-  deadlineMs?: number;
-}
-
-const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
-const ACCEL_CHECK_TIMEOUT_MS = 3_000;
-// A freshly-provisioned AVD's first cold boot can land its serial in ADB
-// `offline` and stay there. This bounds a single re-detect recovery while
-// normal readiness polling continues through the caller's full budget.
-const FRESH_OFFLINE_RECOVERY_THRESHOLD_MS = 15_000;
-const FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS = 5_000;
-// Continue checking at a bounded cadence after recovery so a device that
-// becomes ready before the deadline is observed despite a large configured interval.
-const FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS = 5_000;
-
-function outputFromUnknown(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Buffer.isBuffer(value)) {
-    return value.toString();
-  }
-  return "";
-}
+export { EMULATOR_CONSOLE_KILL_BOUND_MS } from "./EmulatorKiller";
 
 function resolveReadinessPoller(
   poller: EmulatorReadinessPoller | undefined,
@@ -184,57 +149,6 @@ function resolveEmulatorExecAsync(
   execAsyncFn: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null,
 ): (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult> {
   return execAsyncFn || execAsync;
-}
-
-/**
- * Interface for Android Emulator (AVD) management
- * Provides emulator lifecycle and control capabilities
- */
-export interface AndroidEmulatorLaunchRequest {
-  /** Host still image used as the virtual-scene back-camera wall poster at boot. */
-  cameraPosterPath?: string;
-  /** The configured Android Virtual Device to launch. */
-  avdName: string;
-  /**
-   * The expected ADB serial, when the caller already knows it. This remains
-   * authoritative during readiness checks instead of relying on AVD-name
-   * discovery from a concurrently starting emulator.
-   */
-  deviceId?: string;
-  /** Additional, already-tokenized emulator arguments. */
-  extraArgs?: readonly string[];
-  /** Cancels a launch that has not begun, or disposes a completed launch. */
-  signal?: AbortSignal;
-  /**
-   * Boot admission (#11181), awaited only on the cold-spawn path: after the
-   * in-process join and the already-running/starting adoption checks, so
-   * adopting a running AVD is never refused for capacity.
-   */
-  admitColdBoot?: AdmitColdBoot;
-}
-
-/** Optional readiness behavior for callers recovering an existing guest state. */
-export interface AndroidEmulatorReadinessOptions {
-  /** Preserve the guest's restored display and keyguard state instead of waking it. */
-  skipWakeAndUnlock?: boolean;
-  /**
-   * The device was just created by a fresh provision, so its first boot is a
-   * genuine cold boot (no quick-boot snapshot to restore). When its serial sits
-   * in ADB `offline` past a bounded threshold, attempt one `adb -s <serial> reconnect`
-   * re-detect, then continue readiness polling through the caller's
-   * timeout. A quick-boot-after-shutdown restore leaves this unset and skips
-   * that recovery attempt.
-   */
-  freshProvision?: boolean;
-}
-
-export interface AndroidEmulatorLaunchHandle {
-  readonly avdName: string;
-  readonly process: ChildProcess | null;
-  readonly outcome: AndroidEmulatorLaunchOutcome;
-  readonly targetDeviceId?: string;
-  /** Stops the emulator only when this launch created its process. */
-  dispose(): void;
 }
 
 export interface AndroidEmulator {
@@ -340,21 +254,6 @@ export interface AndroidEmulatorForDeviceManager extends Pick<
   | "waitForEmulatorReady"
 > {}
 
-/** Any failure of a launch the caller cancelled is reported as that cancellation, with the spawned child. */
-function asLaunchCancellation(
-  avdName: string,
-  error: unknown,
-  process: ChildProcess | null,
-): EmulatorLaunchCancelledError {
-  return error instanceof EmulatorLaunchCancelledError
-    ? error
-    : new EmulatorLaunchCancelledError(avdName, process);
-}
-
-function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
-  return deviceId === undefined || deviceId.startsWith("emulator-");
-}
-
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
 // executor's `spawn` is a plain passthrough, so this is behavior-identical; all
@@ -384,37 +283,85 @@ const execAsync = async (
   );
 };
 
-// Keep the runtime API typed locally; this project does not include Bun's ambient types.
-declare const Bun: { which(name: string): string | null };
+import { getFallbackEmulatorPath, locateEmulatorPath } from "./emulatorBinaryLocator";
+import { resolveRunningAvdNameOnce, type RunningAvdNameResult } from "./runningAvdName";
+export { AndroidEmulatorUnavailableError } from "./AndroidEmulatorUnavailableError";
+export { AndroidOfflineProbeError } from "./AndroidOfflineProbeError";
+import {
+  DefaultEmulatorKiller,
+  type EmulatorKiller,
+  type EmulatorKillOptions,
+} from "./EmulatorKiller";
+import {
+  DefaultEmulatorOfflineRecovery,
+  type EmulatorOfflineRecovery,
+  type OfflineProbeOptions,
+} from "./EmulatorOfflineRecovery";
 
-/** Offline discovery failed; callers must retain the prior episode state. */
-export class AndroidOfflineProbeError extends ActionableError {}
+export { isMissingExecutableError } from "./EmulatorAvdCatalog";
 
-export class AndroidEmulatorUnavailableError extends ActionableError {}
+/**
+ * Constructor dependencies for {@link AndroidEmulatorClient}. All fields are
+ * optional; omitted fields use the production implementation. Test seams are
+ * injected by name instead of by position.
+ */
+export interface AndroidEmulatorClientOptions {
+  /** Promisified exec function (for testing) */
+  execAsync?: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null;
+  /** Spawn function (for testing) */
+  spawnFn?: SpawnFn | null;
+  /** Timer for delays */
+  timer?: Timer;
+  /** Factory for creating AdbClient instances (for testing) */
+  adbFactory?: AdbClientFactory;
+  /** Reader for AVD config.ini files (for testing) */
+  avdConfigReader?: AvdConfigReader;
+  /** Host platform (for testing) */
+  platform?: NodeJS.Platform;
+  /** Host CPU architecture (for testing) */
+  hostArchitecture?: string;
+  /** Checks whether emulator ports are free (for testing) */
+  hostPortAvailabilityChecker?: PortAvailabilityChecker;
+  runningAvdAdvertisementReader?: RunningAvdAdvertisementReader;
+  /** Tracks daemon-owned console-exclusive operations (for testing) */
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  /** Orders completed device discovery observations (for testing) */
+  observationSequence?: DiscoveryObservationSequence;
+  posterFileSystem?: Pick<FileSystem, "existsSync">;
+  reservations?: EmulatorPortReservations;
+  inventory?: AndroidDeviceInventoryScanner;
+  launcher?: EmulatorLauncher;
+  readinessPoller?: EmulatorReadinessPoller;
+}
 
-/** Classify spawn failures without mistaking a running/stopped process for missing tooling. */
-export function isMissingExecutableError(
-  error: unknown,
-  resolvedPath: string,
-  executableExists: boolean,
-): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const failure = error as Error & {
-    code?: string | number;
-    path?: string;
-    killed?: boolean;
-    signal?: string | null;
+type ResolvedClientOptions = AndroidEmulatorClientOptions &
+  Required<
+    Pick<
+      AndroidEmulatorClientOptions,
+      | "timer"
+      | "adbFactory"
+      | "platform"
+      | "hostArchitecture"
+      | "runningAvdAdvertisementReader"
+      | "observationSequence"
+    >
+  >;
+
+function withClientOptionDefaults(options: AndroidEmulatorClientOptions): ResolvedClientOptions {
+  return {
+    ...options,
+    timer: options.timer ?? defaultTimer,
+    // Below the admission gate, not behind it: discovery reading the AVD name on
+    // a quarantined serial is the only event that can LIFT the quarantine, and
+    // `emu kill` on one is how the pool settles a serial it can no longer
+    // identify ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+    adbFactory: options.adbFactory ?? unadmittedAdbClientFactory,
+    platform: options.platform ?? process.platform,
+    hostArchitecture: options.hostArchitecture ?? arch(),
+    runningAvdAdvertisementReader:
+      options.runningAvdAdvertisementReader ?? new TmpdirRunningAvdAdvertisementReader(),
+    observationSequence: options.observationSequence ?? defaultDiscoveryObservationSequence,
   };
-  return (
-    failure.code === "ENOENT" &&
-    !failure.killed &&
-    !failure.signal &&
-    !["AbortError", "TimeoutError"].includes(failure.name) &&
-    (failure.path === undefined || failure.path === resolvedPath) &&
-    !executableExists
-  );
 }
 
 export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
@@ -429,54 +376,46 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private readonly hostPortAvailabilityChecker: PortAvailabilityChecker;
   private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
-  private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
   private readonly reservations: EmulatorPortReservations;
   private readonly inventory: AndroidDeviceInventoryScanner;
   private readonly launcher: EmulatorLauncher;
   private readonly readinessPoller: EmulatorReadinessPoller;
-  private readonly launchErrors = new WeakMap<ChildProcess, ActionableError>();
-  private readonly launchErrorFinalizations = new WeakMap<
-    ChildProcess,
-    Promise<ActionableError | undefined>
-  >();
+  private readonly killer: EmulatorKiller;
+  private readonly offlineRecovery: EmulatorOfflineRecovery;
+  private readonly targets: EmulatorLaunchTargets;
+  private readonly diagnostics: EmulatorLaunchDiagnostics;
+  private readonly commandRunner: EmulatorCommandRunner;
+  private readonly avdCatalog: EmulatorAvdCatalog;
+  private readonly coordinator: EmulatorLaunchCoordinator;
+
+  private readonly observationSequence: DiscoveryObservationSequence;
+  private readonly posterFileSystem?: Pick<FileSystem, "existsSync">;
 
   /**
-   * Create an AndroidEmulatorClient instance
-   * @param execAsyncFn - promisified exec function (for testing)
-   * @param spawnFn - spawn function (for testing)
-   * @param timer - Timer for delays
-   * @param adbFactory - Factory for creating AdbClient instances (for testing)
-   * @param avdConfigReader - Reader for AVD config.ini files (for testing)
-   * @param platform - Host platform (for testing)
-   * @param hostArchitecture - Host CPU architecture (for testing)
-   * @param hostPortAvailabilityChecker - Checks whether emulator ports are free (for testing)
-   * @param consoleBusyRegistry - Tracks daemon-owned console-exclusive operations (for testing)
-   * @param observationSequence - Orders completed device discovery observations (for testing)
+   * Create an AndroidEmulatorClient instance. Every dependency is optional and
+   * defaults to the production implementation (see {@link AndroidEmulatorClientOptions}).
    */
-  constructor(
-    execAsyncFn:
-      | ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>)
-      | null = null,
-    spawnFn: SpawnFn | null = null,
-    timer: Timer = defaultTimer,
-    // Below the admission gate, not behind it: discovery reading the AVD name on
-    // a quarantined serial is the only event that can LIFT the quarantine, and
-    // `emu kill` on one is how the pool settles a serial it can no longer
-    // identify ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-    adbFactory: AdbClientFactory = unadmittedAdbClientFactory,
-    avdConfigReader?: AvdConfigReader,
-    platform: NodeJS.Platform = process.platform,
-    hostArchitecture: string = arch(),
-    hostPortAvailabilityChecker: PortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
-    runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
-    consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
-    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    private readonly posterFileSystem?: Pick<FileSystem, "existsSync">,
-    reservations?: EmulatorPortReservations,
-    inventory?: AndroidDeviceInventoryScanner,
-    launcher?: EmulatorLauncher,
-    readinessPoller?: EmulatorReadinessPoller,
-  ) {
+  constructor(options: AndroidEmulatorClientOptions = {}) {
+    const {
+      execAsync: execAsyncFn = null,
+      spawnFn = null,
+      timer,
+      adbFactory,
+      avdConfigReader,
+      platform,
+      hostArchitecture,
+      hostPortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
+      runningAvdAdvertisementReader,
+      consoleBusyRegistry,
+      observationSequence,
+      posterFileSystem,
+      reservations,
+      inventory,
+      launcher,
+      readinessPoller,
+    } = withClientOptionDefaults(options);
+    this.observationSequence = observationSequence;
+    this.posterFileSystem = posterFileSystem;
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
     this.spawnFn =
       spawnFn || ((file, args, options) => emulatorHostProcessExecutor.spawn(file, args, options));
@@ -498,35 +437,48 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       adbFactory: () => this.adbFactory,
       hostPortAvailabilityChecker: () => this.hostPortAvailabilityChecker,
     });
+    this.killer = new DefaultEmulatorKiller({
+      timer: () => this.timer,
+      adbFactory: () => this.adbFactory,
+      getBootedDevicesChecked: (onlyEmulators, options, signal) =>
+        this.getBootedDevicesChecked(onlyEmulators, options, signal),
+    });
+    this.offlineRecovery = new DefaultEmulatorOfflineRecovery({
+      timer: () => this.timer,
+      adbFactory: () => this.adbFactory,
+    });
+    this.targets = new DefaultEmulatorLaunchTargets(() => this.reservations);
+    this.diagnostics = new DefaultEmulatorLaunchDiagnostics({
+      timer: () => this.timer,
+      emulatorPath: () => this.emulatorPath,
+      hostArchitecture: () => this.hostArchitecture,
+      avdConfigReader: () => this.avdConfigReader,
+      execAsync: (file, args, signal) => this.execAsync(file, args, signal),
+    });
+    this.commandRunner = new DefaultEmulatorCommandRunner({
+      timer: () => this.timer,
+      ensureEmulatorPath: () => this.ensureEmulatorPath(),
+      execAsync: (file, args, signal) => this.execAsync(file, args, signal),
+    });
+    this.avdCatalog = new DefaultEmulatorAvdCatalog({
+      timer: () => this.timer,
+      emulatorPath: () => this.emulatorPath,
+      avdConfigReader: () => this.avdConfigReader,
+      executeCommand: (args, timeoutMs, signal) => this.executeCommand(args, timeoutMs, signal),
+      listAvdsUncached: (listOptions) => this.listAvdsUncached(listOptions),
+    });
+    this.coordinator = new DefaultEmulatorLaunchCoordinator({
+      timer: () => this.timer,
+      launcher: () => this.launcher,
+      reservations: () => this.reservations,
+      targets: () => this.targets,
+      posterFileSystem: () => this.posterFileSystem,
+      getBootedDevicesChecked: (onlyEmulators, scanOptions, signal) =>
+        this.getBootedDevicesChecked(onlyEmulators, scanOptions, signal),
+      isAvdStarting: (avdName) => this.isAvdStarting(avdName),
+    });
     // Only set a fallback emulator path here; proper detection happens lazily
-    this.emulatorPath = this.getFallbackEmulatorPath();
-  }
-
-  private classifyEmulatorExitOutput(combinedOutput: string): ActionableError | null {
-    const sandboxError = this.sandboxFailure(combinedOutput);
-    const corruptResult = this.detectCorruptImage(combinedOutput);
-    const displayResult = this.detectDisplayError(combinedOutput);
-    if (sandboxError) {
-      return sandboxError;
-    }
-    if (corruptResult.isCorrupt) {
-      let msg = `Emulator failed to start: ${corruptResult.message}`;
-      if (corruptResult.suggestion) {
-        msg += `\n\nSuggestion: ${corruptResult.suggestion}`;
-      }
-      return new ActionableError(msg);
-    }
-    if (displayResult.isDisplayError) {
-      let msg = `Emulator failed to start: ${displayResult.message}`;
-      if (displayResult.suggestion) {
-        msg += `\n\nSuggestion: ${displayResult.suggestion}`;
-      }
-      return new ActionableError(msg);
-    }
-    const panicResult = this.detectArchitecturePanic(combinedOutput);
-    return panicResult.isPanic
-      ? new ActionableError(`Emulator failed to start: ${panicResult.message}`)
-      : null;
+    this.emulatorPath = getFallbackEmulatorPath();
   }
 
   private wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
@@ -537,21 +489,20 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return {
       timer: () => this.timer,
       adbFactory: () => this.adbFactory,
-      getLaunchError: (cp) => this.getLaunchError(cp),
-      getLaunchErrorFinalization: (cp) => this.getLaunchErrorFinalization(cp),
-      throwLaunchError: (error) => this.throwLaunchError(error),
-      getLaunchTargetDeviceId: (cp) => this.getLaunchTargetDeviceId(cp),
-      captureLaunchTargetDeviceId: (cp, output) => this.captureLaunchTargetDeviceId(cp, output),
-      clearOfflineTracker: (tracker) => this.clearOfflineTracker(tracker),
-      detectOfflineFailure: (...args) => this.detectOfflineFailure(...args),
-      maybeRecoverFreshOffline: (...args) => this.maybeRecoverFreshOffline(...args),
-      nextPollingDelayMs: (...args) => this.nextPollingDelayMs(...args),
+      getLaunchError: (cp) => this.targets.getLaunchError(cp),
+      getLaunchErrorFinalization: (cp) => this.targets.getLaunchErrorFinalization(cp),
+      throwLaunchError: (error) => this.targets.throwLaunchError(error),
+      getLaunchTargetDeviceId: (cp) => this.targets.getLaunchTargetDeviceId(cp),
+      captureLaunchTargetDeviceId: (cp, output) =>
+        this.targets.captureLaunchTargetDeviceId(cp, output),
+      maybeRecoverFreshOffline: (...args) => this.offlineRecovery.maybeRecoverFreshOffline(...args),
+      nextPollingDelayMs: (...args) => this.offlineRecovery.nextPollingDelayMs(...args),
       getBootedDevicesWithDiagnostics: (...args) => this.getBootedDevicesWithDiagnostics(...args),
-      findNamedEmulator: (...args) => this.findNamedEmulator(...args),
+      findNamedEmulator: (...args) => this.targets.findNamedEmulator(...args),
       resolvedReadyAvdName: (...args) => this.resolvedReadyAvdName(...args),
       resolveFoundDeviceModel: (...args) => this.resolveFoundDeviceModel(...args),
       foundBootedDevice: (...args) => this.foundBootedDevice(...args),
-      classifyEmulatorExitOutput: (output) => this.classifyEmulatorExitOutput(output),
+      classifyEmulatorExitOutput,
     };
   }
 
@@ -584,35 +535,36 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       spawnFn: () => this.spawnFn,
       platform: () => this.platform,
       avdConfigReader: () => this.avdConfigReader,
-      launchErrors: () => this.launchErrors,
-      launchErrorFinalizations: () => this.launchErrorFinalizations,
-      launchTargetDeviceIds: () => this.launchTargetDeviceIds,
-      accelerationCheckCategory: (output) => this.accelerationCheckCategory(output),
+      launchErrors: () => this.targets.launchErrors,
+      launchErrorFinalizations: () => this.targets.launchErrorFinalizations,
+      launchTargetDeviceIds: () => this.targets.launchTargetDeviceIds,
+      accelerationCheckCategory,
       adoptsExistingAvdLaunch: (avdName, perf, signal) =>
-        this.adoptsExistingAvdLaunch(avdName, perf, signal),
-      appendCategory: (error, category) => this.appendCategory(error, category),
-      assertCameraPosterColdBoot: (posterPath) => this.assertCameraPosterColdBoot(posterPath),
+        this.coordinator.adoptsExistingAvdLaunch(avdName, perf, signal),
+      appendCategory,
+      assertCameraPosterColdBoot: (posterPath) =>
+        this.coordinator.assertCameraPosterColdBoot(posterPath),
       captureLaunchTargetDeviceId: (childProcess, output) =>
-        this.captureLaunchTargetDeviceId(childProcess, output),
+        this.targets.captureLaunchTargetDeviceId(childProcess, output),
       checkArchitectureCompatibility: (avdName, avdConfig) =>
         this.checkArchitectureCompatibility(avdName, avdConfig),
-      detectArchitecturePanic: (output) => this.detectArchitecturePanic(output),
-      detectCorruptImage: (output) => this.detectCorruptImage(output),
-      detectDisplayError: (output) => this.detectDisplayError(output),
-      emulatorAudioArguments: () => this.emulatorAudioArguments(),
-      formatEarlyExitError: (avdName, code, signal, category, output, accelCheckOutput) =>
-        this.formatEarlyExitError(avdName, code, signal, category, output, accelCheckOutput),
-      launchFailureCategory: (output) => this.launchFailureCategory(output),
+      detectArchitecturePanic,
+      detectCorruptImage,
+      detectDisplayError,
+      emulatorAudioArguments: () =>
+        readEnvRaw(ENV.EMULATOR_AUDIO) === "false" ? ["-no-audio"] : [],
+      formatEarlyExitError,
+      launchFailureCategory,
       listAvds: (options) => this.listAvds(options),
       recordReservedEmulatorDeviceId: (childProcess, reservation) =>
-        this.recordReservedEmulatorDeviceId(childProcess, reservation),
+        this.targets.recordReservedEmulatorDeviceId(childProcess, reservation),
       releaseReservationIfLaunchCancelled: (avdName, reservation, isCancelled) =>
-        this.releaseReservationIfLaunchCancelled(avdName, reservation, isCancelled),
-      runAccelerationCheck: () => this.runAccelerationCheck(),
-      sandboxFailure: (output) => this.sandboxFailure(output),
+        this.coordinator.releaseReservationIfLaunchCancelled(avdName, reservation, isCancelled),
+      runAccelerationCheck: () => this.diagnostics.runAccelerationCheck(),
+      sandboxFailure,
       throwIfLaunchCancelled: (avdName, isCancelled) =>
-        this.throwIfLaunchCancelled(avdName, isCancelled),
-      validateAvdMemory: (avdName, avdConfig) => this.validateAvdMemory(avdName, avdConfig),
+        this.coordinator.throwIfLaunchCancelled(avdName, isCancelled),
+      validateAvdMemory,
     };
   }
 
@@ -645,651 +597,43 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   /**
-   * Get the path to the emulator executable.
-   * This function tries the best available path synchronously, falling back to env/PATH.
-   * Actual async detection is performed when needed by ensureEmulatorPath().
-   * @returns The path to the emulator
-   */
-  private getFallbackEmulatorPath(): string {
-    const androidHome = resolveAndroidSdkRoot(process.env);
-    if (androidHome) {
-      return `${androidHome}/emulator/emulator`;
-    }
-    return "emulator";
-  }
-
-  /**
-   * Try multiple common paths to find the emulator executable
-   * @returns Promise<string | null> The emulator path if found, null otherwise
-   */
-  private async tryMultiplePaths(): Promise<string | null> {
-    const { existsSync } = require("fs");
-    const path = require("path");
-
-    // Build list of potential emulator paths
-    const potentialPaths: string[] = [];
-
-    // 1. Check environment variables first (highest priority)
-    const androidHome = resolveAndroidSdkRoot(
-      process.env,
-      (candidate) =>
-        existsSync(path.join(candidate, "emulator", "emulator")) ||
-        existsSync(path.join(candidate, "emulator", "emulator-arm64-v8a")),
-    );
-    if (androidHome) {
-      potentialPaths.push(`${androidHome}/emulator/emulator`);
-      potentialPaths.push(`${androidHome}/emulator/emulator-arm64-v8a`);
-    }
-
-    // 2. Check standard macOS Android SDK location
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
-    if (homeDir) {
-      potentialPaths.push(path.join(homeDir, "Library/Android/sdk/emulator/emulator"));
-      potentialPaths.push(path.join(homeDir, ".android/emulator/emulator"));
-    }
-
-    // 3. Check Linux/WSL locations
-    potentialPaths.push("/usr/lib/android-sdk/emulator/emulator");
-    potentialPaths.push("/opt/android-sdk/emulator/emulator");
-
-    // 4. Check Homebrew locations
-    potentialPaths.push("/opt/homebrew/bin/emulator");
-    potentialPaths.push("/usr/local/bin/emulator");
-    potentialPaths.push("/opt/homebrew/Caskroom/android-studio/*/Contents/emulator/emulator");
-
-    // 5. Try to find via Android command line tools detection
-    try {
-      const locations = await detectAndroidCommandLineTools();
-      const bestLocation = getBestAndroidToolsLocation(locations);
-
-      if (bestLocation) {
-        // Check various emulator locations relative to SDK root
-        const sdkRoot = bestLocation.path
-          .replace("/cmdline-tools/latest", "")
-          .replace("/cmdline-tools", "");
-        potentialPaths.push(`${sdkRoot}/emulator/emulator`);
-        potentialPaths.push(`${sdkRoot}/emulator/emulator-arm64-v8a`);
-
-        // Also check Homebrew location structure
-        potentialPaths.push(`${sdkRoot}/../emulator/emulator`);
-      }
-    } catch (error) {
-      logger.debug(`Failed to detect Android tools: ${error}`);
-    }
-
-    // 6. Check system PATH
-    potentialPaths.push("emulator");
-
-    // Try each path
-    for (const potentialPath of potentialPaths) {
-      try {
-        // Handle glob patterns - skip them in basic existence check
-        if (potentialPath.includes("*")) {
-          continue;
-        }
-
-        // Expand ~ if present
-        const expandedPath = potentialPath.startsWith("~")
-          ? path.join(homeDir || "", potentialPath.slice(1))
-          : potentialPath;
-
-        if (existsSync(expandedPath)) {
-          logger.debug(`Found emulator at: ${expandedPath}`);
-          return expandedPath;
-        }
-      } catch (error) {
-        logger.debug(`Failed to check path ${potentialPath}: ${error}`);
-      }
-    }
-
-    logger.debug(`Emulator not found in any of these paths:\n${potentialPaths.join("\n")}`);
-    return null;
-  }
-
-  /**
-   * Enrich a list of DeviceInfo with config.ini metadata (osVersion, screen size, form factor)
-   */
-  private async enrichDeviceInfoList(devices: DeviceInfo[]): Promise<DeviceInfo[]> {
-    const enriched = await Promise.all(
-      devices.map(async (device) => {
-        try {
-          const config = await this.avdConfigReader.readConfig(device.name);
-          if (!config) {
-            return device;
-          }
-          const formFactor = androidProfileFormFactor({
-            profileId: config.deviceName,
-            width: config.screenWidth,
-            height: config.screenHeight,
-            density: config.screenDensity,
-          });
-          return this.deviceInfoFromConfig(device, config, formFactor);
-        } catch (error) {
-          logger.debug(`Failed to enrich AVD ${device.name}: ${error}`);
-          return device;
-        }
-      }),
-    );
-    return enriched;
-  }
-
-  private deviceInfoFromConfig(
-    device: DeviceInfo,
-    config: AvdConfig,
-    formFactor: ReturnType<typeof androidProfileFormFactor>,
-  ): DeviceInfo {
-    return {
-      ...device,
-      apiLevel: config.apiLevel ?? device.apiLevel,
-      osVersion: config.osVersion ?? device.osVersion,
-      runtimeId: config.systemImagePackage ?? device.runtimeId,
-      deviceType: config.deviceName ?? device.deviceType,
-      architecture: configuredAvdArchitecture(config, device.architecture),
-      screenWidth: config.screenWidth ?? device.screenWidth,
-      screenHeight: config.screenHeight ?? device.screenHeight,
-      screenDensity: config.screenDensity ?? device.screenDensity,
-      formFactor: formFactor === "unknown" ? device.formFactor : formFactor,
-      capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
-    };
-  }
-
-  /**
-   * Gets the emulator path asynchronously via detection.
-   * @returns Promise<string>
-   */
-  private async getEmulatorPath(): Promise<string> {
-    // Try multiple common paths
-    const foundPath = await this.tryMultiplePaths();
-    if (foundPath) {
-      return foundPath;
-    }
-
-    // Fall back to default
-    return this.getFallbackEmulatorPath();
-  }
-
-  /**
    * Ensure emulator path is properly detected and cached
    */
   private async ensureEmulatorPath(): Promise<string> {
-    // Update cached path if needed
-    const detectedPath = await this.getEmulatorPath();
-    this.emulatorPath = detectedPath;
+    this.emulatorPath = await locateEmulatorPath();
     return this.emulatorPath;
   }
 
-  private isResolvedEmulatorPathAvailable(): boolean {
-    const trimmedPath = this.emulatorPath.trim();
-    if (trimmedPath.length === 0) {
-      return false;
-    }
-    if (!trimmedPath.includes("/") && !trimmedPath.includes("\\")) {
-      return false;
-    }
-    return existsSync(trimmedPath);
-  }
-
-  /**
-   * Describe how the emulator binary was resolved, for failure diagnostics.
-   *
-   * The previous guidance ("install via Homebrew") is actively misleading on a
-   * CI runner, where the SDK is present but the emulator package is not. The
-   * resolved path plus the environment it came from is what identifies the
-   * actual gap (issue #4237).
-   */
-  private describeEmulatorResolution(): string {
-    const unset = "<unset>";
-    return [
-      `  resolved emulator path: ${this.emulatorPath || unset}`,
-      `  ANDROID_HOME=${process.env.ANDROID_HOME ?? unset}`,
-      `  ANDROID_SDK_ROOT=${process.env.ANDROID_SDK_ROOT ?? unset}`,
-      `  ANDROID_SDK_HOME=${process.env.ANDROID_SDK_HOME ?? unset}`,
-      `  PATH=${process.env.PATH ?? unset}`,
-    ].join("\n");
-  }
-
-  private isLikelyDaemonWorkingDirectoryFailure(errorMsg: string): boolean {
-    if (!this.isResolvedEmulatorPathAvailable()) {
-      return false;
-    }
-
-    const lowerError = errorMsg.toLowerCase();
-    return (
-      (lowerError.includes("enoent") && lowerError.includes("spawn")) ||
-      lowerError.includes("getcwd") ||
-      lowerError.includes("current working directory") ||
-      lowerError.includes("current directory")
-    );
-  }
-
-  /**
-   * Get the host architecture
-   * @returns The host architecture string
-   */
-  private getHostArchitecture(): string {
-    return this.hostArchitecture;
-  }
-
-  /**
-   * Check if an AVD architecture is compatible with the host
-   * @param avdName - The AVD name to check
-   * @returns Promise with compatibility result
-   */
-  private async checkArchitectureCompatibility(
+  checkArchitectureCompatibility(
     avdName: string,
     avdConfig?: AvdConfig | null,
-  ): Promise<{
-    compatible: boolean;
-    hostArch: string;
-    avdArch?: string;
-    reason?: string;
-  }> {
-    const hostArch = this.getHostArchitecture();
-
-    try {
-      const config =
-        avdConfig === undefined ? await this.avdConfigReader.readConfig(avdName) : avdConfig;
-      const avdArch = config?.architecture;
-      if (!avdArch) {
-        // Missing config metadata is non-fatal; the launch attempt provides definitive diagnostics.
-        return {
-          compatible: true,
-          hostArch,
-          reason: "Could not determine AVD architecture, allowing attempt",
-        };
-      }
-
-      // Check compatibility
-      const compatible = this.isArchitectureCompatible(hostArch, avdArch);
-      const reason = compatible
-        ? undefined
-        : `Host architecture '${hostArch}' cannot run AVD with architecture '${avdArch}'`;
-
-      return { compatible, hostArch, avdArch, reason };
-    } catch (error) {
-      // If we can't check, we'll let the emulator start attempt proceed and catch errors there
-      logger.debug(`Could not check architecture compatibility for ${avdName}: ${error}`);
-      return {
-        compatible: true,
-        hostArch,
-        reason: "Could not verify compatibility, allowing attempt",
-      };
-    }
+  ): Promise<ArchitectureCompatibilityResult> {
+    return this.diagnostics.checkArchitectureCompatibility(avdName, avdConfig);
   }
 
-  /**
-   * Check if host architecture can run AVD architecture
-   * @param hostArch - Host architecture
-   * @param avdArch - AVD architecture
-   * @returns Boolean indicating compatibility
-   */
-  private isArchitectureCompatible(hostArch: string, avdArch: string): boolean {
-    // ARM64 hosts (Apple Silicon) cannot run x86/x86_64 AVDs
-    if (
-      (hostArch === "arm64" || hostArch === "aarch64") &&
-      (avdArch === "x86" || avdArch === "x86_64")
-    ) {
-      return false;
-    }
-
-    // x86_64 hosts can generally run both x86 and ARM (with performance impact)
-    // ARM hosts can run ARM AVDs
-    return true;
-  }
-
-  /**
-   * Detect if emulator output contains architecture-related PANIC errors
-   * @param output - Emulator output to check
-   * @returns Error details if PANIC detected, null otherwise
-   */
-  private detectArchitecturePanic(output: string): {
-    isPanic: boolean;
-    message?: string;
-    hostArch?: string;
-    avdArch?: string;
-  } {
-    return detectArchitecturePanic(output);
-  }
-
-  /** Detect sandbox/JIT entitlement failures that leave an emulator offline. */
-  detectSandboxMprotect(output: string): {
-    isSandboxError: boolean;
-    message?: string;
-    suggestion?: string;
-  } {
-    return detectSandboxMprotect(output);
-  }
-
-  private sandboxFailure(output: string): ActionableError | null {
-    const result = this.detectSandboxMprotect(output);
-    if (!result.isSandboxError) {
-      return null;
-    }
-    return new ActionableError(
-      [
-        `Emulator failed to start: ${result.message}`,
-        result.suggestion ? `Suggestion: ${result.suggestion}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-    );
-  }
-
-  private validateAvdMemory(avdName: string, avdConfig: AvdConfig | null): void {
-    if (!avdConfig) {
-      return;
-    }
-    const isModernPlayImage =
-      avdConfig.tag?.toLowerCase().includes("play") &&
-      (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
-    if (isModernPlayImage && avdConfig.ramSizeInvalid) {
-      throw new ActionableError(
-        `Cannot start AVD '${avdName}': hw.ramSize is invalid. Use a whole number in MB or a K, M, or G size suffix and retry.`,
-      );
-    }
-    if (
-      isModernPlayImage &&
-      avdConfig.ramSizeMb !== undefined &&
-      avdConfig.ramSizeMb < MIN_AVD_RAM_MB
-    ) {
-      throw new ActionableError(
-        `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`,
-      );
-    }
-  }
-
-  /**
-   * Clear only the CURRENT OBSERVATION on the offline tracker (device serial,
-   * offline-since, and last observed state). Used when there is no target serial
-   * and when a device-state probe rejects/omits the target, so a stale offline
-   * reading cannot drive recovery off out-of-date data (#7054).
-   *
-   * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
-   * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
-   * the one-shot `adb -s <serial> reconnect` has been dispatched must not wipe that
-   * history, or a later re-confirmed offline would issue a SECOND reconnect.
-   */
-  private clearOfflineTracker(tracker: OfflineTracker): void {
-    tracker.deviceId = null;
-    tracker.since = null;
-    tracker.state = undefined;
-  }
-
-  private async detectOfflineFailure(
-    deviceId: string | undefined,
-    tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
-  ): Promise<ActionableError | null> {
-    let states: AdbDeviceState[];
-    try {
-      states =
-        observedStates ??
-        (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs, signal })) ??
-        [];
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      // Auxiliary diagnostic probe; a failure here must not block readiness polling.
-      logger.debug(
-        `Offline-state probe unavailable during emulator readiness: ${errorMessage(error)}`,
-      );
-      // A rejected probe is NOT a current offline observation. Clear the tracker
-      // so both the reconnect dispatch and the fail-fast wait for a fresh,
-      // successful observation that still shows offline; a run of failed probes
-      // must not by itself satisfy the offline-failure threshold (#7054).
-      this.clearOfflineTracker(tracker);
-      return null;
-    }
-    if (!deviceId) {
-      this.clearOfflineTracker(tracker);
-      return null;
-    }
-    const targetState = states.find((state: AdbDeviceState) => state.deviceId === deviceId);
-    tracker.state = this.targetReadinessState(targetState);
-    if (targetState?.state !== "offline") {
-      tracker.deviceId = null;
-      tracker.since = null;
-      return null;
-    }
-    if (tracker.deviceId !== targetState.deviceId) {
-      // Refresh the current observation for a (re-)observed offline serial.
-      // Recovery history stays monotonic for the invocation, so a re-confirmed
-      // offline after the one-shot reconnect keeps advancing toward the
-      // fail-fast instead of resurrecting a second reconnect (#7054).
-      tracker.deviceId = targetState.deviceId;
-      tracker.since = this.timer.now();
-    }
-    // An offline ADB state is transient during normal emulator startup. Keep
-    // tracking it for diagnostics, but wait for the caller's readiness deadline
-    // unless the emulator process provides definitive failure evidence.
-    return null;
-  }
-
-  /**
-   * Bounded recovery for a fresh-provision cold boot whose serial is stuck in
-   * ADB `offline`. Runs at most one `adb -s <serial> reconnect` re-detect once the
-   * serial has been offline past {@link FRESH_OFFLINE_RECOVERY_THRESHOLD_MS}.
-   * The recovery never terminates readiness: normal polling continues until the
-   * caller's deadline or a terminal emulator failure (issue #7078).
-   */
-  private async maybeRecoverFreshOffline(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-    startTime: number,
-    timeoutMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
-  ): Promise<void> {
-    const { avdName, signal } = context;
-    if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
-      return;
-    }
-    const now = this.timer.now();
-    const remainingMs = timeoutMs - (now - startTime);
-    if (remainingMs <= 0) {
-      return;
-    }
-    const offlineSince = tracker.since ?? now;
-
-    if (!tracker.recoveryAttempted) {
-      if (now - offlineSince >= FRESH_OFFLINE_RECOVERY_THRESHOLD_MS) {
-        await this.dispatchFreshOfflineReconnect(
-          tracker,
-          deviceId!,
-          now,
-          offlineSince,
-          remainingMs,
-          { avdName, signal },
-        );
-      }
-    }
-  }
-
-  /** True while a fresh-provision target is actively sitting in ADB `offline`. */
-  private isFreshOfflineEpisode(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-  ): boolean {
-    return (
-      options?.freshProvision === true &&
-      Boolean(deviceId) &&
-      tracker.state === "offline" &&
-      tracker.since !== null
-    );
-  }
-
-  private nextPollingDelayMs(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-    now: number,
-    pollingIntervalMs: number,
-    remainingPollingTimeMs: number,
-  ): number {
-    const currentDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
-    // After the one-shot recovery, keep polling at this cadence for the rest
-    // of a fresh boot. The serial can leave `offline` before Android itself is ready.
-    if (options?.freshProvision === true && tracker.recoveryAttempted) {
-      return Math.min(currentDelayMs, FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS);
-    }
-    if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
-      return currentDelayMs;
-    }
-    const thresholdAt = (tracker.since ?? now) + FRESH_OFFLINE_RECOVERY_THRESHOLD_MS;
-    const timeUntilThresholdMs = Math.max(0, thresholdAt - now);
-    const thresholdDelayMs = Math.max(
-      MIN_EMULATOR_POLLING_INTERVAL_MS,
-      Math.min(currentDelayMs, timeUntilThresholdMs),
-    );
-    return Math.min(currentDelayMs, thresholdDelayMs);
-  }
-
-  /** Dispatch the single bounded `adb -s <serial> reconnect` re-detect for a stuck fresh boot. */
-  private async dispatchFreshOfflineReconnect(
-    tracker: OfflineTracker,
-    deviceId: string,
-    now: number,
-    offlineSince: number,
-    remainingMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
-  ): Promise<void> {
-    const { avdName, signal } = context;
-    tracker.recoveryAttempted = true;
-    const commandTimeoutMs = Math.max(
-      0,
-      Math.min(FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS, remainingMs),
-    );
-    logger.warn(
-      `Fresh provision '${avdName}' target ${deviceId} has been ADB-offline for ` +
-        `${now - offlineSince}ms; attempting 'adb -s ${deviceId} reconnect' recovery`,
-    );
-    try {
-      await this.issueReconnectOffline(deviceId, commandTimeoutMs, signal);
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      // Best-effort recovery: readiness polling continues through its deadline.
-      logger.warn(
-        `'adb -s ${deviceId} reconnect' recovery for ${deviceId} failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  /**
-   * Issue exactly one adb -s <serial> reconnect re-detect. Shared by the
-   * fresh-provision readiness recovery ({@link dispatchFreshOfflineReconnect})
-   * and the disconnect monitor's in-session offline recovery
-   * ({@link recoverOfflineDevices}, #7536): noRetry keeps the real AdbClient
-   * from routing this through its retry executor (up to MAX_ADB_RETRIES + 1
-   * executions), so one logical recovery issues exactly one reconnect command
-   * (#7054).
-   */
-  private async issueReconnectOffline(
-    deviceId: string,
-    timeoutMs: number,
-    signal: AbortSignal | undefined,
-  ) {
-    await this.adbFactory
-      .create(null)
-      .execute(["-s", deviceId, "reconnect"], { timeoutMs, noRetry: true, signal });
-  }
-
-  /**
-   * Among the given candidate serials, which ones adb devices -l currently
-   * reports as ADB offline rather than absent. Used by the disconnect
-   * monitor to distinguish an in-session emulator that dropped its transport
-   * from one that is genuinely gone (#7536): both look identical to the
-   * online-only getBootedDevices filter.
-   *
-   * Probe failures throw AndroidOfflineProbeError so callers can distinguish
-   * unavailable evidence from an authoritative empty result.
-   */
-  async getOfflineDeviceIdsAmong(
+  getOfflineDeviceIdsAmong(
     candidateIds: Iterable<string>,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: OfflineProbeOptions = {},
   ): Promise<Set<string>> {
-    const listed = await this.getListedNonDeviceStatesAmong(candidateIds, options);
-    return new Set([...listed].filter(([, state]) => state === "offline").map(([id]) => id));
+    return this.offlineRecovery.getOfflineDeviceIdsAmong(candidateIds, options);
   }
 
-  /**
-   * Among the given candidate serials, every one adb devices -l lists in a
-   * state other than `device` (offline, authorizing, connecting,
-   * unauthorized, recovery, bootloader, sideload, no permissions), keyed to
-   * that state. A listed serial is still attached even though the online-only
-   * getBootedDevices filter drops it, so the disconnect monitor must not treat
-   * it as unplugged (#11090).
-   *
-   * Probe failures throw AndroidOfflineProbeError so callers can distinguish
-   * unavailable evidence from an authoritative empty result.
-   */
-  async getListedNonDeviceStatesAmong(
+  getListedNonDeviceStatesAmong(
     candidateIds: Iterable<string>,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: OfflineProbeOptions = {},
   ): Promise<Map<string, string>> {
-    const candidates = new Set(candidateIds);
-    if (candidates.size === 0) {
-      return new Map();
-    }
-    let states: AdbDeviceState[];
-    try {
-      // The candidates are devices this host held, so adb existed: an executable that has since
-      // vanished (replaced mid-upgrade) is a probe that could not ask, never "listed nowhere"
-      // (#11643). Callers with no candidates return above and never reach a missing adb.
-      states =
-        (await this.adbFactory
-          .create(null)
-          .getDeviceStates?.({ ...options, throwOnMissingAdb: true })) ?? [];
-    } catch (error) {
-      throw new AndroidOfflineProbeError(`Device-state probe failed: ${errorMessage(error)}`, {
-        cause: error,
-      });
-    }
-    return new Map(
-      states
-        .filter((state) => state.state !== "device" && candidates.has(state.deviceId))
-        .map((state) => [state.deviceId, state.state]),
-    );
+    return this.offlineRecovery.getListedNonDeviceStatesAmong(candidateIds, options);
   }
 
-  /**
-   * Bounded, best-effort recovery for session-bound serial(s) the disconnect
-   * monitor observed stuck in ADB offline (#7536). Each distinct serial gets
-   * one host-serial reconnect, accepted even for an offline transport. Dispatch
-   * concurrently so the sweep stays bounded by a single command timeout.
-   * Never throws except on abort: a serial's recovery failure must not prevent
-   * recovery of the others or fail the disconnect monitor's sweep.
-   */
-  async recoverOfflineDevices(
+  recoverOfflineDevices(
     deviceIds: Iterable<string>,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: OfflineProbeOptions = {},
   ): Promise<void> {
-    throwIfReadinessAborted(options.signal);
-    const timeoutMs = options.timeoutMs ?? FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS;
-    await Promise.all(
-      [...new Set(deviceIds)].map(async (deviceId) => {
-        try {
-          await this.issueReconnectOffline(deviceId, timeoutMs, options.signal);
-        } catch (error) {
-          throwIfReadinessAborted(options.signal);
-          // Best-effort recovery: other serials and the disconnect sweep continue.
-          logger.warn(
-            `'adb -s ${deviceId} reconnect' recovery for in-session offline device failed: ${errorMessage(error)}`,
-            error,
-          );
-        }
-      }),
-    );
-    throwIfReadinessAborted(options.signal);
+    return this.offlineRecovery.recoverOfflineDevices(deviceIds, options);
   }
 
-  private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
-    if (targetState?.state === "offline") {
-      return "offline";
-    }
-    return targetState === undefined ? "absent" : "not-ready";
+  killDevice(device: BootedDevice, options: EmulatorKillOptions = {}): Promise<BootedDevice> {
+    return this.killer.killDevice(device, options);
   }
 
   /**
@@ -1320,93 +664,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return detectDisplayError(output);
   }
 
-  private launchFailureCategory(output: string): LaunchFailureCategory | undefined {
-    return launchFailureCategory(output);
-  }
-
-  private accelerationCheckCategory(output: string): LaunchFailureCategory | undefined {
-    return accelerationCheckCategory(output);
-  }
-
-  private appendCategory(error: ActionableError, category: LaunchFailureCategory): ActionableError {
-    return new ActionableError(`${error.message}\n\ncategory=${category}`);
-  }
-
-  private formatEarlyExitError(
-    avdName: string,
-    code: number | null,
-    signal: NodeJS.Signals | null,
-    category: LaunchFailureCategory | undefined,
-    output: string,
-    accelCheckOutput: string,
-  ): ActionableError {
-    const header = [
-      `Emulator process exited with code: ${code}${signal ? ` (signal: ${signal})` : ""} (AVD '${avdName}'`,
-      category ? `; category=${category}` : "",
-      ")",
-    ].join("");
-    const sections = [
-      header,
-      output.trim() ? `Diagnostic:\n${output.trim()}` : "",
-      accelCheckOutput.trim() ? `emulator -accel-check:\n${accelCheckOutput.trim()}` : "",
-    ].filter(Boolean);
-    return new ActionableError(sections.join("\n"));
-  }
-
-  private diagnosticOutputFromError(error: unknown): string {
-    if (typeof error !== "object" || error === null) {
-      return "";
-    }
-    const output = error as { stdout?: unknown; stderr?: unknown };
-    return boundedEmulatorOutputTail(
-      redactAndroidCommandOutput(
-        [outputFromUnknown(output.stdout), outputFromUnknown(output.stderr)]
-          .filter(Boolean)
-          .join("\n"),
-      ),
-    );
-  }
-
-  private runAccelerationCheck(): Promise<string> {
-    // Diagnostic `emulator -accel-check` probe (up to a 3s bound) run on an
-    // inconclusive cold-boot failure. It bypasses the executeCommand funnel, so
-    // give it its own ambient leaf — wrapped around the whole method, outside
-    // its internal Promise.race, so the added async turn can't perturb the
-    // race's FakeTimer timing (see PerfContext).
-    return trackAmbient("emulator -accel-check", () => this.runAccelerationCheckInner());
-  }
-
-  private async runAccelerationCheckInner(): Promise<string> {
-    const controller = new AbortController();
-    const probe = Promise.resolve()
-      .then(() => this.execAsync(this.emulatorPath, ["-accel-check"], controller.signal))
-      .then(
-        (result) =>
-          boundedEmulatorOutputTail(
-            redactAndroidCommandOutput([result.stdout, result.stderr].filter(Boolean).join("\n")),
-          ),
-        (error) => this.diagnosticOutputFromError(error),
-      );
-    const timedOut = Symbol("emulator acceleration timeout");
-    try {
-      return await raceWithDeadline(probe, {
-        timer: this.timer,
-        timeoutMs: ACCEL_CHECK_TIMEOUT_MS,
-        label: "Emulator acceleration check",
-        timeoutError: () => {
-          controller.abort();
-          return timedOut;
-        },
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      logger.debug(`Emulator acceleration check timed out after ${ACCEL_CHECK_TIMEOUT_MS}ms`);
-      return "";
-    }
-  }
-
   /**
    * Execute an emulator command
    * @param command - The command to execute
@@ -1414,136 +671,19 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * @returns Promise with stdout and stderr
    */
   executeCommand(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult> {
-    // One span per `emulator <verb>` CLI invocation (e.g. `emulator -list-avds`
-    // AVD discovery), recorded against the ambient device-lifecycle tracker when
-    // one is in scope (see PerfContext).
-    return trackAmbient(`emulator ${args.slice(0, 1).join(" ")}`.trimEnd(), () =>
-      this.executeCommandInner(args, timeoutMs, signal),
-    );
-  }
-
-  private async executeCommandInner(
-    args: string[],
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
-    const emulatorPath = await this.ensureEmulatorPath();
-    const fullCommand = `${emulatorPath} ${args.join(" ")}`;
-    logger.debug(`Executing emulator command: ${fullCommand}`);
-
-    // On timeout we abort the
-    // controller so the underlying child process is killed rather than left
-    // running orphaned (issue #3938).
-    if (timeoutMs) {
-      const controller = new AbortController();
-
-      const runPromise = this.execAsync(
-        emulatorPath,
-        args,
-        combineAbortSignals(signal, controller.signal),
-      );
-      return raceWithDeadline(runPromise, {
-        timer: this.timer,
-        timeoutMs,
-        label: "Emulator command",
-        timeoutError: () =>
-          new ActionableError(`Command timed out after ${timeoutMs}ms: ${fullCommand}`),
-        onTimeout: () => controller.abort(),
-      });
-    }
-
-    return await this.execAsync(emulatorPath, args, signal);
+    return this.commandRunner.executeCommand(args, timeoutMs, signal);
   }
 
   /**
    * List all available AVDs
    * @returns Promise with array of AVD names
    */
-  async listAvds(options?: {
-    signal?: AbortSignal;
-    timeoutMs?: number;
-    coalesceInventoryEnrichment?: boolean;
-  }): Promise<DeviceInfo[]> {
-    if (!options?.coalesceInventoryEnrichment) {
-      return this.listAvdsUncached(options);
-    }
-    const state = inventoryEnrichmentState(this.timer);
-    const signal = options.signal ?? getAbortSignal();
-    signal?.throwIfAborted();
-    const cached = state.avds.get("avds");
-    if (cached) {
-      return cached;
-    }
-    const generation = state.generation;
-    const shared = state.avdFlight.run(
-      "avds",
-      () =>
-        runWithAbortSignal(undefined, async () => {
-          const result = await this.listAvdsUncached({
-            timeoutMs: ANDROID_INVENTORY_AVD_LIST_CAP_MS,
-          });
-          if (generation === state.generation) {
-            state.avds.set("avds", result);
-          }
-          return result;
-        }),
-      signal,
-    );
-    return raceWithDeadline(shared, {
-      timer: this.timer,
-      timeoutMs: options.timeoutMs,
-      signal,
-      label: "Android AVD-list caller wait",
-    });
+  listAvds(options?: ListAvdsOptions): Promise<DeviceInfo[]> {
+    return this.avdCatalog.listAvds(options);
   }
 
-  private async listAvdsUncached(options?: {
-    signal?: AbortSignal;
-    timeoutMs?: number;
-  }): Promise<DeviceInfo[]> {
-    try {
-      const result = await this.executeCommand(["-list-avds"], options?.timeoutMs, options?.signal);
-      const devices = result.stdout
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .map(
-          (name) =>
-            ({ name, platform: "android", isRunning: false, source: "local" }) as DeviceInfo,
-        );
-      return this.enrichDeviceInfoList(devices);
-    } catch (error) {
-      options?.signal?.throwIfAborted();
-      logger.error("Failed to list AVDs:", error);
-
-      // Check if the error is because emulator is not found
-      const errorMsg = errorMessage(error);
-      const daemonWorkingDirectoryFailure = this.isLikelyDaemonWorkingDirectoryFailure(errorMsg);
-      const executableExists = (path: string): boolean =>
-        isAbsolute(path) ? existsSync(path) : Bun.which(path) !== null;
-      const missingExecutable =
-        !daemonWorkingDirectoryFailure &&
-        isMissingExecutableError(error, this.emulatorPath, executableExists(this.emulatorPath));
-      const missingEmulator =
-        missingExecutable || /No such file or directory|command not found|ENOENT/.test(errorMsg);
-      if (missingEmulator && daemonWorkingDirectoryFailure) {
-        throw new ActionableError(
-          `Android emulator command failed because the daemon working directory is unavailable. ` +
-            `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`,
-        );
-      }
-      if (missingEmulator) {
-        const MissingError = missingExecutable ? AndroidEmulatorUnavailableError : ActionableError;
-        throw new MissingError(
-          `Android emulator not found.\n${this.describeEmulatorResolution()}\n\n` +
-            `Install the emulator package with: sdkmanager --install "emulator"\n` +
-            `(Android Studio installs it too: https://developer.android.com/studio)\n` +
-            `Or point ANDROID_HOME at an SDK that already has emulator/emulator.`,
-        );
-      }
-
-      throw new ActionableError(`Failed to list AVDs: ${errorMsg}`);
-    }
+  private listAvdsUncached(options?: ListAvdsOptions): Promise<DeviceInfo[]> {
+    return this.avdCatalog.listAvdsUncached(options);
   }
 
   /**
@@ -1626,93 +766,21 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     );
   }
 
-  /**
-   * `infoTimeoutMs` is the TOTAL budget for naming this runtime, not a per-command
-   * allowance. The console probe and the `getprop` fallback run sequentially, so
-   * giving each its own full budget would let two stalled commands take twice the
-   * timeout the caller asked for -- and this resolver runs inside a destructive
-   * action that is already holding a lifecycle lease against a deadline (#6863
-   * review). They share one deadline; the fallback gets only what is left of it,
-   * and is skipped when nothing is.
-   */
-  private async getRunningAVDName(
+  private getRunningAVDName(
     device: BootedDevice,
     infoTimeoutMs: number,
     signal?: AbortSignal,
-  ): Promise<{
-    name: string;
-    diagnostic?: ReadinessDiagnostic;
-    consoleBusyDuringProbe?: boolean;
-  }> {
-    const deviceId = device.deviceId;
-    const busyBeforeDispatch = this.consoleBusyRegistry.isBusy(deviceId);
-    if (busyBeforeDispatch) {
-      // `adb devices` has already established that the serial exists. During a
-      // daemon-owned snapshot operation, both identity probes can transiently
-      // lose the ADB transport; leave identity unresolved instead of creating
-      // the false missing-device evidence that reaches the disconnect monitor.
-      logger.debug(
-        `Skipping AVD-name resolution for ${deviceId}: a console-exclusive operation is in flight`,
-      );
-      return { name: "", consoleBusyDuringProbe: true };
-    }
-
-    const adbWithDevice = this.adbFactory.create(device);
-    const deadlineMs = this.timer.now() + infoTimeoutMs;
-    let diagnostic: ReadinessDiagnostic | undefined;
-    const generationBeforeDispatch = this.consoleBusyRegistry.getGeneration(deviceId);
-    try {
-      const result = await adbWithDevice.executeCommand("emu avd name", {
-        timeoutMs: infoTimeoutMs,
-        noRetry: true,
-        signal,
-      });
-      const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
-      logger.debug(
-        `AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
-      );
-      if (avdName) {
-        return { name: avdName };
-      }
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      diagnostic = readinessDiagnostic("avd-name-resolution", error, deviceId);
-      logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
-    }
-
-    const consoleBusyDuringProbe =
-      busyBeforeDispatch ||
-      this.consoleBusyRegistry.isBusy(deviceId) ||
-      generationBeforeDispatch !== this.consoleBusyRegistry.getGeneration(deviceId);
-
-    const remainingMs = deadlineMs - this.timer.now();
-    if (remainingMs <= 0) {
-      logger.debug(
-        `AVD name resolution for ${deviceId} spent its ${infoTimeoutMs}ms budget on the console probe; skipping the property fallback`,
-      );
-      return { name: "", diagnostic, consoleBusyDuringProbe };
-    }
-
-    try {
-      const result = await adbWithDevice.executeCommand("shell getprop ro.boot.qemu.avd_name", {
-        timeoutMs: remainingMs,
-        noRetry: true,
-        signal,
-      });
-      const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
-      logger.debug(
-        `AVD name property fallback for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`,
-      );
-      return avdName ? { name: avdName } : { name: "", diagnostic, consoleBusyDuringProbe };
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      logger.debug(`Failed to get AVD name property for ${deviceId}: ${error}`);
-      return {
-        name: "",
-        diagnostic: readinessDiagnostic("avd-name-resolution", error, deviceId),
-        consoleBusyDuringProbe,
-      };
-    }
+  ): Promise<RunningAvdNameResult> {
+    return resolveRunningAvdNameOnce(
+      {
+        consoleBusyRegistry: this.consoleBusyRegistry,
+        adbFactory: this.adbFactory,
+        timer: this.timer,
+      },
+      device,
+      infoTimeoutMs,
+      signal,
+    );
   }
 
   private resolveFoundDeviceModel(
@@ -1764,708 +832,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return (await this.launchEmulator({ avdName })).process;
   }
 
-  private resolveCameraPosterPath(posterPath?: string): string | undefined {
-    const cameraPosterPath = posterPath === undefined ? undefined : resolve(posterPath);
-    if (cameraPosterPath !== undefined) {
-      if (![".png", ".jpg", ".jpeg"].includes(extname(cameraPosterPath).toLowerCase())) {
-        throw new ActionableError("cameraPosterPath must point to a PNG, JPG, or JPEG image.");
-      }
-      if (!(this.posterFileSystem ?? { existsSync }).existsSync(cameraPosterPath)) {
-        throw new ActionableError(`Camera poster image does not exist: ${cameraPosterPath}`);
-      }
-    }
-    return cameraPosterPath;
-  }
-
-  private assertCameraPosterColdBoot(posterPath?: string): void {
-    if (posterPath !== undefined) {
-      throw new ActionableError(
-        "cameraPosterPath is unsupported on a running or starting AVD. Stop it first.",
-      );
-    }
-  }
-
-  async launchEmulator(
-    request: AndroidEmulatorLaunchRequest,
-  ): Promise<AndroidEmulatorLaunchHandle> {
-    if (request.signal?.aborted) {
-      throw new EmulatorLaunchCancelledError(request.avdName, null);
-    }
-
-    const cameraPosterPath = this.resolveCameraPosterPath(request.cameraPosterPath);
-    let process: ChildProcess | null = null;
-    let outcome: AndroidEmulatorLaunchOutcome = "launched";
-    let disposed = false;
-    let admission: BootAdmission | undefined;
-    const dispose = () => {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
-      if (process && !process.killed) {
-        process.kill();
-      }
-    };
-    request.signal?.addEventListener("abort", dispose, { once: true });
-
-    try {
-      // Ambient leaf for the emulator startup command (spawn + startup
-      // validation). It ends when `startEmulatorProcess` resolves — never the
-      // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
-      // leaf (see PerfContext).
-      // Raced against the request's abort so a cancel does not outwait the
-      // startup validation: that can run its full 5 s fallback against an
-      // emulator that ignores SIGTERM, and the owner needs the child handle
-      // inside its abort grace to confirm the exit (#10075).
-      const launch = await raceWithDeadline(
-        () =>
-          trackAmbient(`emulator launch ${request.avdName}`, () =>
-            this.launcher.startEmulatorProcess(request.avdName, {
-              requestedExtraArgs: request.extraArgs,
-              cameraPosterPath,
-              onSpawn: (spawnedProcess) => {
-                process = spawnedProcess;
-                if (disposed && !spawnedProcess.killed) {
-                  spawnedProcess.kill();
-                }
-              },
-              isCancelled: () => disposed,
-              capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
-              expectedDeviceId: request.deviceId,
-              signal: request.signal,
-              admitColdBoot: request.admitColdBoot,
-              onAdmitted: (admitted) => {
-                admission = admitted;
-              },
-            }),
-          ),
-        { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
-      );
-      process = launch.process;
-      outcome = launch.outcome;
-      if (!process) {
-        // A sibling can win the AVD lock after the pre-spawn check. Never adopt its camera state.
-        this.assertCameraPosterColdBoot(cameraPosterPath);
-      }
-      if (disposed) {
-        // `dispose` already sent the SIGTERM to this child.
-        throw new EmulatorLaunchCancelledError(request.avdName, process);
-      }
-    } catch (error) {
-      request.signal?.removeEventListener("abort", dispose);
-      // A failed or cancelled launch frees its capacity slot; the owner confirms the child's exit.
-      admission?.release();
-      // Hand the spawned child to the owner: one SIGTERM is only a request, and
-      // the owner must confirm the exit before freeing the AVD (#10075).
-      throw disposed ? asLaunchCancellation(request.avdName, error, process) : error;
-    }
-    if (process && request.deviceId) {
-      this.launchTargetDeviceIds.set(process, request.deviceId);
-    }
-
-    const release = () => {
-      if (!disposed) {
-        disposed = true;
-      }
-      request.signal?.removeEventListener("abort", dispose);
-    };
-
-    const client = this;
-    return {
-      avdName: request.avdName,
-      process,
-      outcome,
-      get targetDeviceId() {
-        return process ? client.launchTargetDeviceIds.get(process) : request.deviceId;
-      },
-      dispose: () => {
-        dispose();
-        release();
-      },
-    };
-  }
-
-  /**
-   * Whether this AVD is already up or coming up, so the launch must adopt it
-   * instead of spawning a second emulator for it.
-   *
-   * `getBootedDevicesChecked` rather than the swallow-to-[] wrapper: an adb
-   * discovery failure must surface as an error, never be read as "this AVD is
-   * not running" (#6407).
-   */
-  private async adoptsExistingAvdLaunch(
-    avdName: string,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    perf.startOperation("checkAlreadyRunning");
-    try {
-      const runningEmulators = await this.getBootedDevicesChecked(
-        false,
-        { bypassDeviceListCache: true },
-        signal,
-      );
-      if (runningEmulators.some((emulator) => emulator.name === avdName)) {
-        logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
-        return true;
-      }
-      // Mid-boot the scan can only label the emulator `Unknown (<serial>)`, so
-      // the console-port reservation, not the name, is the evidence (#6407).
-      const launchingDeviceId = this.reservations.findReservedLaunchSerial(
-        avdName,
-        runningEmulators,
-        isUnknownEmulatorName,
-      );
-      if (launchingDeviceId) {
-        logger.info(
-          `AVD '${avdName}' is already starting on ${launchingDeviceId} (this process reserved that console port) - waiting for it to be ready`,
-        );
-        return true;
-      }
-      const preAdbLaunchSerial = this.reservations.findLiveReservationAwaitingAdb(
-        avdName,
-        runningEmulators,
-      );
-      if (preAdbLaunchSerial) {
-        logger.info(
-          `AVD '${avdName}' is already starting on ${preAdbLaunchSerial} (this process holds a live reservation adb has not listed yet) - waiting for it to be ready`,
-        );
-        return true;
-      }
-      if (this.reservations.hasLiveUnreservedLaunch(avdName)) {
-        logger.info(
-          `AVD '${avdName}' is already starting (this process holds a live launch for it that adb has not named yet) - waiting for it to be ready`,
-        );
-        return true;
-      }
-      if (await this.isAvdStarting(avdName)) {
-        logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
-        return true;
-      }
-      return false;
-    } finally {
-      perf.endOperation("checkAlreadyRunning");
-    }
-  }
-
-  private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
-    if (isCancelled?.()) {
-      throw new EmulatorLaunchCancelledError(avdName, null);
-    }
-  }
-
-  private releaseReservationIfLaunchCancelled(
-    avdName: string,
-    reservation: EmulatorDeviceIdReservation | undefined,
-    isCancelled?: () => boolean,
-  ): void {
-    if (!isCancelled?.()) {
-      return;
-    }
-    if (reservation) {
-      this.reservations.releasePendingEmulatorDeviceId(reservation);
-    }
-    this.throwIfLaunchCancelled(avdName, isCancelled);
-  }
-
-  private emulatorAudioArguments(): string[] {
-    return process.env.AUTOMOBILE_EMULATOR_AUDIO === "false" ? ["-no-audio"] : [];
-  }
-
-  /**
-   * Request termination of the expected running emulator.
-   * @param device - The device to kill
-   * @param options - `force` drops the AVD-name comparison below AND the
-   *   discovery that feeds it (#6864).
-   * @returns The checked target after ADB accepts termination; callers confirm disappearance.
-   */
-  async killDevice(device: BootedDevice, options: EmulatorKillOptions = {}): Promise<BootedDevice> {
-    options = { ...options, deadlineMs: this.timer.now() + (options.timeoutMs ?? 30_000) };
-    // Under `force` the rediscovery below is serial-only. Dropping the name
-    // comparison alone was not enough: enrichment runs BEFORE the comparison
-    // and probes every attached emulator sequentially at 2s apiece, so three
-    // wedged consoles spend 6s of a 5s forced teardown deadline inside the
-    // discovery and `emu kill` is never dispatched. Since `force` has already
-    // committed to killing whatever occupies this serial, every one of those
-    // names is read and then discarded
-    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
-    const runningEmulators = await this.discoverEmulatorsForKill(options);
-    const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
-
-    if (!emulator || !emulator.deviceId) {
-      return await this.killEmulatorMissingFromOnlineList(device, options);
-    }
-
-    if (emulator.platform !== device.platform) {
-      throw new ActionableError(
-        `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
-      );
-    }
-
-    // `force` is the caller's decision, taken one layer up, to act on whatever
-    // occupies this serial (#6864). It drops exactly the two NAME comparisons
-    // below and nothing else: the serial selection above still has to find a
-    // running emulator, and the termination primitive is unchanged.
-    //
-    // Dropping them is what makes the flag work at all. `deviceTools` reaches
-    // here having deliberately NOT established an identity -- either skipping
-    // the emulator-console probe whose wedging is the whole reason force
-    // exists, or carrying the pooled AVD label no probe stood behind -- so a
-    // second comparison against the same unanswerable discovery can only refuse
-    // the forced kill on the caller's behalf a second time
-    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
-    if (!options.force) {
-      if (this.shouldStopMuteEmulatorProcess(device, emulator, options)) {
-        await this.stopEmulatorProcess(
-          device,
-          options,
-          new ActionableError(
-            `Refusing to kill '${device.deviceId}': the emulator could not name itself.`,
-          ),
-        );
-        return device;
-      }
-      if (emulator.name !== device.name) {
-        throw new ActionableError(
-          `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
-        );
-      }
-
-      // Two unknowns are not an equality. `Unknown (<serial>)` on either side is
-      // the absence of a name, so a request carrying the placeholder that meets a
-      // discovery carrying the placeholder has matched on nothing -- and the
-      // emulator answering on the serial now may be a replacement of the one the
-      // caller resolved. Callers that legitimately target an emulator whose
-      // console is mute resolve its AVD name first and put THAT in the target
-      // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
-      // placeholders means no identity was ever established (#6863 review).
-      if (
-        isUnknownEmulatorName(device.name, device.deviceId) &&
-        isUnknownEmulatorName(emulator.name, emulator.deviceId)
-      ) {
-        throw new ActionableError(
-          `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
-            "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
-            (options.processStop
-              ? `name and retry. ${await this.processStopEscapeHint(device, options)}`
-              : `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`),
-        );
-      }
-    } else {
-      logger.warn(
-        `[AndroidEmulatorClient] force=true: killing whatever occupies '${device.deviceId}' ` +
-          `without asking the runtime to name itself and without comparing the requested AVD ` +
-          `name '${device.name}' against the discovery.`,
-      );
-    }
-
-    // Terminate through the emulator console `emu kill`. Only the console
-    // shutdown lets the emulator write its quick-boot snapshot on exit; a guest
-    // `shell reboot -p` halts the OS without it, so the next quick-boot of the
-    // AVD resumes into a halted guest that never comes adb-online and burns the
-    // whole getAndroid readiness budget (issue #6849 regression of #6845). The
-    // console kill remains preferred; a bounded process fallback is available
-    // only when the caller supplies process-table identity evidence.
-    //
-    // `adb emu` selects a device by serial only — the console subcommand ignores
-    // `-t` and honours just `-s`/ANDROID_SERIAL, so `adb -t <id> emu kill` fails
-    // with "more than one emulator detected; use -s" as soon as a second
-    // emulator is attached (issue #6845). The kill is consequently always
-    // serial-scoped through the discovered emulator, which is what makes it
-    // correct with several emulators attached. Transport ids are not used for
-    // termination at all: the serial is the kill's identity, the discovery-time
-    // check above refuses a replacement AVD found on that serial, and callers
-    // confirm disappearance and incarnation afterwards.
-    await this.dispatchEmulatorConsoleKill(emulator, options, device);
-    logger.info(`Requested termination of emulator '${device.name}'`);
-    return emulator;
-  }
-
-  private async discoverEmulatorsForKill(options: EmulatorKillOptions): Promise<BootedDevice[]> {
-    const discover = (signal?: AbortSignal) =>
-      this.getBootedDevicesChecked(
-        false,
-        {
-          bypassDeviceListCache: true,
-          skipNameEnrichment: options.force === true,
-        },
-        signal,
-      );
-    if (!options.processStop) {
-      return discover(options.signal);
-    }
-    const controller = new AbortController();
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, controller.signal])
-      : controller.signal;
-    return raceWithDeadline(() => discover(signal), {
-      timer: this.timer,
-      signal: options.signal,
-      timeoutMs: Math.max(0, (options.deadlineMs ?? this.timer.now()) - this.timer.now()),
-      label: "Emulator shutdown discovery",
-      onTimeout: () => controller.abort(),
-    });
-  }
-
-  private async dispatchEmulatorConsoleKill(
-    target: BootedDevice,
-    options: EmulatorKillOptions,
-    identityTarget: BootedDevice = target,
-  ): Promise<void> {
-    const remainingMs =
-      (options.deadlineMs ?? this.timer.now() + (options.timeoutMs ?? 30_000)) - this.timer.now();
-    const timeoutMs = options.processStop
-      ? Math.max(0, Math.min(remainingMs / 3, EMULATOR_CONSOLE_KILL_BOUND_MS))
-      : options.timeoutMs;
-    try {
-      await this.adbFactory.create(target).execute(["emu", "kill"], {
-        timeoutMs,
-        noRetry: true,
-        signal: options.signal,
-        waitForProcessSettlementAfterAbort: true,
-      });
-    } catch (error) {
-      if (!options.processStop) {
-        throw error;
-      }
-      options.signal?.throwIfAborted();
-      if (!(error instanceof AdbCommandTimeoutError)) {
-        throw error;
-      }
-      logger.warn(
-        `[AndroidEmulatorClient] console kill timed out for ${target.deviceId}; checking process identity`,
-        error,
-      );
-      try {
-        await this.stopEmulatorProcess(identityTarget, options, error);
-      } catch (stopError) {
-        throw markEmulatorStopDispatched(
-          stopError instanceof Error
-            ? stopError
-            : toActionableError(stopError, "Emulator stop failed after console kill"),
-        );
-      }
-    }
-  }
-
-  private shouldStopMuteEmulatorProcess(
-    device: BootedDevice,
-    emulator: BootedDevice,
-    options: EmulatorKillOptions,
-  ): boolean {
-    return Boolean(
-      options.processStop &&
-      isUnknownEmulatorName(emulator.name, emulator.deviceId) &&
-      this.processStopAvdName(device, options),
-    );
-  }
-
-  private processStopAvdName(
-    device: BootedDevice,
-    options: EmulatorKillOptions,
-  ): string | undefined {
-    return isUnknownEmulatorName(device.name, device.deviceId)
-      ? options.processStop?.expectedAvdName
-      : device.name;
-  }
-
-  private async processStopEscapeHint(
-    device: BootedDevice,
-    options: EmulatorKillOptions,
-    identity?: EmulatorProcessIdentity,
-  ): Promise<string> {
-    if (identity) {
-      return this.processIdentityEscapeHint(device, identity);
-    }
-    const stopper = options.processStop?.stopper;
-    if (!stopper) {
-      return emulatorProcessEscapeHint(device.deviceId);
-    }
-    const stopOptions = {
-      deadlineMs: options.deadlineMs ?? this.timer.now(),
-      signal: options.signal,
-    };
-    const described = await stopper.describeSerial(device.deviceId, stopOptions);
-    if (described.kind === "read" && described.candidates.length > 0) {
-      return emulatorProcessEscapeHint(device.deviceId, described.candidates);
-    }
-    const observed = await stopper.identify(
-      { serial: device.deviceId, avdName: this.processStopAvdName(device, options) ?? "" },
-      stopOptions,
-    );
-    return this.processIdentityEscapeHint(device, observed);
-  }
-
-  private processIdentityEscapeHint(
-    device: BootedDevice,
-    identity: EmulatorProcessIdentity,
-  ): string {
-    switch (identity.kind) {
-      case "absent":
-      case "unreadable":
-        return emulatorProcessEscapeHint(device.deviceId, [], identity.kind);
-      case "ambiguous":
-        return emulatorProcessEscapeHint(device.deviceId, identity.candidates);
-      default:
-        return emulatorProcessEscapeHint(device.deviceId, [identity]);
-    }
-  }
-
-  private async stopEmulatorProcess(
-    device: BootedDevice,
-    options: EmulatorKillOptions,
-    refusal: Error,
-  ): Promise<void> {
-    const avdName = this.processStopAvdName(device, options);
-    if (!options.processStop || !avdName) {
-      throw await this.processStopRefusal(device, options, refusal);
-    }
-    const outcome = await options.processStop.stopper.stop(
-      { serial: device.deviceId, avdName },
-      {
-        deadlineMs: options.deadlineMs ?? this.timer.now(),
-        signal: options.signal,
-      },
-    );
-    switch (outcome.kind) {
-      case "stopped":
-        return;
-      case "identity-mismatch":
-        throw new ActionableError(
-          `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement (AVD '${outcome.runningAvdName}').`,
-        );
-      case "still-running":
-        if (!outcome.signalled) {
-          throw new ActionableError(
-            `Emulator '${device.deviceId}' (AVD '${avdName}') is still running with pid ${outcome.pid}; no signal could be delivered (deadline spent or signal refused: permission denied or unsafe pid). ${emulatorProcessEscapeHint(device.deviceId, [{ pid: outcome.pid, command: outcome.command }])}`,
-          );
-        }
-        throw new EmulatorStillRunningError(outcome.pid, device.deviceId, avdName, outcome.command);
-      case "unidentified":
-        throw await this.processStopRefusal(device, options, refusal, outcome.identity);
-    }
-  }
-
-  private async processStopRefusal(
-    device: BootedDevice,
-    options: EmulatorKillOptions,
-    refusal: Error,
-    identity?: EmulatorProcessIdentity,
-  ): Promise<Error> {
-    const message = `${refusal.message} ${await this.processStopEscapeHint(device, options, identity)}`;
-    return refusal instanceof AdbCommandTimeoutError
-      ? new AdbCommandTimeoutError(message)
-      : new ActionableError(message, { cause: refusal });
-  }
-
-  /**
-   * The serial is not among the `device`-state rows `killDevice` rediscovered.
-   * That is not proof the emulator stopped: `adb devices` also lists an
-   * emulator whose transport dropped (host sleep/wake, a boot that never
-   * finished) as `offline` while its process keeps running and keeps holding
-   * its AVD (#10074). Read the raw states before answering "not running", so a
-   * caller never retires session/pool ownership of an emulator that is alive.
-   *
-   * - absent from `adb devices` altogether: the one case that is "not running";
-   * - attached in another state, without `force`: a distinct error that the
-   *   already-stopped classifier does not match, so ownership stays intact;
-   * - attached in another state, under `force`: the serial-scoped console kill.
-   *   `adb emu` talks to the emulator console port rather than the adb
-   *   transport, so it still reaches an `offline` emulator. Disappearance is
-   *   confirmed by the caller, which must also see the serial leave `adb devices`.
-   */
-  private async killEmulatorMissingFromOnlineList(
-    device: BootedDevice,
-    options: EmulatorKillOptions,
-  ): Promise<BootedDevice> {
-    const stateOptions = options.processStop
-      ? {
-          ...options,
-          timeoutMs: Math.max(0, (options.deadlineMs ?? this.timer.now()) - this.timer.now()),
-        }
-      : options;
-    const attachedState = await this.readAttachedStateForKill(device, stateOptions);
-    if (attachedState === undefined) {
-      return await this.killEmulatorAbsentFromAdb(device, options);
-    }
-    const label = this.emulatorLabel(device);
-    if (!options.force) {
-      throw new ActionableError(
-        `Emulator '${label}' (${device.deviceId}) is attached to adb but reported in state ` +
-          `'${attachedState}', so the daemon cannot tell whether it has stopped and has left its ` +
-          `session and pool entry untouched. Retry killDevice with force: true to send the ` +
-          `emulator console kill to ${device.deviceId} anyway.`,
-      );
-    }
-    logger.warn(
-      `[AndroidEmulatorClient] force=true: '${device.deviceId}' is attached in adb state ` +
-        `'${attachedState}'; dispatching the console kill without a booted-device match.`,
-    );
-    await this.dispatchEmulatorConsoleKill(device, options);
-    logger.info(`Requested termination of emulator '${label}' (adb state '${attachedState}')`);
-    return device;
-  }
-
-  /** The AVD name, or the serial when the caller's target carries no usable name. */
-  private emulatorLabel(device: BootedDevice): string {
-    return device.name.trim() === "" ? device.deviceId : device.name;
-  }
-
-  /**
-   * adb lists no row for the serial. That only proves the daemon's adb server does not know
-   * it, not that the emulator exited: the emulator process can outlive its adb registration
-   * (a different adb server, a dropped transport). The process table is the second witness;
-   * only when it also has no process for the serial is the emulator "not running".
-   */
-  private async killEmulatorAbsentFromAdb(
-    device: BootedDevice,
-    options: EmulatorKillOptions,
-  ): Promise<BootedDevice> {
-    const stopper = options.processStop?.stopper;
-    const described = stopper
-      ? await stopper.describeSerial(device.deviceId, {
-          deadlineMs: options.deadlineMs ?? this.timer.now(),
-          signal: options.signal,
-        })
-      : ({ kind: "read", candidates: [] } satisfies EmulatorSerialDescription);
-    if (described.kind === "unreadable") {
-      // Fail closed: an unreadable table (ps failure, deadline, unsupported platform) cannot
-      // prove absence, and this wording must not match the already-stopped classifier.
-      throw new ActionableError(
-        `Cannot confirm whether emulator '${this.emulatorLabel(device)}' (${device.deviceId}) has ` +
-          `stopped: adb does not list it and the host process table could not be read ` +
-          `(${described.detail}), so its session and pool entry were left untouched. ` +
-          emulatorProcessEscapeHint(device.deviceId, [], "unreadable"),
-      );
-    }
-    const { candidates } = described;
-    if (candidates.length === 0) {
-      throw new ActionableError(`Emulator '${this.emulatorLabel(device)}' is not running`);
-    }
-    const label = this.emulatorLabel(device);
-    if (this.processStopAvdName(device, options)) {
-      logger.warn(
-        `[AndroidEmulatorClient] '${device.deviceId}' is absent from adb but its emulator process is ` +
-          `alive; stopping it through the process table.`,
-      );
-      await this.stopEmulatorProcess(
-        device,
-        options,
-        new ActionableError(`Emulator '${label}' is absent from adb`),
-      );
-      return device;
-    }
-    throw new ActionableError(
-      `Emulator '${label}' (${device.deviceId}) has a live process but adb does not list it, and ` +
-        `no AVD name was given to verify its identity. ${emulatorProcessEscapeHint(device.deviceId, candidates)}`,
-    );
-  }
-
-  private async readAttachedStateForKill(
-    device: BootedDevice,
-    options: { timeoutMs?: number; signal?: AbortSignal },
-  ): Promise<string | undefined> {
-    const adb = this.adbFactory.create(null);
-    if (!adb.getDeviceStates) {
-      return undefined;
-    }
-    try {
-      const states = await adb.getDeviceStates({
-        timeoutMs: options.timeoutMs,
-        signal: options.signal,
-        // A vanished adb cannot say the serial is gone either (#11643).
-        throwOnMissingAdb: true,
-      });
-      return states.find((state) => state.deviceId === device.deviceId)?.state;
-    } catch (error) {
-      if (options.signal?.aborted) {
-        throw error;
-      }
-      // An unreadable state list cannot prove the serial is gone, so fail the kill
-      // rather than let the caller classify the emulator as already stopped.
-      throw toActionableError(
-        error,
-        `Could not read adb device states to confirm '${device.deviceId}' is stopped`,
-      );
-    }
-  }
-
-  private recordReservedEmulatorDeviceId(
-    childProcess: ChildProcess,
-    reservation: EmulatorDeviceIdReservation,
-  ): void {
-    this.reservations.recordReservedEmulatorDeviceId(childProcess, reservation);
-    this.recordLaunchTargetDeviceId(childProcess, reservation.deviceId, "reserved console port");
-  }
-
-  private getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined {
-    return childProcess ? this.launchTargetDeviceIds.get(childProcess) : undefined;
-  }
-
-  private findNamedEmulator(
-    avdName: string,
-    childProcess: ChildProcess | null | undefined,
-    runningEmulators: BootedDevice[],
-  ): { emulator?: BootedDevice; failure?: string } {
-    const namedEmulator = runningEmulators.find((emulator) => emulator.name === avdName);
-    logger.debug(
-      `Exact name match for '${avdName}': ${namedEmulator ? `Found ${namedEmulator.deviceId}` : "Not found"}`,
-    );
-    if (namedEmulator) {
-      this.recordLaunchTargetDeviceId(childProcess, namedEmulator.deviceId, "AVD name");
-      return { emulator: namedEmulator };
-    }
-    return {};
-  }
-
-  private getLaunchError(childProcess?: ChildProcess | null): ActionableError | undefined {
-    return childProcess ? this.launchErrors.get(childProcess) : undefined;
-  }
-
-  private getLaunchErrorFinalization(
-    childProcess?: ChildProcess | null,
-  ): Promise<ActionableError | undefined> | undefined {
-    return childProcess ? this.launchErrorFinalizations.get(childProcess) : undefined;
-  }
-
-  private throwLaunchError(error?: ActionableError): void {
-    if (error) {
-      throw error;
-    }
-  }
-
-  private detectDeviceIdFromEmulatorOutput(output: string): string | undefined {
-    return detectDeviceIdFromEmulatorOutput(output);
-  }
-
-  private captureLaunchTargetDeviceId(childProcess: ChildProcess, output: string): void {
-    if (this.launchTargetDeviceIds.has(childProcess)) {
-      return;
-    }
-
-    const targetDeviceId = this.detectDeviceIdFromEmulatorOutput(output);
-    if (targetDeviceId) {
-      this.recordLaunchTargetDeviceId(childProcess, targetDeviceId, "process output");
-    }
-  }
-
-  private recordLaunchTargetDeviceId(
-    childProcess: ChildProcess | null | undefined,
-    targetDeviceId: string,
-    source: string,
-  ): void {
-    if (!childProcess || this.launchTargetDeviceIds.has(childProcess)) {
-      return;
-    }
-    this.launchTargetDeviceIds.set(childProcess, targetDeviceId);
-    logger.debug(`Captured emulator launch target deviceId from ${source}: ${targetDeviceId}`);
-  }
-
-  /**
-   * Utility method to sleep for a specified duration
-   * @param ms - Milliseconds to sleep
-   */
-  private sleep(ms: number): Promise<void> {
-    return this.timer.sleep(ms);
+  launchEmulator(request: AndroidEmulatorLaunchRequest): Promise<AndroidEmulatorLaunchHandle> {
+    return this.coordinator.launchEmulator(request);
   }
 }

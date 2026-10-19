@@ -17,6 +17,13 @@ import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { ActionableError } from "../../src/models";
 import { PLAN_LABEL_SESSION_SOURCE } from "../../src/daemon/sessionManager";
 
+/** An unrelated error that merely carries the refusal field names. */
+class LookalikeRefusalError extends ActionableError {
+  readonly code = "timeout";
+  readonly retryable = true;
+  readonly deviceId = "emu";
+}
+
 function sessionManager(
   overrides: Partial<StreamAuthSessionManager> = {},
 ): StreamAuthSessionManager {
@@ -30,7 +37,7 @@ function sessionManager(
 
 function authenticator(
   sm: StreamAuthSessionManager | null,
-  env: NodeJS.ProcessEnv = {} as NodeJS.ProcessEnv,
+  env: NodeJS.ProcessEnv = {},
 ): SessionScopedStreamAuthenticator {
   return new SessionScopedStreamAuthenticator(() => sm, "test op", env);
 }
@@ -196,7 +203,7 @@ describe("SessionScopedStreamAuthenticator", () => {
   });
 
   test("the escape hatch disables enforcement entirely", () => {
-    const env = { [STREAM_SOCKET_AUTH_ENV]: "0" } as unknown as NodeJS.ProcessEnv;
+    const env: NodeJS.ProcessEnv = { [STREAM_SOCKET_AUTH_ENV]: "0" };
     expect(() => authenticator(sessionManager(), env).authorize({})).not.toThrow();
   });
 });
@@ -476,14 +483,6 @@ test("aux authorization fields expose only the two stream ownership classes", ()
     retryable: false,
     deviceId: "emu",
   });
-  expect(
-    streamAuthRefusalFields(
-      Object.assign(new ActionableError("other refusal"), {
-        code: "timeout",
-        retryable: true,
-        deviceId: "emu",
-      }),
-    ),
-  ).toEqual({});
+  expect(streamAuthRefusalFields(new LookalikeRefusalError("other refusal"))).toEqual({});
   expect(streamAuthRefusalFields(new Error("untyped"))).toEqual({});
 });

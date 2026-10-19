@@ -8,6 +8,9 @@ import {
   registerToolSelectionTools,
 } from "../../src/server/toolSelectionTools";
 import { getStructuredField, type StructuredToolResponse } from "../../src/utils/toolUtils";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /** The server-computed fields an acquisition envelope carries (#6869, #6886). */
 type AcquisitionPayload = {

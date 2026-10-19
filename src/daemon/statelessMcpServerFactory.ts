@@ -104,6 +104,7 @@ export function createStatelessMcpServer(
     sessionContext: { ...context, sessionId: scope.requestScopeId },
     daemonMode: true,
     requestMcpSessionId: scope.requestMcpSessionId,
+    ...(scope.trustedForwarder === true && { trustForwardedMcpSessionId: true }),
     stateless: true,
     taskLeaseKeepalive: daemonTaskLeaseKeepalive(),
   });

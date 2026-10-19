@@ -31,6 +31,7 @@ import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 function createBlackHoleSocket(): Duplex {
   return new Duplex({
@@ -42,8 +43,13 @@ function createBlackHoleSocket(): Duplex {
 }
 
 function createConnectedClient(fakeTimer: FakeTimer, connectionTimeout = 1000): DaemonClient {
-  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer);
-  client.attachSocketForTesting(createBlackHoleSocket());
+  const client = new DaemonClient(
+    "/fake/socket",
+    connectionTimeout,
+    fakeTimer,
+    ISOLATED_DAEMON_RECOVERY,
+  );
+  client.testHooks.attachSocket(createBlackHoleSocket());
   return client;
 }
 
@@ -75,12 +81,17 @@ function createDeferredConnectClient(
       callback();
     },
   });
-  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer);
+  const client = new DaemonClient(
+    "/fake/socket",
+    connectionTimeout,
+    fakeTimer,
+    ISOLATED_DAEMON_RECOVERY,
+  );
   client.connect = async (timeoutMs = 1000) => {
     connectTimeouts.push(timeoutMs);
     markConnectStarted();
     await connectGate;
-    client.attachSocketForTesting(socket);
+    client.testHooks.attachSocket(socket);
     onConnected?.();
   };
   return {
@@ -328,7 +339,7 @@ describe("DaemonClient per-request timeout", () => {
     expect(request?.timeoutMs).toBe(600);
     expect(fakeTimer.getPendingTimeouts()).toEqual([600 + DAEMON_RESPONSE_GRACE_MS]);
 
-    harness.client.simulateIncomingDataForTesting(
+    harness.client.testHooks.simulateIncomingData(
       Buffer.from(
         `${JSON.stringify({
           id: request?.id,
@@ -404,7 +415,7 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
   function deliverProgress(
     client: DaemonClient,
     progressToken: string | number,
-    requestId = client.findPendingRequestIdByProgressTokenForTesting(progressToken),
+    requestId = client.testHooks.findPendingRequestIdByProgressToken(progressToken),
   ): void {
     const frame =
       JSON.stringify({
@@ -415,7 +426,7 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
         progress: 1,
         total: 1,
       }) + "\n";
-    client.simulateIncomingDataForTesting(Buffer.from(frame));
+    client.testHooks.simulateIncomingData(Buffer.from(frame));
   }
 
   test("a request that emits periodic progress survives past its default 30s deadline", async () => {
@@ -527,7 +538,7 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
     fakeTimer.advanceTime(10_000 + DAEMON_RESPONSE_GRACE_MS);
 
     expect(await firstResult).toBeInstanceOf(McpTimeoutError);
-    expect(client.hasPendingRequestForTesting(secondId)).toBe(true);
+    expect(client.testHooks.hasPendingRequest(secondId)).toBe(true);
     await client.close();
     expect(await secondResult).toBeInstanceOf(DaemonUnavailableError);
   });
@@ -540,10 +551,10 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, {}, null);
-    client.attachSocketForTesting(socket);
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
+    client.testHooks.attachSocket(socket);
     const respond = (response: DaemonResponse) =>
-      client.simulateIncomingDataForTesting(Buffer.from(JSON.stringify(response) + "\n"));
+      client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(response) + "\n"));
     return { client, timer, socket, respond };
   }
 
@@ -604,7 +615,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
       const request = socket.getWrittenMessages<DaemonRequest>()[0];
       try {
         timer.advanceTime(request.timeoutMs! + responseGraceMs - 1);
-        expect(client.hasPendingRequestForTesting(request.id)).toBe(true);
+        expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
         expect(socket.getWrittenMessages()).toHaveLength(1);
         timer.advanceTime(1);
         const error = await outcome;
@@ -670,7 +681,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
       })
       .catch((error: unknown) => error);
     const progress = () =>
-      client.simulateIncomingDataForTesting(
+      client.testHooks.simulateIncomingData(
         Buffer.from(
           JSON.stringify({
             type: "daemon_notification",
@@ -725,8 +736,8 @@ test.each(["timeout", "reply", "abort"])(
     timer.setTimeout = (callback, ms) =>
       scheduleFakeTimeout(callback, ms > MAX_SETTIMEOUT_DELAY_MS ? 1 : ms);
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, {}, null);
-    client.attachSocketForTesting(socket);
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
+    client.testHooks.attachSocket(socket);
     const controller = new AbortController();
     const outcome = client
       .callTool(
@@ -741,11 +752,11 @@ test.each(["timeout", "reply", "abort"])(
     try {
       expect(request.timeoutMs).toBe(MAX_SETTIMEOUT_DELAY_MS);
       timer.advanceTime(MAX_SETTIMEOUT_DELAY_MS);
-      expect(client.hasPendingRequestForTesting(request.id)).toBe(true);
+      expect(client.testHooks.hasPendingRequest(request.id)).toBe(true);
       expect(socket.getWrittenMessages()).toHaveLength(1);
       expect(timer.getPendingTimeouts()).toEqual([DAEMON_RESPONSE_GRACE_MS]);
       if (terminal === "reply") {
-        client.simulateIncomingDataForTesting(
+        client.testHooks.simulateIncomingData(
           Buffer.from(
             JSON.stringify({
               id: request.id,
@@ -788,8 +799,13 @@ async function checkArgumentBudgetClientTimeout(
       callback();
     },
   });
-  const client = new DaemonClient("/fake/socket", connectionTimeout, timer);
-  client.attachSocketForTesting(socket);
+  const client = new DaemonClient(
+    "/fake/socket",
+    connectionTimeout,
+    timer,
+    ISOLATED_DAEMON_RECOVERY,
+  );
+  client.testHooks.attachSocket(socket);
   const outcome = client.callTool(tool, args).catch((error: unknown) => error);
   const expectedMs = Math.max(resolvedMs, connectionTimeout);
   try {

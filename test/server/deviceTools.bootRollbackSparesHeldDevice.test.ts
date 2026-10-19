@@ -177,7 +177,7 @@ describe("a failed start does not stop the device it booted once another session
     deviceId: string,
     platform: "android" | "ios",
   ): Promise<void> => {
-    await pool.bindOrReuseDeviceSession("other-session", deviceId, platform);
+    await pool.bindOrReuseDeviceSession({ sessionId: "other-session", deviceId, platform });
     expect(pool.getDevice(deviceId)?.sessionId).toBe("other-session");
   };
 
@@ -297,7 +297,12 @@ describe("a failed start does not stop the device it booted once another session
       };
       duringReadiness = async () => {
         if (!runningBefore) {
-          await pool.bindOrReuseDeviceSession(held, AVD_SERIAL, "android", avd);
+          await pool.bindOrReuseDeviceSession({
+            sessionId: held,
+            deviceId: AVD_SERIAL,
+            platform: "android",
+            sourceImage: avd,
+          });
         }
         expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBe(held);
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");

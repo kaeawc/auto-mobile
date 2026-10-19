@@ -15,20 +15,20 @@ import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { SwipeDirection } from "../../../../src/models";
 import type { AdbExecutor } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
-import type { BootedDevice } from "../../../../src/models";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import type { BootedDevice, Element } from "../../../../src/models";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 const ANDROID_DEVICE: BootedDevice = {
   name: "test-device",
   platform: "android",
   deviceId: "emulator-5554",
-} as unknown as BootedDevice;
+};
 
 const IOS_DEVICE: BootedDevice = {
   name: "test-ios-device",
   platform: "ios",
   deviceId: "test-ios-device",
-} as unknown as BootedDevice;
+};
 
 function makeExecutor(
   device: BootedDevice,
@@ -37,12 +37,12 @@ function makeExecutor(
   fakeDetector: FakeAccessibilityDetector,
   fakeTimer: FakeTimer,
   fakeAdb: AdbExecutor = new FakeAdbClient(),
-  featureFlags?: FeatureFlagService,
+  featureFlags?: FeatureFlagReader,
 ): TalkBackSwipeExecutor {
   return new TalkBackSwipeExecutor(
     device,
     fakeGesture,
-    fakeProxy as any,
+    fakeProxy,
     fakeDetector,
     fakeAdb,
     fakeTimer,
@@ -245,7 +245,7 @@ describe("TalkBackSwipeExecutor", () => {
   describe("force-accessibility-mode feature flag threading (#3925)", () => {
     test("forwards the injected featureFlags to detectMethod on android", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
       const exec = makeExecutor(
         ANDROID_DEVICE,
         fakeGestureExecutor,
@@ -334,11 +334,11 @@ describe("TalkBackSwipeExecutor", () => {
     });
 
     test("dispatches to accessibility-aware swipe method when container has resource-id", async () => {
-      const containerElement = {
+      const containerElement: Element = {
         bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
         scrollable: true,
-      } as any;
+      };
 
       await executor.executeSwipeGesture(
         100,
@@ -460,9 +460,10 @@ describe("TalkBackSwipeExecutor", () => {
     );
 
     test("boomerang mode announces swipeable element instead of swiping", async () => {
-      const containerElement = {
+      const containerElement: Element = {
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-      } as any;
+      };
 
       await executor.executeSwipeGesture(
         100,
@@ -536,11 +537,11 @@ describe("TalkBackSwipeExecutor", () => {
     // getSwipeWithinBounds). Finger UP reveals the content BELOW, which is
     // ACTION_SCROLL_FORWARD — the mapping used to be inverted (#6116).
     test("tries ACTION_SCROLL (scroll_forward) when container has resource-id and finger swipes up", async () => {
-      const containerElement = {
+      const containerElement: Element = {
         bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
         scrollable: true,
-      } as any;
+      };
 
       await executor.executeAndroidSwipeWithAccessibility(
         100,
@@ -563,9 +564,10 @@ describe("TalkBackSwipeExecutor", () => {
     });
 
     test("maps finger-down direction to scroll_backward (reveals content above)", async () => {
-      const containerElement = {
+      const containerElement: Element = {
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-      } as any;
+      };
 
       await executor.executeAndroidSwipeWithAccessibility(
         100,
@@ -586,9 +588,10 @@ describe("TalkBackSwipeExecutor", () => {
     });
 
     test("maps finger-left direction to scroll_forward (reveals content to the right)", async () => {
-      const containerElement = {
+      const containerElement: Element = {
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-      } as any;
+      };
 
       await executor.executeAndroidSwipeWithAccessibility(
         300,
@@ -607,9 +610,10 @@ describe("TalkBackSwipeExecutor", () => {
     });
 
     test("maps finger-right direction to scroll_backward (reveals content to the left)", async () => {
-      const containerElement = {
+      const containerElement: Element = {
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-      } as any;
+      };
 
       await executor.executeAndroidSwipeWithAccessibility(
         100,
@@ -728,9 +732,10 @@ describe("TalkBackSwipeExecutor", () => {
         error: "Scroll not supported",
       });
 
-      const containerElement = {
+      const containerElement: Element = {
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-      } as any;
+      };
 
       await executor.executeAndroidSwipeWithAccessibility(
         100,
@@ -756,11 +761,11 @@ describe("TalkBackSwipeExecutor", () => {
     });
 
     test("uses two-finger swipe when container has no resource-id", async () => {
-      const containerElement = {
+      const containerElement: Element = {
         bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         scrollable: true,
         // No resource-id
-      } as any;
+      };
 
       await executor.executeAndroidSwipeWithAccessibility(
         100,

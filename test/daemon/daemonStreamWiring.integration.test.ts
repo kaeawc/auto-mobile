@@ -49,6 +49,7 @@ import {
   spyOnIosExistingFactory,
   spyOnIosExistingInstance,
 } from "../helpers/iosCtrlProxyClientSpies";
+import { typedFrameSchema } from "../helpers/wireMessageSchemas";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
@@ -109,7 +110,7 @@ interface DaemonStreamInternals {
   setupDeviceSessionRouting(): void;
   setupDeviceDataStreamCallback(): void;
   setupNavigationGraphStreamListener(server: unknown): void;
-  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
+  navigationGraphBridge: { attach(manager: NavigationGraphManager): void };
   attemptRecovery(failureKind?: string): Promise<void>;
   applyStorageSubscriptionRequest(request: {
     deviceId: string | null;
@@ -414,7 +415,7 @@ describe("Daemon stream wiring", () => {
           failuresPush: null,
           telemetryPush: null,
         });
-        internals.setupNavigationGraphUpdateListener = () => {};
+        internals.navigationGraphBridge.attach = () => {};
         const pool = internals.devicePool as unknown as DevicePool;
         try {
           internals.setupDeviceSessionRouting();
@@ -517,7 +518,7 @@ describe("Daemon stream wiring", () => {
           expect(fresh?.replay).toBe(false);
           expect(fresh?.frame.deviceSessionUuid).toBe(stream.getDeviceSessionUuid("emulator-5554"));
           const frameCount = pane
-            .getWrittenMessages<{ type: string }>()
+            .getWrittenMessages(typedFrameSchema)
             .filter((m) => m.type === "hierarchy_update").length;
           observation.resolve([
             {
@@ -534,7 +535,7 @@ describe("Daemon stream wiring", () => {
           if (event.generationOnly) {
             expect(
               pane
-                .getWrittenMessages<{ type: string }>()
+                .getWrittenMessages(typedFrameSchema)
                 .filter((m) => m.type === "hierarchy_update"),
             ).toHaveLength(frameCount + 1);
             expect(
@@ -552,7 +553,7 @@ describe("Daemon stream wiring", () => {
           } else {
             expect(
               pane
-                .getWrittenMessages<{ type: string }>()
+                .getWrittenMessages(typedFrameSchema)
                 .filter((m) => m.type === "hierarchy_update"),
             ).toHaveLength(frameCount);
             expect(stream.getCurrentFrameContext("emulator-5554")).toBeUndefined();
@@ -1143,7 +1144,7 @@ describe("Daemon stream wiring", () => {
     const stream = new FakeDeviceDataStreamServer();
     internals.getDeviceSessionRoutingTargets = () => targets(stream);
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.setupNavigationGraphUpdateListener = (manager) => {
+    internals.navigationGraphBridge.attach = (manager) => {
       attachedManagers.push(manager);
     };
 
@@ -1236,7 +1237,7 @@ describe("Daemon stream wiring", () => {
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.setupNavigationGraphUpdateListener = (manager) => {
+    internals.navigationGraphBridge.attach = (manager) => {
       attachedManagers.push(manager);
     };
 

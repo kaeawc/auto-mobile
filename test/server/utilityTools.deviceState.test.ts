@@ -25,6 +25,9 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // No test in this file may run the installed network-filter-controller.
 const networkFilterBridge = new FakeNetworkFilterBridge();
@@ -825,8 +828,16 @@ describe("device state tools", () => {
       createBootedDevice("sim-a", "ios", "iPhone 15"),
       createBootedDevice("sim-b", "ios", "iPhone 16"),
     ]);
-    await devicePool.bindOrReuseDeviceSession("session-a", "sim-a", "ios");
-    await devicePool.bindOrReuseDeviceSession("session-b", "sim-b", "ios");
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: "session-a",
+      deviceId: "sim-a",
+      platform: "ios",
+    });
+    await devicePool.bindOrReuseDeviceSession({
+      sessionId: "session-b",
+      deviceId: "sim-b",
+      platform: "ios",
+    });
     DaemonState.getInstance().initialize(sessionManager, devicePool);
 
     const setActiveDevice = ToolRegistry.getTool("setActiveDevice");

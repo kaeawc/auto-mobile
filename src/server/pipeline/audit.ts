@@ -2,7 +2,10 @@ import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLim
 import { ActionableError, BootedDevice } from "../../models";
 import { serverConfig } from "../../utils/ServerConfig";
 import { MemoryAudit } from "../../features/memory/MemoryAudit";
-import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
 import type { ProgressCallback, DeviceAwareToolHandler } from "../toolRegistry";
@@ -24,7 +27,10 @@ export interface AuditRunner {
 // the ToolRegistry constructor; tests instantiate it directly to exercise the
 // memory-audit wrapping decision and foreground-package lookup without a device.
 export class DefaultAuditRunner implements AuditRunner {
-  constructor(private readonly log: Logger = logger) {}
+  constructor(
+    private readonly log: Logger = logger,
+    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  ) {}
   async run(input: AuditRunnerInput): Promise<any> {
     const { name, args, device, handler, progress, signal } = input;
     if (!serverConfig.isMemPerfAuditEnabled() || device.platform !== "android") {
@@ -66,7 +72,7 @@ export class DefaultAuditRunner implements AuditRunner {
 
   private async getForegroundPackageName(device: BootedDevice): Promise<string | null> {
     try {
-      const adb = defaultAdbClientFactory.create(device);
+      const adb = this.adbFactory.create(device);
       const { stdout } = await adb.executeCommand("shell dumpsys window | grep mCurrentFocus", {
         maxBuffer: DUMPSYS_MAX_BUFFER,
       });

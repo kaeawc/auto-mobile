@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -47,7 +47,7 @@ describe("setActiveDevice naming a session another connection owns", () => {
         (error: unknown) => error as InputDeviceOwnedError,
       );
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -73,20 +73,26 @@ describe("setActiveDevice naming a session another connection owns", () => {
     await pool.initializeWithDevices([held, free]);
     DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
     tools = new RealToolCallPath([held, free]).install();
-    await pool.bindOrReuseDeviceSession(
-      SESSION,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
     );
-  });
+  }
 
   afterEach(() => {
     tools.uninstall();
@@ -102,7 +108,7 @@ describe("setActiveDevice naming a session another connection owns", () => {
     }
   });
 
-  test("the refusal carries the same evidence every other tool's refusal carries", async () => {
+  arranged("the refusal carries the same evidence every other tool's refusal carries", async () => {
     const reference = await refusal(() =>
       refuseControlOnForeignOwnedSession("killDevice", SESSION, OTHER),
     );
@@ -128,20 +134,23 @@ describe("setActiveDevice naming a session another connection owns", () => {
     expect(error?.toPayload()).toEqual(reference?.toPayload());
   });
 
-  test("a caller with no connection identity cannot move a live autolock session (#11235)", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-    await pool.releaseDevice(held.deviceId, SESSION);
-    const autolocked = await pool.autolockDevice(held.deviceId, "android", OWNER);
-    expect(autolocked).toBeDefined();
+  arranged(
+    "a caller with no connection identity cannot move a live autolock session (#11235)",
+    async () => {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      await pool.releaseDevice(held.deviceId, SESSION);
+      const autolocked = await pool.autolockDevice(held.deviceId, "android", OWNER);
+      expect(autolocked).toBeDefined();
 
-    const error = await refusal(() =>
-      tools.call("setActiveDevice", { deviceId: free.deviceId, sessionUuid: autolocked }),
-    );
+      const error = await refusal(() =>
+        tools.call("setActiveDevice", { deviceId: free.deviceId, sessionUuid: autolocked }),
+      );
 
-    expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    // The evidence is the device the session holds; the free target stays free.
-    expect(error?.toPayload()).toMatchObject({ deviceId: held.deviceId });
-    expect(manager.getSessionForDevice(held.deviceId)).toBe(autolocked!);
-    expect(manager.getSessionForDevice(free.deviceId)).toBeNull();
-  });
+      expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      // The evidence is the device the session holds; the free target stays free.
+      expect(error?.toPayload()).toMatchObject({ deviceId: held.deviceId });
+      expect(manager.getSessionForDevice(held.deviceId)).toBe(autolocked!);
+      expect(manager.getSessionForDevice(free.deviceId)).toBeNull();
+    },
+  );
 });

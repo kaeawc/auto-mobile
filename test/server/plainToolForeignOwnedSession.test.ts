@@ -24,6 +24,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /** Records each platform kill and stops there: a recorded kill proves the call got past every gate. */
 class RecordingKillDeviceManager extends FakeDeviceUtils {
@@ -116,19 +119,13 @@ describe("a plain control tool naming a session another connection owns", () => 
     await pool.initializeWithDevices([held, free]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     // OWNER's connection acquires the session that holds the device.
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "ios",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      OWNER,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "ios",
+      allowSessionRebind: false,
+      mcpSessionId: OWNER,
+    });
     registerDeviceTools();
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();

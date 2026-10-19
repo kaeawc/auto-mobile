@@ -1,11 +1,14 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
-import type { BootedDevice } from "../../src/models";
-import type { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import {
+  DaemonDisconnectHarness,
+  createPooledDevice,
+  type MutablePooledDevice,
+} from "./helpers/DaemonDisconnectHarness";
+import { createFakeSession } from "./helpers/inputSocketHarness";
+
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
 import { getPerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
-import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { logger } from "../../src/utils/logger";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
@@ -30,43 +33,19 @@ const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 const PLAN_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
 
-interface PlanDisconnectMonitorSurface {
-  deviceDisconnectMonitor: SingleFlightInterval;
-  deviceDisconnectMisses: Map<string, number>;
-  confirmedDisconnectedDeviceIds: Set<string>;
-  offlineRecoveryAttemptedDeviceIds: Set<string>;
-  offlineRecoveryAttemptedIncarnations: Map<string, number | string>;
-  startDeviceDisconnectMonitor(
-    manager: Pick<
-      MultiPlatformDeviceManager,
-      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
-    >,
-    listRecordings: () => Promise<VideoRecordingRecord[]>,
-    transportRestarts?: InMemoryAdbTransportRestartRegistry,
-  ): void;
-}
-
 function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
   const timer = new FakeTimer();
   const actions: string[] = [];
-  const device = {
-    id: deviceId,
-    platform: "android" as const,
-    incarnation: 1,
-    assignmentCount: 1,
+  const device: MutablePooledDevice = createPooledDevice(deviceId, {
     sessionId: "plan-session",
-    status: "busy" as const,
+    status: "busy",
     avdName: "Pixel",
-    androidImage: {},
-  };
+    androidImage: { name: "Pixel", platform: "android", isRunning: true },
+  });
   let pooled = true;
   let sessionActive = true;
-  const session = {
-    sessionId: device.sessionId,
-    assignedDevice: device.id,
-    platform: device.platform,
-  };
-  const devices = [device];
+  const session = createFakeSession(device.sessionId ?? "", device.id, "android");
+  const devices: MutablePooledDevice[] = [device];
   class PlanDeviceManager extends FakeDeviceManager {
     discoveryCalls = 0;
     offlineProbeCalls = 0;
@@ -107,48 +86,9 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
       config: DEFAULT_VIDEO_RECORDING_CONFIG,
     },
   ];
-  // Exercise the real daemon tick with only its dependencies replaced, without
-  // constructing the daemon's unrelated database/socket/process services.
-  const daemon = Object.assign(Object.create(Daemon.prototype), {
-    timer,
-    deviceDisconnectMonitor: null,
-    deviceDisconnectMisses: new Map<string, number>(),
-    deviceDisconnectMissIncarnations: new Map(),
-    confirmedDisconnectedDeviceIds: new Set<string>(),
-    forceDisconnectedDeviceIds: new Set<string>(),
-    forceDisconnectedDeviceGenerations: new Map(),
-    offlineRecoveryAttemptedDeviceIds: new Set(),
-    offlineRecoveryAttemptedIncarnations: new Map(),
-    deferredSessionRecoverySweeps: new Set(),
-    devicePool: {
-      retryDueDeferredSessionRecoveries: async () => {
-        actions.push("deferred-recovery");
-      },
-      reconcileDiscoveryObservation: async () => {
-        actions.push("reconcile");
-      },
-      mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
-      getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => (pooled ? devices : []),
-      getDevice: (id: string) => (pooled && id === device.id ? device : null),
-      isDeviceLeasedForAndroidStartup: () => false,
-      detachAdbServerResetCohort: async () => {
-        actions.push("detach-reset-cohort");
-        return { devices: [], deferred: false };
-      },
-      releaseAdbServerResetCohortReservations: async () => {
-        actions.push("release-reset-cohort");
-      },
-      removeDisconnectedDevice: async (id: string) => {
-        actions.push(`remove:${id}`);
-        pooled = false;
-      },
-    },
-    sessionManager: {
-      getAllSessions: () => (sessionActive ? [session] : []),
-      getSessionForDevice: () => (sessionActive ? session.sessionId : null),
-      getSession: () => (sessionActive ? session : null),
-    },
+  // Exercise the real daemon tick over a real (fake-backed) daemon, replacing only the pool and
+  // session-manager reads and the steps the tick hands off to other subsystems.
+  const daemon = new DaemonDisconnectHarness(timer, {
     shouldSkipStaleDisconnectCleanup: async () => false,
     recordAndTryRecoverCapturedDisconnect: async () => {
       actions.push("device-loss-recovery");
@@ -157,12 +97,41 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
     cancelAndReleaseSession: async (id: string) => {
       actions.push(`cancel:${id}`);
       sessionActive = false;
+      return true;
     },
     stopRecordingAfterDeviceDisconnect: async () => {
       actions.push("stop-recording");
       return true;
     },
-  }) as PlanDisconnectMonitorSurface;
+  });
+  const pool = daemon.getDevicePool();
+  pool.retryDueDeferredSessionRecoveries = async () => {
+    actions.push("deferred-recovery");
+  };
+  pool.reconcileDiscoveryObservation = async () => {
+    actions.push("reconcile");
+  };
+  pool.mapAndroidDiscovery = (discovered) => [...discovered];
+  pool.getAndroidTransportAliases = (): string[] => [];
+  pool.getAllDevices = () => (pooled ? devices : []);
+  pool.getDevice = (id: string) => (pooled && id === device.id ? device : null);
+  pool.isDeviceLeasedForAndroidStartup = () => false;
+  pool.detachAdbServerResetCohort = async () => {
+    actions.push("detach-reset-cohort");
+    return { devices: [], deferred: false };
+  };
+  pool.releaseAdbServerResetCohortReservations = async () => {
+    actions.push("release-reset-cohort");
+  };
+  pool.removeDisconnectedDevice = async (id: string) => {
+    actions.push(`remove:${id}`);
+    pooled = false;
+    return true;
+  };
+  const sessions = daemon.getSessionManager();
+  sessions.getAllSessions = () => (sessionActive ? [session] : []);
+  sessions.getSessionForDevice = () => (sessionActive ? session.sessionId : null);
+  sessions.getSession = () => (sessionActive ? session : null);
   const recordingsReader = {
     calls: 0,
     async list() {
@@ -171,7 +140,7 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
     },
   };
   const transportRestarts = new InMemoryAdbTransportRestartRegistry(timer);
-  daemon.startDeviceDisconnectMonitor(manager, () => recordingsReader.list(), transportRestarts);
+  daemon.startMonitor(manager, () => recordingsReader.list(), transportRestarts);
   return {
     daemon,
     transportRestarts,
@@ -194,7 +163,7 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
     async tick() {
       timer.advanceTime(DEVICE_DISCONNECT_POLL_INTERVAL_MS);
       // run() joins the tick just fired by FakeTimer; it does not start another.
-      await daemon.deviceDisconnectMonitor.run();
+      await daemon.disconnectMonitor?.run();
     },
   };
 }
@@ -209,12 +178,12 @@ describe("disconnect monitor during plan execution", () => {
     );
     try {
       serverConfig.setPlanExecutionActive(true);
-      h.daemon.deviceDisconnectMisses.set(h.device.id, DEVICE_DISCONNECT_MISS_THRESHOLD - 1);
+      h.daemon.disconnectMisses.set(h.device.id, DEVICE_DISCONNECT_MISS_THRESHOLD - 1);
       h.manager.onDiscovery = () => serverConfig.setPlanExecutionActive(false);
       await h.tick();
       expect(h.actions).toEqual([]);
       expect(planActive).toHaveBeenCalledTimes(1);
-      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
       expect(h.recordingsReader.calls).toBe(0);
       expect(h.manager.offlineProbeCalls).toBe(0);
       expect(stopMonitoring).not.toHaveBeenCalled();
@@ -255,7 +224,7 @@ describe("disconnect monitor during plan execution", () => {
         "reconcile",
       ]);
       expect(planActive).toHaveBeenCalledTimes(1);
-      expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
+      expect(h.daemon.disconnectMisses.size).toBe(0);
     } finally {
       serverConfig.setPlanExecutionActive(previous);
       planActive.mockRestore();
@@ -267,8 +236,8 @@ describe("disconnect monitor during plan execution", () => {
     const previous = serverConfig.isPlanExecutionActive();
     const info = spyOn(logger, "info").mockImplementation(() => {});
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
-    const attempted = h.daemon.offlineRecoveryAttemptedDeviceIds;
-    const incarnations = h.daemon.offlineRecoveryAttemptedIncarnations;
+    const attempted = h.daemon.offlineRecoveryAttempted;
+    const incarnations = h.daemon.offlineRecoveryIncarnations;
     attempted.add(h.device.id);
     incarnations.set(h.device.id, h.device.incarnation);
     try {
@@ -278,9 +247,9 @@ describe("disconnect monitor during plan execution", () => {
       }
       expect(h.recordingsReader.calls).toBe(0);
       expect(h.manager.offlineProbeCalls).toBe(0);
-      expect(h.daemon.offlineRecoveryAttemptedDeviceIds).toBe(attempted);
+      expect(h.daemon.offlineRecoveryAttempted).toBe(attempted);
       expect([...attempted]).toEqual([h.device.id]);
-      expect(h.daemon.offlineRecoveryAttemptedIncarnations).toBe(incarnations);
+      expect(h.daemon.offlineRecoveryIncarnations).toBe(incarnations);
       expect(incarnations.get(h.device.id)).toBe(h.device.incarnation);
       const missMessage = `[DisconnectMonitor] Device ${h.device.id} not in booted list (absent, miss ${PLAN_DISCONNECT_MISS_CAP}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=0)`;
       expect(info.mock.calls.filter(([message]) => message === missMessage)).toHaveLength(1);
@@ -305,28 +274,26 @@ describe("disconnect monitor during plan execution", () => {
       serverConfig.setPlanExecutionActive(true);
       for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD + 1; i++) {
         await h.tick();
-        expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(
+        expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(
           Math.min(i + 1, PLAN_DISCONNECT_MISS_CAP),
         );
         expect(h.actions).toEqual([]);
-        expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+        expect(h.daemon.confirmedDisconnected.size).toBe(0);
       }
       expect(h.manager.discoveryCalls).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD + 1);
       expect(stopMonitoring).not.toHaveBeenCalled();
       serverConfig.setPlanExecutionActive(false);
       await h.tick();
       expect(h.actions).toEqual(["deferred-recovery", "reconcile"]);
-      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(
-        DEVICE_DISCONNECT_MISS_THRESHOLD - 1,
-      );
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD - 1);
+      expect(h.daemon.confirmedDisconnected.size).toBe(0);
       expect(stopMonitoring).not.toHaveBeenCalled();
       await h.tick();
       expect(h.actions).toContain("cancel:plan-session");
       expect(h.actions).toContain(`remove:${h.device.id}`);
       expect(h.actions).toContain("stop-recording");
-      expect(h.daemon.confirmedDisconnectedDeviceIds.has(h.device.id)).toBe(true);
-      expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+      expect(h.daemon.confirmedDisconnected.has(h.device.id)).toBe(true);
+      expect(h.daemon.disconnectMisses.has(h.device.id)).toBe(false);
       expect(stopMonitoring).toHaveBeenCalledWith(h.device.id);
     } finally {
       serverConfig.setPlanExecutionActive(previous);
@@ -342,26 +309,26 @@ describe("disconnect monitor during plan execution", () => {
       for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
         await h.tick();
       }
-      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.confirmedDisconnected.size).toBe(0);
       expect(h.actions).toEqual([]);
       expect(h.device.status).toBe("busy");
       expect(h.device.sessionId).toBe("plan-session");
       h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
       // Present observations clear the accumulated absence even during allocation.
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
+      expect(h.daemon.disconnectMisses.has(h.device.id)).toBe(false);
       expect(h.actions).toEqual([]);
       h.manager.bootedDevices = [];
       for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
         await h.tick();
       }
-      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
       h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
       serverConfig.setPlanExecutionActive(false);
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.disconnectMisses.has(h.device.id)).toBe(false);
+      expect(h.daemon.confirmedDisconnected.size).toBe(0);
       expect(h.actions).not.toContain("cancel:plan-session");
       expect(h.actions).not.toContain(`remove:${h.device.id}`);
       for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
@@ -385,7 +352,7 @@ describe("disconnect monitor during plan execution", () => {
       serverConfig.setPlanExecutionActive(false);
       for (let misses = 1; misses < DEVICE_DISCONNECT_MISS_THRESHOLD; misses++) {
         await h.tick();
-        expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(misses);
+        expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(misses);
         expect(h.actions).not.toContain("cancel:plan-session");
       }
       await h.tick();
@@ -402,17 +369,17 @@ describe("disconnect monitor during plan execution", () => {
     const previous = serverConfig.isPlanExecutionActive();
     try {
       h.devices.push({ ...h.device, id: "emulator-5556", avdName: "Pixel_2" });
-      Object.assign(h.daemon, { forceDisconnectedDeviceIds: new Set([h.device.id]) });
+      h.daemon.forcedDisconnected = new Set([h.device.id]);
       h.manager.offlineDeviceIds.add(h.device.id);
       serverConfig.setPlanExecutionActive(true);
       for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
         await h.tick();
       }
-      expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
-      expect(h.daemon.deviceDisconnectMisses.get("emulator-5556")).toBe(PLAN_DISCONNECT_MISS_CAP);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(h.daemon.disconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.disconnectMisses.get("emulator-5556")).toBe(PLAN_DISCONNECT_MISS_CAP);
+      expect(h.daemon.confirmedDisconnected.size).toBe(0);
       expect(h.actions).toEqual([]);
-      expect(h.daemon.offlineRecoveryAttemptedDeviceIds.size).toBe(0);
+      expect(h.daemon.offlineRecoveryAttempted.size).toBe(0);
       h.manager.onRecovery = () => {
         h.manager.bootedDevices = [
           { deviceId: h.device.id, name: "Pixel", platform: "android" },
@@ -421,7 +388,7 @@ describe("disconnect monitor during plan execution", () => {
       };
       serverConfig.setPlanExecutionActive(false);
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
+      expect(h.daemon.disconnectMisses.size).toBe(0);
       expect(h.actions).toEqual([
         "deferred-recovery",
         "reconcile",
@@ -457,7 +424,7 @@ describe("physical Android device leaving adb devices (#10493)", () => {
       await h.tick();
       expect(h.actions).toContain("cancel:plan-session");
       expect(h.actions).toContain(`remove:${PHONE}`);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.has(PHONE)).toBe(true);
+      expect(h.daemon.confirmedDisconnected.has(PHONE)).toBe(true);
       expect(h.timer.getSleepHistory()).toEqual([]);
     });
   });
@@ -468,18 +435,21 @@ describe("physical Android device leaving adb devices (#10493)", () => {
       const h = planDisconnectMonitorHarness(deviceId);
       await withInactivePlan(async () => {
         await h.tick();
-        expect(h.daemon.deviceDisconnectMisses.get(deviceId)).toBe(1);
+        expect(h.daemon.disconnectMisses.get(deviceId)).toBe(1);
         expect(h.actions).not.toContain("cancel:plan-session");
       });
     },
   );
 
-  test("an ADB-offline physical device keeps the miss debounce", async () => {
+  test("an ADB-offline physical device is held under the offline budget, not counted as missed", async () => {
     const h = planDisconnectMonitorHarness(PHONE);
     h.manager.offlineDeviceIds.add(PHONE);
     await withInactivePlan(async () => {
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.get(PHONE)).toBe(1);
+      // The real daemon holds a transitional (adb-offline) device under the offline episode
+      // budget instead of counting a miss, so the phone is neither missed nor released.
+      expect(h.daemon.disconnectMisses.has(PHONE)).toBe(false);
+      expect(h.daemon.confirmedDisconnected.has(PHONE)).toBe(false);
       expect(h.actions).not.toContain("cancel:plan-session");
     });
   });
@@ -494,7 +464,7 @@ describe("physical Android device leaving adb devices (#10493)", () => {
     }
     await withInactivePlan(async () => {
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      expect(h.daemon.disconnectMisses.has(PHONE)).toBe(false);
       expect(h.actions).not.toContain("cancel:plan-session");
       expect(h.actions).not.toContain(`remove:${PHONE}`);
     });
@@ -506,7 +476,7 @@ describe("physical Android device leaving adb devices (#10493)", () => {
       const gate = Promise.withResolvers<void>();
       const restart = h.transportRestarts.runRestart(PHONE, () => gate.promise);
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.get(PHONE)).toBe(1);
+      expect(h.daemon.disconnectMisses.get(PHONE)).toBe(1);
       expect(h.actions).not.toContain("cancel:plan-session");
       gate.resolve();
       await restart;
@@ -527,8 +497,8 @@ describe("physical Android device leaving adb devices (#10493)", () => {
       h.actions.length = 0;
       await h.tick();
       await h.tick();
-      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
-      expect(h.daemon.confirmedDisconnectedDeviceIds.has(PHONE)).toBe(false);
+      expect(h.daemon.disconnectMisses.has(PHONE)).toBe(false);
+      expect(h.daemon.confirmedDisconnected.has(PHONE)).toBe(false);
       expect(h.actions).not.toContain("cancel:new-owner");
       expect(h.actions).not.toContain(`remove:${PHONE}`);
     });
@@ -651,13 +621,15 @@ describe("SSE keepalive timer", () => {
   });
 });
 
+type DiscoveryPlatform = "android" | "ios";
+
 describe("disconnect monitor miss counting", () => {
   const runDisconnectPoll = (
     deviceDisconnectMisses: Map<string, number>,
     bootedDeviceIds: Set<string>,
     candidateDeviceIds: Set<string>,
-    succeededPlatforms: Set<string> = new Set(),
-    candidatePlatforms: Map<string, string> = new Map(),
+    succeededPlatforms: Set<DiscoveryPlatform> = new Set(),
+    candidatePlatforms: Map<string, DiscoveryPlatform> = new Map(),
     candidateIncarnations: Map<string, number> = new Map(),
     deviceDisconnectMissIncarnations: Map<string, number> = new Map(),
   ): { disconnected: string[]; skippedAllDiscoveryFailed: boolean } => {
@@ -666,8 +638,8 @@ describe("disconnect monitor miss counting", () => {
       confirmedDisconnectedDeviceIds: new Set(),
       bootedDeviceIds,
       candidateDeviceIds,
-      succeededPlatforms: succeededPlatforms as Set<"android" | "ios">,
-      candidatePlatforms: candidatePlatforms as Map<string, "android" | "ios">,
+      succeededPlatforms,
+      candidatePlatforms,
       candidateIncarnations,
       deviceDisconnectMissIncarnations,
     });
@@ -685,8 +657,8 @@ describe("disconnect monitor miss counting", () => {
   // Android device ("ADB returning some devices but not ours"), so they name
   // its platform: a candidate with no platform at all is unverifiable by
   // construction and is deliberately never aged out (see below).
-  const ANDROID_CANDIDATE = new Map([["device-1", "android"]]);
-  const ANDROID_SUCCEEDED = new Set(["android"]);
+  const ANDROID_CANDIDATE = new Map<string, DiscoveryPlatform>([["device-1", "android"]]);
+  const ANDROID_SUCCEEDED = new Set<DiscoveryPlatform>(["android"]);
 
   test("increments miss count when device is absent", () => {
     const misses = new Map<string, number>();
@@ -896,29 +868,17 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("a single adb missing report marks a tracked device suspect without preloading misses", () => {
-    const misses = new Map<string, number>();
-    const forced = new Set<string>();
-    const generations = new Map<string, number>();
-    const daemon = {
-      devicePool: { getDevice: () => ({}) },
-      sessionManager: { getSessionForDevice: () => null },
-      deviceDisconnectMisses: misses,
-      forceDisconnectedDeviceIds: forced,
-      forceDisconnectedDeviceGenerations: generations,
-      unsubscribeAdbMissingDevice: null as (() => void) | null,
-    };
-    const startAdbMissingDeviceListener = (
-      Daemon.prototype as unknown as { startAdbMissingDeviceListener: () => void }
-    ).startAdbMissingDeviceListener;
-
-    startAdbMissingDeviceListener.call(daemon);
+    const daemon = new DaemonDisconnectHarness(new FakeTimer());
+    daemon.getDevicePool().getDevice = () => createPooledDevice("emulator-5554");
+    daemon.getSessionManager().getSessionForDevice = () => null;
+    daemon.startMissingDeviceListener();
     try {
       notifyAdbMissingDevice("emulator-5554", new Error("device 'emulator-5554' not found"));
-      expect(forced.has("emulator-5554")).toBe(true);
-      expect(generations.get("emulator-5554")).toBe(1);
-      expect(misses.has("emulator-5554")).toBe(false);
+      expect(daemon.forcedDisconnected.has("emulator-5554")).toBe(true);
+      expect(daemon.forceGenerations.get("emulator-5554")).toBe(1);
+      expect(daemon.disconnectMisses.has("emulator-5554")).toBe(false);
     } finally {
-      daemon.unsubscribeAdbMissingDevice?.();
+      daemon.stopMissingDeviceListener();
     }
   });
 
@@ -932,20 +892,13 @@ describe("disconnect monitor miss counting", () => {
       const planActive = spyOn(serverConfig, "isPlanExecutionActive").mockReturnValue(true);
       const tracked = executionTracker.startExecution("executePlan");
       executionTracker.bindDeviceExecution(tracked.id, "emulator-5554");
-      const pooledDevice = { incarnation: 1 };
-      const daemon = {
-        devicePool: {
-          getDevice: () => pooledDevice,
-          isShutdownReserved: async () => false,
-        },
-        sessionManager: { getSessionForDevice: () => null },
-        forceDisconnectedDeviceIds: new Set<string>(),
-        forceDisconnectedDeviceGenerations: new Map<string, number>(),
-        unsubscribeAdbMissingDevice: null as (() => void) | null,
-      };
-      const start = (Daemon.prototype as unknown as { startAdbMissingDeviceListener(): void })
-        .startAdbMissingDeviceListener;
-      start.call(daemon);
+      const daemon = new DaemonDisconnectHarness(timer);
+      const pool = daemon.getDevicePool();
+      const pooledDevice = createPooledDevice("emulator-5554");
+      pool.getDevice = () => pooledDevice;
+      pool.isShutdownReserved = async () => false;
+      daemon.getSessionManager().getSessionForDevice = () => null;
+      daemon.startMissingDeviceListener();
       const screen = new FakeObserveScreen();
       screen.setObserveResult((index) => {
         if (index === 1) {
@@ -956,7 +909,7 @@ describe("disconnect monitor miss counting", () => {
           const confirmation = evaluateDeviceDisconnects({
             deviceDisconnectMisses: new Map(),
             confirmedDisconnectedDeviceIds: new Set(),
-            forceDisconnectedDeviceIds: daemon.forceDisconnectedDeviceIds,
+            forceDisconnectedDeviceIds: daemon.forcedDisconnected,
             bootedDeviceIds: new Set(["emulator-5554"]),
             candidateDeviceIds: new Set(["emulator-5554"]),
             succeededPlatforms: new Set(["android"]),
@@ -1000,9 +953,9 @@ describe("disconnect monitor miss counting", () => {
         expect(screen.getExecuteCallCount()).toBe(3);
         expect(tracked.abortController.signal.aborted).toBe(false);
         expect(tracked.cancelReason).toBeUndefined();
-        expect(daemon.forceDisconnectedDeviceIds.size).toBe(0);
+        expect(daemon.forcedDisconnected.size).toBe(0);
       } finally {
-        daemon.unsubscribeAdbMissingDevice?.();
+        daemon.stopMissingDeviceListener();
         executionTracker.endExecution(tracked.id);
         planActive.mockRestore();
       }
@@ -1021,19 +974,12 @@ describe("disconnect monitor miss counting", () => {
     executionTracker.bindDeviceExecution(otherDevice.id, "emulator-5556");
     const shutdownCheck = spyOn({ check: async () => false }, "check");
     const cancel = spyOn(executionTracker, "cancelDeviceExecutions");
-    const daemon = {
-      devicePool: {
-        getDevice: () => ({ incarnation: 1, status: "booting" }),
-        isShutdownReserved: shutdownCheck,
-      },
-      sessionManager: { getSessionForDevice: () => "plan-session" },
-      forceDisconnectedDeviceIds: new Set<string>(),
-      forceDisconnectedDeviceGenerations: new Map<string, number>(),
-      unsubscribeAdbMissingDevice: null as (() => void) | null,
-    };
-    const start = (Daemon.prototype as unknown as { startAdbMissingDeviceListener(): void })
-      .startAdbMissingDeviceListener;
-    start.call(daemon);
+    const daemon = new DaemonDisconnectHarness(new FakeTimer());
+    const pool = daemon.getDevicePool();
+    pool.getDevice = () => createPooledDevice("emulator-5554", { status: "busy" });
+    pool.isShutdownReserved = shutdownCheck;
+    daemon.getSessionManager().getSessionForDevice = () => "plan-session";
+    daemon.startMissingDeviceListener();
     try {
       for (let i = 0; i < 710; i++) {
         notifyAdbMissingDevice("emulator-5554", new Error("device 'emulator-5554' not found"));
@@ -1045,9 +991,9 @@ describe("disconnect monitor miss counting", () => {
         expect(execution.abortController.signal.aborted).toBe(false);
         expect(execution.cancelReason).toBeUndefined();
       }
-      expect(daemon.forceDisconnectedDeviceIds).toEqual(new Set(["emulator-5554"]));
+      expect(daemon.forcedDisconnected).toEqual(new Set(["emulator-5554"]));
     } finally {
-      daemon.unsubscribeAdbMissingDevice?.();
+      daemon.stopMissingDeviceListener();
       for (const execution of [tracked, recovery, otherClient, otherDevice]) {
         executionTracker.endExecution(execution.id);
       }
@@ -1254,96 +1200,49 @@ describe("disconnect monitor miss counting", () => {
     expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(false);
   });
 
-  test("clears disconnect state when an absent candidate is pooled before cleanup", async () => {
-    const misses = new Map([["sim-1", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
-    const missIncarnations = new Map([["sim-1", 1]]);
-    const confirmed = new Set(["sim-1"]);
-    const forced = new Set(["sim-1"]);
-    const daemon = {
-      devicePool: {
-        getDevice: () => ({}),
-      },
-      deviceDisconnectMisses: misses,
-      deviceDisconnectMissIncarnations: missIncarnations,
-      confirmedDisconnectedDeviceIds: confirmed,
-      forceDisconnectedDeviceIds: forced,
-      forceDisconnectedDeviceGenerations: new Map(),
-    };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: null,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+  /** A daemon whose disconnect state tracks one device the way a confirmed disconnect leaves it. */
+  function disconnectedDaemon(deviceId: string, missIncarnation: number, forceGeneration: number) {
+    const daemon = new DaemonDisconnectHarness(new FakeTimer());
+    daemon.disconnectMisses.set(deviceId, DEVICE_DISCONNECT_MISS_THRESHOLD);
+    daemon.missIncarnations.set(deviceId, missIncarnation);
+    daemon.confirmedDisconnected.add(deviceId);
+    daemon.forcedDisconnected.add(deviceId);
+    daemon.forceGenerations.set(deviceId, forceGeneration);
+    return daemon;
+  }
 
-    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1")).resolves.toBe(true);
-    expect(misses.has("sim-1")).toBe(false);
-    expect(missIncarnations.has("sim-1")).toBe(false);
-    expect(confirmed.has("sim-1")).toBe(false);
-    expect(forced.has("sim-1")).toBe(false);
+  test("clears disconnect state when an absent candidate is pooled before cleanup", async () => {
+    const daemon = disconnectedDaemon("sim-1", 1, 0);
+    daemon.forceGenerations.delete("sim-1");
+    daemon.getDevicePool().getDevice = () => createPooledDevice("sim-1");
+
+    await expect(daemon.shouldSkipStaleCleanup(null, "sim-1")).resolves.toBe(true);
+    expect(daemon.disconnectMisses.has("sim-1")).toBe(false);
+    expect(daemon.missIncarnations.has("sim-1")).toBe(false);
+    expect(daemon.confirmedDisconnected.has("sim-1")).toBe(false);
+    expect(daemon.forcedDisconnected.has("sim-1")).toBe(false);
   });
 
   test("retains a replacement force marker when null-captured cleanup finds a pooled device", async () => {
-    const forced = new Set(["sim-1"]);
-    const forceGenerations = new Map([["sim-1", 2]]);
-    const daemon = {
-      devicePool: {
-        getDevice: () => ({}),
-      },
-      deviceDisconnectMisses: new Map([["sim-1", DEVICE_DISCONNECT_MISS_THRESHOLD]]),
-      deviceDisconnectMissIncarnations: new Map([["sim-1", 1]]),
-      confirmedDisconnectedDeviceIds: new Set(["sim-1"]),
-      forceDisconnectedDeviceIds: forced,
-      forceDisconnectedDeviceGenerations: forceGenerations,
-    };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: null,
-          deviceId: string,
-          forceGenerationAtDisconnect: number | undefined,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const daemon = disconnectedDaemon("sim-1", 1, 2);
+    daemon.getDevicePool().getDevice = () => createPooledDevice("sim-1");
 
-    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1", 1)).resolves.toBe(
-      true,
-    );
-    expect(forced.has("sim-1")).toBe(true);
-    expect(forceGenerations.get("sim-1")).toBe(2);
+    await expect(daemon.shouldSkipStaleCleanup(null, "sim-1", 1)).resolves.toBe(true);
+    expect(daemon.forcedDisconnected.has("sim-1")).toBe(true);
+    expect(daemon.forceGenerations.get("sim-1")).toBe(2);
   });
 
   test("clears disconnect state when cleanup rediscovers the pooled incarnation", async () => {
-    const misses = new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
-    const missIncarnations = new Map([["emulator-5554", 4]]);
-    const daemon = {
-      devicePool: {
-        isCurrentDisconnectedDevice: async () => "recovered" as const,
-      },
-      deviceDisconnectMisses: misses,
-      deviceDisconnectMissIncarnations: missIncarnations,
-      confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
-      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
-      forceDisconnectedDeviceGenerations: new Map([["emulator-5554", 1]]),
-    };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: object,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const daemon = disconnectedDaemon("emulator-5554", 4, 1);
+    daemon.getDevicePool().isCurrentDisconnectedDevice = async () => "recovered";
 
-    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554")).resolves.toBe(
-      true,
-    );
-    expect(misses.has("emulator-5554")).toBe(false);
-    expect(missIncarnations.has("emulator-5554")).toBe(false);
-    expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
-    expect(daemon.forceDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
+    await expect(
+      daemon.shouldSkipStaleCleanup(createPooledDevice("emulator-5554"), "emulator-5554"),
+    ).resolves.toBe(true);
+    expect(daemon.disconnectMisses.has("emulator-5554")).toBe(false);
+    expect(daemon.missIncarnations.has("emulator-5554")).toBe(false);
+    expect(daemon.confirmedDisconnected.has("emulator-5554")).toBe(false);
+    expect(daemon.forcedDisconnected.has("emulator-5554")).toBe(false);
   });
 
   test("preserves a force signal raised during recovery verification", async () => {
@@ -1351,95 +1250,48 @@ describe("disconnect monitor miss counting", () => {
     const verification = new Promise<void>((resolve) => {
       resolveVerification = resolve;
     });
-    const forced = new Set<string>();
-    const forceGenerations = new Map<string, number>();
-    const daemon = {
-      devicePool: {
-        isCurrentDisconnectedDevice: async () => {
-          await verification;
-          return "recovered" as const;
-        },
-      },
-      deviceDisconnectMisses: new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]),
-      deviceDisconnectMissIncarnations: new Map([["emulator-5554", 4]]),
-      confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
-      forceDisconnectedDeviceIds: forced,
-      forceDisconnectedDeviceGenerations: forceGenerations,
+    const daemon = disconnectedDaemon("emulator-5554", 4, 1);
+    daemon.forcedDisconnected.clear();
+    daemon.forceGenerations.clear();
+    daemon.getDevicePool().isCurrentDisconnectedDevice = async () => {
+      await verification;
+      return "recovered";
     };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: object,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
 
-    const pending = shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554");
-    forced.add("emulator-5554");
-    forceGenerations.set("emulator-5554", 1);
+    const pending = daemon.shouldSkipStaleCleanup(
+      createPooledDevice("emulator-5554"),
+      "emulator-5554",
+    );
+    daemon.forcedDisconnected.add("emulator-5554");
+    daemon.forceGenerations.set("emulator-5554", 1);
     resolveVerification?.();
 
     await expect(pending).resolves.toBe(true);
-    expect(forced.has("emulator-5554")).toBe(true);
-    expect(forceGenerations.get("emulator-5554")).toBe(1);
+    expect(daemon.forcedDisconnected.has("emulator-5554")).toBe(true);
+    expect(daemon.forceGenerations.get("emulator-5554")).toBe(1);
   });
 
   test("rejects an old disconnect target after cancellation races a same-ID replacement", () => {
-    const capturedDevice = { assignmentCount: 4 };
-    const replacementDevice = { assignmentCount: 1 };
-    const daemon = {
-      devicePool: {
-        getDevice: () => replacementDevice,
-      },
-      sessionManager: {
-        getSessionForDevice: () => null,
-      },
-    };
-    const isCapturedDisconnectTargetCurrent = (
-      Daemon.prototype as unknown as {
-        isCapturedDisconnectTargetCurrent: (
-          deviceId: string,
-          pooledDeviceAtDisconnect: object,
-          assignmentCountAtDisconnect: number,
-        ) => boolean;
-      }
-    ).isCapturedDisconnectTargetCurrent;
+    const capturedDevice = createPooledDevice("emulator-5554", { assignmentCount: 4 });
+    const replacementDevice = createPooledDevice("emulator-5554", { assignmentCount: 1 });
+    const daemon = new DaemonDisconnectHarness(new FakeTimer());
+    daemon.getDevicePool().getDevice = () => replacementDevice;
+    daemon.getSessionManager().getSessionForDevice = () => null;
 
-    expect(isCapturedDisconnectTargetCurrent.call(daemon, "emulator-5554", capturedDevice, 4)).toBe(
-      false,
-    );
+    expect(daemon.isCapturedTargetCurrent("emulator-5554", capturedDevice, 4)).toBe(false);
   });
 
   test("retains disconnect state when cleanup verification is inconclusive", async () => {
-    const misses = new Map([["emulator-5554", DEVICE_DISCONNECT_MISS_THRESHOLD]]);
-    const missIncarnations = new Map([["emulator-5554", 4]]);
-    const daemon = {
-      devicePool: {
-        isCurrentDisconnectedDevice: async () => "unknown" as const,
-      },
-      deviceDisconnectMisses: misses,
-      deviceDisconnectMissIncarnations: missIncarnations,
-      confirmedDisconnectedDeviceIds: new Set(["emulator-5554"]),
-      forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
-      forceDisconnectedDeviceGenerations: new Map([["emulator-5554", 1]]),
-    };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: object,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const daemon = disconnectedDaemon("emulator-5554", 4, 1);
+    daemon.getDevicePool().isCurrentDisconnectedDevice = async () => "unknown";
 
-    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554")).resolves.toBe(
-      true,
-    );
-    expect(misses.get("emulator-5554")).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD);
-    expect(missIncarnations.get("emulator-5554")).toBe(4);
-    expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(true);
-    expect(daemon.forceDisconnectedDeviceIds.has("emulator-5554")).toBe(true);
+    await expect(
+      daemon.shouldSkipStaleCleanup(createPooledDevice("emulator-5554"), "emulator-5554"),
+    ).resolves.toBe(true);
+    expect(daemon.disconnectMisses.get("emulator-5554")).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD);
+    expect(daemon.missIncarnations.get("emulator-5554")).toBe(4);
+    expect(daemon.confirmedDisconnected.has("emulator-5554")).toBe(true);
+    expect(daemon.forcedDisconnected.has("emulator-5554")).toBe(true);
   });
 
   test("fires at poll interval using FakeTimer", () => {

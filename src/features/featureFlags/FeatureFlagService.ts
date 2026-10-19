@@ -7,8 +7,8 @@ import {
   FEATURE_FLAG_DEFINITIONS,
   TOOL_DEFINITION_AFFECTING_FLAGS,
 } from "./FeatureFlagDefinitions";
-import type { FeatureFlagRepository } from "./FeatureFlagRepository";
-import { SqliteFeatureFlagRepository } from "./FeatureFlagRepository";
+import type { FeatureFlagRepository } from "../../db/featureFlagRepository";
+import { SqliteFeatureFlagRepository } from "../../db/featureFlagRepository";
 import type { FeatureFlagApplier } from "./FeatureFlagApplier";
 import { DefaultFeatureFlagApplier } from "./FeatureFlagApplier";
 import type { ToolListChangedNotifier } from "./ToolListChangedNotifier";
@@ -24,6 +24,9 @@ interface FeatureFlagState {
 
 /** Read-only view of the flag service; most consumers only ask `isEnabled`. */
 export type FeatureFlagReader = Pick<FeatureFlagService, "isEnabled">;
+
+/** List/set view used by the IDE flag routes; they never read single flags. */
+export type FeatureFlagAdmin = Pick<FeatureFlagService, "listFlags" | "setFlag">;
 
 export class FeatureFlagService {
   private static instance: FeatureFlagService | null = null;
@@ -42,6 +45,16 @@ export class FeatureFlagService {
     return FeatureFlagService.instance;
   }
 
+  /** Test-only: the current singleton without creating one (null before first use). */
+  static peekInstanceForTesting(): FeatureFlagService | null {
+    return FeatureFlagService.instance;
+  }
+
+  /** Test-only: restore a previously peeked singleton; there is no production reset. */
+  static setInstanceForTesting(instance: FeatureFlagService | null): void {
+    FeatureFlagService.instance = instance;
+  }
+
   constructor(
     private readonly repository: FeatureFlagRepository,
     private readonly applier: FeatureFlagApplier,
@@ -58,6 +71,11 @@ export class FeatureFlagService {
    */
   setToolListChangedNotifier(notifier: ToolListChangedNotifier): void {
     this.notifier = notifier;
+  }
+
+  /** Test-only: the installed notifier, so a suite can restore it after wiring a server. */
+  toolListChangedNotifierForTesting(): ToolListChangedNotifier {
+    return this.notifier;
   }
 
   async initialize(): Promise<void> {

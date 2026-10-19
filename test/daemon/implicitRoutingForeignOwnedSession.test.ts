@@ -35,6 +35,9 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #11555 item 3: can a call that names NO `sessionUuid` get, as its implicit routing session, a
@@ -212,19 +215,13 @@ describe("the implicit routing session of a call that names none", () => {
     stranger = connect();
     // The owner's connection acquires the session that holds the device.
     pool.declareMcpSessionLivenessOwnerToken(owner.id, OWNER_TOKEN);
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      held.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      owner.id,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: held.deviceId,
+      platform: "android",
+      allowSessionRebind: false,
+      mcpSessionId: owner.id,
+    });
     expect(sessionManager.getSession(HOLDER)?.livenessOwnerToken).toBe(OWNER_TOKEN);
   };
 
@@ -541,19 +538,13 @@ describe("the implicit routing session of a call that names none", () => {
     test("remaining tokenless case of #11555 item 3 still runs stranger marked control", async () => {
       const TOKENLESS = "tokenless-session";
       const tokenlessOwner = connect();
-      await pool.bindOrReuseDeviceSession(
-        TOKENLESS,
-        other.deviceId,
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        tokenlessOwner.id,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: TOKENLESS,
+        deviceId: other.deviceId,
+        platform: "android",
+        allowSessionRebind: false,
+        mcpSessionId: tokenlessOwner.id,
+      });
       expect(sessionManager.peekSession(TOKENLESS)?.livenessOwnerToken).toBeUndefined();
       expect(pool.isSessionOwnedByOtherConnection(TOKENLESS, stranger.id)).toBe(true);
       const tap = await stranger.call("tapAt", {
@@ -587,7 +578,11 @@ describe("the implicit routing session of a call that names none", () => {
 
     test("still runs on a bound session no connected client owns", async () => {
       const OWNERLESS = "ownerless-session";
-      await pool.bindOrReuseDeviceSession(OWNERLESS, other.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: OWNERLESS,
+        deviceId: other.deviceId,
+        platform: "android",
+      });
       expect(pool.isSessionOwnedByOtherConnection(OWNERLESS, stranger.id)).toBe(false);
 
       const tap = await stranger.call("tapAt", {

@@ -24,6 +24,7 @@ import {
 } from "../../../src/features/utility/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 
 const hierarchy = (left: number): ViewHierarchyResult => ({
   updatedAt: 100 + left,
@@ -202,7 +203,7 @@ test("settlement timeout is never presented as a settled capture", async () => {
     (value) => value,
     {
       execute: async () => ({
-        observation: { viewHierarchy: hierarchy(0) } as any,
+        observation: createObserveResultForTest({ viewHierarchy: hierarchy(0) }),
         settled: false,
         polls: 1,
         waitMs: 10,

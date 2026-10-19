@@ -1,7 +1,8 @@
 import { describe, expect, test, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { mkdtempSync, writeFileSync, readdirSync, utimesSync } from "node:fs";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { writeFileSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+
 import { pruneLogFiles, type LogRetentionNamespaceSource } from "../../src/utils/logPruner";
 import {
   logRetentionNamespaces,
@@ -19,13 +20,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
  * has EXITED and the file is stale by mtime — never another live process's file.
  */
 describe("pruneLogFiles", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("logger-prune-test-");
   const dead = () => false; // no peer process is alive in these tests unless stated
 
   function createTempLogsDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), "logger-prune-test-"));
-    tempDirs.push(dir);
-    return dir;
+    return scratch.next();
   }
 
   beforeEach(async () => {
@@ -39,15 +38,6 @@ describe("pruneLogFiles", () => {
     // Keep an unfinished sweep from consulting the next test's namespace source.
     await flushLogRetentionStartupSweepForTesting();
     resetLogRetentionNamespaceSourceForTesting();
-    for (const dir of tempDirs) {
-      try {
-        const { rmSync } = require("node:fs");
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-    }
-    tempDirs.length = 0;
   });
 
   function fakeNamespaceSource(): LogRetentionNamespaceSource {

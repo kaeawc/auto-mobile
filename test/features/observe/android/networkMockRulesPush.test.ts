@@ -50,7 +50,7 @@ async function harness(commands: string[]) {
   );
   clients.push(client);
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
   await receive({ type: "connected", supportedCommands: commands });

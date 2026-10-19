@@ -8,6 +8,7 @@ import {
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/ctrlProxy/CtrlProxyManager";
 import type { CtrlProxyApkPrefetcher } from "../../src/ctrlProxy/CtrlProxyApkPrefetcher";
+import type { FileDownloader } from "../../src/utils/FileDownloader";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AdbClient, AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -138,7 +139,7 @@ describe("CtrlProxyManager", function () {
         return report;
       });
       const invoke = (installed = true, force = true) =>
-        manager["installDownloadedApkGuarded"](
+        manager.installDownloadedApkGuarded(
           "/fake.apk",
           { status: "not_installed" },
           installed,
@@ -415,6 +416,16 @@ describe("CtrlProxyManager", function () {
     accessibilityServiceClient.clearAvailabilityCache();
   });
 
+  /** Rebuild the process-wide prefetcher around `downloader`; afterEach restores the default. */
+  function usePrefetchDownloader(downloader: FileDownloader): void {
+    testPrefetcher = AndroidCtrlProxyManager.createApkPrefetcher({
+      prerequisiteDetector: () => ({ hasAndroidPrerequisites: async () => true }),
+      cacheDirOverride: () => prefetchCacheDir,
+      downloader: () => downloader,
+    });
+    AndroidCtrlProxyManager.useApkPrefetcher(testPrefetcher);
+  }
+
   afterEach(async function () {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
@@ -654,6 +665,24 @@ describe("CtrlProxyManager", function () {
     });
   });
 
+  test.each([
+    ["serial-qualified", "error: device 'test-device' not found", "deviceConnection"],
+    ["unqualified", "error: device not found", "deviceConnection"],
+    ["another device's serial", "error: device 'emulator-9999' not found", "unknown"],
+  ] as const)(
+    "classifies a %s missing-device compatibility failure (#13392)",
+    async (_name, error, category) => {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeAdb,
+        new FakeTimer(),
+      );
+      manager.ensureCompatibleVersion = async () => ({ status: "failed", error });
+      const result = await manager.setup();
+      expect(result).toMatchObject({ success: false, error, category });
+    },
+  );
+
   test("quotes a hostile installed APK path before sha256sum", async function () {
     const apkPath = "/data/app/base$(id).apk";
     fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
@@ -665,7 +694,7 @@ describe("CtrlProxyManager", function () {
       stderr: "",
     });
 
-    const result = await (accessibilityServiceClient as any).getInstalledApkSha256WithDetails();
+    const result = await accessibilityServiceClient.getInstalledApkSha256WithDetails();
 
     expect(result).toMatchObject({ sha256: "a".repeat(64), source: "device", apkPath });
     expect(fakeAdb.getExecutedCommands()).toContain("shell sha256sum '/data/app/base$(id).apk'");
@@ -850,7 +879,7 @@ describe("CtrlProxyManager", function () {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const error = spyOn(logger, "error").mockImplementation(() => {});
       try {
-        await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+        await accessibilityServiceClient.uninstallLegacyPackageIfPresent();
         expect(warn).not.toHaveBeenCalled();
         expect(error).not.toHaveBeenCalled();
         expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
@@ -868,7 +897,7 @@ describe("CtrlProxyManager", function () {
         fakeAdb.setCommandResponse(probe, { stdout: `package:${legacy}${newline}`, stderr: "" });
         const clear = spyOn(accessibilityServiceClient, "clearAvailabilityCache");
         try {
-          await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+          await accessibilityServiceClient.uninstallLegacyPackageIfPresent();
           expect(fakeAdb.getExecutedCommands()).toEqual([probe, uninstall]);
           expect(clear).toHaveBeenCalledTimes(1);
         } finally {
@@ -882,7 +911,7 @@ describe("CtrlProxyManager", function () {
         stdout: `package:${legacy}.debug\npackage:x.${legacy}\n`,
         stderr: "",
       });
-      await accessibilityServiceClient["uninstallLegacyPackageIfPresent"]();
+      await accessibilityServiceClient.uninstallLegacyPackageIfPresent();
       expect(fakeAdb.getExecutedCommands()).toEqual([probe]);
     });
 
@@ -915,7 +944,7 @@ describe("CtrlProxyManager", function () {
       const clear = spyOn(accessibilityServiceClient, "clearAvailabilityCache");
       try {
         await expect(
-          accessibilityServiceClient["uninstallLegacyPackageIfPresent"](),
+          accessibilityServiceClient.uninstallLegacyPackageIfPresent(),
         ).resolves.toBeUndefined();
         expect(warn).toHaveBeenCalledWith(
           "[CTRL_PROXY] Failed to check/uninstall legacy package: adb unavailable",
@@ -2141,8 +2170,8 @@ describe("CtrlProxyManager", function () {
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
         create: () => localFakeAdb,
       });
-      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
-      (manager as any).cleanupApk = async () => undefined;
+      spyOn(manager, "downloadApk").mockImplementation(async () => "/tmp/fake-accessibility.apk");
+      spyOn(manager, "cleanupApk").mockImplementation(async () => undefined);
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("upgraded");
@@ -2404,21 +2433,19 @@ describe("CtrlProxyManager", function () {
     test("prefetch is skipped (no network) for an unknown pin (#2746)", async function () {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "99.99.99";
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
       let downloadCalls = 0;
       try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+        usePrefetchDownloader({
           download: async () => {
             downloadCalls++;
             throw new Error("download must not run for an unverifiable pin");
           },
-        };
+        });
 
         AndroidCtrlProxyManager.prefetchApk();
         expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
         expect(downloadCalls).toBe(0);
       } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
         if (prevVersion === undefined) {
           delete process.env.AUTOMOBILE_VERSION;
         } else {
@@ -2430,79 +2457,69 @@ describe("CtrlProxyManager", function () {
     test("should allow background refresh to retry failed prefetches", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       const payload = apkPayload;
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
       let downloadCalls = 0;
       let failedDestination: string | null = null;
 
-      try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
-          download: async (_url: string, destination: string) => {
-            downloadCalls++;
-            if (downloadCalls === 1) {
-              failedDestination = destination;
-              throw new Error("network is unreachable");
-            }
-            await fs.mkdir(path.dirname(destination), { recursive: true });
-            await fs.writeFile(destination, payload);
-          },
-        };
+      usePrefetchDownloader({
+        download: async (_url: string, destination: string) => {
+          downloadCalls++;
+          if (downloadCalls === 1) {
+            failedDestination = destination;
+            throw new Error("network is unreachable");
+          }
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.writeFile(destination, payload);
+        },
+      });
 
-        AndroidCtrlProxyManager.prefetchApk();
-        expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
-        expect(failedDestination).not.toBeNull();
-        // REWRITE-3: a bare rejects.toThrow() passes for ANY stat error. Pin the
-        // reason to ENOENT to prove the partial prefetch dir was actually removed
-        // (not, say, an EACCES that would also "throw").
-        const statError = await fs.stat(path.dirname(failedDestination!)).then(
-          () => null,
-          (error: NodeJS.ErrnoException) => error,
-        );
-        expect(statError?.code).toBe("ENOENT");
+      AndroidCtrlProxyManager.prefetchApk();
+      expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
+      expect(failedDestination).not.toBeNull();
+      // REWRITE-3: a bare rejects.toThrow() passes for ANY stat error. Pin the
+      // reason to ENOENT to prove the partial prefetch dir was actually removed
+      // (not, say, an EACCES that would also "throw").
+      const statError = await fs.stat(path.dirname(failedDestination!)).then(
+        () => null,
+        (error: NodeJS.ErrnoException) => error,
+      );
+      expect(statError?.code).toBe("ENOENT");
 
-        AndroidCtrlProxyManager.prefetchApk();
-        const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
+      AndroidCtrlProxyManager.prefetchApk();
+      const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
 
-        expect(downloadCalls).toBe(2);
-        expect(retriedPath).not.toBeNull();
-      } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
-      }
+      expect(downloadCalls).toBe(2);
+      expect(retriedPath).not.toBeNull();
     });
 
     test("reuses a verified cache asset and reaps stale staging directories across daemon lifecycles", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       const payload = apkPayload;
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
       let downloadCalls = 0;
 
-      try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
-          download: async (_url: string, destination: string) => {
-            downloadCalls++;
-            await fs.writeFile(destination, payload);
-          },
-        };
+      usePrefetchDownloader({
+        download: async (_url: string, destination: string) => {
+          downloadCalls++;
+          await fs.writeFile(destination, payload);
+        },
+      });
 
-        const firstPath = await AndroidCtrlProxyManager.prefetchApk();
-        await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-        const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
-        await fs.mkdir(staleStagingDir);
-        const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
-        await fs.utimes(staleStagingDir, staleTime, staleTime);
-        const secondPath = await AndroidCtrlProxyManager.prefetchApk();
+      const firstPath = await AndroidCtrlProxyManager.prefetchApk();
+      await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+      const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
+      await fs.mkdir(staleStagingDir);
+      const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await fs.utimes(staleStagingDir, staleTime, staleTime);
+      const secondPath = await AndroidCtrlProxyManager.prefetchApk();
 
-        expect(firstPath).not.toBeNull();
-        expect(secondPath).toBe(firstPath);
-        expect(downloadCalls).toBe(1);
-        expect(await fs.stat(firstPath!)).toBeDefined();
-        const staleStatError = await fs.stat(staleStagingDir).then(
-          () => null,
-          (error: NodeJS.ErrnoException) => error,
-        );
-        expect(staleStatError?.code).toBe("ENOENT");
-      } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
-      }
+      expect(firstPath).not.toBeNull();
+      expect(secondPath).toBe(firstPath);
+      expect(downloadCalls).toBe(1);
+      expect(await fs.stat(firstPath!)).toBeDefined();
+      const staleStatError = await fs.stat(staleStagingDir).then(
+        () => null,
+        (error: NodeJS.ErrnoException) => error,
+      );
+      expect(staleStatError?.code).toBe("ENOENT");
     });
 
     test("removes the successful prefetch staging directory after publishing the cache", async function () {
@@ -2512,14 +2529,13 @@ describe("CtrlProxyManager", function () {
       const stageDir = path.join(stageRoot, "auto-mobile-prefetch-stage");
       await fs.mkdir(stageDir);
       const mkdtempSpy = spyOn(fs, "mkdtemp").mockResolvedValue(stageDir);
-      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
 
       try {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+        usePrefetchDownloader({
           download: async (_url: string, destination: string) => {
             await fs.writeFile(destination, payload);
           },
-        };
+        });
 
         await expect(AndroidCtrlProxyManager.prefetchApk()).resolves.not.toBeNull();
         const statError = await fs.stat(stageDir).then(
@@ -2528,7 +2544,6 @@ describe("CtrlProxyManager", function () {
         );
         expect(statError?.code).toBe("ENOENT");
       } finally {
-        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
         mkdtempSpy.mockRestore();
       }
     });
@@ -2611,10 +2626,10 @@ describe("CtrlProxyManager", function () {
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, localFactory);
-      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
-      (manager as any).cleanupApk = async () => undefined;
-      (manager as any).install = async () => undefined;
-      (manager as any).enable = async () => undefined;
+      spyOn(manager, "downloadApk").mockImplementation(async () => "/tmp/fake-accessibility.apk");
+      spyOn(manager, "cleanupApk").mockImplementation(async () => undefined);
+      spyOn(manager, "install").mockImplementation(async () => undefined);
+      spyOn(manager, "enable").mockImplementation(async () => undefined);
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("reinstalled");
@@ -2923,9 +2938,9 @@ describe("CtrlProxyManager", function () {
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, {
         create: () => localFakeAdb,
       });
-      (manager as any).downloadApk = async () => {
+      spyOn(manager, "downloadApk").mockImplementation(async () => {
         throw new Error("download should not be called");
-      };
+      });
 
       const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
@@ -2983,10 +2998,10 @@ describe("CtrlProxyManager", function () {
 
       AndroidCtrlProxyManager.resetInstances();
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, localFactory);
-      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
-      (manager as any).cleanupApk = async () => undefined;
-      (manager as any).install = async () => undefined;
-      (manager as any).enable = async () => undefined;
+      spyOn(manager, "downloadApk").mockImplementation(async () => "/tmp/fake-accessibility.apk");
+      spyOn(manager, "cleanupApk").mockImplementation(async () => undefined);
+      spyOn(manager, "install").mockImplementation(async () => undefined);
+      spyOn(manager, "enable").mockImplementation(async () => undefined);
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("reinstalled");
@@ -3153,15 +3168,19 @@ describe("CtrlProxyManager", function () {
       process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
       const hashed: string[] = [];
-      Reflect.set(accessibilityServiceClient, "fileDownloader", {
-        download: async () => {
-          throw new Error("downloader must not run for an override");
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async () => {
+            throw new Error("downloader must not run for an override");
+          },
         },
       });
-      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
-        computeFileSha256: async (file: string) => {
-          hashed.push(file);
-          return { checksum: "x", source: "node" as const };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async (file: string) => {
+            hashed.push(file);
+            return { checksum: "x", source: "node" as const };
+          },
         },
       });
 
@@ -3177,19 +3196,35 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
       const prefetched = path.join(scratch.next(), "prefetched.apk");
       await fs.writeFile(prefetched, apkPayload);
-      testPrefetcher.adoptCompletedPath(prefetched);
-      // consume() waits on the in-flight promise, which adoptCompletedPath does not stage.
-      Reflect.set(testPrefetcher, "prefetchPromise", Promise.resolve(prefetched));
+      // A completed prefetch hands its staged APK over via consume(); stage it without a download.
+      const stagedPrefetcher: CtrlProxyApkPrefetcher = {
+        prefetch: async () => prefetched,
+        getPrefetchedPath: async () => prefetched,
+        consume: async (destination) => {
+          await fs.copyFile(prefetched, destination);
+          return true;
+        },
+        consumeCompleted: async () => false,
+        completedPath: () => prefetched,
+        adoptCompletedPath: () => undefined,
+        cleanup: async () => undefined,
+        sweepStaleDirs: async () => undefined,
+      };
+      AndroidCtrlProxyManager.useApkPrefetcher(stagedPrefetcher);
       const hashed: string[] = [];
-      Reflect.set(accessibilityServiceClient, "fileDownloader", {
-        download: async () => {
-          throw new Error("downloader must not run when a prefetch is available");
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async () => {
+            throw new Error("downloader must not run when a prefetch is available");
+          },
         },
       });
-      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
-        computeFileSha256: async (file: string) => {
-          hashed.push(file);
-          return { checksum: expectedChecksum, source: "node" as const };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async (file: string) => {
+            hashed.push(file);
+            return { checksum: expectedChecksum, source: "node" as const };
+          },
         },
       });
 
@@ -3202,16 +3237,20 @@ describe("CtrlProxyManager", function () {
     test("a download with no checksum configured skips hashing but still checks structure", async function () {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
       const hashed: string[] = [];
-      Reflect.set(accessibilityServiceClient, "fileDownloader", {
-        download: async (_url: string, destination: string) => {
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, apkPayload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, apkPayload);
+          },
         },
       });
-      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
-        computeFileSha256: async (file: string) => {
-          hashed.push(file);
-          return { checksum: "x", source: "node" as const };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async (file: string) => {
+            hashed.push(file);
+            return { checksum: "x", source: "node" as const };
+          },
         },
       });
 
@@ -3220,10 +3259,12 @@ describe("CtrlProxyManager", function () {
       expect(hashed).toEqual([]);
       await accessibilityServiceClient.cleanupApk(apkPath);
 
-      Reflect.set(accessibilityServiceClient, "fileDownloader", {
-        download: async (_url: string, destination: string) => {
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, "tiny");
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, "tiny");
+          },
         },
       });
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(/too small/);
@@ -3242,23 +3283,27 @@ describe("CtrlProxyManager", function () {
       const started = new Promise<void>((resolve) => {
         bothStarted = resolve;
       });
-      Reflect.set(accessibilityServiceClient, "fileDownloader", {
-        download: async (_url: string, destination: string) => {
-          const mine = ++call;
-          destinations.push(destination);
-          if (destinations.length === 2) {
-            bothStarted();
-          }
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, apkPayload);
-          await gate;
-          if (mine === 1) {
-            throw new Error("connection reset");
-          }
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            const mine = ++call;
+            destinations.push(destination);
+            if (destinations.length === 2) {
+              bothStarted();
+            }
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, apkPayload);
+            await gate;
+            if (mine === 1) {
+              throw new Error("connection reset");
+            }
+          },
         },
       });
-      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
-        computeFileSha256: async () => ({ checksum: expectedChecksum, source: "node" as const }),
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({ checksum: expectedChecksum, source: "node" as const }),
+        },
       });
 
       // Which call reaches download() first depends on scheduling, so assert on the pair.
@@ -3285,15 +3330,19 @@ describe("CtrlProxyManager", function () {
     test("a checksum mismatch fails the download and leaves no APK behind", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("a".repeat(64));
       let destination = "";
-      Reflect.set(accessibilityServiceClient, "fileDownloader", {
-        download: async (_url: string, dest: string) => {
-          destination = dest;
-          await fs.mkdir(path.dirname(dest), { recursive: true });
-          await fs.writeFile(dest, apkPayload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, dest: string) => {
+            destination = dest;
+            await fs.mkdir(path.dirname(dest), { recursive: true });
+            await fs.writeFile(dest, apkPayload);
+          },
         },
       });
-      Reflect.set(accessibilityServiceClient, "checksumCalculator", {
-        computeFileSha256: async () => ({ checksum: "b".repeat(64), source: "node" as const }),
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({ checksum: "b".repeat(64), source: "node" as const }),
+        },
       });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
@@ -3310,21 +3359,25 @@ describe("CtrlProxyManager", function () {
 
       // Inject fake FileDownloader that writes the APK payload
       let downloadedPath: string | null = null;
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async (_url: string, destination: string) => {
-          downloadedPath = destination;
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, payload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            downloadedPath = destination;
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          },
         },
-      };
+      });
 
       // Inject fake ChecksumCalculator that returns the expected checksum
-      (accessibilityServiceClient as any).checksumCalculator = {
-        computeFileSha256: async () => ({
-          checksum: expectedChecksum,
-          source: "node" as const,
-        }),
-      };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({
+            checksum: expectedChecksum,
+            source: "node" as const,
+          }),
+        },
+      });
 
       const apkPath = await accessibilityServiceClient.downloadApk();
       const stats = await fs.stat(apkPath);
@@ -3344,12 +3397,14 @@ describe("CtrlProxyManager", function () {
         // No expected-checksum override and no APK-path/skip override: the pinned
         // version has no registry checksum, so the download is unverifiable and
         // must fail closed rather than install an unchecked APK (esp. from a mirror).
-        (accessibilityServiceClient as any).fileDownloader = {
-          download: async (_url: string, destination: string) => {
-            await fs.mkdir(path.dirname(destination), { recursive: true });
-            await fs.writeFile(destination, payload);
+        accessibilityServiceClient.setDownloadUtilitiesForTesting({
+          fileDownloader: {
+            download: async (_url: string, destination: string) => {
+              await fs.mkdir(path.dirname(destination), { recursive: true });
+              await fs.writeFile(destination, payload);
+            },
           },
-        };
+        });
 
         await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
           "not in the AutoMobile release",
@@ -3370,12 +3425,14 @@ describe("CtrlProxyManager", function () {
       try {
         const payload = apkPayload;
 
-        (accessibilityServiceClient as any).fileDownloader = {
-          download: async (_url: string, destination: string) => {
-            await fs.mkdir(path.dirname(destination), { recursive: true });
-            await fs.writeFile(destination, payload);
+        accessibilityServiceClient.setDownloadUtilitiesForTesting({
+          fileDownloader: {
+            download: async (_url: string, destination: string) => {
+              await fs.mkdir(path.dirname(destination), { recursive: true });
+              await fs.writeFile(destination, payload);
+            },
           },
-        };
+        });
 
         const apkPath = await accessibilityServiceClient.downloadApk();
         const stats = await fs.stat(apkPath);
@@ -3397,20 +3454,24 @@ describe("CtrlProxyManager", function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting(expectedChecksum);
 
       // Inject fake FileDownloader that writes the APK payload
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async (_url: string, destination: string) => {
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, payload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          },
         },
-      };
+      });
 
       // Inject fake ChecksumCalculator that returns a mismatched checksum
-      (accessibilityServiceClient as any).checksumCalculator = {
-        computeFileSha256: async () => ({
-          checksum: "mismatched-checksum",
-          source: "node" as const,
-        }),
-      };
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        checksumCalculator: {
+          computeFileSha256: async () => ({
+            checksum: "mismatched-checksum",
+            source: "node" as const,
+          }),
+        },
+      });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
         "APK checksum verification failed",
@@ -3421,12 +3482,14 @@ describe("CtrlProxyManager", function () {
       const payload = Buffer.alloc(250, 5);
 
       // Inject fake FileDownloader that writes a tiny payload
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async (_url: string, destination: string) => {
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          await fs.writeFile(destination, payload);
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async (_url: string, destination: string) => {
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          },
         },
-      };
+      });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
         "Downloaded APK is too small",
@@ -3435,11 +3498,13 @@ describe("CtrlProxyManager", function () {
 
     test("should fail when download errors", async function () {
       // Inject fake FileDownloader that throws
-      (accessibilityServiceClient as any).fileDownloader = {
-        download: async () => {
-          throw new Error("download failed");
+      accessibilityServiceClient.setDownloadUtilitiesForTesting({
+        fileDownloader: {
+          download: async () => {
+            throw new Error("download failed");
+          },
         },
-      };
+      });
 
       await expect(accessibilityServiceClient.downloadApk()).rejects.toThrow(
         "Failed to download APK: download failed",

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../../../helpers/scratchRoot";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import {
@@ -57,8 +57,9 @@ describe("AndroidCtrlProxyClient.releaseForwardLeasesForShutdown", () => {
   let dir: string;
   let timer: FakeTimer;
 
+  const scratch = useScratchRoot("ctrlproxy-shutdown-");
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "ctrlproxy-shutdown-"));
+    dir = scratch.next();
     timer = new FakeTimer();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   });
@@ -66,7 +67,6 @@ describe("AndroidCtrlProxyClient.releaseForwardLeasesForShutdown", () => {
   afterEach(() => {
     AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
     PortManager.setPortAvailabilityCheckerForTesting(null);
-    rmSync(dir, { recursive: true, force: true });
   });
 
   const lockFile = (): string => join(dir, ctrlProxyForwardLeaseFileName(DEVICE.deviceId));
@@ -87,9 +87,8 @@ describe("AndroidCtrlProxyClient.releaseForwardLeasesForShutdown", () => {
       timer,
       ctrlProxyForwardLease: lease,
     });
-    const internals = client as unknown as { portForwardingSetup: boolean; localPort: number };
-    internals.portForwardingSetup = true;
-    internals.localPort = PORT;
+    client.testHooks.portForwardingSetup = true;
+    client.testHooks.localPort = PORT;
     AndroidCtrlProxyClient.registerForTesting(client, DEVICE.deviceId);
     return client;
   }

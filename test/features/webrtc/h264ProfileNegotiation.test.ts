@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fakeWhipClient } from "../../helpers/fakeWhipClient";
-import type { RTCPeerConnection } from "werift";
+import { FakePublisherPeerConnection } from "../../fakes/FakePublisherPeerConnection";
 import {
   evaluateH264SpsForSend,
   h264ProfileLevelId,
@@ -137,7 +137,7 @@ describe("H.264 cross-source profile negotiation (#4884, #4756)", () => {
         // End-to-end SDP leg: a WHEP answer echoing this session's advertised
         // profile must be accepted so the publisher reaches `connected`. Exercises
         // the acceptsLocalH264Send negotiation path for this source's profile.
-        const pc = new NegotiationFakePeerConnection();
+        const pc = new FakePublisherPeerConnection();
         const answerSdp = [
           "v=0",
           "m=video 9 UDP/TLS/RTP/SAVPF 102",
@@ -153,7 +153,7 @@ describe("H.264 cross-source profile negotiation (#4884, #4756)", () => {
             h264Profile: source.profile,
           },
           {
-            createPeerConnection: () => pc as unknown as RTCPeerConnection,
+            createPeerConnection: () => pc,
             createWhipClient: () =>
               fakeWhipClient({
                 publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
@@ -194,29 +194,3 @@ describe("H.264 cross-source profile negotiation (#4884, #4756)", () => {
     expect(isCompatibleMainProfile("64001f")).toBe(false);
   });
 });
-
-/** Minimal fake peer connection whose offer/publish path succeeds up to connect. */
-class NegotiationFakePeerConnection {
-  closed = false;
-  connectionState = "new";
-  iceGatheringState = "complete";
-  connectionStateChange = { subscribe: () => {} };
-  iceGatheringStateChange = { watch: async () => {} };
-  localDescription = { sdp: "v=0" };
-  addTransceiver() {
-    return {
-      sender: {
-        ssrc: 1,
-        onPictureLossIndication: { subscribe: () => {} },
-      },
-    };
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "v=0" };
-  }
-  async setLocalDescription() {}
-  async setRemoteDescription() {}
-  async close() {
-    this.closed = true;
-  }
-}

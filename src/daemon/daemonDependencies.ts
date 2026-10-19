@@ -9,6 +9,7 @@ import {
   PidFileLiveDaemonSessionIdProvider,
   type LiveDaemonSessionIdProvider,
 } from "./daemonFiles";
+import { defaultDaemonStateWrites, type DaemonStateWrites } from "./daemonContext";
 import type { ForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { DatabaseInitializer, DefaultDatabaseInitializer } from "../db/DatabaseInitializer";
 import { DatabaseHealthProbe, DefaultDatabaseHealthProbe } from "../db/DatabaseHealthProbe";
@@ -56,6 +57,8 @@ export interface DaemonDependencies {
   bindingExclusionFactory?: (timer: Timer) => BindingExclusion;
   /** Host forward evidence is supplied by the production entry point only (#12220). */
   foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
+  /** Where the daemon registers its sessions and pool; defaults to the process-wide state. */
+  daemonState?: DaemonStateWrites;
 }
 
 /** {@link DaemonDependencies} with every default applied; the three optional ones stay optional. */
@@ -116,6 +119,7 @@ function resolveFactories(dependencies: DaemonDependencies) {
     httpServerFactory: dependencies.httpServerFactory ?? (() => createHttpServer()),
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
     bindingExclusionFactory: dependencies.bindingExclusionFactory ?? createDefaultBindingExclusion,
+    daemonState: dependencies.daemonState ?? defaultDaemonStateWrites,
   };
 }
 

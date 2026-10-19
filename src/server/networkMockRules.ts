@@ -85,7 +85,7 @@ export function parseMockRuleReport(message: {
  * is never re-armed by this value.
  */
 export function buildNetworkMockRules(
-  state: NetworkState,
+  state: Pick<NetworkState, "getMocks">,
   deviceId: string,
 ): NetworkMockRuleSync[] {
   return Array.from(state.getMocks(deviceId).values()).map((r: MockRule) => ({

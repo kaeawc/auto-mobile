@@ -1,7 +1,8 @@
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
-import type { WebSocketMessage, XCTestHierarchy } from "../../../../src/features/observe/ios/types";
+import type { IosHierarchyMessageEffects } from "../../../../src/features/observe/ios/IosHierarchyMessageEffects";
+import type { XCTestHierarchy } from "../../../../src/features/observe/ios/types";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
@@ -29,98 +30,87 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
     "preserves %s side effects and exits",
     (kind) => {
       const timer = new FakeTimer();
+      const calls: string[] = [];
+      const effects: IosHierarchyMessageEffects = {
+        ignoreOlderPush: () => {
+          calls.push("older-guard");
+          return kind === "older";
+        },
+        retainScaleMetadata: () => {
+          calls.push("scale");
+        },
+        recordNavigation: () => {
+          calls.push("navigation");
+        },
+        convert: () => {
+          calls.push("convert");
+          return { hierarchy: captured.hierarchy };
+        },
+        recordLayoutTelemetry: () => {
+          calls.push("layout");
+        },
+        consumeStreamSuppression: () => {
+          calls.push("suppression");
+          return false;
+        },
+        pushToObservationStream: () => {
+          calls.push("stream");
+        },
+        startScreenshotBackoff: () => {
+          calls.push("backoff");
+        },
+        notifyPushListeners: () => {
+          calls.push("listeners");
+        },
+        resolveRequest: () => {
+          calls.push("resolve");
+        },
+      };
       const client = IOSCtrlProxyClient.createForTesting(
         { deviceId: "captured-order", platform: "ios", name: "Fake iPhone" },
         8765,
         createSuccessWebSocketFactory(timer),
         timer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { messageEffects: effects },
       );
-      const calls: string[] = [];
-      const internal = client as unknown as {
-        processMessage(message: WebSocketMessage): void;
-        ignoreOlderHierarchyPush(message: WebSocketMessage): boolean;
-        retainScaleMetadataFrom(hierarchy: XCTestHierarchy): void;
-        handleHierarchyUpdateForNavigation(hierarchy: XCTestHierarchy): void;
-        convertToViewHierarchyResult(hierarchy: XCTestHierarchy): unknown;
-        sdkEventIngestor: { recordLayoutTelemetryEvent(hierarchy: unknown): void };
-        consumeHierarchyObservationStreamSuppression(requestId: string): boolean;
-        pushHierarchyToObservationStream(hierarchy: unknown): void;
-        startScreenshotBackoff(): void;
-        notifyPushUpdateListeners(hierarchy: XCTestHierarchy): void;
-        requestManager: { resolve(requestId: string, result: unknown): void };
-      };
-      const spies = [
-        spyOn(internal, "ignoreOlderHierarchyPush").mockImplementation(() => {
-          calls.push("older-guard");
-          return kind === "older";
-        }),
-        spyOn(internal, "retainScaleMetadataFrom").mockImplementation(() => {
-          calls.push("scale");
-        }),
-        spyOn(internal, "handleHierarchyUpdateForNavigation").mockImplementation(() => {
-          calls.push("navigation");
-        }),
-        spyOn(internal, "convertToViewHierarchyResult").mockImplementation(() => {
-          calls.push("convert");
-          return { hierarchy: captured.hierarchy };
-        }),
-        spyOn(internal.sdkEventIngestor, "recordLayoutTelemetryEvent").mockImplementation(() => {
-          calls.push("layout");
-        }),
-        spyOn(internal, "consumeHierarchyObservationStreamSuppression").mockImplementation(() => {
-          calls.push("suppression");
-          return false;
-        }),
-        spyOn(internal, "pushHierarchyToObservationStream").mockImplementation(() => {
-          calls.push("stream");
-        }),
-        spyOn(internal, "startScreenshotBackoff").mockImplementation(() => {
-          calls.push("backoff");
-        }),
-        spyOn(internal, "notifyPushUpdateListeners").mockImplementation(() => {
-          calls.push("listeners");
-        }),
-        spyOn(internal.requestManager, "resolve").mockImplementation(() => {
-          calls.push("resolve");
-        }),
-      ];
-      try {
-        internal.processMessage({
+      void client.connectionTestHooks.deliverMessage(
+        JSON.stringify({
           type: "hierarchy_update",
           data: captured,
           ...(kind === "response" ? { requestId: "captured-response" } : {}),
-        });
-        expect(calls).toEqual(
-          kind === "older"
-            ? ["older-guard"]
-            : kind === "response"
-              ? [
-                  "older-guard",
-                  "scale",
-                  "navigation",
-                  "convert",
-                  "layout",
-                  "suppression",
-                  "stream",
-                  "resolve",
-                ]
-              : [
-                  "older-guard",
-                  "scale",
-                  "navigation",
-                  "convert",
-                  "layout",
-                  "convert",
-                  "stream",
-                  "backoff",
-                  "listeners",
-                ],
-        );
-      } finally {
-        for (const spy of spies) {
-          spy.mockRestore();
-        }
-      }
+        }),
+      );
+      expect(calls).toEqual(
+        kind === "older"
+          ? ["older-guard"]
+          : kind === "response"
+            ? [
+                "older-guard",
+                "scale",
+                "navigation",
+                "convert",
+                "layout",
+                "suppression",
+                "stream",
+                "resolve",
+              ]
+            : [
+                "older-guard",
+                "scale",
+                "navigation",
+                "convert",
+                "layout",
+                "convert",
+                "stream",
+                "backoff",
+                "listeners",
+              ],
+      );
     },
   );
 });

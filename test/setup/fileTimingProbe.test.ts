@@ -1,16 +1,12 @@
-import { afterAll, beforeAll, afterEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { appendTimingEvent } from "./fileTimingEvents";
 
+const scratch = useScratchRoot("file-timing-probe-");
 let dir: string | undefined;
-afterEach(() => {
-  if (dir) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-  dir = undefined;
-});
 
 test("timing probe is inert without a log path", () => {
   let writes = 0;
@@ -21,7 +17,7 @@ test("timing probe is inert without a log path", () => {
 });
 
 test("timing probe appends one NDJSON line per event", () => {
-  dir = mkdtempSync(join(tmpdir(), "file-timing-probe-"));
+  dir = scratch.next();
   const path = join(dir, "timing.ndjson");
   appendTimingEvent(path, { event: "start", file: "example.test.ts", t: 100 });
   appendTimingEvent(path, {

@@ -682,6 +682,9 @@ import {
   type IosDelegateHarness,
 } from "../../../helpers/iosDelegateHarness";
 import { CtrlProxyStorage } from "../../../../src/features/observe/ios/CtrlProxyStorage";
+import { isolateToolRegistry } from "../../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 let deps: Partial<StorageToolsDependencies> = {};
 function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {

@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
@@ -19,7 +20,8 @@ import { asPlanAllocation } from "../helpers/planLabelAllocation";
 const SESSION = "mid-release-owner";
 const DEVICE = "fake-mid-release-device";
 const OWNER = "owner-token";
-const REASONS = ["device-restart:Pixel_A", "plan-auto-release"] as const;
+type ReleaseReason = "device-restart:Pixel_A" | "plan-auto-release";
+const REASONS: ReleaseReason[] = ["device-restart:Pixel_A", "plan-auto-release"];
 
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   upsertGate?: Promise<void>;
@@ -67,7 +69,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
       rootedByUs: true,
     });
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION, { livenessOwnerToken: OWNER });
     await drainMicrotasks(50);
     monitor = new SessionHeartbeatMonitor(
       manager,
@@ -84,6 +86,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+        releaseDevice: async () => {},
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(timer),
     };
@@ -113,7 +116,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     await timer.advanceTimeAsync(ms, () => drainMicrotasks(50));
   }
 
-  async function begin(reason: (typeof REASONS)[number], silenceMs = 4_001) {
+  async function begin(reason: ReleaseReason, silenceMs = 4_001) {
     monitor.start();
     await advance(silenceMs);
     expect(reaped).toEqual([]);
@@ -451,6 +454,9 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     expect(label.lastOwnerHeartbeat).toBe(0);
     const lastHeartbeat = label.lastHeartbeat;
     const row = structuredClone(await persistence.getSession!(labelId));
+    if (!row) {
+      throw new Error("Expected a persisted label session row");
+    }
     expect(await manager.releaseSession(labelId, "plan-auto-release")).toBe(label.assignedDevice);
     expect(await persistence.getSession!(labelId)).toEqual({
       ...row,
@@ -519,10 +525,10 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     );
     manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     expect(await manager.claimLivenessOwnership(labelId, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(labelId);
+    await deliverDaemonHeartbeat(manager, labelId, { livenessOwnerToken: OWNER });
     await advance(2_000);
     expect((await heartbeat()).success).toBe(true);
-    manager.recordHeartbeat(labelId);
+    await deliverDaemonHeartbeat(manager, labelId, { livenessOwnerToken: OWNER });
     restoreMs = 14_000;
     expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
     const baseRelease = manager.releaseSession(SESSION, REASONS[0]);

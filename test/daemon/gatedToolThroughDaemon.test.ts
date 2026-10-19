@@ -14,6 +14,7 @@ import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 /**
  * #10179: nothing exercised the real hop chain for a gated tool. The proxy tests synthesise the
@@ -136,9 +137,16 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
     internals.handleConnection(daemonSide as unknown as Socket);
-    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, {}, null, new FakeIdGenerator());
-    daemonClient.attachSocketForTesting(clientSide as never);
-    daemonSide.deliver = (frame) => daemonClient.simulateIncomingDataForTesting(Buffer.from(frame));
+    daemonClient = new DaemonClient(
+      "/fake/socket",
+      60_000,
+      timer,
+      ISOLATED_DAEMON_RECOVERY,
+      null,
+      new FakeIdGenerator(),
+    );
+    daemonClient.testHooks.attachSocket(clientSide as never);
+    daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
     const manager = new FakeDaemonManager();
     manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
     proxy = new DaemonMcpProxy({

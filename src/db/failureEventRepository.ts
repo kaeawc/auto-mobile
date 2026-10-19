@@ -84,9 +84,22 @@ export class FailureEventRepository {
     insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
   };
 
-  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
+  /** `retention` lets tests observe the amortized sweeps at small caps. */
+  constructor(
+    db?: Kysely<Database>,
+    timer: Timer = defaultTimer,
+    private readonly retention: { crashMaxRows?: number; anrMaxRows?: number } = {},
+  ) {
     this.timer = timer;
     this.db = db ?? null;
+  }
+
+  /** @internal Typed view of private retention for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      pruneCrashesToRowCap: (maxRows?: number) => this.pruneCrashesToRowCap(maxRows),
+      pruneAnrsToRowCap: (maxRows?: number) => this.pruneAnrsToRowCap(maxRows),
+    };
   }
 
   private getDb(): Kysely<Database> {
@@ -508,11 +521,15 @@ export class FailureEventRepository {
   // inserts (#6464), mirroring the other RowCapTable repositories so retention
   // does not add a scan to the hot insert path.
   private async cleanupCrashRetention(): Promise<void> {
-    await runAmortizedRetention(this.crashRetentionState, () => this.pruneCrashesToRowCap());
+    await runAmortizedRetention(this.crashRetentionState, () =>
+      this.pruneCrashesToRowCap(this.retention.crashMaxRows),
+    );
   }
 
   private async cleanupAnrRetention(): Promise<void> {
-    await runAmortizedRetention(this.anrRetentionState, () => this.pruneAnrsToRowCap());
+    await runAmortizedRetention(this.anrRetentionState, () =>
+      this.pruneAnrsToRowCap(this.retention.anrMaxRows),
+    );
   }
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap

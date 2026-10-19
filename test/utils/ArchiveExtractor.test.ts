@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
+
 import * as path from "node:path";
 import type { ExecResult } from "../../src/models";
 import {
@@ -10,18 +11,13 @@ import {
 import { ActionableError } from "../../src/models/ActionableError";
 import type { HostCommandExecutor, HostCommandOptions } from "../../src/utils/HostCommandExecutor";
 
-const tempDirs: string[] = [];
+const scratch = useScratchRoot("ArchiveExtractor-");
 
 async function makeTempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-archive-extractor-"));
-  tempDirs.push(dir);
+  const dir = scratch.next();
   // realpath so assertions compare against the canonical path tar's -C receives.
   return fs.realpath(dir);
 }
-
-afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
-});
 
 function execResult(stdout: string): ExecResult {
   return {

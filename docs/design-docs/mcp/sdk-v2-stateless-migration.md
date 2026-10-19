@@ -140,11 +140,19 @@ per-session tool binding and `tools/list` filtering in daemon mode.
 - The socket server keys every forward's server on the socket session id (in process since
   #11820; it was this header on every loopback request before).
 - The desktop client generates one id per app session and sends it in the same header on
-  every call. The header is preferred over the in-band argument.
+  every call.
+- Precedence (owner decision, #13315): the header wins. The exception is the daemon's own
+  in-process forward (`InProcessMcpDispatcher`, which marks its request scope
+  `trustedForwarder` and builds the server with `trustForwardedMcpSessionId`): the in-band
+  `__mcpSessionId` the socket server injects names the originating client, so it outranks the
+  forward's connection key. An in-band id from any other source, such as a plain HTTP client
+  putting `__mcpSessionId` in the tool arguments beside a header, never overrides the header.
+  A direct HTTP request with no header still falls back to its in-band id, so header-less
+  clients keep working. `parseCallContext` is the single place this is resolved.
 - The in-band `__mcpSessionId` argument is still accepted and stripped from tool
   arguments before schema validation (`stripInternalToolParams`). The earlier spike found
-  `__mcpSessionId` was derived from a connection id; it is now just an alternative carrier
-  for the same explicit key.
+  `__mcpSessionId` was derived from a connection id; on a direct request it is just a
+  fallback carrier for the same explicit key.
 - An explicit `sessionUuid` argument still wins where a tool takes one.
 - `tools/list` has no arguments, so the header is what lets an argument-less list be
   filtered per session.
@@ -241,11 +249,18 @@ result, and only to a client whose `initialize` declared it; every other client 
   terminal state), when the session ends under it, or at daemon shutdown
   (`releaseDaemonTaskLeases`). The daemon's per-request servers get the daemon-scoped instance
   from `createStatelessMcpServer`; direct stdio holds nothing.
-- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task: `startDevice`. Its work holds
+- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task: `startDevice` and
+  `executePlan`. `startDevice`'s work holds
   the session it binds (`currentTaskContext()?.holdDeviceLease`) right after the bind, so the
   session cannot lapse before the client learns its id from `tasks/get`. The boot itself binds
   no session until it is ready, so `tasks/cancel` during the boot runs the existing
   undelivered-acquisition rollback: the boot is stopped and nothing stays bound.
+  `executePlan` (#13088) holds its base and routed session as the handler starts and each label
+  session once its label map is published (`holdTaskDeviceLeases`, idempotent per task). Its execution registers
+  under the task's scope with the same binding key and session UUID, so `PlanExecutionLock`
+  keeps blocking that session's calls until the plan ends; `tasks/cancel` aborts the task's
+  signal, which the execution combines with its own, so the plan unwinds and ends its execution
+  (releasing the lock) as a cancelled synchronous call does.
 - `createSdkMcpServer` passes a `CreateTaskResult` through the SDK's `tools/call` result
   validation, which would otherwise stamp `content: []` on it.
 

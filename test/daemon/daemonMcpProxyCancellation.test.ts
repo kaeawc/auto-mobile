@@ -11,6 +11,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
@@ -33,11 +34,11 @@ async function setup() {
     "/fake/socket",
     1000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(),
   );
-  daemonClient.attachSocketForTesting(socket);
+  daemonClient.testHooks.attachSocket(socket);
   const fake = new FakeDaemonClient();
   fake.callTool = daemonClient.callTool.bind(daemonClient);
   const { server, proxy } = createProxyMcpServer({ proxyConfig: config(() => fake, timer) });
@@ -53,7 +54,7 @@ async function setup() {
   await client.connect(clientTransport);
   messages.length = 0;
   const respond = (id: string) =>
-    daemonClient.simulateIncomingDataForTesting(
+    daemonClient.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({
           id,
@@ -213,7 +214,7 @@ test("stdio MCP caller receives the daemon queue marker at its deadline", async 
     const request = socket.getWrittenMessages<DaemonRequest>()[0];
     timer.advanceTime(request.timeoutMs!);
     const message = "timed out in queue before admission";
-    daemonClient.simulateIncomingDataForTesting(
+    daemonClient.testHooks.simulateIncomingData(
       Buffer.from(
         JSON.stringify({
           id: request.id,

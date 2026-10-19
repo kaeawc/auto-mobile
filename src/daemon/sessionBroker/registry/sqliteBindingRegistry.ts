@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
 import { Kysely, type Generated, type Selectable, type Transaction, SqliteAdapter } from "kysely";
-import { BunSqliteDialect } from "../../../db/bunSqliteDialect";
+import { BunSqliteDialect, type BunSqliteHandle } from "../../../db/bunSqliteDialect";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../../db/database";
 import { classifySqliteError } from "../../../db/databaseFailureClassification";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -404,11 +404,8 @@ export interface OpenSqliteBindingRegistryOptions extends SqliteBindingRegistryO
  */
 export const BINDING_REGISTRY_BUSY_TIMEOUT_MS = Math.min(250, SQLITE_BUSY_TIMEOUT_MS);
 
-/** The slice of a bun:sqlite handle this module touches before handing it to the dialect. */
-interface RegistrySqliteHandle {
-  exec(sql: string): void;
-  close(): void;
-}
+/** The handle this module opens and hands to the dialect. */
+type RegistrySqliteHandle = BunSqliteHandle;
 
 function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
   // Resolved lazily, like database.ts, so importing this module never requires the Bun runtime.

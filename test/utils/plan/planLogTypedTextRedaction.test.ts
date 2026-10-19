@@ -5,7 +5,7 @@ import type { BootedDevice } from "../../../src/models";
 import type { Plan } from "../../../src/models/Plan";
 import { ToolRegistry, ToolRegistryClass } from "../../../src/server/toolRegistry";
 import { logger } from "../../../src/utils/logger";
-import { DefaultPlanExecutor } from "../../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../../src/server/planExecutorFactory";
 import { PlanNormalizer } from "../../../src/utils/plan/PlanNormalizer";
 import { YamlPlanSerializer } from "../../../src/utils/plan/PlanSerializer";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
@@ -102,7 +102,7 @@ describe("plan logs never carry typed text", () => {
     const info = spyOn(logger, "info");
     const debug = spyOn(logger, "debug");
     try {
-      await new DefaultPlanExecutor(timer).executePlan(plan, 0, "android", "device-A", "session");
+      await createDefaultPlanExecutor(timer).executePlan(plan, 0, "android", "device-A", "session");
       expect(received).toEqual([SECRET]);
       const logged = loggedText([...info.mock.calls, ...debug.mock.calls]);
       expect(logged).toContain("sendKeys with params");

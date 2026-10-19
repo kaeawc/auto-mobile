@@ -21,7 +21,7 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeDaemonSpawner.ts:FakeDaemonSpawner": "DaemonProcessSpawner",
   "FakeDeviceSnapshotConfigRepository.ts:FakeDeviceSnapshotConfigRepository": "ConfigRepository",
   "FakeDeviceSnapshotRepository.ts:FakeDeviceSnapshotRepository": "DeviceSnapshotRepository",
-  "FakeDeviceSnapshotStore.ts:FakeDeviceSnapshotStore": "DeviceSnapshotStore",
+  "FakeDeviceSnapshotStore.ts:FakeDeviceSnapshotStore": "DeviceSnapshotStorePort",
   "FakeDeviceSessionExecutionCanceller.ts:FakeDeviceSessionExecutionCanceller":
     "DeviceSessionExecutionCanceller",
   "FakeDeviceSessionRepository.ts:FakeDeviceSessionRepository": "DeviceSessionRepository",
@@ -43,7 +43,7 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeTalkBackTapStrategy.ts:FakeTalkBackTapStrategy": "TalkBackTapStrategy",
   "FakeVideoRecordingConfigRepository.ts:FakeVideoRecordingConfigRepository": "ConfigRepository",
   "FakeVideoRecordingRepository.ts:FakeVideoRecordingRepository": "VideoRecordingRepository",
-  "FakeWebSocket.ts:FakeWebSocket": "WebSocket",
+  "FakeWebSocket.ts:FakeWebSocket": "CtrlSocket",
 };
 
 function exportedFakeClassesWithoutContracts(fileName: string): Array<{

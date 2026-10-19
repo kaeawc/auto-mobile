@@ -5,6 +5,7 @@ import { sourceFiles, relativeImportTargets, toPosixPath } from "./check-utils-i
  * Import-direction ratchet for the tiers below `features`/`server` (#11789), generalizing
  * check-utils-import-direction.ts. Each tier lists the `src/` tiers it may import; every other
  * edge must already be in that tier's committed baseline, which can only shrink. The
+ * `models` tier is owned by test/lint/modelsLeaf.test.ts (#11853), so it is not listed here. The
  * `features` tier is gated on one forbidden target (`server`) instead of an allow-list.
  */
 interface TierRule {
@@ -15,11 +16,12 @@ interface TierRule {
 
 const LEAF = ["constants", "config"];
 export const TIER_RULES: readonly TierRule[] = [
-  { tier: "models", allowed: ["models", ...LEAF] },
   { tier: "db", allowed: ["db", "models", "utils", ...LEAF] },
   { tier: "devices", allowed: ["devices", "ctrlProxy", "db", "models", "utils", ...LEAF] },
   { tier: "ctrlProxy", allowed: ["ctrlProxy", "devices", "db", "models", "utils", ...LEAF] },
   { tier: "features", forbidden: ["server"] },
+  // daemon must not reach up into the MCP server tier (#11790); sub-package rules follow the moves.
+  { tier: "daemon", forbidden: ["server"] },
 ];
 
 export function baselinePath(tier: string): string {

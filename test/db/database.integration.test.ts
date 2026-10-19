@@ -15,6 +15,7 @@ import {
   SQLITE_TEMP_STORE,
   SQLITE_WAL_SIZE_LIMIT_BYTES,
 } from "../../src/db/database";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 class FakeSqliteDatabase {
   readonly statements: string[] = [];
@@ -231,10 +232,7 @@ describe("BunSqliteDialect transactions", () => {
     });
 
     try {
-      const query = db
-        .selectFrom("sqlite_master" as any)
-        .selectAll()
-        .execute();
+      const query = looseKyselyTables(db).selectFrom("sqlite_master").selectAll().execute();
 
       await Promise.resolve();
       expect(databaseOpened).toBe(false);

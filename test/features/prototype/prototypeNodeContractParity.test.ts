@@ -4,7 +4,7 @@ import {
 } from "../../../src/features/prototype/prototypeSpec";
 import { PROTOTYPE_EVENT_KINDS } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
-import type { z } from "zod";
+import { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   PROTOTYPE_COLOR_ROLES,
@@ -15,19 +15,34 @@ import {
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 type ContractFields = Record<string, { rule: Record<string, unknown> }>;
-const contractNodes = contract.definitions.node.variants as unknown as Record<
-  string,
-  { fields: ContractFields }
->;
+const contractNodes: Record<string, { fields: ContractFields }> =
+  contract.definitions.node.variants;
 
-/** The Zod node union, unwrapped from its lazy wrapper, keyed by node type. */
+/** Narrow a Zod schema to a class through its public `instanceof` support, or fail loudly. */
+function expectSchema<T extends z.ZodTypeAny>(
+  schema: unknown,
+  type: abstract new (...args: never[]) => T,
+  what: string,
+): T {
+  if (!(schema instanceof type)) {
+    throw new Error(`expected ${what} to be a ${type.name}`);
+  }
+  return schema;
+}
+
+/** The Zod node union's object options, unwrapped from the refinement and lazy wrappers. */
+function zodNodeOptions(): z.AnyZodObject[] {
+  const refined = expectSchema(prototypeNodeSchema, z.ZodEffects, "the node schema");
+  const lazy = expectSchema(refined.innerType(), z.ZodLazy, "the refined node schema");
+  const union = expectSchema(lazy.schema, z.ZodDiscriminatedUnion, "the lazy node schema");
+  return [...union.options].map((option) => expectSchema(option, z.ZodObject, "a node variant"));
+}
+
+/** The Zod node union keyed by node type. */
 function zodNodeShapes(): Map<string, string[]> {
-  const union = (
-    prototypeNodeSchema as unknown as z.ZodEffects<z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>>
-  ).innerType().schema;
   const shapes = new Map<string, string[]>();
-  for (const option of union.options as z.AnyZodObject[]) {
-    const type = (option.shape.type as z.ZodEnum<[string]>).options[0];
+  for (const option of zodNodeOptions()) {
+    const type = expectSchema(option.shape.type, z.ZodEnum, "a node type tag").options[0];
     shapes.set(type, Object.keys(option.shape).sort());
   }
   return shapes;
@@ -87,12 +102,13 @@ describe("prototype node contract parity", () => {
   });
 
   test("style has the same fields in Zod and the contract", () => {
-    const union = (
-      prototypeNodeSchema as unknown as z.ZodEffects<z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>>
-    ).innerType().schema;
-    const box = (union.options as z.AnyZodObject[])[0];
-    const style = (box.shape.style as z.ZodOptional<z.AnyZodObject>).unwrap();
-    const contractStyle = contract.definitions.style.fields as unknown as ContractFields;
+    const box = zodNodeOptions()[0];
+    const style = expectSchema(
+      expectSchema(box.shape.style, z.ZodOptional, "the style field").unwrap(),
+      z.ZodObject,
+      "the style schema",
+    );
+    const contractStyle: ContractFields = contract.definitions.style.fields;
     expect(Object.keys(style.shape).sort()).toEqual(Object.keys(contractStyle).sort());
   });
 

@@ -1,8 +1,8 @@
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  stripNavigationToolParams,
 } from "../../daemon/constants";
+import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import { ActionableError, BootedDevice, NavigateToResult } from "../../models";
 import {
   AdbClientFactory,
@@ -19,7 +19,7 @@ import {
   type NavigationGraphService,
 } from "./NavigationGraphManager";
 import type { PathResult, ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
-import { edgeReplayKey } from "./edgeReplayKey";
+import { edgeReplayKey } from "../../db/edgeReplayKey";
 import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";
@@ -124,6 +124,19 @@ interface NavigationPathResultContext {
   startTime: number;
 }
 
+/** What `NavigateTo` knows when it builds its UI-state setup lazily on the first call. */
+export interface UIStateSetupContext {
+  device: BootedDevice;
+  adb: AdbExecutor;
+  timer: Timer;
+  sessionUuid?: string;
+}
+
+export type UIStateSetupFactory = (context: UIStateSetupContext) => UIStateSetup;
+
+const defaultUIStateSetupFactory: UIStateSetupFactory = ({ device, adb, timer, sessionUuid }) =>
+  new DefaultUIStateSetup(device, adb, undefined, timer, sessionUuid);
+
 /**
  * NavigateTo feature class that uses the navigation graph to traverse an app
  * to reach a target screen.
@@ -139,6 +152,7 @@ export class NavigateTo {
   private sessionUuid?: string;
   private foregroundObserverProvider: () => ForegroundObserver;
   private scrollSearcher: ReplayScrollSearcher;
+  private uiStateSetupFactory: UIStateSetupFactory;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
   /** Swipes a replayed tapOn may spend looking for an off-screen target (#10154). */
@@ -161,7 +175,9 @@ export class NavigateTo {
     sessionUuid?: string,
     foregroundObserverProvider?: () => ForegroundObserver,
     scrollSearcher?: ReplayScrollSearcher,
+    uiStateSetupFactory: UIStateSetupFactory = defaultUIStateSetupFactory,
   ) {
+    this.uiStateSetupFactory = uiStateSetupFactory;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
@@ -199,7 +215,12 @@ export class NavigateTo {
     this.sessionUuid ??= options.sessionUuid;
     const uiStateSetup =
       this.uiStateSetup ??
-      new DefaultUIStateSetup(this.device, this.adb, undefined, this.timer, this.sessionUuid);
+      this.uiStateSetupFactory({
+        device: this.device,
+        adb: this.adb,
+        timer: this.timer,
+        sessionUuid: this.sessionUuid,
+      });
     this.uiStateSetup = uiStateSetup;
 
     try {

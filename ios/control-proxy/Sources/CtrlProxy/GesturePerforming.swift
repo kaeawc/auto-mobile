@@ -38,6 +38,17 @@ public protocol GesturePerforming: Sendable {
     /// Opt-in lock-screen seam; older conformers retain the ordinary swipe.
     func lockScreenSwipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws
 
+    /// `swipe` that also reports which dispatch route ran and the stroke duration it really used
+    /// (#13145). Conformers that cannot tell return nil, and the response omits the fields.
+    func swipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    ) throws -> SwipeDispatchReport?
+
+    /// Lock-screen counterpart of `swipeReportingRoute`.
+    func lockScreenSwipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    ) throws -> SwipeDispatchReport?
+
     /// Perform a simultaneous multi-finger swipe from start to end coordinates
     func multiFingerSwipe(
         startX: Double,
@@ -198,6 +209,24 @@ extension GesturePerforming {
         try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
     }
 
+    public func swipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws -> SwipeDispatchReport?
+    {
+        try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        return nil
+    }
+
+    public func lockScreenSwipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws -> SwipeDispatchReport?
+    {
+        try lockScreenSwipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        return nil
+    }
+
     public func path(points _: [PathGesturePoint]) throws {
         throw CommandError.invalidParameter("path", "unsupported by this gesture performer")
     }
@@ -256,4 +285,65 @@ enum SwipeDispatchMode: Equatable {
 
 func swipeDispatchMode(lockScreen: Bool?) -> SwipeDispatchMode {
     lockScreen == true ? .synthesizedLockScreen : .xcuitest
+}
+
+/// The dispatch route a single-finger swipe really took (#13145). The raw values are the wire
+/// strings of `WebSocketResponse.swipeRoute`.
+public enum SwipeRoute: String, Equatable, Sendable {
+    /// `XCUICoordinate` press-drag; velocity is clamped to 100-10000 pt/s.
+    case xcuiCoordinate
+    /// Private event synthesis for an app the runner did not launch; floors the stroke at 50 ms.
+    case unpinnedSynthesized
+    /// Private event synthesis for the lock screen (`lockScreen: true`).
+    case lockScreenSynthesized
+    /// Display-targeted private event synthesis (inner panel of a foldable); honors the duration.
+    case displayTargetedSynthesized
+}
+
+/// Route plus the stroke duration that route really dispatched, so hosts can derive velocity and
+/// clamp warnings from the route that ran rather than the one they assume.
+public struct SwipeDispatchReport: Equatable, Sendable {
+    public let route: SwipeRoute
+    public let effectiveDurationMs: Int64
+
+    /// Smallest contact the synthesis helper dispatches.
+    static let synthesizedMinimumDuration: TimeInterval = 0.05
+
+    private static func milliseconds(_ seconds: TimeInterval) -> Int64 {
+        guard seconds.isFinite, seconds > 0 else { return 0 }
+        return Int64((seconds * 1000).rounded())
+    }
+
+    /// The `XCUICoordinate` stroke runs `distance / velocity` where velocity is clamped.
+    static func xcuiCoordinate(distance: Double, duration: TimeInterval) -> SwipeDispatchReport {
+        let seconds = GesturePerformer.swipeVelocity(distance: distance, duration: duration)
+            .map { distance / $0 } ?? duration
+        return SwipeDispatchReport(route: .xcuiCoordinate, effectiveDurationMs: milliseconds(seconds))
+    }
+
+    static func unpinnedSynthesized(duration: TimeInterval) -> SwipeDispatchReport {
+        SwipeDispatchReport(
+            route: .unpinnedSynthesized,
+            effectiveDurationMs: milliseconds(max(duration, synthesizedMinimumDuration))
+        )
+    }
+
+    /// The report for the route a `DisplayGestureFactory` delivery really took (#13319).
+    static func forDelivery(
+        route: TapDiagnostics.Route, distance: Double, duration: TimeInterval
+    )
+        -> SwipeDispatchReport
+    {
+        switch route {
+        case .xcuiCoordinate:
+            return xcuiCoordinate(distance: distance, duration: duration)
+        case .displayTargetedRecord:
+            // The touch's move phase is the requested duration; no velocity clamp applies.
+            return SwipeDispatchReport(route: .displayTargetedSynthesized, effectiveDurationMs: milliseconds(duration))
+        }
+    }
+
+    static func lockScreenSynthesized(duration: TimeInterval) -> SwipeDispatchReport {
+        SwipeDispatchReport(route: .lockScreenSynthesized, effectiveDurationMs: milliseconds(duration))
+    }
 }

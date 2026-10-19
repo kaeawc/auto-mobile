@@ -36,7 +36,11 @@ async function createContext(): Promise<Context> {
     deviceManager,
   });
   await pool.initializeWithDevices([ORIGINAL, REPLACEMENT]);
-  await pool.bindOrReuseDeviceSession(SESSION_ID, ORIGINAL.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: SESSION_ID,
+    deviceId: ORIGINAL.deviceId,
+    platform: "android",
+  });
   const session = manager.getSession(SESSION_ID)!;
   return {
     timer,
@@ -98,7 +102,11 @@ async function bindWithSnapshot(context: Context) {
   const { pool, manager } = context;
   const device = pool.getDevice(REPLACEMENT.deviceId)!;
   const snapshot = pool["snapshotSessionAssignment"](device);
-  await pool.bindOrReuseDeviceSession("autolock-session", REPLACEMENT.deviceId, "android");
+  await pool.bindOrReuseDeviceSession({
+    sessionId: "autolock-session",
+    deviceId: REPLACEMENT.deviceId,
+    platform: "android",
+  });
   const session = manager.getSession("autolock-session")!;
   return { device, snapshot, session };
 }
@@ -168,11 +176,11 @@ test("an in-flight session creation is not captured for shutdown until the pool 
   const context = await createContext();
   const { pool, manager } = context;
   try {
-    const creating = pool.bindOrReuseDeviceSession(
-      "creating-session",
-      REPLACEMENT.deviceId,
-      "android",
-    );
+    const creating = pool.bindOrReuseDeviceSession({
+      sessionId: "creating-session",
+      deviceId: REPLACEMENT.deviceId,
+      platform: "android",
+    });
     await drainUntil(() => manager.getSession("creating-session") !== null, {
       description: "creating-session to be published",
     });

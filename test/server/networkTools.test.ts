@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
   type IosMockRuleSyncOutcome,
@@ -23,6 +24,9 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 function ipaBytes(): Buffer {
   // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates
@@ -130,12 +134,7 @@ describe("network tool schema", () => {
     iosGetInstanceSpy.mockRestore();
     androidGetInstanceSpy.mockRestore();
     warnSpy.mockRestore();
-    if (localRunnerIpa) {
-      await fs
-        .rm(path.dirname(localRunnerIpa), { recursive: true, force: true })
-        .catch(() => undefined);
-      localRunnerIpa = undefined;
-    }
+    localRunnerIpa = undefined;
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH", originalIosBundlePath);
     restoreEnv("AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", originalIosIpaPath);
     restoreEnv("AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD", originalSkipDownload);
@@ -149,13 +148,14 @@ describe("network tool schema", () => {
     process.env[key] = value;
   }
 
+  const scratch = useScratchRoot("nettools-local-runner-");
   let localRunnerIpa: string | undefined;
 
   // Point the override at a REAL .ipa file. hasIosCtrlProxyRunnerOverride now
   // validates that the override resolves to a file (#4221), so a bare
   // non-existent path no longer counts as an available local runner.
   async function allowLocalIosRunner(): Promise<void> {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "nettools-local-runner-"));
+    const dir = scratch.next();
     localRunnerIpa = path.join(dir, "CtrlProxyUITests-Runner.ipa");
     await fs.writeFile(localRunnerIpa, ipaBytes());
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = localRunnerIpa;

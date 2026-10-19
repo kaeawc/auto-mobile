@@ -183,7 +183,7 @@ describe("structuredContent gating (issue #2759)", () => {
   test("EC6: internal callers invoking handler directly still receive structuredContent (flag on)", async () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     const tool = ToolRegistry.getTool(SCHEMA_TOOL);
-    const direct = await tool!.handler({}, undefined, undefined as unknown as AbortSignal);
+    const direct = await tool!.handler({}, undefined, new AbortController().signal);
     expect((direct as { structuredContent?: unknown }).structuredContent).toEqual({
       success: true,
       value: "hello",

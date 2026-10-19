@@ -640,7 +640,7 @@ describe("tapAny (Android default display)", () => {
           screenSize: { width: 500, height: 500 },
         }),
       );
-    tapAny.setRefreshViewHierarchyForTesting(async () => null);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     return tapAny;
   }
 
@@ -698,17 +698,7 @@ describe("tapOn (Android default display)", () => {
   }
 
   const doubleTap = (tap: TapOnElement) =>
-    (
-      tap as unknown as {
-        executeAndroidTapWithCoordinates(
-          action: string,
-          x: number,
-          y: number,
-          durationMs: number,
-          element: Element,
-        ): Promise<void>;
-      }
-    ).executeAndroidTapWithCoordinates("doubleTap", 540, 380, 0, plainElement);
+    tap.executeAndroidTapWithCoordinates("doubleTap", 540, 380, 0, plainElement);
 
   test("sends one device-timed double tap", async () => {
     const timer = newTimer();

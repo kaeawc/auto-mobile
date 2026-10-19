@@ -55,7 +55,7 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import {
   encodeDroppedFrames,
   encodeHeartbeat,
@@ -1865,10 +1865,7 @@ async function defaultResolveDevice(
 function defaultDependencies(): VideoStreamSocketServerDependencies {
   return {
     captureRegistry: getDefaultDeviceCaptureRegistry(),
-    ownershipChanges: () => {
-      const state = DaemonState.getInstance();
-      return state.isInitialized() ? state.getSessionManager() : null;
-    },
+    ownershipChanges: () => defaultDaemonContext.sessionManager() ?? null,
     deviceLifecycle: getDaemonStreamDeviceLifecycleEmitter,
     sessionReleases: SessionReleaseBroadcaster,
     observerReleases: ObserverReleaseBroadcaster,

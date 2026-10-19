@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import {
   getWebRtcStreamDescriptor,
@@ -13,11 +13,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice } from "../../src/models";
-import type {
-  AndroidH264Source,
-  WebRtcPublisher,
-  WebRtcStreamDescriptor,
-} from "../../src/features/webrtc";
+import type { WebRtcStreamDescriptor } from "../../src/features/webrtc";
 
 // Initial WHIP publish failure teardown (#10149). The capture-start twin of this
 // path (#7555) is covered in webrtcStreamManager.test.ts; both go through the
@@ -58,6 +54,7 @@ class ScriptedPublisher {
     }
   }
   writeH264Chunk(): void {}
+  endOfH264Packet(): void {}
   primeH264ParameterSets(): void {}
   writePcmAudioChunk(): void {}
   notifySourceFailed(): void {}
@@ -122,12 +119,12 @@ function installFakes(firstMode: "reject-now" | "gated") {
         publishers.length === 0 ? firstMode : "gated",
       );
       publishers.push(publisher);
-      return publisher as unknown as WebRtcPublisher;
+      return publisher;
     },
     createSource: () => {
       const source = new CountingSource();
       sources.push(source);
-      return source as unknown as AndroidH264Source;
+      return source;
     },
     resolveVideoJar: async () => null,
     timer,
@@ -144,13 +141,15 @@ async function settle(): Promise<void> {
 
 const startRequest = { device: ANDROID, overrides: { whipEndpoint: ENDPOINT } };
 
+let warnSpy: Mock<typeof logger.warn>;
+
 beforeEach(() => {
-  spyOn(logger, "warn").mockImplementation(() => {});
+  warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   resetWebRtcStreamManager();
-  (logger.warn as unknown as { mockRestore(): void }).mockRestore();
+  warnSpy.mockRestore();
 });
 
 describe("webrtcStreamManager initial publish failure (#10149)", () => {
@@ -312,7 +311,7 @@ describe("webrtcStreamManager initial publish failure (#10149)", () => {
 
     expect(publishers[0].stopCalls).toBe(1);
     expect(sources[0].stopCalls).toBe(1);
-    const warnings = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const warnings = warnSpy.mock.calls;
     expect(warnings.some((call) => String(call[0]).includes("whip delete failed"))).toBe(true);
   });
 

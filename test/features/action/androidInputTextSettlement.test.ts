@@ -10,10 +10,7 @@ import {
   INPUT_TEXT_CONSUME_PER_CHAR_MS,
   INPUT_TEXT_HOST_WAIT_PER_CHAR_MS,
 } from "../../../src/utils/android-cmdline-tools/AndroidInputText";
-import {
-  buildAndroidInputTextCommand,
-  type KeyEventPlan,
-} from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
+import { buildAndroidInputTextCommand } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeGuestInputAdb } from "../../fakes/FakeGuestInputAdb";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -44,25 +41,13 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     );
     // InputText currently produces single-character plans; exercise its text-plan
     // dispatch seam directly. SendKeys eventAll also exercises the public batched path.
-    const inputPlan = input as unknown as {
-      executeKeyEventPlan(
-        plan: KeyEventPlan,
-        timeout?: number,
-        noRetry?: boolean,
-        before?: undefined,
-        signal?: AbortSignal,
-      ): Promise<void>;
-    };
-    const sendPlan = executor as unknown as {
-      executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void>;
-    };
     const result = runWithTextRequestContext(
       { getDeadlineMs: () => undefined, textState: state },
       () =>
         path === "InputText"
-          ? inputPlan.executeKeyEventPlan(plan, undefined, true, undefined, controller.signal)
+          ? input.testHooks.executeKeyEventPlan(plan, undefined, true, undefined, controller.signal)
           : path === "SendKeys plan"
-            ? sendPlan.executeKeyEventPlan(plan, controller.signal)
+            ? executor.testHooks.executeKeyEventPlan(plan, controller.signal)
             : executor.type({ action: "type", text: "abcd", mode: "eventAll" }, controller.signal),
     );
     let settled = false;

@@ -48,6 +48,7 @@ describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
   let adb: FakeAdbClient;
   let app: TerminateApp;
+  let cacheInvalidator: FakeDeviceWindowCacheInvalidator;
   let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
 
   beforeEach(() => {
@@ -55,7 +56,8 @@ describe("TerminateApp (Android install listing)", () => {
     adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    app = new TerminateApp(device, adb, { timer });
+    cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    app = new TerminateApp(device, adb, { timer, cacheInvalidator });
     ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });
@@ -119,9 +121,6 @@ describe("TerminateApp (Android install listing)", () => {
   });
 
   test("retires the app's process state after a force-stop and for an already-dead process", async () => {
-    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
-    const retiring = app as unknown as { cacheInvalidator: FakeDeviceWindowCacheInvalidator };
-    retiring.cacheInvalidator = cacheInvalidator;
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     await app.execute("com.example.app", { skipObservation: true });
@@ -1153,11 +1152,11 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   let fakeAwaitIdle: FakeAwaitIdle;
   let fakeWindow: FakeWindow;
 
-  const wireDeps = (terminateApp: TerminateApp): void => {
-    (terminateApp as any).observeScreen = fakeObserveScreen;
-    (terminateApp as any).awaitIdle = fakeAwaitIdle;
-    (terminateApp as any).window = fakeWindow;
-  };
+  const collaborators = () => ({
+    observeScreen: fakeObserveScreen,
+    awaitIdle: fakeAwaitIdle,
+    window: fakeWindow,
+  });
 
   beforeEach(() => {
     setDebugPerfEnabled(true); // exercise DefaultPerformanceTracker (NoOp hides the tree)
@@ -1182,8 +1181,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(iosSimDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1199,8 +1198,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(iosSimDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1219,8 +1218,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1241,8 +1240,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -1269,8 +1268,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
         fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
       }),
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     // skipUiStability keeps the Android gfxinfo path out of the test; the perf
     // ownership under observedInteraction is what we are covering here.
     const result = await terminateApp.execute("com.example.app", { skipUiStability: true });
@@ -1294,8 +1293,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     try {
       const result = await terminateApp.execute("com.example.app", {
         userId: 0,

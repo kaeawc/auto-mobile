@@ -645,11 +645,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    * restores every symbol it installs.
    */
   const INSTALLERS: readonly string[] = [
-    "test/daemon/socketServerInputGesture.integration.test.ts",
-    "test/daemon/socketServerInputSwipe.integration.test.ts",
-    "test/daemon/socketServerInputTap.integration.test.ts",
-    "test/daemon/socketServerInputTypeText.integration.test.ts",
-    "test/daemon/socketServerKeyValue.integration.test.ts",
     "test/daemon/socketServerToolCapabilities.integration.test.ts",
     "test/features/action/ClearText.adbFactory.test.ts",
     "test/features/action/InputText.test.ts",
@@ -658,13 +653,9 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "test/features/observe/TakeScreenshot.Encoding.test.ts",
     "test/features/observe/TakeScreenshot.iOS.test.ts",
     "test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts",
-    "test/server/ToolExecutionContext.test.ts",
     "test/server/databaseIos.test.ts",
     "test/server/databaseResourcesPagination.test.ts",
     "test/server/deviceTools.killDevice.test.ts",
-    "test/server/storageResources.test.ts",
-    "test/server/toolRegistry.pipeline.test.ts",
-    "test/server/unissuedSessionBoundConnection.integration.test.ts",
   ];
 
   test("every file that installs a CtrlProxy getInstance mock is inventoried", () => {

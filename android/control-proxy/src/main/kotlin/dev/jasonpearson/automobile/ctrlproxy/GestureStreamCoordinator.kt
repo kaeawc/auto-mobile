@@ -56,14 +56,15 @@ internal sealed interface GestureStreamAction {
  * Android types, so the whole continuation policy is unit-tested without a device.
  *
  * ### Backpressure / coalescing at the runner
- * Moves are last-wins: [move] only records the newest target, so if several arrive while one
- * segment is in flight the machine jumps straight to the latest. The desktop client already thins
- * host samples to roughly the frame cadence, and segments are short, so a backlog rarely exceeds
- * one point; last-wins keeps the touch chasing the true cursor instead of replaying stale interior
- * points. When no fresh move is waiting and the gesture has not ended, the machine returns
- * [GestureStreamAction.Wait] and dispatches **nothing** — the last `willContinue` stroke already
- * holds the finger down. Dispatching a stationary keep-alive continuation there is exactly what the
- * framework CANCELS (confirmed on device), so the adapter parks until the next [move]/[end].
+ * Moves are a bounded FIFO: if several arrive while one segment is in flight each is dispatched as
+ * its own segment in order, so waypoint paths (dragPath, unlock patterns) are not collapsed
+ * (#12994). The desktop client already thins host samples to roughly the frame cadence, so a live
+ * drag rarely backs up; if it does beyond the cap the oldest points are dropped so the touch still
+ * catches up to the cursor. When no fresh move is waiting and the gesture has not ended, the
+ * machine returns [GestureStreamAction.Wait] and dispatches **nothing** — the last `willContinue`
+ * stroke already holds the finger down. Dispatching a stationary keep-alive continuation there is
+ * exactly what the framework CANCELS (confirmed on device), so the adapter parks until the next
+ * [move]/[end].
  *
  * ### Termination
  * A normal [end] produces one final `willContinue = false` segment to the released point (that lift
@@ -76,9 +77,10 @@ internal sealed interface GestureStreamAction {
 internal class GestureStreamCoordinator(
   private val moveSegmentDurationMs: Long = DEFAULT_MOVE_SEGMENT_MS,
   private val pressDurationMs: Long = DEFAULT_PRESS_SEGMENT_MS,
+  private val maxPendingMoves: Int = DEFAULT_MAX_PENDING_MOVES,
 ) {
   private var current: GesturePoint? = null
-  private var pending: GesturePoint? = null
+  private val pending = ArrayDeque<GesturePoint>()
   private var endPoint: GesturePoint? = null
   private var started = false
   private var ended = false
@@ -108,12 +110,20 @@ internal class GestureStreamCoordinator(
   }
 
   /**
-   * Record the newest move target. Last-wins: only the most recent point is kept, and it is
-   * consumed by the next [next] call. Ignored once the gesture has ended or been cancelled.
+   * Queue a move waypoint. Waypoints are FIFO so a precise path (an unlock pattern) is not
+   * collapsed when several arrive within one in-flight segment (#12994); each becomes its own
+   * continued stroke. The queue is bounded by [maxPendingMoves]: past it the oldest waypoint is
+   * dropped, so a live drag that falls far behind still catches up instead of replaying seconds of
+   * stale points. Ignored once the gesture has ended or been cancelled.
    */
   fun move(x: Float, y: Float) {
     if (ended || cancelled || finished) return
-    pending = GesturePoint(x, y)
+    val point = GesturePoint(x, y)
+    // Coalesce an exact repeat of the newest queued point: it would only replay a stationary
+    // continuing segment. A repeat of the already-dispatched point is a genuine hold and is kept.
+    if (point == pending.lastOrNull()) return
+    if (pending.size >= maxPendingMoves) pending.removeFirst()
+    pending.addLast(point)
   }
 
   /**
@@ -147,8 +157,7 @@ internal class GestureStreamCoordinator(
     if (cancelled) return finish(from, from)
 
     // A fresh move is waiting: travel to it, staying down.
-    pending?.let { target ->
-      pending = null
+    pending.removeFirstOrNull()?.let { target ->
       current = target
       return GestureStreamAction.Dispatch(
         GestureSegment(
@@ -196,5 +205,12 @@ internal class GestureStreamCoordinator(
 
     /** The initial finger-down press. Brief; the touch is then held open by `willContinue`. */
     const val DEFAULT_PRESS_SEGMENT_MS: Long = 32
+
+    /**
+     * Backlog cap. Must stay at or above the largest scripted dragPath (the TS side's
+     * `DRAG_PATH_MAX_POINTS` = 100 points = 99 moves) so a legitimate path never loses waypoints
+     * (#13280); only a live drag far beyond that is thinned to catch up.
+     */
+    const val DEFAULT_MAX_PENDING_MOVES: Int = 128
   }
 }

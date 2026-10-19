@@ -4,13 +4,8 @@ import { TIER_RULES, isViolation } from "../../scripts/check-tier-import-directi
 const rule = (tier: string) => TIER_RULES.find((r) => r.tier === tier)!;
 
 describe("tier import direction rules (#11789)", () => {
-  test("models is a leaf: only models, constants and config", () => {
-    const models = rule("models");
-    expect(isViolation(models, "src/models/ActionableError")).toBe(false);
-    expect(isViolation(models, "src/constants/x")).toBe(false);
-    expect(isViolation(models, "src/utils/describeUnknownError")).toBe(true);
-    expect(isViolation(models, "src/features/observe/Foo")).toBe(true);
-    expect(isViolation(models, "test/helpers/x")).toBe(true);
+  test("models is owned by modelsLeaf.test.ts, not this gate", () => {
+    expect(TIER_RULES.map((r) => r.tier)).not.toContain("models");
   });
 
   test("db may use utils and models but not daemon, server or features", () => {
@@ -30,5 +25,12 @@ describe("tier import direction rules (#11789)", () => {
     const features = rule("features");
     expect(isViolation(features, "src/daemon/daemonState")).toBe(false);
     expect(isViolation(features, "src\\server\\toolRegistry")).toBe(true);
+  });
+
+  test("daemon is gated only on importing server (#11790)", () => {
+    const daemon = rule("daemon");
+    expect(isViolation(daemon, "src/db/database")).toBe(false);
+    expect(isViolation(daemon, "src/features/video")).toBe(false);
+    expect(isViolation(daemon, "src/server/appearanceManager")).toBe(true);
   });
 });

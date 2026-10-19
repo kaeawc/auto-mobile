@@ -7,10 +7,7 @@ import {
   ActionableError,
   BootedDevice,
   DeviceInfo,
-  VideoFormat,
   VideoRecordingHighlightEntry,
-  VideoRecordingHighlightInput,
-  VideoQualityPreset,
   VideoRecordingMetadata,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -44,11 +41,11 @@ import { logger } from "../utils/logger";
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,
-  type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -408,28 +405,7 @@ interface RecordingToolContext {
   requesterResolver: RecordingRequesterResolver;
 }
 
-export interface VideoRecordingArgs {
-  action: "start" | "stop";
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: "android" | "ios";
-  deviceId?: string;
-  qualityPreset?: VideoQualityPreset;
-  targetBitrateKbps?: number;
-  maxThroughputMbps?: number;
-  fps?: number;
-  resolution?: {
-    width: number;
-    height: number;
-  };
-  format?: VideoFormat;
-  maxDuration?: number;
-  outputName?: string;
-  recordingId?: string;
-  sessionUuid?: string;
-  device?: string;
-  highlights?: VideoRecordingHighlightInput[];
-  display?: string;
-}
+export type VideoRecordingArgs = z.output<typeof videoRecordingSchema>;
 
 const resolutionSchema = z.object({
   width: z.number().int().positive(),
@@ -674,14 +650,12 @@ export interface RecordingRequesterResolver {
 
 const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
   async assertFanoutTargetAllowed(device, requester) {
-    const daemon = DaemonState.getInstance();
-    if (!daemon.isInitialized()) {
+    const pool = defaultDaemonContext.devicePool();
+    if (!pool) {
       return;
     }
     const held = requester.mcpSessionId
-      ? daemon
-          .getDevicePool()
-          .resolveOwnedDeviceSessionForMcpSession(requester.mcpSessionId, device.deviceId)
+      ? pool.resolveOwnedDeviceSessionForMcpSession(requester.mcpSessionId, device.deviceId)
       : undefined;
     const effectiveRequester = held ? { ...requester, sessionUuid: held } : requester;
     const input = { toolName: "videoRecording", device, requester: effectiveRequester };
@@ -689,32 +663,26 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
     assertLifecycleCallerHoldsDevice({ ...input, force: false });
   },
   baseSessionUuid(sessionUuid) {
-    if (!DaemonState.getInstance().isInitialized()) {
+    const sessionManager = defaultDaemonContext.sessionManager();
+    if (!sessionManager) {
       return sessionUuid;
     }
-    const sessionManager = DaemonState.getInstance().getSessionManager();
     return resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) ?? sessionUuid;
   },
   connectionOwnsDeviceSession(mcpSessionId, deviceId, ownerBaseSessionUuid) {
-    if (!DaemonState.getInstance().isInitialized()) {
-      return false;
-    }
-    const held = DaemonState.getInstance()
-      .getDevicePool()
-      .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
+    const held = defaultDaemonContext
+      .devicePool()
+      ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
     return held !== undefined && this.baseSessionUuid(held) === ownerBaseSessionUuid;
   },
   resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId) {
-    const daemon = DaemonState.getInstance();
-    return daemon.isInitialized()
-      ? daemon.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
-      : undefined;
+    return defaultDaemonContext
+      .devicePool()
+      ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
   },
   isDeviceHeld(deviceId) {
-    return (
-      DaemonState.getInstance().isInitialized() &&
-      DaemonState.getInstance().getSessionManager().getSessionForDevice(deviceId) !== null
-    );
+    const owner = defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId);
+    return owner !== undefined && owner !== null;
   },
 };
 

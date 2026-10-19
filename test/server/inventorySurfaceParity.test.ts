@@ -40,6 +40,9 @@ import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Inventory contract: every inventory surface describes the same device the same way. The
 // listDevices tool and the booted-devices resource are built from different code paths, so this
@@ -570,11 +573,11 @@ describe("a held device in a transitional platform state is one row and one coun
     manager.setBootedDevices(scenario.platform, [scenario.device]);
     await pool.initializeWithDevices([scenario.device]);
     if (scenario.held) {
-      await pool.bindOrReuseDeviceSession(
-        "session-held",
-        scenario.device.deviceId,
-        scenario.platform,
-      );
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-held",
+        deviceId: scenario.device.deviceId,
+        platform: scenario.platform,
+      });
     }
     scenario.transition(manager);
     DaemonState.getInstance().initialize(sessions, pool);
@@ -835,7 +838,11 @@ describe("every inventory surface gives one answer per discovery-source outcome 
     const pool = poolFor({ timer, sessions: activeSessions, manager });
     await pool.initializeWithDevices(device ? [device] : []);
     if (device && held) {
-      await pool.bindOrReuseDeviceSession("session-held", device.deviceId, device.platform);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-held",
+        deviceId: device.deviceId,
+        platform: device.platform,
+      });
       // Discovery stops listing the held device: it is transitional, offline, or its tool is gone.
       manager.setBootedDevices(device.platform, []);
     }

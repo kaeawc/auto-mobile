@@ -1,6 +1,6 @@
 import { expect, describe, test } from "bun:test";
 import { DefaultScreenTransitionWaiter } from "../../../src/features/navigation/DefaultScreenTransitionWaiter";
-import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import type { NavigationGraphService } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
@@ -27,7 +27,7 @@ class ScriptedClock extends FakeTimer {
 
 /** Navigation-graph stub exposing only the method the waiter consumes. */
 function stubManager(screens: Array<string | null>): {
-  manager: NavigationGraphManager;
+  manager: Pick<NavigationGraphService, "getCurrentScreen">;
   pollCount: () => number;
 } {
   let index = 0;
@@ -37,7 +37,7 @@ function stubManager(screens: Array<string | null>): {
       index += 1;
       return value;
     },
-  } as unknown as NavigationGraphManager;
+  };
   return { manager, pollCount: () => index };
 }
 

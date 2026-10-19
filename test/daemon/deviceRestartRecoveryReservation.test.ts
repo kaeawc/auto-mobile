@@ -147,14 +147,12 @@ describe("device restart reserves the entire recovery window", () => {
       notify(target);
     };
     await pool.initializeWithDevices(devices);
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      devices[0].deviceId,
-      devices[0].platform,
-      undefined,
-      undefined,
-      devices[0],
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: HOLDER,
+      deviceId: devices[0].deviceId,
+      platform: devices[0].platform,
+      expectedIdentity: devices[0],
+    });
     fixtureInitialized = true;
   }
   async function keepIdlePastRecovery() {
@@ -222,7 +220,12 @@ describe("device restart reserves the entire recovery window", () => {
     await setup();
     await handoff();
     await expect(
-      pool.bindOrReuseDeviceSession("newcomer", SIM.deviceId, "ios", undefined, undefined, SIM),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "newcomer",
+        deviceId: SIM.deviceId,
+        platform: "ios",
+        expectedIdentity: SIM,
+      }),
     ).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
     expect(pool.getDevice(SIM.deviceId)?.id).toBe(SIM.deviceId);
     expect(pool.getDevicesByPlatform("ios")).toHaveLength(1);
@@ -239,7 +242,12 @@ describe("device restart reserves the entire recovery window", () => {
     await handoff();
     managed = true;
     await expect(
-      pool.bindOrReuseDeviceSession("slot-exec", SIM.deviceId, "ios", undefined, undefined, SIM),
+      pool.bindOrReuseDeviceSession({
+        sessionId: "slot-exec",
+        deviceId: SIM.deviceId,
+        platform: "ios",
+        expectedIdentity: SIM,
+      }),
     ).resolves.toBe("slot-exec");
   });
   test("binding refresh failure reserves nothing", async () => {
@@ -511,7 +519,7 @@ describe("device restart reserves the entire recovery window", () => {
       if (args[3] === "restart-recovery-timeout") {
         events.push("write");
         expect(args[4]).toMatchObject({
-          expectedRowGeneration: 1,
+          expectedRowGeneration: 0,
           onlyIfOwnedByDaemon: DAEMON_A,
           onlyIfRecoverable: true,
           onlyIfRestartRecoveryHandoff: {
@@ -589,7 +597,7 @@ describe("device restart reserves the entire recovery window", () => {
         status: "released",
         release_reason: `device-restart:${SIM.name}`,
         daemon_session_id: DAEMON_B,
-        stable_identity_generation: 2,
+        stable_identity_generation: 1,
       });
       expect(notices).toBe(0);
       expect(sessions.getTerminalReleaseSnapshot(HOLDER)).toBeUndefined();
@@ -989,7 +997,12 @@ describe("device restart reserves the entire recovery window", () => {
       await returned();
       expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
       await expect(
-        pool.bindOrReuseDeviceSession("newcomer", SIM.deviceId, "ios", undefined, undefined, SIM),
+        pool.bindOrReuseDeviceSession({
+          sessionId: "newcomer",
+          deviceId: SIM.deviceId,
+          platform: "ios",
+          expectedIdentity: SIM,
+        }),
       ).resolves.toBe("newcomer");
     });
   }
@@ -1021,14 +1034,12 @@ describe("device restart reserves the entire recovery window", () => {
     await sessions.releaseSession(HOLDER, "explicit-release");
     await pool.releaseDevice(SIM.deviceId, HOLDER);
     const closeMint = sessions.openPlanLabelMints(base, { phone: `${base}:phone` });
-    await pool.bindOrReuseDeviceSession(
-      `${base}:phone`,
-      SIM.deviceId,
-      "ios",
-      undefined,
-      undefined,
-      SIM,
-    );
+    await pool.bindOrReuseDeviceSession({
+      sessionId: `${base}:phone`,
+      deviceId: SIM.deviceId,
+      platform: "ios",
+      expectedIdentity: SIM,
+    });
     closeMint();
     await internals.releaseDisconnectedRecoverySessionWithRetry(
       `${base}:phone`,

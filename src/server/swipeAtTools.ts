@@ -4,6 +4,7 @@ import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
 import type { SwipeAtOptions, SwipeAtRecordingContext } from "../models/SwipeAtOptions";
+import { swipeAtResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import {
   SWIPE_DURATION_MAX_MS,
@@ -20,11 +21,10 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 
-export type SwipeAtArgs = SwipeAtOptions & {
+// The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
+// from/to) is narrowed where the options are built.
+export type SwipeAtArgs = z.output<typeof swipeAtSchema> & {
   __swipeAtRecordingContext?: SwipeAtRecordingContext;
-  platform?: "android" | "ios";
-  raw?: boolean;
-  project?: "full" | "skeleton";
 };
 
 const swipeAtPointSchema = z
@@ -223,6 +223,6 @@ export function registerSwipeAtTools() {
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
     swipeAtHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, outputSchema: swipeAtResultSchema },
   );
 }

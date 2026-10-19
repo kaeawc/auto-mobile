@@ -86,7 +86,12 @@ describe("cross-daemon claim across a same-serial System UI ANR recovery", () =>
       foreignDeviceOwnership: daemonA,
     });
     await pool.initializeWithDevices([original]);
-    await pool.bindOrReuseDeviceSession(SESSION, SERIAL, "android", sourceImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: SERIAL,
+      platform: "android",
+      sourceImage,
+    });
     expect(claims.get(SERIAL)).toBe(DAEMON_A_PID);
 
     const reservation = await pool.reserveDeviceForShutdown(SERIAL);
@@ -157,7 +162,12 @@ describe("cross-daemon claim across a same-serial System UI ANR recovery", () =>
       foreignDeviceOwnership: daemonA,
     });
     await pool.initializeWithDevices([original]);
-    await pool.bindOrReuseDeviceSession(SESSION, SERIAL, "android", sourceImage);
+    await pool.bindOrReuseDeviceSession({
+      sessionId: SESSION,
+      deviceId: SERIAL,
+      platform: "android",
+      sourceImage,
+    });
     events.length = 0;
 
     const reservation = await pool.reserveDeviceForShutdown(SERIAL);

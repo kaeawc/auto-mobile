@@ -1,5 +1,6 @@
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolJson } from "../helpers/toolResponse";
 import {
   afterAll,
   afterEach,
@@ -69,12 +70,8 @@ async function waitFor(condition: () => boolean, label: string): Promise<void> {
   throw new Error(`Timed out waiting for: ${label}`);
 }
 
-interface ToolResponse {
-  content?: Array<{ text?: string }>;
-}
-
-function parse(response: ToolResponse): Record<string, unknown> {
-  return JSON.parse(response.content?.[0]?.text ?? "{}");
+function parse(response: unknown): Record<string, unknown> {
+  return toolJson(response);
 }
 
 // Directory the fake segment paths live under. Set to the per-test archiveRoot in
@@ -126,6 +123,8 @@ describe("videoRecording tool segmentation branch", () => {
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeRepository: FakeVideoRecordingRepository;
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
+  let archiveBase = "";
+  let archiveCount = 0;
   let archiveRoot: string;
   let segmentStarts: string[];
   let segmentStops: string[];
@@ -134,7 +133,7 @@ describe("videoRecording tool segmentation branch", () => {
     if (!ToolRegistry.getTool("videoRecording")) {
       videoRecording.register();
     }
-    archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-tool-"));
+    archiveBase = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-tool-"));
   });
 
   beforeEach(async () => {
@@ -152,7 +151,7 @@ describe("videoRecording tool segmentation branch", () => {
     videoRecording.configure({ deviceDetector: fakeDeviceSessionManager });
     segmentStarts = [];
     segmentStops = [];
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
+    archiveRoot = path.join(archiveBase, `t${archiveCount++}`);
     await fsPromises.mkdir(archiveRoot, { recursive: true });
     fakeSegmentDir = archiveRoot;
 
@@ -189,7 +188,7 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   afterAll(async () => {
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
+    await fsPromises.rm(archiveBase, { recursive: true, force: true });
   });
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
@@ -389,7 +388,7 @@ describe("videoRecording tool segmentation branch", () => {
       const schema = ToolRegistry.getTool("videoRecording")!.schema;
       const result = schema.safeParse({ action: "start", platform: "android", fps });
       expect(result.success).toBe(false);
-      expect(result.error.issues).toEqual(
+      expect(result.error?.issues).toEqual(
         expect.arrayContaining([expect.objectContaining({ path: ["fps"] })]),
       );
       expect(fakeBackend.startCalls).toHaveLength(0);
@@ -865,7 +864,7 @@ describe("videoRecording tool segmentation branch", () => {
       if (fakeBackend.startCalls.length === 2) {
         markSecondStart?.();
         await new Promise<void>((resolve) => {
-          config.abortSignal?.addEventListener("abort", resolve, { once: true });
+          config.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
         });
         throw new Error("fanout start aborted");
       }
@@ -922,7 +921,7 @@ describe("videoRecording tool segmentation branch", () => {
         }
         markThirdStart?.();
         await new Promise<void>((resolve) => {
-          request.abortSignal?.addEventListener("abort", resolve, { once: true });
+          request.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
         });
         request.abortSignal?.throwIfAborted();
         throw new Error("unreachable");
@@ -981,7 +980,7 @@ describe("videoRecording tool segmentation branch", () => {
           secondStartSignal = request.abortSignal;
           markSecondStart?.();
           await new Promise<void>((resolve) => {
-            request.abortSignal?.addEventListener("abort", resolve, { once: true });
+            request.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
           });
           request.abortSignal?.throwIfAborted();
         }
@@ -1029,7 +1028,7 @@ describe("videoRecording tool segmentation branch", () => {
           receivedSignal = signal;
           markDiscoveryStarted?.();
           await new Promise<void>((resolve) => {
-            signal?.addEventListener("abort", resolve, { once: true });
+            signal?.addEventListener("abort", () => resolve(), { once: true });
           });
           signal?.throwIfAborted();
           return [];

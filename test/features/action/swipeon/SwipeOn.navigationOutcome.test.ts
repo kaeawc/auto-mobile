@@ -22,10 +22,14 @@ import demosEnvelope from "../../../fixtures/ios/ios-demos-observe-full-sdk-node
 import formsCapture from "../../../fixtures/observe-output/ios-keyboard-states/ios-keyboard-visible.raw.json";
 import launcherHome from "../../../fixtures/android-launcher/launcher-home-emulator-5602.json";
 import playgroundMain from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
+import {
+  observeResultFromFixture,
+  observeResultFromJsonText,
+} from "../../../helpers/observeFixture";
 
 // Captured iPhone 17 Playground Demos list, and the Forms screen its "Forms & Input" row opens.
-const demosList = JSON.parse(demosEnvelope.content[0].text) as ObserveResult;
-const formsScreen = formsCapture as unknown as ObserveResult;
+const demosList = observeResultFromJsonText(demosEnvelope.content[0].text, "demos");
+const formsScreen = observeResultFromFixture(formsCapture, "formsCapture");
 
 let restoreHostWorkGuards = () => {};
 function installHostWorkGuards() {
@@ -112,8 +116,8 @@ describe("swipeOn navigation outcome", () => {
   test("Android screen swipe that changed the foreground activity reports navigation", async () => {
     const result = await harness(
       "android",
-      launcherHome as unknown as ObserveResult,
-      playgroundMain as unknown as ObserveResult,
+      observeResultFromFixture(launcherHome, "launcherHome"),
+      observeResultFromFixture(playgroundMain, "playgroundMain"),
     ).execute({ direction: "up", autoTarget: false });
     expect(result.success).toBe(true);
     expect(result.navigated).toBe(true);

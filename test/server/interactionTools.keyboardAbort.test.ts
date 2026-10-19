@@ -2,16 +2,19 @@ import { warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
-import { KeyboardOpenIndeterminateError } from "../../src/features/action/Keyboard";
+import { KeyboardOpenIndeterminateError } from "../../src/features/action/KeyboardOpenIndeterminateError";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetKeyboardFactory,
-  setKeyboardFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+isolateToolRegistry();
+
+const interactionDeps: InteractionToolDependencies = {};
 const test = warmedTests(() => ToolRegistry.clearTools());
 
 test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME switch or tap", async () => {
@@ -33,7 +36,7 @@ test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME sw
   );
   try {
     ToolRegistry.clearTools();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     expect(keyboardHandler).toBeDefined();
     const controller = new AbortController();
     controller.abort();
@@ -78,7 +81,7 @@ test("registered keyboard setIme completes verification after cancellation follo
   const create = spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
   try {
     ToolRegistry.clearTools();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     expect(keyboardHandler).toBeDefined();
     const device = { deviceId: "fake-keyboard-set-ime", platform: "android" } as BootedDevice;
     const response = await keyboardHandler!(
@@ -124,22 +127,22 @@ async function openKeyboardWithAbortedFailure(failure: Error) {
     return originalRegister(...args);
   });
   const controller = new AbortController();
-  setKeyboardFactory(() => ({
+  interactionDeps.keyboardFactory = () => ({
     execute: async () => {
       controller.abort();
       throw failure;
     },
-  }));
+  });
   try {
     ToolRegistry.clearTools();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const device = { deviceId: "fake-keyboard-open", platform: "android" } as BootedDevice;
     return await keyboardHandler!(device, { action: "open" }, undefined, controller.signal).then(
       () => undefined,
       (error: unknown) => error,
     );
   } finally {
-    resetKeyboardFactory();
+    delete interactionDeps.keyboardFactory;
     registration.mockRestore();
     ToolRegistry.clearTools();
   }

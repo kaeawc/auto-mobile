@@ -1,4 +1,4 @@
-import type { SessionToolSelectionRepository } from "../../src/features/toolSelection/SessionToolSelectionService";
+import type { SessionToolSelectionRepository } from "../../src/db/sessionToolSelectionRepository";
 
 type Entry = { toolName: string; enabled: boolean };
 type Write = [string, string, boolean];

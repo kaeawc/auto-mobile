@@ -23,6 +23,7 @@ import {
   type DeviceInfo,
   type Platform,
 } from "../../src/models";
+import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { settleByFakeEvents, drainUntilQuiescent, drainUntil } from "../helpers/fakeTimerStepping";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
@@ -46,7 +47,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
 import { executionTracker } from "../../src/server/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -65,6 +66,9 @@ import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDevic
 import { FakeWindow } from "../fakes/FakeWindow";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const readArgs: Record<string, Record<string, unknown>> = {
   keyboard: { action: "detect" },
@@ -266,7 +270,7 @@ let h: Harness | undefined;
 let tools: string[] = [];
 let restoreFixture: () => void;
 let restorePipeline: () => void;
-let originals: Map<string, unknown>;
+let originals: ToolRegistryCollaborators;
 let embeddedBefore: boolean;
 let debugBefore: boolean;
 let registeredBefore: ReturnType<typeof ToolRegistry.getEveryRegisteredTool>;
@@ -296,14 +300,11 @@ beforeAll(async () => {
   setDebugModeEnabled(true);
   embeddedBefore = serverConfig.isEmbeddedSdkEnabled();
   serverConfig.setEmbeddedSdkEnabled(true);
-  originals = new Map(
-    ["deviceSessionManager", "toolCallRepository", "navigationToolCallRecorder"].map((field) => [
-      field,
-      Reflect.get(ToolRegistry, field),
-    ]),
-  );
-  Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall() {} });
-  Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+  originals = ToolRegistry.getCollaboratorsForTesting();
+  ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: { async recordToolCall() {} } });
+  ToolRegistry.setCollaboratorsForTesting({
+    navigationToolCallRecorder: { record: () => undefined },
+  });
   restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
     deviceReadAccess: access,
     displayInventory: new FakeDisplayInventoryProvider(),
@@ -398,9 +399,9 @@ afterEach(async () => {
   restoreReadTimer = undefined;
   h?.restoreSpies();
   h = undefined;
-  Reflect.set(ToolRegistry, "deviceSessionManager", originals.get("deviceSessionManager"));
-  expect(Reflect.get(ToolRegistry, "deviceSessionManager")).toBe(
-    originals.get("deviceSessionManager"),
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originals.deviceSessionManager });
+  expect(ToolRegistry.getCollaboratorsForTesting().deviceSessionManager).toBe(
+    originals.deviceSessionManager,
   );
   DaemonState.getInstance().reset();
   expect(DaemonState.getInstance().isInitialized()).toBe(false);
@@ -408,10 +409,8 @@ afterEach(async () => {
 });
 afterAll(() => {
   restorePipeline();
-  for (const [field, value] of originals) {
-    Reflect.set(ToolRegistry, field, value);
-    expect(Reflect.get(ToolRegistry, field)).toBe(value);
-  }
+  ToolRegistry.setCollaboratorsForTesting(originals);
+  expect(ToolRegistry.getCollaboratorsForTesting()).toEqual(originals);
   for (const { sessions } of [...owners.values(), ...unheld.values()]) {
     sessions.stopCleanupTimer();
   }
@@ -528,7 +527,7 @@ for (const platform of ["android", "ios"] as const) {
   for (const name of EXPECTED) {
     test(`${platform} unheld running not ready: ${name}`, async () => {
       h = harness(platform, true, false, false, false, true);
-      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
       const daemon = unheld.get(platform)!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       const execution = executionTracker.startExecution(name);
@@ -548,7 +547,7 @@ for (const platform of ["android", "ios"] as const) {
       } finally {
         executionTracker.endExecution(execution.id);
       }
-      expect(h.handledDevices).toEqual([h.device]);
+      expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
       expect(h.runs).toHaveLength(1);
       expect(h.runs[0].sessionUuid).toBeUndefined();
       const operations = (
@@ -736,7 +735,7 @@ for (const platform of ["android", "ios"] as const) {
               };
             };
           }
-          Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+          ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
           const held = column.startsWith("held");
           const owner = owners.get(platform)!;
           const holderBefore = structuredClone(owner.sessions.getSession(`holder-${platform}`));
@@ -899,7 +898,7 @@ for (const platform of ["android", "ios"] as const) {
             expect(h.timer.now()).toBe(0);
             expect(h.timer.getSleepCallCount()).toBe(0);
             expect(h.detect).toHaveBeenCalledTimes(1);
-            expect(h.handledDevices).toEqual([h.device]);
+            expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([h.device]);
           }
           expect(h.manager.getCurrentDevice()).toBeUndefined();
           expect(h.manager.getCurrentPlatform()).toBeUndefined();
@@ -1012,12 +1011,10 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
       "",
     ),
   );
-  const client = new AndroidEmulatorClient(
-    null,
-    null,
-    current.timer,
-    new FakeAdbClientFactory(current.adb),
-  );
+  const client = new AndroidEmulatorClient({
+    timer: current.timer,
+    adbFactory: new FakeAdbClientFactory(current.adb),
+  });
   const inventory = new MultiPlatformDeviceManager(
     current.adb,
     current.simctl,
@@ -1064,7 +1061,7 @@ for (const column of probeColumns) {
       const held = column === "probe-held-name";
       h = harness("android", !stopped);
       installProbeInventory(column);
-      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
       const daemon = (held ? owners : unheld).get("android")!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       const before = structuredClone(daemon.sessions.getAllSessions());
@@ -1137,7 +1134,7 @@ for (const column of probeColumns) {
 test("a probed serial missing from the memoized raw scan is refreshed before readiness", async () => {
   h = harness("android", true);
   installProbeInventory("probe-running-name");
-  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
   const daemon = unheld.get("android")!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   let scans = 0;
@@ -1162,7 +1159,7 @@ test("a probed serial missing from the memoized raw scan is refreshed before rea
 
 test("a serial acquired during discovery is rechecked before readiness", async () => {
   h = harness("android", true);
-  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
   DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
   let acquired = false;
   let listings = 0;
@@ -1188,8 +1185,7 @@ test("a serial acquired during discovery is rechecked before readiness", async (
       { deviceId: h.device.deviceId, sessionUuid: undefined, readPath: true },
     ]);
     expect(listings).toBe(1);
-    expect(h.handledDevices).toEqual([listedDevice]);
-    expect(h.handledDevices[0]).toBe(listedDevice);
+    expect(h.handledDevices.map(withoutInventoryOutcome)).toEqual([listedDevice]);
     expect(h.detect).toHaveBeenCalledTimes(1);
     expect(h.ensure).not.toHaveBeenCalled();
     expect(h.verify).not.toHaveBeenCalled();
@@ -1202,7 +1198,7 @@ test("a serial acquired during discovery is rechecked before readiness", async (
 
 test("control naming a stopped AVD keeps the provided-device not-found outcome", async () => {
   h = harness("android", false);
-  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
   const daemon = unheld.get("android")!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   // Control bypasses resolveReadinessReadTarget's read boot; requireProvidedReadinessDevice rejects.
@@ -1225,7 +1221,7 @@ for (const name of ["observe", "listApps", "getDeviceState"]) {
     h = harness("android", true);
     const foreign = { ...h.device, deviceId: "emulator-5590", name: "Foreign" };
     h.devices.splice(0, h.devices.length, foreign);
-    Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
     const owner = owners.get("android")!;
     DaemonState.getInstance().initialize(owner.sessions, owner.pool);
     const before = structuredClone(owner.sessions.getSession("holder-android"));
@@ -1266,7 +1262,7 @@ for (const platform of ["android", "ios"] as const) {
     for (const kind of ["holder", "reservation"] as const) {
       test(`${platform}: ${kind} appears during ${phase}, no read boot`, async () => {
         h = harness(platform, false);
-        Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+        ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
         DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
         const id = platform === "android" ? h.device.name : h.device.deviceId;
         let claimed = false;
@@ -1364,7 +1360,7 @@ for (const platform of ["android", "ios"] as const) {
   for (const scenario of ["recovers", "fails", "aborts", "healthy-other", "held-fails"] as const) {
     test(`${platform} explicit observe discovery: ${scenario}`, async () => {
       h = harness(platform, true);
-      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
       const daemon = (scenario === "held-fails" ? owners : unheld).get(platform)!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       let listings = 0;
@@ -1430,7 +1426,7 @@ for (const platform of ["android", "ios"] as const) {
     for (const identity of ["name", "deviceId"] as const) {
       test(`${platform} stopped reserved ${identity}, platform=${requested ?? "absent"}`, async () => {
         h = harness(platform, false);
-        Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+        ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
         const daemon = unheld.get(platform)!;
         DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
         const id = h.device[identity];
@@ -1541,7 +1537,7 @@ async function onePlatformDecision(
 ): Promise<{ decision: string; listings: number }> {
   useFakeReadRetryTimer();
   h = harness(platform, scenario === "running");
-  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
   const daemon = unheld.get(platform)!;
   DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
   const other = platform === "android" ? "ios" : "android";
@@ -1665,7 +1661,7 @@ for (const platform of ["android", "ios"] as const) {
     test(`${platform} reserved ${name} overrides failed discovery`, async () => {
       useFakeReadRetryTimer();
       h = harness(platform, false);
-      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
       const daemon = unheld.get(platform)!;
       DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
       const id = h.device.deviceId;
@@ -1697,7 +1693,7 @@ for (const platform of ["android", "ios"] as const) {
   }
   test(`${platform} explicitly unavailable platform does not retry`, async () => {
     h = harness(platform, false);
-    Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
     let listings = 0;
     statusListing = async () => {
       listings++;
@@ -1722,7 +1718,7 @@ for (const platform of ["android", "ios"] as const) {
   });
   test(`${platform} abort without reason during read backoff preserves signal reason`, async () => {
     h = harness(platform, false);
-    Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: h.manager });
     let listings = 0;
     statusListing = async () => {
       listings++;
@@ -1820,7 +1816,7 @@ for (const platform of ["android", "ios"] as const) {
       test(`${platform}: read by stopped image ${platform === "android" ? "name" : "UDID"} ${phase}, ${acquisition} watches or cancels`, async () => {
         h = harness(platform, false);
         const current = h;
-        Reflect.set(ToolRegistry, "deviceSessionManager", current.manager);
+        ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: current.manager });
         DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
         const { device, lifecycle } = current;
         const identity = {
@@ -1989,4 +1985,11 @@ for (const platform of ["android", "ios"] as const) {
       });
     }
   }
+}
+
+/** Whether a path hydrates the display inventory is not under test here; drop the stamped outcome. */
+function withoutInventoryOutcome(device: BootedDevice): BootedDevice {
+  const stripped = { ...device };
+  delete stripped[displayInventoryOutcome];
+  return stripped;
 }

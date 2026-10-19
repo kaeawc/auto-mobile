@@ -102,8 +102,7 @@ export class SwipeOnElement extends BaseVisualChange {
               flooredEndX,
               flooredEndY,
               options,
-              perf,
-              signal,
+              { perf, signal },
             ),
           );
           if (this.device.platform === "ios" && result.success) {

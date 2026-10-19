@@ -20,8 +20,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 import { StreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
-import { WebRtcPublisher, WhipClient, type H264CaptureSource } from "../../src/features/webrtc";
-import type { RTCPeerConnection } from "werift";
+import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
@@ -46,7 +45,7 @@ afterAll(() => {
     process.env.AUTOMOBILE_WEBRTC_WHIP_ENDPOINT = previousEndpoint;
   }
 });
-const device = { deviceId: "viewer-device", platform: "android", name: "Fake" } as BootedDevice;
+const device: BootedDevice = { deviceId: "viewer-device", platform: "android", name: "Fake" };
 class TestServer extends WebRtcStreamSocketServer {
   started(): void {
     this.onServerStarted();
@@ -92,8 +91,13 @@ function harness(
   const releases = new Set<(id: string) => void>();
   const observerReleases = new Set<(id: string) => void>();
   let lifecycleListeners = 0;
-  const state = {
-    owner: options.owner ?? (null as string | null),
+  const state: {
+    owner: string | null;
+    live: Set<string>;
+    releasing: boolean;
+    quarantined: boolean;
+  } = {
+    owner: options.owner ?? null,
     live: new Set(["a", "b"]),
     releasing: false,
     quarantined: false,
@@ -112,14 +116,13 @@ function harness(
       captureHints.push(options);
       const source = new FakeH264Source();
       sources.push(source);
-      return source as H264CaptureSource;
+      return source;
     },
     createPublisher: (config, deps) => {
       const publisher = new WebRtcPublisher(config, {
         ...deps,
         timer,
-        createPeerConnection: () =>
-          new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
+        createPeerConnection: () => new FakeConnectedPeerConnection(),
         createWhipClient: (opts) =>
           new WhipClient({
             ...opts,

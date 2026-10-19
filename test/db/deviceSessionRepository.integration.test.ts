@@ -18,6 +18,7 @@ import { createTestDatabase } from "./testDbHelper";
 import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,
+  type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
@@ -1331,11 +1332,12 @@ describe("DeviceSessionRepository", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 60_000,
       });
-      await sessionManager.rehydratePersistedSessions({
-        assignSessionToDevice: async () => {
+      const noRowsToAssign: SessionDeviceAssigner = {
+        assignDeviceToSession: async () => {
           throw new Error("no rows to assign");
         },
-      } as unknown as Parameters<SessionManager["rehydratePersistedSessions"]>[0]);
+      };
+      await sessionManager.rehydratePersistedSessions(noRowsToAssign);
       // Stamps cross the process boundary as wall ms (#11162), and the prune and expiry judgements
       // are handed "now" in that same frame (#11129).
       expect(seen.createdAt).toBe(wallClock);
@@ -1439,7 +1441,11 @@ describe("DeviceSessionRepository", () => {
 
     try {
       await pool.initializeWithDevices([androidDevice]);
-      await pool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
       fakeDeviceUtils.setBootedDevices("android", []);
       fakeDeviceUtils.markDeviceAsStopped("Pixel 7");
       fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
@@ -1477,7 +1483,11 @@ describe("DeviceSessionRepository", () => {
 
     try {
       await pool.initializeWithDevices([physicalDevice]);
-      await pool.bindOrReuseDeviceSession("physical-session", physicalDevice.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "physical-session",
+        deviceId: physicalDevice.deviceId,
+        platform: "android",
+      });
       fakeDeviceUtils.setBootedDevices("android", []);
 
       const pooledDevice = pool.getDevice(physicalDevice.deviceId);
@@ -1525,12 +1535,20 @@ describe("DeviceSessionRepository", () => {
 
     try {
       await pool.initializeWithDevices([androidDevice]);
-      await pool.bindOrReuseDeviceSession("session-1", androidDevice.deviceId, "android");
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: androidDevice.deviceId,
+        platform: "android",
+      });
       const pooledDevice = pool.getDevice(androidDevice.deviceId);
       fakeDeviceUtils.setBootedDevices("android", []);
 
       await expect(
-        pool.bindOrReuseDeviceSession("session-2", androidDevice.deviceId, "android"),
+        pool.bindOrReuseDeviceSession({
+          sessionId: "session-2",
+          deviceId: androidDevice.deviceId,
+          platform: "android",
+        }),
       ).rejects.toThrow(/not available/);
 
       expect(await repo.getSession("session-1")).toMatchObject({

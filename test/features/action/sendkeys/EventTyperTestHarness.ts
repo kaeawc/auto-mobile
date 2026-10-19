@@ -76,6 +76,7 @@ export function eventHost() {
       calls.push("resetCaretState");
     },
     getKeyEventPlan: async (char) => buildAsciiKeyEventPlan(char, true),
+    getAndroidApiLevel: async () => 36,
     getEventAllKeyEventPlan: async (char) =>
       char.length === 1 ? buildAsciiKeyEventPlan(char, true) : null,
     clearForReplace: async (operation, signal, display) => {

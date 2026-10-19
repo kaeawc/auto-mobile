@@ -5,7 +5,7 @@ import {
   TALKBACK_STATE_UNKNOWN_WARNING,
 } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import {
@@ -70,8 +70,7 @@ import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./t
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote, tapDeliveryReporter } from "./tapSharedHelpers";
 import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
-
-class TapAtGeometryError extends ActionableError {}
+import { TapAtGeometryError } from "./TapAtGeometryError";
 
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;
@@ -324,7 +323,7 @@ function hasSameTapTargetingLayout(previous: ObserveResult, refreshed: ObserveRe
 
 export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   timer?: Timer;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetector;
   talkBackStrategy?: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
@@ -382,7 +381,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly invalidateIosCache: () => void;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly snapshotReferences: SnapshotReferenceStore;
-  private readonly featureFlags: FeatureFlagService;
+  private readonly featureFlags: FeatureFlagReader;
   private readonly accessibilityDetector: AccessibilityDetector;
   private readonly talkBackStrategy: Pick<
     TalkBackTapStrategy,
@@ -435,9 +434,11 @@ export class TapAtCoordinate extends BaseVisualChange {
       display,
       this.observeScreen,
       this.adb,
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
+      {
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      },
     );
     const stale = this.staleSnapshotReason(options, observation);
     if (stale) {

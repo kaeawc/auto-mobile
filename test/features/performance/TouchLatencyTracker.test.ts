@@ -6,6 +6,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 /**
  * Extended FakeAdbExecutor that supports dynamic responses based on call count.
@@ -28,10 +29,7 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
 
   override async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
+    options?: AdbExecuteOptions,
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -55,7 +53,7 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
       }
     }
     // Fall back to parent behavior
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, options);
   }
 
   resetCallCounts(): void {
@@ -135,8 +133,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
-      // Access private method via type assertion for testing
-      const location = (tracker as any).selectSafeTouchLocation(screenSize);
+      const location = tracker.selectSafeTouchLocation(screenSize);
 
       expect(location.x).toBe(Math.floor(1080 * 0.5));
       expect(location.y).toBe(Math.floor(1920 * 0.12));
@@ -150,7 +147,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
       const smallScreen: ScreenSize = { width: 720, height: 1280 };
-      const location = (tracker as any).selectSafeTouchLocation(smallScreen);
+      const location = tracker.selectSafeTouchLocation(smallScreen);
 
       expect(location.x).toBe(Math.floor(720 * 0.5));
       expect(location.y).toBe(Math.floor(1280 * 0.12));
@@ -162,7 +159,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       const factory: AdbClientFactory = { create: () => fakeAdb };
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
-      const location = (tracker as any).selectSafeTouchLocation(screenSize, { x: 42, y: 84 });
+      const location = tracker.selectSafeTouchLocation(screenSize, { x: 42, y: 84 });
 
       expect(location).toEqual({ x: 42, y: 84 });
     });
@@ -174,11 +171,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
 
       // App occupies only the lower half of the screen.
       const windowBounds = { left: 0, top: 960, right: 1080, bottom: 1920 };
-      const location = (tracker as any).selectSafeTouchLocation(
-        screenSize,
-        undefined,
-        windowBounds,
-      );
+      const location = tracker.selectSafeTouchLocation(screenSize, undefined, windowBounds);
 
       expect(location).toEqual({ x: 540, y: 1440 });
     });
@@ -189,11 +182,7 @@ describe("TouchLatencyTracker - Unit Tests", function () {
       tracker = new TouchLatencyTracker(device, factory, fakeTimer);
 
       const invalidBounds = { left: 100, top: 100, right: 100, bottom: 100 };
-      const location = (tracker as any).selectSafeTouchLocation(
-        screenSize,
-        undefined,
-        invalidBounds,
-      );
+      const location = tracker.selectSafeTouchLocation(screenSize, undefined, invalidBounds);
 
       expect(location).toEqual({ x: Math.floor(1080 * 0.5), y: Math.floor(1920 * 0.12) });
     });

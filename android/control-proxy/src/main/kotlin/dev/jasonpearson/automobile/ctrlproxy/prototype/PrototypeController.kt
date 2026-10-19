@@ -492,10 +492,12 @@ class PrototypeController(
   }
 
   /** The default display is always present; any other must be connected, or nothing is replaced. */
-  private fun requireDisplayAvailable(displayId: Int) =
+  private fun requireDisplayAvailable(displayId: Int) {
+    displays.unsupportedReason(displayId)?.let { throw IllegalArgumentException(it) }
     require(displayId == Display.DEFAULT_DISPLAY || displays.isAvailable(displayId)) {
       "Unknown or disconnected display: $displayId"
     }
+  }
 
   private suspend fun display(
     spec: PrototypeSpec,

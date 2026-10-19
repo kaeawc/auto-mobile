@@ -738,12 +738,7 @@ export async function runSessionRowInterleaving(
   /** The row work still owed for the id, through each owner's public surface. */
   const armedRetries = (): string[] => {
     const armed: string[] = [];
-    const owed = (
-      Reflect.get(manager, "owedSupersededRowReasserts") as Map<
-        string,
-        { session: unknown; handle?: unknown }
-      >
-    ).get(sessionId);
+    const owed = (Reflect.get(manager, "rowWriter") as SessionRowWriter).superseded.owed(sessionId);
     if (owed && owed.session !== live()) {
       armed.push("a live-row rewrite is owed to a session that ended");
     } else if (owed?.handle !== undefined) {

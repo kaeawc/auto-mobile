@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { describe, expect, test } from "bun:test";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import {
@@ -44,7 +45,7 @@ describe("observer heartbeat budget across a wall-clock step", () => {
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager.stopCleanupTimer();
     await manager.createSession("device-session", "emulator-5554", "android");
-    manager.recordHeartbeat("device-session");
+    await deliverDaemonHeartbeat(manager, "device-session");
 
     timer.stepWallClock(BUDGET_MS + 1_000);
 

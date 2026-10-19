@@ -95,13 +95,15 @@ for (const [platform, deviceId] of [
       const a = await daemon(DAEMON_A_PID);
       const b = await daemon(DAEMON_B_PID);
 
-      await a.pool.bindOrReuseDeviceSession("a-session", deviceId, platform);
+      await a.pool.bindOrReuseDeviceSession({ sessionId: "a-session", deviceId, platform });
       expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
 
-      const refusal = await b.pool.bindOrReuseDeviceSession("b-session", deviceId, platform).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const refusal = await b.pool
+        .bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
       expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
       expect(refusal).toMatchObject({
         code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -115,7 +117,7 @@ for (const [platform, deviceId] of [
       await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "a-session", "explicit-release");
       expect(store.claims.has(deviceId)).toBe(false);
 
-      await b.pool.bindOrReuseDeviceSession("b-session", deviceId, platform);
+      await b.pool.bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform });
       expect(b.pool.getDevice(deviceId)?.sessionId).toBe("b-session");
       expect(store.claims.get(deviceId)).toBe(DAEMON_B_PID);
     });
@@ -134,10 +136,12 @@ for (const [platform, deviceId] of [
       };
       const b = await daemon(DAEMON_B_PID, racing);
 
-      const refusal = await b.pool.bindOrReuseDeviceSession("b-session", deviceId, platform).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const refusal = await b.pool
+        .bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
       expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.sessions.getSession("b-session")).toBeNull();
@@ -214,7 +218,7 @@ for (const [platform, deviceId] of [
     test("platform allocation skips a device another daemon claimed", async () => {
       const a = await daemon(DAEMON_A_PID);
       const b = await daemon(DAEMON_B_PID);
-      await a.pool.bindOrReuseDeviceSession("a-session", deviceId, platform);
+      await a.pool.bindOrReuseDeviceSession({ sessionId: "a-session", deviceId, platform });
 
       let settled = false;
       void b.pool.assignDeviceToSession("b-session", platform).finally(() => {
@@ -259,21 +263,14 @@ for (const [platform, deviceId] of [
         receipt?: AcquisitionReceipt,
         allowSessionRebind = false,
       ) =>
-        pool.bindOrReuseDeviceSession(
+        pool.bindOrReuseDeviceSession({
           sessionId,
           deviceId,
           platform,
-          undefined,
-          undefined,
-          undefined,
           allowSessionRebind,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          false,
+          oneShotCli: false,
           receipt,
-        );
+        });
       const autolockWith = (pool: DevicePool, receipt: AcquisitionReceipt) =>
         pool.autolockDevice(
           deviceId,

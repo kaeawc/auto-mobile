@@ -18,7 +18,10 @@ import {
   installIosManagerSuiteHooks,
   tunnel,
 } from "../helpers/iosCtrlProxyManagerHarness";
-import { asIosCtrlProxyBuilder, createStartableBuilder } from "../helpers/iosCtrlProxyBuilderFake";
+import {
+  fakeIosCtrlProxyBuilder,
+  createStartableBuilder,
+} from "../helpers/iosCtrlProxyBuilderFake";
 
 describe("IOSCtrlProxyManager", function () {
   let testDevice: BootedDevice;
@@ -117,7 +120,7 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   test("returns the persisted runner bundle identity from its builder", async function () {
-    const builder = asIosCtrlProxyBuilder({
+    const builder = fakeIosCtrlProxyBuilder({
       getInstalledBundleVersion: async () => "2026.9.13",
     });
     const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer, builder);
@@ -805,7 +808,7 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        asIosCtrlProxyBuilder({
+        fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
@@ -849,7 +852,7 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        asIosCtrlProxyBuilder({
+        fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
@@ -882,7 +885,7 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        asIosCtrlProxyBuilder({
+        fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
@@ -960,14 +963,14 @@ describe("IOSCtrlProxyManager", function () {
         undefined,
         fakeExecutor,
       );
-      tunnel(manager)["iproxyProcessId"] = fakeProcess.pid;
-      tunnel(manager)["iproxyProcess"] = fakeProcess as unknown as ChildProcess;
+      tunnel(manager).setStateForTesting({ processId: fakeProcess.pid });
+      tunnel(manager).setStateForTesting({ process: fakeProcess as unknown as ChildProcess });
 
       fakeTimer.enableAutoAdvance();
       await tunnel(manager).stop();
 
       expect(signals).toEqual([undefined, "SIGKILL"]);
-      expect(tunnel(manager)["iproxyProcessId"]).toBeNull();
+      expect(tunnel(manager).diagnostics.processId).toBeNull();
     });
 
     test("restarts iproxy after unexpected exit", async function () {
@@ -1025,8 +1028,8 @@ describe("IOSCtrlProxyManager", function () {
           await Promise.resolve();
         }
 
-        expect(tunnel(manager)["iproxyProcessId"]).toBe(2222);
-        expect(tunnel(manager)["iproxyProcess"]).toBe(newProcess);
+        expect(tunnel(manager).diagnostics.processId).toBe(2222);
+        expect(tunnel(manager).diagnostics.process).toBe(newProcess);
         expect(eventTimer.getPendingTimeoutCount()).toBe(0);
         expect(eventExecutor.getSpawnedProcesses().length).toBe(2);
       }

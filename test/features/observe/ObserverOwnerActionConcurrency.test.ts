@@ -175,8 +175,7 @@ test.each(ownerCommands)(
                   30,
                   40,
                   { duration: 100 },
-                  undefined,
-                  owner.signal,
+                  { signal: owner.signal },
                 )
               : command === ownerCommands[4]
                 ? new InputKey(device, factory, undefined, timer).press(
@@ -186,7 +185,7 @@ test.each(ownerCommands)(
                     [],
                     { signal: owner.signal },
                   )
-                : adb.executeCommand(command, undefined, undefined, undefined, owner.signal);
+                : adb.executeCommand(command, { signal: owner.signal });
       await adb.started;
       const ownerIndex = adb.getExecutedCommands().indexOf(command);
       const revision = displayTransitions.revision(device.deviceId);

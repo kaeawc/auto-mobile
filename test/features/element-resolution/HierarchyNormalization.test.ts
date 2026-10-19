@@ -1,15 +1,25 @@
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { describe, expect, test } from "bun:test";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observe/android/ViewHierarchyAndroidCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ViewHierarchyResult } from "../../../src/models";
+
+const notUsedOnIos = (): never => {
+  throw new Error("iOS hierarchy normalization never reads the Android CtrlProxy");
+};
+const unusedAndroidProxy: ViewHierarchyAndroidCtrlProxy = {
+  getAccessibilityHierarchy: notUsedOnIos,
+  setRecompositionTrackingEnabled: notUsedOnIos,
+  getSdkScreenIdentity: notUsedOnIos,
+};
 
 const normalizer = () =>
   new ViewHierarchy(
     { deviceId: "ios-test", platform: "ios", name: "test" },
     undefined,
-    new FakeCtrlProxy() as any,
+    unusedAndroidProxy,
     new FakeTimer(),
   );
 const capture: ViewHierarchyResult = {
@@ -32,7 +42,9 @@ const capture: ViewHierarchyResult = {
 describe("shared iOS capture normalization", () => {
   test("direct sync uses cleanup and the same visible projection as observe", () => {
     const reader = normalizer();
-    const result = reader.projectActionableHierarchy(reader.normalizeIosHierarchy(capture));
+    const result = reader.projectActionableHierarchy(
+      reader.normalizeIosHierarchy(convertIosHierarchy(capture)),
+    );
     const nodes: string[] = [];
     const parser = new DefaultElementParser();
     for (const root of parser.extractRootNodes(result)) {
@@ -50,7 +62,9 @@ describe("shared iOS capture normalization", () => {
   test("secondary window projections cannot reintroduce offscreen nodes", () => {
     const reader = normalizer();
     const source = { ...capture, windows: [{ windowLayer: 2, hierarchy: capture.hierarchy }] };
-    const result = reader.projectActionableHierarchy(reader.normalizeIosHierarchy(source));
+    const result = reader.projectActionableHierarchy(
+      reader.normalizeIosHierarchy(convertIosHierarchy(source)),
+    );
     expect(JSON.stringify(result.windows)).not.toContain("Offscreen");
   });
 });

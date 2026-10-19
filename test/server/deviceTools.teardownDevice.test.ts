@@ -63,6 +63,9 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async upsertActiveSession(): Promise<void> {}
@@ -858,7 +861,12 @@ describe("deleteDevice handler", () => {
       );
       manager.setBootedDevices("android", [device]);
       await pool.initializeWithDevices([device]);
-      await pool.bindOrReuseDeviceSession("session-1", device.deviceId, "android", image);
+      await pool.bindOrReuseDeviceSession({
+        sessionId: "session-1",
+        deviceId: device.deviceId,
+        platform: "android",
+        sourceImage: image,
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       manager.setDeviceImages("android", [image]);
       manager.setBootedDevices("android", []);
@@ -3145,7 +3153,7 @@ describe("deleteDevice handler", () => {
 
       expect(forceStop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
-      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.registry.peek(device.deviceId)).toBeUndefined();
       expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeUndefined();
     } finally {
       forceStop.mockRestore();
@@ -3199,7 +3207,7 @@ describe("deleteDevice handler", () => {
 
       expect(forceStop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
-      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.registry.peek(device.deviceId)).toBeUndefined();
       expect(resolveDirectSessionDevice("late-destroy-session")).toBeUndefined();
     } finally {
       forceStop.mockRestore();

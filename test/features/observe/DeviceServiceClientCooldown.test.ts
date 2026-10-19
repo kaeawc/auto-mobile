@@ -20,6 +20,7 @@ import type WebSocket from "ws";
  * Exposes protected internals needed by tests.
  */
 class TestDeviceServiceClient extends DeviceServiceClient {
+  cancelScreenshotBackoff(): void {}
   protected readonly logTag = "TestClient";
   connectionEstablishedCount = 0;
   connectionClosedCount = 0;
@@ -452,7 +453,7 @@ describe("DeviceServiceClient connection cooldown", () => {
       const socket = new FakeWebSocket(url, "none", 0, timer);
       const attempt = sockets.length;
       const emit = socket.emit.bind(socket);
-      socket.emit = (event, ...args) => {
+      socket.emit = (event: string | symbol, ...args: unknown[]) => {
         if (event === "open" && attempt > 0) {
           socket.readyState = WebSocketState.CONNECTING;
           if (attempt < 3) {

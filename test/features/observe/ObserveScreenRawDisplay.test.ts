@@ -89,6 +89,7 @@ function buildScreen(options: { display?: string; displays: string }) {
 }
 
 const primary = (): ObserveResult => ({
+  observationId: "raw-display",
   updatedAt: 0,
   screenSize: { width: 0, height: 0 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },

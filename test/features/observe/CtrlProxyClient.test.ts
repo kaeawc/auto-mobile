@@ -4421,6 +4421,9 @@ describe("AndroidCtrlProxyClient", function () {
       ]);
 
       // Check child node conversion
+      if (!result.hierarchy.node) {
+        throw new Error("Expected converted child");
+      }
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
       expect(result.hierarchy.node.class).toBe("android.widget.TextView");
@@ -4452,6 +4455,9 @@ describe("AndroidCtrlProxyClient", function () {
       const result =
         accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
+      if (!result.hierarchy.node) {
+        throw new Error("Expected converted child");
+      }
       expect(typeof result.hierarchy.node).toBe("object"); // Single child should not be in array
       expect(result.hierarchy.node.text).toBe("Single Child");
       expect(result.hierarchy.node.clickable).toBe("true");
@@ -4564,7 +4570,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(rootless.screenHeight).toBe(2340);
       expect(rootless.rotation).toBe(1);
       expect(rootless.systemInsets).toEqual({ top: 24, right: 0, bottom: 48, left: 0 });
-      expect(rootless.insets?.displayCutoutInfo).toEqual({
+      expect<unknown>(rootless.insets?.displayCutoutInfo).toEqual({
         classification: "hole_punch",
         bounds: [[480, 0, 600, 120]],
       });

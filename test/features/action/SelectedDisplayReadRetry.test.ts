@@ -45,7 +45,14 @@ function gestureHarness(reason: string, fold = false) {
   const tap = new TapAtCoordinate(selectedDisplayDevice, h.adb, {
     timer: h.timer,
     androidClient: client,
-    iosClient: client,
+    iosClient: {
+      requestTapCoordinates: async () => {
+        throw new Error("Unexpected iOS tap");
+      },
+      requestDoubleTapCoordinates: async () => {
+        throw new Error("Unexpected iOS double tap");
+      },
+    },
     lastRenderedObservation: () => ({
       display: { key: "inner", generation: 0 },
       displayRevision: 0,

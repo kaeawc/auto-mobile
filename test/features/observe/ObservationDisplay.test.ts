@@ -1,3 +1,5 @@
+import { wireHierarchyFrom } from "../../helpers/androidHierarchyConverter";
+import { createAndroidHierarchyConverter } from "../../helpers/androidHierarchyConverter";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
@@ -14,11 +16,8 @@ import {
 } from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
-import type {
-  AccessibilityHierarchy,
-  HierarchyDelegateContext,
-} from "../../../src/features/observe/android/types";
+
+import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
 import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
 import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
@@ -427,7 +426,7 @@ describe("observation display stamp", () => {
       captureSequence: 23,
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
-    const converter = new CtrlProxyHierarchy({ timer } as HierarchyDelegateContext);
+    const converter = createAndroidHierarchyConverter();
     const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
     });
@@ -910,15 +909,15 @@ test("exact fingerprint matching rejects ambiguous, missing, swapped and externa
 });
 
 test("both CtrlProxy hierarchy conversion routes retain the top-level fingerprint", () => {
-  const converter = new CtrlProxyHierarchy({ timer: new FakeTimer() } as HierarchyDelegateContext);
+  const converter = createAndroidHierarchyConverter();
   for (const hierarchy of [undefined, { className: "android.view.View", children: [] }]) {
-    const wire: AccessibilityHierarchy = {
+    const wire = wireHierarchyFrom({
       updatedAt: 1,
       packageName: "example",
       hierarchy,
       displayId: 4,
       panelFingerprint: { width: 1080, height: 2364 },
-    };
+    });
     expect(converter.convertToViewHierarchyResult(wire).panelFingerprint).toEqual(
       wire.panelFingerprint,
     );
@@ -926,7 +925,7 @@ test("both CtrlProxy hierarchy conversion routes retain the top-level fingerprin
 });
 
 test("both CtrlProxy hierarchy conversion routes drop malformed fingerprints", () => {
-  const converter = new CtrlProxyHierarchy({ timer: new FakeTimer() } as HierarchyDelegateContext);
+  const converter = createAndroidHierarchyConverter();
   for (const hierarchy of [undefined, { className: "android.view.View", children: [] }]) {
     for (const panelFingerprint of [
       null,
@@ -942,7 +941,7 @@ test("both CtrlProxy hierarchy conversion routes drop malformed fingerprints", (
       { width: 1080 },
       { height: 2364 },
     ]) {
-      const wire: AccessibilityHierarchy = { updatedAt: 1, packageName: "example", hierarchy };
+      const wire = wireHierarchyFrom({ updatedAt: 1, packageName: "example", hierarchy });
       // Object.assign models malformed wire data outside the typed producer contract.
       Object.assign(wire, { panelFingerprint });
       expect(converter.convertToViewHierarchyResult(wire).panelFingerprint).toBeUndefined();

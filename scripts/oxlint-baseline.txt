@@ -43,8 +43,6 @@
 1	src/models/deviceAcquisitionRefusals.ts	eslint(max-classes-per-file)
 1	src/server/ToolExecutionContext.ts	eslint(max-params)
 1	src/daemon/deviceOutsideBoundSessionRefusal.ts	eslint(max-classes-per-file)
-1	src/server/deviceToolsProvisioning.ts	eslint(max-lines-per-function)
-1	src/server/deviceToolsProvisioning.ts	oxlint-disable(complexity)
 1	src/server/deviceToolsStartDevice.ts	oxlint-disable(auto-mobile/no-unknown-cast)
 1	src/server/deviceToolsStartDevice.ts	oxlint-disable-no-reason(auto-mobile/no-unknown-cast)
 1	src/daemon/listChangedBroadcast.ts	eslint(max-classes-per-file)

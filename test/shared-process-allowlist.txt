@@ -1451,7 +1451,6 @@ test/server/swipeOnSchema.test.ts
 test/server/talkBackReleaseDuringFocusNavigation.test.ts
 test/server/tasks/TaskManager.test.ts
 test/server/tasks/daemonTaskManager.test.ts
-test/server/tasks/runAsTask.test.ts
 test/server/tasks/taskLeaseKeepalive.test.ts
 test/server/tasks/taskRelay.test.ts
 test/server/tasks/tasksWireProtocol.test.ts

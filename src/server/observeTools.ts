@@ -31,6 +31,7 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
+  includeExtrasSchema,
 } from "../utils/schemaHelpers";
 import {
   hierarchyLayerSchema,
@@ -182,6 +183,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           .optional()
           .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
         raw: z.boolean().optional().describe("Include raw view hierarchy"),
+        includeExtras: includeExtrasSchema,
         screenshot: z
           .enum(["settled", "async", "none"])
           .optional()

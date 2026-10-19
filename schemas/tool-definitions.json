@@ -653,6 +653,10 @@
           "description": "SDK override TTL ms (default 5000)",
           "type": "number"
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -1779,6 +1783,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -1922,6 +1930,10 @@
           "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
           "enum": ["app", "prototype"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -4479,6 +4491,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -5054,6 +5070,10 @@
         },
         "prototype": {
           "description": "iOS simulator only: inject the prototype agent so the prototype tool can draw over this app. Always relaunches the app, losing its state. Rejected on physical iOS devices (use the in-app SDK), on Android (prototypes need no injection) and for com.apple.* apps.",
+          "type": "boolean"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
         },
         "raw": {
@@ -10235,6 +10255,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -10774,6 +10798,10 @@
         },
         "raw": {
           "description": "Include raw view hierarchy",
+          "type": "boolean"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
         },
         "screenshot": {
@@ -16440,6 +16468,10 @@
           "required": ["quietPeriodMs"],
           "additionalProperties": false
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -16673,6 +16705,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -16881,6 +16917,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -27345,6 +27385,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -28141,6 +28185,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -31393,6 +31441,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -31619,6 +31671,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -34475,6 +34531,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -35324,6 +35384,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -35542,6 +35606,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -35721,6 +35789,10 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"
@@ -35803,6 +35875,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -35934,6 +36010,10 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "image": {
           "description": "Screenshot-relative point; mutually exclusive with outer x, y, and coordinateSpace. Without image, x and y are required.",
@@ -36394,6 +36474,10 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -40438,6 +40522,10 @@
           "minLength": 1,
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "includeExtras": {
+          "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",

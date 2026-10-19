@@ -1,3 +1,4 @@
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { createExecResult } from "../../../src/utils/execResult";
 import { expect, spyOn, describe, test, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -226,10 +227,10 @@ Receiver Resolver Table:
     test.each([stderrWarning, ""])(
       "should parse a captured installed package with stderr %j",
       async (stderr) => {
-        fakeAdb.setCommandResponse(`dumpsys package '${playgroundAppId}'`, {
-          stdout: installedPackageDump,
-          stderr,
-        });
+        fakeAdb.setCommandResponse(
+          `dumpsys package '${playgroundAppId}'`,
+          createExecResult(installedPackageDump, stderr),
+        );
 
         const result = await deepLinkManager.getDeepLinks(playgroundAppId);
 
@@ -296,7 +297,7 @@ Receiver Resolver Table:
 
   describe("detectIntentChooser", () => {
     test("should detect intent chooser with ChooserActivity", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -304,14 +305,14 @@ Receiver Resolver Table:
             },
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should detect intent chooser with ResolverActivity", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -319,14 +320,14 @@ Receiver Resolver Table:
             },
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should detect intent chooser with 'Choose an app' text", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -334,14 +335,14 @@ Receiver Resolver Table:
             },
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should detect intent chooser with 'Always' and 'Just once' buttons", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
@@ -359,14 +360,14 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(true);
     });
 
     test("should not detect intent chooser in normal app screens", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
@@ -386,63 +387,63 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(false);
     });
 
     test("should handle malformed view hierarchy", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {},
-      };
+      });
 
       const detected = deepLinkManager.detectIntentChooser(viewHierarchy);
       expect(detected).toBe(false);
     });
 
     test("detects the chooser via the button_once resource id", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
             node: [{ $: { "resource-id": "android:id/button_once" } }],
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
 
     test("detects the chooser via the resolver_list resource id (substring match)", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { "resource-id": "com.android.internal:id/resolver_list" },
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
 
     test("detects an indicator that appears only in content-desc (text fallback)", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { "content-desc": "Just once" },
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(true);
     });
 
     test("requires an exact text match and ignores superstrings of an indicator", () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { text: "Just once please tap here" },
           },
         },
-      };
+      });
       expect(deepLinkManager.detectIntentChooser(viewHierarchy)).toBe(false);
     });
   });
@@ -466,7 +467,7 @@ Receiver Resolver Table:
     });
 
     test("should handle intent chooser with 'always' preference", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -483,7 +484,7 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       const result = await deepLinkManager.handleIntentChooser(viewHierarchy, "always");
 
@@ -493,7 +494,7 @@ Receiver Resolver Table:
     });
 
     test("should return success false when no intent chooser is detected", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -508,7 +509,7 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       // Reset mocks for this specific test
       mockParser.extractRootNodes = () => [
@@ -533,7 +534,7 @@ Receiver Resolver Table:
     });
 
     test("should handle ADB command failures during tap", async () => {
-      const viewHierarchy: ViewHierarchyResult = {
+      const viewHierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {
@@ -550,7 +551,7 @@ Receiver Resolver Table:
             ],
           },
         },
-      };
+      });
 
       // Create a failing fake for input tap commands
       const failingFake = new FakeAdbExecutor();

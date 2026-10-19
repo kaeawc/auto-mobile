@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { LaunchApp, amStartReportedFailure } from "../../../src/features/action/LaunchApp";
@@ -30,13 +31,14 @@ describe("LaunchApp live install confirmation (#9976)", () => {
   let staleStore: FakeInstalledAppsRepository;
   let staled: string[];
 
-  const observeResult = (appId: string): ObserveResult => ({
-    updatedAt: 0,
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-    activeWindow: { appId, activityName: "MainActivity", layoutSeqSum: 1 },
-  });
+  const observeResult = (appId: string): ObserveResult =>
+    buildObserveResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: {} } },
+      activeWindow: { appId, activityName: "MainActivity", layoutSeqSum: 1 },
+    });
 
   const createLaunchApp = (cachedApps: string[], appId: string = packageName): LaunchApp => {
     const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {

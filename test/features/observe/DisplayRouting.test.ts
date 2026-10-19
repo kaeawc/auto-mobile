@@ -1,3 +1,4 @@
+import { createHierarchyForTest } from "./observeScreenTestBuilders";
 import { createExecResult } from "../../../src/utils/execResult";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
@@ -176,12 +177,12 @@ describe("display read routing", () => {
 
   test("fresh Android hierarchy passes selected displayId to the sync client", async () => {
     let requestedDisplayId: number | undefined;
-    const hierarchy: ViewHierarchyResult = {
+    const hierarchy: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: { node: { bounds: { left: 0, top: 0, right: 20, bottom: 20 } } },
       screenWidth: 200,
       screenHeight: 200,
       displayId: 2,
-    };
+    });
     const capture = createDeviceHierarchyCapture(device, {
       syncClientFactory: () => ({
         requestHierarchySync: async (_perf, _raw, _signal, _timeout, _diagnostics, displayId) => {
@@ -304,14 +305,14 @@ describe("display read routing", () => {
                 right: systemInsets.right,
               },
             };
-      const hierarchy: ViewHierarchyResult = {
+      const hierarchy: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: { node: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } },
         displayId: isDefault ? 0 : 2,
         screenWidth: isDefault ? 100 : 200,
         screenHeight: isDefault ? 100 : 200,
         insets,
         ...(scenario === "unavailable" ? {} : { systemInsets }),
-      };
+      });
       const defaultHierarchy = new FakeViewHierarchy();
       defaultHierarchy.configureHierarchy(hierarchy);
       const requestedDisplayIds: Array<number | undefined> = [];
@@ -476,13 +477,13 @@ describe("display read routing", () => {
         "",
       ),
     );
-    const hierarchy: ViewHierarchyResult = {
+    const hierarchy: ViewHierarchyResult = createHierarchyForTest({
       hierarchy: { node: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } } },
       displayId: 2,
       screenWidth: 200,
       screenHeight: 200,
       captureSequence: 9,
-    };
+    });
     let hierarchyDisplayId: number | undefined;
     let hierarchyCaptures = 0;
     let screenshotDisplayId: number | undefined;
@@ -660,6 +661,7 @@ describe("display read routing", () => {
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);
       displayTransitions.notifyAndroidTransition(device.deviceId, {
         change: "device_state",
+        displayId: 0,
         deviceState: 1,
       });
       const fencedRevision = displayTransitions.revision(device.deviceId);
@@ -1189,6 +1191,7 @@ describe("all-display captures", () => {
     };
     displayTransitions.notifyAndroidTransition(device.deviceId, {
       change: "device_state",
+      displayId: 0,
       deviceState: 1,
     });
     const revision = displayTransitions.revision(device.deviceId);

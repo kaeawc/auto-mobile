@@ -11,7 +11,7 @@ import type {
   TaskLeaseHoldRequest,
   TaskLeaseKeepalive,
 } from "../../../src/daemon/tasks/taskLeaseKeepalive";
-import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
+import { TASK_ELIGIBILITY } from "../../../src/server/tasks/toolCallTasks";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import * as videoRecordingManager from "../../../src/server/videoRecordingManager";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -193,7 +193,7 @@ describe("executePlan as an MCP task (#13088)", () => {
   afterEach(teardown);
 
   test("executePlan is task-eligible beside startDevice", () => {
-    expect([...TASK_ELIGIBLE_TOOLS].sort()).toEqual(["executePlan", "installApp", "startDevice"]);
+    expect(TASK_ELIGIBILITY({ name: "executePlan", args: {} })).toEqual({ onCancel: "abort" });
   });
 
   test("a non-declaring call blocks for the plan result and creates no task", async () => {

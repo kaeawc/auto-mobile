@@ -69,7 +69,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     expect(result.success).toBe(true);
     expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: true });
     expect(typeof result.deviceLockWarning).toBe("string");
-    expect(result.deviceLockWarning.toLowerCase()).toContain("unlock");
+    expect(result.deviceLockWarning?.toLowerCase()).toContain("unlock");
   });
 
   test("swipe lock: warning points at dismissing the keyguard, not a PIN", async () => {
@@ -82,7 +82,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     );
 
     expect(result.deviceLock).toEqual({ locked: true, keyguardShowing: true, secure: false });
-    expect(result.deviceLockWarning.toLowerCase()).toContain("dismiss");
+    expect(result.deviceLockWarning?.toLowerCase()).toContain("dismiss");
   });
 
   test("unlocked device: no deviceLock annotation", async () => {

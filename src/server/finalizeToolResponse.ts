@@ -385,7 +385,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     };
   }
   const payload = envelopeView.payload;
-  const hasStructured = envelopeView.hasStructured;
+  // Internal callers and an explicit includeExtras opt-in keep accessibility
+  // `extras` in structuredContent; every other delivery strips them like the text.
+  const hasStructured = envelopeView.hasStructured && keepsStructuredExtras(ctx);
 
   const state = createFinalizationState(ctx, payload);
   const { isObserveTool } = state;
@@ -408,6 +410,10 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // and preserve the original envelope when compaction has nothing to remove.
   sanitizedPayload = compactRenderedPayload(ctx, payload, envelopeView.envelope, sanitizedPayload);
 
+  // Only rebuild when the cached complete and stripped renderings differ. This
+  // also covers non-observation payloads that otherwise take the early exit.
+  sanitizedPayload = stripStructuredExtras(ctx, envelopeView, serialization, sanitizedPayload);
+
   if (!sanitizedPayload) {
     commitDeliveredActionMetadata(ctx, payload, payload);
     return response;
@@ -423,6 +429,25 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   commitDeliveredBaseline(ctx, state.pendingBaselineUpdate, renderedDisplay);
 
   return response;
+}
+
+function keepsStructuredExtras(ctx: FinalizeToolResponseContext): boolean {
+  return ctx.internal === true || ctx.args?.includeExtras === true;
+}
+
+/** Strip extras from the delivered structuredContent unless the caller opted in. */
+function stripStructuredExtras(
+  ctx: FinalizeToolResponseContext,
+  view: { payload: Record<string, unknown>; hasStructured: boolean },
+  serialization: ToolResponseSerialization,
+  current: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!view.hasStructured || keepsStructuredExtras(ctx)) {
+    return current;
+  }
+  const delivered = current ?? view.payload;
+  const stripped = serialization.stripExtras(delivered);
+  return stripped === delivered ? current : stripped;
 }
 
 interface FinalizationState {

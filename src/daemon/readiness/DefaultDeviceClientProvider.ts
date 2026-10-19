@@ -1,27 +1,27 @@
-import { AndroidCtrlProxyManager, type CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
-import { IOSCtrlProxyManager, type CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
-import type { BootedDevice } from "../models";
-import type { ObserveScreenCache } from "../models/ObserveScreenCache";
-import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
+import { AndroidCtrlProxyManager, type CtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
+import { IOSCtrlProxyManager, type CtrlProxyIosManager } from "../../ctrlProxy/IOSCtrlProxyManager";
+import type { BootedDevice } from "../../models";
+import type { ObserveScreenCache } from "../../models/ObserveScreenCache";
+import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
-} from "../utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
-} from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import type { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
+} from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import type { PlatformDeviceManager } from "../../utils/interfaces/DeviceUtils";
 import type { DeviceClientProvider, DeviceClientSimctl } from "./DeviceReadiness";
 import {
   compareIdentityEvidence,
   deriveEvidenceFromBootedDevice,
   type IdentityEvidence,
   isUnresolvedAndroidEmulatorName,
-} from "./deviceIdentityEvidence";
-import { MultiPlatformDeviceManager } from "./deviceUtils";
+} from "../../devices/deviceIdentityEvidence";
+import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 
 type ClientWindow = ReturnType<DeviceClientProvider["getWindow"]>;
 type ClientAndroidProxy = ReturnType<DeviceClientProvider["getAndroidCtrlProxyClient"]>;

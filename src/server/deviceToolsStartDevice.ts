@@ -15,7 +15,7 @@ import {
   isAnonymousAcquisitionSession,
   type SessionRecoveryTarget,
 } from "../daemon/sessionManager";
-import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import type { DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 import { recordAcquiredSessionReadiness } from "./recordAcquiredSessionReadiness";
 import { requestAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";

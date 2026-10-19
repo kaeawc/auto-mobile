@@ -1,3 +1,3 @@
-import { ActionableError } from "../models";
+import { ActionableError } from "../../models";
 
 export class AndroidForwardReadinessConflictError extends ActionableError {}

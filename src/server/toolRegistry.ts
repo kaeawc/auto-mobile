@@ -1161,38 +1161,21 @@ export class ToolRegistryClass {
   }
 }
 
-// Export a singleton instance
-export const ToolRegistry = installDaemonToolRegistryPort(new ToolRegistryClass());
+// Install one instance; the exported value below also enforces its typed payload contract.
+const installedToolRegistry = installDaemonToolRegistryPort(new ToolRegistryClass());
 
 // --- Compile-time enforcement of AC1 (issue #3222) ---
-// AC1 is a *type* guarantee: `callInternalTyped(name, …)` must thread the concrete
-// payload type from `InternalToolPayloads` through the registry seam rather than
-// collapse back to the untyped `Promise<any>` of `callInternal`. The runtime tests
-// in `test/server/internalToolPayloads.test.ts` cannot pin this — bun's test runner
-// does not typecheck, and the `bun run typecheck` gate compiles only `src`
-// (`tsconfig.json` include), so an assertion in `test/` is never checked and would
-// pass even against an `any` regression. These type-only aliases live in `src` (and
-// beside the method they guard, to avoid a type-resolution cycle) so the gate DOES
-// fail if the seam regresses; they erase at build time (zero runtime cost).
-type _IsAny<T> = 0 extends 1 & T ? true : false;
-
-type _AssertTrue<T extends true> = T;
-
-type _ResolvedTypedEnvelope = NonNullable<
-  Awaited<ReturnType<typeof ToolRegistry.callInternalTyped>>
+// This contract is checked by the src typecheck gate. It rejects both an `any`
+// result and a result that no longer carries the concrete internal-tool payload.
+type IsAny<T> = 0 extends 1 & T ? true : false;
+type ResolvedTypedEnvelope = NonNullable<
+  Awaited<ReturnType<typeof installedToolRegistry.callInternalTyped>>
 >;
-// The aliases are referenced only by the compiler (their constraint check IS the
-// guard); they are intentionally unused at runtime, hence the disable.
-/* eslint-disable @typescript-eslint/no-unused-vars */
+type ValidatedToolRegistry =
+  IsAny<ResolvedTypedEnvelope> extends true
+    ? never
+    : ResolvedTypedEnvelope extends StructuredToolResponse<InternalToolPayloads[InternalToolName]>
+      ? typeof installedToolRegistry
+      : never;
 
-// Fails to compile if the resolved envelope widens to `any` (the seam stopped
-// threading the payload type)...
-type _Ac1ResultIsNotAny = _AssertTrue<_IsAny<_ResolvedTypedEnvelope> extends true ? false : true>;
-
-// ...or if it is no longer the concrete `StructuredToolResponse<…Payload>` envelope.
-type _Ac1ResultIsConcreteEnvelope = _AssertTrue<
-  _ResolvedTypedEnvelope extends StructuredToolResponse<InternalToolPayloads[InternalToolName]>
-    ? true
-    : false
->;
-/* eslint-enable @typescript-eslint/no-unused-vars */
+export const ToolRegistry = installedToolRegistry satisfies ValidatedToolRegistry;

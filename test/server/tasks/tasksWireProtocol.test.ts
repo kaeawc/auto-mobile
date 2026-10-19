@@ -8,7 +8,7 @@ import { TASKS_EXTENSION_ID } from "../../../src/server/tasks/mcpTasksExtension"
 import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
 import { currentTaskContext } from "../../../src/server/tasks/runAsTask";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { executionTracker } from "../../../src/server/executionTracker";
+import { executionTracker } from "../../../src/daemon/executionTracker";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeMcpTaskStore } from "../../fakes/FakeMcpTaskStore";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";

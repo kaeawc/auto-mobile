@@ -2,7 +2,7 @@ import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
-import type { ExecutionTracker } from "../server/executionTracker";
+import type { ExecutionTracker } from "./executionTracker";
 import type { DevicePool } from "./devicePool";
 import type { ActiveSessionExecutionQuery, SessionManager } from "./sessionManager";
 import type { SessionExecutionProbe } from "./unsettledExecutionVeto";

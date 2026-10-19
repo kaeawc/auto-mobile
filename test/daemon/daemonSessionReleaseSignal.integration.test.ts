@@ -18,7 +18,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 
 // Issue #4610: the daemon registers a release callback (next to the nav-graph /
 // observe-cache cleanup) that fans the released session key out to the

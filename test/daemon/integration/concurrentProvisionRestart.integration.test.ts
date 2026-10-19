@@ -9,7 +9,7 @@ import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manag
 import type { DaemonProcessSignaler } from "../../../src/daemon/processTable";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonOptions, DaemonStatus, PidFileData } from "../../../src/daemon/types";
-import { executionTracker } from "../../../src/server/executionTracker";
+import { executionTracker } from "../../../src/daemon/executionTracker";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { sendSocketRequest } from "../helpers/socketRequest";

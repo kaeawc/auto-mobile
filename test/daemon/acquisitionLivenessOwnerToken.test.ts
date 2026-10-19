@@ -7,7 +7,7 @@ import {
 } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 import {

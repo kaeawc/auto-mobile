@@ -40,7 +40,7 @@ import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { combineAbortSignals, runWithAbortSignal } from "../../utils/AbortContext";
-import { executionTracker } from "../executionTracker";
+import { executionTracker } from "../../daemon/executionTracker";
 import type {
   SessionlessDeviceRead,
   DeviceAwareToolOptions,

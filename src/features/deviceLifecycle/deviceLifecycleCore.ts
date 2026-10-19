@@ -73,9 +73,9 @@ import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { createPerformanceTracker } from "../../utils/PerformanceTracker";
 import { listActiveVideoRecordings, stopVideoRecording } from "../../server/videoRecordingManager";
 import { stopSegmentedVideoRecordingsForDevice } from "../../server/videoRecordingTools";
-import { executionTracker } from "../../server/executionTracker";
+import { executionTracker } from "../../daemon/executionTracker";
 import { getToolSelectionContext } from "../toolSelection/toolSelectionContext";
-import { unregisterDirectSessionsForStableIdentity } from "../../server/directSessionDeviceRegistry";
+import { unregisterDirectSessionsForStableIdentity } from "../../utils/directSessionDeviceRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { bindingPoolGate } from "../../daemon/sessionBroker/provisioning/poolGate";
@@ -99,8 +99,8 @@ import { terminateColdBootProcess } from "../../devices/coldBootProcessTerminati
 
 import { z } from "zod/v4";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
-import { enableToolsSchemaField } from "../../server/toolSelectionTools";
-import { deviceResourceConfigurationSchema } from "../../server/deviceResourceSchemas";
+import { enableToolsSchemaField } from "../toolSelection/enableToolsSchemaField";
+import { deviceResourceConfigurationSchema } from "../../utils/deviceResourceSchemas";
 import {
   DefaultDeviceResourceController,
   type DeviceResourceController,
@@ -117,15 +117,13 @@ import {
 } from "../../models/DeviceResourceConfiguration";
 import { PlatformDeviceManagerFactory } from "../../utils/factories/PlatformDeviceManagerFactory";
 import { type DeviceMatchCriteria, type FormFactor } from "../../models/DeviceMatchCriteria";
+import { notifyBootedDeviceResourcesUpdated } from "../../server/bootedDeviceResources";
+import { notifyDeviceImageResourcesUpdated } from "../../server/deviceImageResources";
 import {
-  BOOTED_DEVICE_RESOURCE_URIS,
-  notifyBootedDeviceResourcesUpdated,
-} from "../../server/bootedDeviceResources";
-import {
-  DEVICE_IMAGE_RESOURCE_URIS,
   ANDROID_INVENTORY_RETRY_AFTER_MS,
-  notifyDeviceImageResourcesUpdated,
-} from "../../server/deviceImageResources";
+  BOOTED_DEVICE_RESOURCE_URIS,
+  DEVICE_IMAGE_RESOURCE_URIS,
+} from "../../constants/deviceResourceUris";
 import {
   configuredImageForBootedDevice,
   configuredImagesByStableId,
@@ -134,12 +132,12 @@ import {
 import { AvdManagerService } from "../../utils/android-cmdline-tools/AvdManagerService";
 import { type AvdManager } from "../../utils/android-cmdline-tools/interfaces/AvdManager";
 import { type AvdInfo } from "../../utils/android-cmdline-tools/avdmanager";
-import { projectListDevicesEntry, poolHoldFor } from "../../server/deviceDescription";
+import { projectListDevicesEntry, poolHoldFor } from "../../daemon/deviceDescription";
 import {
   describeInventoryDevice,
   transitionalHoldInputs,
   type TransitionalHold,
-} from "../../server/inventoryDeviceDescription";
+} from "../../daemon/inventoryDeviceDescription";
 import {
   type AppResourceDependencies,
   notifyInstalledAppResourceListChanged,
@@ -178,7 +176,7 @@ import {
   requestAcquisitionReceipt,
   type AcquisitionReceipt,
 } from "../../daemon/acquisitionReceipt";
-import { undoUndeliveredAcquisition } from "../../server/undeliveredAcquisition";
+import { undoUndeliveredAcquisition } from "../../daemon/acquisitionUndo";
 import {
   AndroidAvdProvenanceCache,
   CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
@@ -226,7 +224,7 @@ import { DeviceTeardownService } from "../../devices/deviceTeardownService";
 import {
   androidProvisionDeviceSpecSchema,
   iosProvisionDeviceSpecSchema,
-} from "../../server/provisionDeviceSpecSchemas";
+} from "../../utils/provisionDeviceSpecSchemas";
 import { mergeDeviceToolsDependencies } from "./deviceLifecycleDependencyOverrides";
 export {
   provisionDeviceDependencyOverrides,

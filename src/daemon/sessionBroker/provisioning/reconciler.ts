@@ -23,7 +23,7 @@ import type { DeviceInfo } from "../../../models/index";
 import type { BindingBudgetEvidence } from "./acquisitionResult";
 import type { FormFactor } from "../../../models/DeviceMatchCriteria";
 import { androidProfileFormFactor } from "../../../models/formFactor";
-import type { BindingDeviceFamily } from "../../../server/provisionDeviceSpecSchemas";
+import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import { inferIosFormFactor } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { evaluateRuntimeCompatibility } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
 import type {

@@ -36,7 +36,7 @@ import {
   refuseControlOnForeignOwnedSession,
 } from "../foreignOwnedSessionRefusal";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
-import { executionTracker } from "../executionTracker";
+import { executionTracker } from "../../daemon/executionTracker";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,

@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { readMcpSessionKey } from "../server/mcpSessionKey";
-import type { ExecutionCancellationReason } from "../server/executionTracker";
+import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";

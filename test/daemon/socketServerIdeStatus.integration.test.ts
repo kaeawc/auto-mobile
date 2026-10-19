@@ -26,7 +26,7 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
 import { RELEASE_CHECKSUM_REGISTRY, IOS_CTRL_PROXY_APP_HASH } from "../../src/constants/release";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import {
   DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,

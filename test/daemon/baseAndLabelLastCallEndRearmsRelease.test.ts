@@ -11,7 +11,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import type { BootedDevice } from "../../src/models";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";

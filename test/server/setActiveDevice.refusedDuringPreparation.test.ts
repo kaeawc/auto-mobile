@@ -9,7 +9,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, Platform } from "../../src/models";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import {
   listDevicesOutputSchema,
   registerDeviceTools,

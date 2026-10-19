@@ -16,7 +16,7 @@ import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { setCtrlProxyForwardLeaseOwnerSocketPath } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { createTestDatabase } from "../db/testDbHelper";

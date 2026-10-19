@@ -6,7 +6,7 @@ import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {

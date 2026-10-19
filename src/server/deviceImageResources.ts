@@ -1,3 +1,8 @@
+import {
+  DEVICE_IMAGE_RESOURCE_URIS,
+  ANDROID_INVENTORY_RETRY_AFTER_MS,
+} from "../constants/deviceResourceUris";
+export { DEVICE_IMAGE_RESOURCE_URIS, ANDROID_INVENTORY_RETRY_AFTER_MS };
 import { registerAndroidInventoryCatalogInvalidator } from "../utils/AndroidInventoryInvalidation";
 export { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -35,14 +40,17 @@ import {
   type ConfiguredDeviceInventoryObservation,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
-import { describeDevice, projectConfiguredImage, type ConfiguredImage } from "./deviceDescription";
+import {
+  describeDevice,
+  projectConfiguredImage,
+  type ConfiguredImage,
+} from "../daemon/deviceDescription";
 import { TTLCache } from "../utils/cache/Cache";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 
 /** Per-read response budget; the shared fetch has its own lifecycle and hard cap. */
 export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
 export const ANDROID_INVENTORY_BACKGROUND_CAP_MS = 30_000;
-export const ANDROID_INVENTORY_RETRY_AFTER_MS = 1_000;
 // The stage includes configured images, so it uses the same 2.5s freshness bound.
 export const ANDROID_INVENTORY_STAGE_TTL_MS = 2_500;
 
@@ -99,10 +107,6 @@ function resetAndroidResourceCacheStates(): void {
 }
 
 // Resource URIs
-export const DEVICE_IMAGE_RESOURCE_URIS = {
-  ALL_IMAGES: "automobile:devices/images",
-  PLATFORM_TEMPLATE: "automobile:devices/images/{platform}",
-} as const;
 
 // Device image info for resource response
 export type DeviceImageInfo = ConfiguredImage;

@@ -6,9 +6,9 @@ import {
   listDevicesEntrySchema,
   provisionedDeviceSchema,
   configuredImageSchema,
-} from "./deviceDescription";
+} from "../daemon/deviceDescription";
 import { platformSchema, addSessionUuidToSchema } from "../utils/schemaHelpers";
-import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
+import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createProvisionDeviceHandlers } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";

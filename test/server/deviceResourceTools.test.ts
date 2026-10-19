@@ -13,7 +13,7 @@ import {
   deviceResourceConfigurationSchema,
   reconcileDeviceResourcesSchema,
   setDeviceResourcesSchema,
-} from "../../src/server/deviceResourceSchemas";
+} from "../../src/utils/deviceResourceSchemas";
 import { FakeDeviceResourceReconciler } from "../fakes/FakeDeviceResourceReconciler";
 import { DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {

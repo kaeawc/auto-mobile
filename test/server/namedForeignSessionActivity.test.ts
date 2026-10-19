@@ -11,7 +11,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";

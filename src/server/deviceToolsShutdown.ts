@@ -26,7 +26,7 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import {
   resolveDirectSessionDevice,
   unregisterDirectSessionsForDevice,
-} from "./directSessionDeviceRegistry";
+} from "../utils/directSessionDeviceRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { DeviceShutdownService } from "../devices/deviceShutdownService";

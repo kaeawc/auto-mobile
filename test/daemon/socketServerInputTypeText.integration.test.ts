@@ -26,7 +26,7 @@ import {
   deviceIncarnationToken,
   setDeviceIncarnationResolver,
 } from "../../src/utils/deviceIncarnation";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
 import { spyOnIosTestClientInstance } from "../helpers/iosCtrlProxyClientSpies";

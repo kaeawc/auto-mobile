@@ -26,7 +26,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { setDebugModeEnabled } from "../../src/utils/debug";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import {
   getToolSelectionContext,

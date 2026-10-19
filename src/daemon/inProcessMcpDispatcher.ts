@@ -1,7 +1,7 @@
 import { AsyncResource } from "node:async_hooks";
 import type { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, type McpServer } from "@modelcontextprotocol/server";
-import type { ExecutionCancellationReason } from "../server/executionTracker";
+import type { ExecutionCancellationReason } from "./executionTracker";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
@@ -13,7 +13,7 @@ import { JsonBoundaryTransport } from "./jsonBoundaryTransport";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
   buildMcpRequestContext,

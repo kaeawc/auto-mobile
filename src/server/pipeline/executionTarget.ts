@@ -22,12 +22,12 @@ import {
 import { createToolExecutionContext } from "../ToolExecutionContext";
 import { resolveTransportDeadlineMs } from "../transportDeadline";
 import { getDeviceLabelMap } from "../deviceLabelMapping";
-import { resolveDirectSessionDevice } from "../directSessionDeviceRegistry";
+import { resolveDirectSessionDevice } from "../../utils/directSessionDeviceRegistry";
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../../daemon/internalToolCall";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../executionTracker";
+import { executionTracker } from "../../daemon/executionTracker";
 import type { SessionlessDeviceRead, DeviceAwareToolOptions } from "../toolRegistry";
 import {
   markDeviceCallKind,

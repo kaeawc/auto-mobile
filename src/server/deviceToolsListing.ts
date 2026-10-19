@@ -17,7 +17,7 @@ import {
   createConfiguredInventoryContract,
   projectConfiguredDeviceInventory,
 } from "../utils/configuredDeviceInventory";
-import { describeDevice, projectConfiguredImage } from "./deviceDescription";
+import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescription";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
@@ -26,7 +26,7 @@ import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/dev
 import { hydrateRequiredDisplayInventories } from "../devices/DisplayInventoryProvider";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
-import type { TransitionalHold } from "./inventoryDeviceDescription";
+import type { TransitionalHold } from "../daemon/inventoryDeviceDescription";
 import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 import {
   ListDeviceImagesArgs,

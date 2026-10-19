@@ -1,6 +1,6 @@
 import { holderOf } from "../daemon/deviceBinding";
 import { defaultDaemonContext } from "../daemon/daemonContext";
-import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
+import { resolveDirectSessionDevice } from "../utils/directSessionDeviceRegistry";
 import type { BootedDevice } from "../models";
 
 /**

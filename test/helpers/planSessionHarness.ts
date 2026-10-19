@@ -5,7 +5,7 @@ import { registerDerivedLabelSessionReleaseCascade } from "../../src/daemon/deri
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import * as videoRecordingManager from "../../src/server/videoRecordingManager";

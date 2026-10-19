@@ -45,7 +45,7 @@ import {
 } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";

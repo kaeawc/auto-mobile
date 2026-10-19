@@ -3,7 +3,7 @@ import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionMa
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { ExecutionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { ExecutionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

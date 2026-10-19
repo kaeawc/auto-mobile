@@ -1,4 +1,4 @@
-import { deviceDescriptionSchema } from "./deviceDescription";
+import { deviceDescriptionSchema } from "../daemon/deviceDescription";
 import { deviceClockInputSchema } from "../features/utility/DeviceClock";
 import {
   biometricEnrollmentSchema,

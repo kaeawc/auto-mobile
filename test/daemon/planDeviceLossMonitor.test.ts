@@ -7,7 +7,7 @@ import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossDetectionPath,
 } from "../../src/daemon/emulatorLossIncident";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   deviceLossOutcomeFromError,
   enrichDeviceLossOutcome,

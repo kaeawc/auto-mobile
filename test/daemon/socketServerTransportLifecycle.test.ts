@@ -12,7 +12,7 @@ import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { daemonSessionToolBindingStore } from "../../src/server/daemonSessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {

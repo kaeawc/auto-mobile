@@ -9,7 +9,7 @@ import type { ManagedExecutionReownRegistry } from "../../../helpers/deferredPro
 import { DeviceSessionManager } from "../../../../src/devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../../../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { resetDbWriteBarrier } from "../../../../src/db/dbWriteBarrier";
-import { executionTracker } from "../../../../src/server/executionTracker";
+import { executionTracker } from "../../../../src/daemon/executionTracker";
 import { logger } from "../../../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceSessionRepository } from "../../../fakes/FakeDeviceSessionRepository";

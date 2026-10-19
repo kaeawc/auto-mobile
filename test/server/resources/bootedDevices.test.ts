@@ -54,7 +54,7 @@ import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
-import { describeDevice, listDevicesEntrySchema } from "../../../src/server/deviceDescription";
+import { describeDevice, listDevicesEntrySchema } from "../../../src/daemon/deviceDescription";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";
 import {

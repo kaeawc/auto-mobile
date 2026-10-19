@@ -24,7 +24,7 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";

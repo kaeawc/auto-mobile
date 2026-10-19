@@ -8,7 +8,7 @@ import {
   listDevicesEntrySchema,
   type DeviceDescription,
   type DeviceDescriptionInput,
-} from "../../src/server/deviceDescription";
+} from "../../src/daemon/deviceDescription";
 import type { DeviceInfo } from "../../src/models";
 
 type Assert<T extends true> = T;

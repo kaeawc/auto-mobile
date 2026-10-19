@@ -7,7 +7,7 @@ import {
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";

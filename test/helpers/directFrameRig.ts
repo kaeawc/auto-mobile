@@ -14,7 +14,7 @@ import type { FeatureFlagKey } from "../../src/features/featureFlags/FeatureFlag
 import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

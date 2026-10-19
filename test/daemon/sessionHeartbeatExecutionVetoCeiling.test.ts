@@ -8,7 +8,7 @@ import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettle
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

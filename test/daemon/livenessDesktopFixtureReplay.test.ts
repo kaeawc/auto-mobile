@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { PIXEL, PIXEL_FOLD, type WireFixture } from "./helpers/desktopWireHarness";
 

@@ -11,7 +11,7 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../../src/server/deviceTools";
-import { clearDirectSessionDevices } from "../../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { SessionToolBindingStore } from "../../../src/server/sessionToolBindingStore";
 import {

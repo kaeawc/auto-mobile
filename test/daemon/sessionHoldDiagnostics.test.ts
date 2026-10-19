@@ -19,7 +19,7 @@ import {
 } from "../../src/daemon/unsettledExecutionVeto";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonRequest } from "../../src/daemon/types";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";

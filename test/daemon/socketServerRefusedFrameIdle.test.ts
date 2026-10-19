@@ -23,7 +23,7 @@ import { drainUntil, drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/
 import { InputKey } from "../../src/features/action/InputKey";
 import { PressButton } from "../../src/features/action/PressButton";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

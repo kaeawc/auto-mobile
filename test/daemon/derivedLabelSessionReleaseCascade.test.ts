@@ -10,7 +10,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { sessionReleaseThatCancelledCall } from "../../src/daemon/sessionReleasedDuringCall";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

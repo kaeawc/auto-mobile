@@ -38,7 +38,7 @@ import {
 } from "../../src/daemon/sessionLivenessWindows";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import type { DeferredRebindCleanup } from "../../src/daemon/acquisitionReceipt";

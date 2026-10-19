@@ -8,7 +8,10 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { z } from "zod/v4";
 import type { DeviceToolsDependencies } from "./deviceTools";
-import { reconcileDeviceResourcesSchema, setDeviceResourcesSchema } from "./deviceResourceSchemas";
+import {
+  reconcileDeviceResourcesSchema,
+  setDeviceResourcesSchema,
+} from "../utils/deviceResourceSchemas";
 import type { BootedDevice } from "../models/DeviceInfo";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";

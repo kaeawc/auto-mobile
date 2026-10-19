@@ -16,6 +16,7 @@ import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "./fakeTimerStepping";
 import {
@@ -138,13 +139,16 @@ export function createDirectFrameRig(
   });
 
   const updateServiceSpy = client.updateService
-    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation((device) => ({
-        ensureCompatibleVersion: async () => {
+    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation((device) => {
+        const manager = new FakeCtrlProxyManager();
+        const ensureCompatibleVersion = manager.ensureCompatibleVersion.bind(manager);
+        manager.ensureCompatibleVersion = async (options) => {
           deviceCalls.push(`${device.deviceId}:updateService`);
           await client.updateService?.();
-          return { status: "compatible" };
-        },
-      }))
+          return ensureCompatibleVersion(options);
+        };
+        return manager;
+      })
     : undefined;
 
   const fakePool = {

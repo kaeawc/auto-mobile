@@ -41,6 +41,7 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { withStaleDisplay } from "../observe/StaleDisplayError";
+import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
@@ -758,7 +759,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.assertDisplayRevisionCurrent(transitionRevision);
       this.assertSnapshotCurrent(options, refreshed);
       const retry = this.resolveFreshFrameRetry(options, point, observation, refreshed);
-      if (!retry) {
+      if (!retry || !isAdoptableCapture(observation, refreshed, true)) {
         throw actionable;
       }
       // No loop: a second stale rejection surfaces to the caller.
@@ -1049,7 +1050,9 @@ export class TapAtCoordinate extends BaseVisualChange {
       resolved.y !== point.y ||
       !this.hasSafeRetryLayout(options, initial, refreshed) ||
       !frameContext ||
-      frameContext === initial.viewHierarchy?.frameContext
+      // iOS tokens identify semantic state, not captures. A genuinely fresh capture can
+      // repeat the rejected token after transient post-gesture UI settles (#13437).
+      (this.device.platform !== "ios" && frameContext === initial.viewHierarchy?.frameContext)
     ) {
       return undefined;
     }

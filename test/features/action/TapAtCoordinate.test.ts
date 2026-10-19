@@ -498,7 +498,11 @@ describe("TapAtCoordinate", () => {
         "CtrlProxy iOS tap failed: Command execution failed: Stale frame context; observe a fresh frame before retrying",
       );
 
-    function createIosTapAt(runnerFrames: string[], observations: ObserveResult[]) {
+    function createIosTapAt(
+      runnerFrames: string[],
+      observations: ObserveResult[],
+      snapshotReferences?: SnapshotReferenceStore,
+    ) {
       const sent: Array<string | undefined> = [];
       const observeScreen = new FakeObserveScreen();
       observeScreen.setObserveSequence(observations);
@@ -509,6 +513,7 @@ describe("TapAtCoordinate", () => {
       };
       const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
         timer,
+        snapshotReferences,
         androidClient: unused,
         iosClient: unused,
         invalidateIosCache: () => {},
@@ -540,6 +545,89 @@ describe("TapAtCoordinate", () => {
           .slice(0, 2)
           .map((options) => options.freshness),
       ).toEqual(["cached-ok", "fresh"]);
+    });
+
+    test("retries a freshly captured iOS frame even when its semantic context is unchanged", async () => {
+      const runnerFrames: string[] = [];
+      const cached = observation(100, 200, "epoch:1");
+      const { tapAt, observeScreen, sent } = createIosTapAt(runnerFrames, [cached]);
+      observeScreen.setObserveResult((index) => {
+        // The first dispatch catches transient post-pinch UI. A fresh capture sees the
+        // original semantic state again; iOS contexts identify state, not each capture.
+        if (index > 0) {
+          runnerFrames.push("epoch:1");
+        }
+        return { ...cached, timestamp: index + 1 };
+      });
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result).toMatchObject({ success: true, x: 10, y: 20 });
+      expect(sent).toEqual(["epoch:1", "epoch:1"]);
+      expect(
+        observeScreen
+          .getExecuteOptions()
+          .slice(0, 2)
+          .map(({ freshness }) => freshness),
+      ).toEqual(["cached-ok", "fresh"]);
+    });
+
+    test("bounds recovery to one retry when the same iOS context is still rejected", async () => {
+      const { tapAt, sent } = createIosTapAt([], [observation(100, 200, "epoch:1")]);
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Stale frame context");
+      expect(sent).toEqual(["epoch:1", "epoch:1"]);
+    });
+
+    test.each(["stale", "unverified"])(
+      "does not retry an explicitly %s fresh-observe fallback",
+      async (verdict) => {
+        const cached = observation(100, 200, "epoch:1");
+        const refreshed = {
+          ...cached,
+          freshness: {
+            ...computeFreshness({ hierarchy: cached.viewHierarchy, nowMs: 1 }),
+            isFresh: verdict !== "stale",
+            verified: verdict !== "unverified",
+          },
+        };
+        const { tapAt, sent } = createIosTapAt([], [cached, refreshed]);
+
+        const result = await tapAt.execute({ x: 10, y: 20 });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Stale frame context");
+        expect(sent).toEqual(["epoch:1"]);
+      },
+    );
+
+    test("rejects an explicit snapshot that becomes stale during the iOS refresh", async () => {
+      const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const captured: ObserveResult = {
+        ...observation(100, 200, "epoch:1"),
+        display: { key: "main", role: "unknown" },
+      };
+      const capture = references.capture(iosDevice.deviceId, captured);
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      const { tapAt, sent } = createIosTapAt(
+        [],
+        [captured, { ...captured, screenSize: { width: 200, height: 100 } }],
+        references,
+      );
+      const result = await tapAt.execute({
+        x: 10,
+        y: 20,
+        snapshotId: capture.reference.snapshotId,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Snapshot reference is stale (width changed)");
+      expect(sent).toEqual(["epoch:1"]);
     });
 
     test("retries only once and never when the fresh layout differs", async () => {

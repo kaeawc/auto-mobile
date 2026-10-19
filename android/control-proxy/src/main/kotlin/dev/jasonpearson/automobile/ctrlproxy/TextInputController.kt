@@ -13,7 +13,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.put
 
 /**
  * Accessibility-driven text input: set text, insert text at the caret, IME actions and select all,
@@ -65,9 +67,17 @@ internal class TextInputController(
   interface ResponseSender {
     fun isRunning(): Boolean
 
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
+    suspend fun broadcastWithPerf(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    )
 
-    suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String)
+    suspend fun broadcastWithPerfSync(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    )
 
     fun connectionCount(): Int
   }
@@ -116,8 +126,9 @@ internal class TextInputController(
           node?.recycle()
         }
       resultBroadcaster.guard(requestId, "insert_text_state_result") {
-        responseSender.broadcastWithPerfSync { perfTiming ->
-          insertTextStateResultFrame(requestId, state, perfTiming)
+        responseSender.broadcastWithPerfSync("insert_text_state_result", requestId) {
+          put("success", true)
+          if (state != null) put("state", jsonCompact.encodeToJsonElement(state))
         }
       }
     }
@@ -947,8 +958,12 @@ internal class TextInputController(
     }
 
     resultBroadcaster.guard(requestId, "set_text_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        setTextResultFrame(requestId, success, error, totalTimeMs, perfTiming)
+      responseSender.broadcastWithPerfSync("set_text_result", requestId) {
+        put("success", success)
+        put("totalTimeMs", totalTimeMs)
+        if (error != null) {
+          put("error", error)
+        }
       }
       Log.d(TAG, "Broadcasted set text result to ${responseSender.connectionCount()} clients")
     }
@@ -971,18 +986,17 @@ internal class TextInputController(
     }
 
     resultBroadcaster.guard(requestId, "insert_text_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        insertTextResultFrame(
-          requestId,
-          success,
-          error,
-          totalTimeMs,
-          warning,
-          caretPlaced,
-          resultingTextLength,
-          partialApplication,
-          perfTiming,
-        )
+      responseSender.broadcastWithPerfSync("insert_text_result", requestId) {
+        InsertTextResultBody(
+            success = success,
+            totalTimeMs = totalTimeMs,
+            error = error,
+            warning = warning,
+            caretPlaced = caretPlaced,
+            resultingTextLength = resultingTextLength,
+            partialApplication = partialApplication,
+          )
+          .putInto(this)
       }
     }
   }
@@ -1002,16 +1016,14 @@ internal class TextInputController(
     }
 
     resultBroadcaster.guard(requestId, "ime_action_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        imeActionResultFrame(
-          requestId,
-          action,
-          success,
-          error,
-          totalTimeMs,
-          approximated,
-          perfTiming,
-        )
+      responseSender.broadcastWithPerf("ime_action_result", requestId) {
+        if (approximated != null) put("approximated", approximated)
+        put("action", action)
+        put("success", success)
+        put("totalTimeMs", totalTimeMs)
+        if (error != null) {
+          put("error", error)
+        }
       }
       Log.d(TAG, "Broadcasted IME action result to ${responseSender.connectionCount()} clients")
     }
@@ -1030,8 +1042,12 @@ internal class TextInputController(
     }
 
     resultBroadcaster.guard(requestId, "select_all_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        selectAllResultFrame(requestId, success, error, totalTimeMs, perfTiming)
+      responseSender.broadcastWithPerf("select_all_result", requestId) {
+        put("success", success)
+        put("totalTimeMs", totalTimeMs)
+        if (error != null) {
+          put("error", error)
+        }
       }
       Log.d(TAG, "Broadcasted select all result to ${responseSender.connectionCount()} clients")
     }

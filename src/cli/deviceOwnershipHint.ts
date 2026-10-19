@@ -1,5 +1,5 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
-import { isDeviceSessionAcquisitionTool } from "../server/deviceSessionResult";
+import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,

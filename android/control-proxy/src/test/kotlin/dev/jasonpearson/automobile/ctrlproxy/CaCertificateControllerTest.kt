@@ -6,10 +6,9 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -425,17 +424,16 @@ class CaCertificateControllerTest {
 
     override fun isRunning() = running
 
-    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
+    override suspend fun broadcastWithPerf(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    ) {
       failure?.let { throw it }
       assertTrue(running)
       // Match production's flush-before-build ordering, without opening a WebSocket server.
-      val frame = Json.parseToJsonElement(messageBuilder(perfProvider.flush())).jsonObject
-      frames +=
-        CapturedFrame(
-          frame.getValue("type").jsonPrimitive.content,
-          frame["requestId"]?.jsonPrimitive?.content,
-          JsonObject(frame - setOf("type", "timestamp", "requestId", "perfTiming")),
-        )
+      perfProvider.flush()
+      frames += CapturedFrame(type, requestId, buildJsonObject(buildContent))
     }
 
     override fun getConnectionCount(): Int {

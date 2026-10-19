@@ -217,7 +217,6 @@ class SetTextAcknowledgementOrderTest {
       "insert acknowledgements must be synchronous",
       "responseSender.broadcastWithPerfSync" in broadcaster,
     )
-    assertTrue("must route through the typed frame", "insertTextResultFrame(" in broadcaster)
     for (field in
       listOf(
         "success",
@@ -228,7 +227,7 @@ class SetTextAcknowledgementOrderTest {
         "resultingTextLength",
         "partialApplication",
       )) {
-      assertTrue("$field must reach the typed frame", Regex("\\b$field\\b") in broadcaster)
+      assertTrue("$field must reach the typed body", "$field = $field" in broadcaster)
     }
   }
 

@@ -19,7 +19,7 @@ import {
   type ResourceContent,
   type ResourceReadContext,
 } from "../../../src/server/resourceRegistry";
-import { ResourceUpdatedBroadcaster } from "../../../src/server/listChangedBroadcast";
+import { ResourceUpdatedBroadcaster } from "../../../src/daemon/listChangedBroadcast";
 import {
   registerNavigationResources,
   setNavigationGraphProvider,

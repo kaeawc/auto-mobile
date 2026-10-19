@@ -8,7 +8,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.put
 
 /** Clipboard copy/get/clear/paste requests, with platform and socket access supplied per call. */
 internal class ClipboardController(
@@ -23,7 +24,11 @@ internal class ClipboardController(
   interface ResponseSender {
     fun isRunning(): Boolean
 
-    suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
+    suspend fun broadcastWithPerf(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    )
 
     fun connectionCount(): Int
   }
@@ -184,8 +189,16 @@ internal class ClipboardController(
     }
 
     resultBroadcaster.guard(requestId, "clipboard_result") {
-      responseSender.broadcastWithPerf { perfTiming ->
-        clipboardResultFrame(requestId, action, success, text, error, totalTimeMs, perfTiming)
+      responseSender.broadcastWithPerf("clipboard_result", requestId) {
+        put("action", action)
+        put("success", success)
+        put("totalTimeMs", totalTimeMs)
+        if (text != null) {
+          put("text", text)
+        }
+        if (error != null) {
+          put("error", error)
+        }
       }
       Log.d(TAG, "Broadcasted clipboard result to ${responseSender.connectionCount()} clients")
     }

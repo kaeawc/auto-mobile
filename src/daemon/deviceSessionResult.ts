@@ -1,17 +1,17 @@
-import { idleReleaseField } from "../daemon/releaseReasons";
+import { idleReleaseField } from "./releaseReasons";
 import {
   ACQUIRE_NEW_SESSION_NEXT_ACTION,
   DEVICE_SESSION_RECOVERY_TOOLS,
 } from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
-import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
+import type { SessionReleaseSnapshot } from "./sessionManager";
 import {
   SESSION_OWNERSHIP_LOST_CODE,
   sessionReleaseThatCancelledCall,
-} from "../daemon/sessionReleasedDuringCall";
-import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
-import { SUSPECT_GRACE_MS } from "../daemon/sessionLivenessWindows";
+} from "./sessionReleasedDuringCall";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
@@ -59,6 +59,18 @@ export function appendHeartbeatExpiryMessage(
   const limitMs =
     release.releaseReason === "heartbeat-timeout" ? timeoutMs + SUSPECT_GRACE_MS : timeoutMs;
   return `${message} No heartbeat for ${ageMs} ms (limit ${limitMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
+}
+
+export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
+  return {
+    error: {
+      code: "no_active_device_session",
+      message: error.message,
+      reason: error.reason,
+      ...idleReleaseField(error.reason),
+      ...terminalSessionRefusalFields(),
+    },
+  };
 }
 
 /**

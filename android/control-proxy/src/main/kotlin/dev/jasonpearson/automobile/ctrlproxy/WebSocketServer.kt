@@ -217,9 +217,6 @@ class WebSocketServer(
         is PinchResult -> response.requestId
         is SetTextResult -> response.requestId
         is CommitTextResult -> response.requestId
-        is InsertTextResult -> response.requestId
-        is InsertTextStateResult -> response.requestId
-        is CancelImeCommitResult -> response.requestId
         is SetKeyboardProfileResult -> response.requestId
         is SetNetworkMockRulesResult -> response.requestId
         is KeyboardProfileCatalogResult -> response.requestId
@@ -256,7 +253,6 @@ class WebSocketServer(
         is HierarchyUpdateEvent -> response.requestId
         // Other event/status frames never echo a requestId.
         is ConnectedResponse,
-        is DisplayTransitionEvent,
         is PrototypeEvent,
         is InteractionEvent,
         is PackageEvent,

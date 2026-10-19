@@ -11,7 +11,7 @@ import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
   type ServerRegistrationOptions,
-} from "./listChangedBroadcast";
+} from "../daemon/listChangedBroadcast";
 import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
 
 export interface ResourceReadContext {

@@ -73,9 +73,9 @@ import * as inputOwnedError from "../../src/models/InputDeviceOwnedError";
 import * as deviceAssignedToBinding from "../../src/models/DeviceAssignedToBindingError";
 import * as brokerConnectionRefusals from "../../src/daemon/sessionBroker/connectionRefusal";
 import * as bootCapacity from "../../src/models/BootCapacityExhaustedError";
-import * as boundSessionRefusal from "../../src/server/deviceOutsideBoundSessionRefusal";
-import * as deviceOutsideBoundSession from "../../src/server/DeviceOutsideBoundSessionError";
-import * as sessionOutsideBoundSession from "../../src/server/SessionOutsideBoundSessionError";
+import * as boundSessionRefusal from "../../src/daemon/deviceOutsideBoundSessionRefusal";
+import * as deviceOutsideBoundSession from "../../src/daemon/DeviceOutsideBoundSessionError";
+import * as sessionOutsideBoundSession from "../../src/daemon/SessionOutsideBoundSessionError";
 import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
 import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
 import * as daemonTypes from "../../src/daemon/types";
@@ -86,7 +86,7 @@ import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
-import * as toolUnavailable from "../../src/server/toolUnavailableError";
+import * as toolUnavailable from "../../src/daemon/toolUnavailableError";
 import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
@@ -211,7 +211,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,
-  "server/toolUnavailableError": toolUnavailable,
+  "daemon/toolUnavailableError": toolUnavailable,
   "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
 };
 

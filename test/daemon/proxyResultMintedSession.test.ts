@@ -818,13 +818,11 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       manager.statusResult = { running: false };
       const boundMs = DAEMON_SHUTDOWN_TIMEOUT_MS + DAEMON_RESTART_HANDOFF_TIMEOUT_MS;
       await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS - 1);
-      expect(Reflect.get(Reflect.get(proxy, "daemonShutdownBarrier"), "pending")).toBeInstanceOf(
-        Promise,
-      );
+      expect(Reflect.get(proxy, "daemonShutdownDisconnect")).toBeInstanceOf(Promise);
       await timer.advanceTimeAsync(1);
       await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
       expect(timer.now()).toBe(boundMs);
-      expect(Reflect.get(Reflect.get(proxy, "daemonShutdownBarrier"), "pending")).toBeNull();
+      expect(Reflect.get(proxy, "daemonShutdownDisconnect")).toBeNull();
       expect(settled).toBe(true);
       expect(error).toMatchObject({ reason: "daemon_stalled", handover: { attempts: 3 } });
       expect(manager.startCallCount).toBe(0);

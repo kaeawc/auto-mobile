@@ -67,8 +67,7 @@ data class HierarchyUpdateEvent(
 @SerialName("interaction_event")
 data class InteractionEvent(
   override val timestamp: Long,
-  /** Compact JSON text of the interaction; the wire embeds it as an object, not a quoted string. */
-  @Serializable(with = PerfTimingJsonSerializer::class) val event: String,
+  val event: String, // JSON string of interaction event
 ) : WebSocketResponse()
 
 @Serializable
@@ -78,34 +77,12 @@ data class PackageEvent(
   val event: PackageEventData,
 ) : WebSocketResponse()
 
-@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class PackageEventData(
-  val action: String,
+  val eventType: String,
   val packageName: String,
-  val userId: Int,
-  val uid: Int? = null,
-  val isSystem: Boolean? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val removedForAllUsers: Boolean = false,
+  val className: String? = null,
 )
-
-/** A display's change (add/remove/rotation/fold); carries no requestId. */
-@Serializable
-@SerialName("display_transition")
-data class DisplayTransitionEvent(
-  override val timestamp: Long,
-  val change: String,
-  val displayId: Int,
-  val panelUniqueId: String? = null,
-  val panelFingerprint: DisplayPanelFingerprint? = null,
-  val width: Int? = null,
-  val height: Int? = null,
-  val state: Int? = null,
-  val rotation: Int? = null,
-  val deviceState: Int? = null,
-) : WebSocketResponse()
-
-@Serializable data class DisplayPanelFingerprint(val width: Int, val height: Int)
 
 @Serializable
 @SerialName("navigation_event")
@@ -366,8 +343,6 @@ data class ScreenshotErrorResult(
   override val timestamp: Long,
   val requestId: String? = null,
   val error: String,
-  val displayId: Int? = null,
-  val panelUniqueId: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -434,10 +409,9 @@ data class SetTextResult(
   val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
-@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("commit_text_result")
 data class CommitTextResult(
@@ -445,57 +419,7 @@ data class CommitTextResult(
   val requestId: String? = null,
   val success: Boolean,
   val totalTimeMs: Long,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val partialApplication: Boolean = false,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val committedUnits: Int = 0,
-  val insertedText: String? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val editorConsumed: Boolean = false,
-  val trace: List<String>? = null,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
-) : WebSocketResponse()
-
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@SerialName("insert_text_result")
-data class InsertTextResult(
-  override val timestamp: Long,
-  val requestId: String? = null,
-  val success: Boolean,
-  val totalTimeMs: Long,
-  val error: String? = null,
-  val warning: String? = null,
-  val caretPlaced: Boolean? = null,
-  val resultingTextLength: Int? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val partialApplication: Boolean = false,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
-) : WebSocketResponse()
-
-/** The focused field's state; [state] is absent when no editable, non-password field has focus. */
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@SerialName("insert_text_state_result")
-data class InsertTextStateResult(
-  override val timestamp: Long,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
-  val success: Boolean = true,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val state: InsertTextState? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER)
-  @Serializable(with = PerfTimingJsonSerializer::class)
-  val perfTiming: String? = null,
-) : WebSocketResponse()
-
-@OptIn(ExperimentalSerializationApi::class)
-@Serializable
-@SerialName("cancel_ime_commit_result")
-data class CancelImeCommitResult(
-  override val timestamp: Long,
-  val requestId: String? = null,
-  val success: Boolean = true,
-  val targetRequestId: String,
-  val partialApplication: Boolean,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val committedUnits: Int = 0,
-  @EncodeDefault(EncodeDefault.Mode.NEVER)
-  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
@@ -562,10 +486,9 @@ data class KeyboardProfileCatalogResult(
   val catalogVersion: Int? = null,
   val supportedCatalogVersions: List<Int> = emptyList(),
   val activeProfileId: String? = null,
-  /** Null on failure, where the wire omits the key; a successful catalog always lists them. */
-  val profiles: List<KeyboardProfileInfo>? = null,
+  val profiles: List<KeyboardProfileInfo> = emptyList(),
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -574,12 +497,12 @@ data class KeyboardProfileCatalogResult(
 data class ImeActionResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
-  val action: String? = null,
   val success: Boolean,
+  val action: String? = null,
   val totalTimeMs: Long,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -590,7 +513,7 @@ data class SelectAllResult(
   val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -625,12 +548,12 @@ data class ActionResult(
 data class ClipboardResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val action: String,
   val success: Boolean,
-  val totalTimeMs: Long,
+  val action: String,
   val text: String? = null, // For 'get' action
+  val totalTimeMs: Long,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -687,12 +610,12 @@ data class SettingsListResult(
 data class CaCertResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val action: String, // install, remove
   val success: Boolean,
-  val totalTimeMs: Long,
+  val action: String, // install, remove
   val alias: String? = null,
+  val totalTimeMs: Long,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -705,12 +628,12 @@ data class DeviceOwnerStatusResult(
   override val timestamp: Long,
   val requestId: String? = null,
   val success: Boolean,
-  val totalTimeMs: Long,
-  val packageName: String? = null,
   val isDeviceOwner: Boolean,
   val isAdminActive: Boolean,
+  val packageName: String? = null,
+  val totalTimeMs: Long,
   val error: String? = null,
-  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
+  val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @OptIn(ExperimentalSerializationApi::class)

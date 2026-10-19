@@ -3,7 +3,7 @@ import { UnixSocketServer, type StrokeAdmission } from "../../../src/daemon/sock
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
 import type { BootedDevice } from "../../../src/models";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import type { ResourceUpdateTargets } from "../../../src/server/listChangedBroadcast";
+import type { ResourceUpdateTargets } from "../../../src/daemon/listChangedBroadcast";
 import { fakeBindLock, unreachableMcpDispatcher } from "../../helpers/createTestUnixSocketServer";
 
 /**

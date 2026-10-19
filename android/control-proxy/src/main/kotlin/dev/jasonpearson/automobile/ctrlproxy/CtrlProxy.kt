@@ -7,7 +7,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
-import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -145,6 +144,7 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
+import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -165,6 +165,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
@@ -566,6 +569,33 @@ internal const val PACKAGE_EVENT_USER_ID_RANGE = 100_000
 internal fun packageEventUserId(uid: Int): Int =
   if (uid >= 0) uid / PACKAGE_EVENT_USER_ID_RANGE else 0
 
+/**
+ * The `package_event` payload. `userId` is the Android user id; `uid` carries the raw package uid
+ * when known and doubles as the marker that `userId` is a real user id: APKs that predate #10067
+ * sent the uid in `userId` and no `uid`, which the host converts itself.
+ */
+internal fun packageEventJson(
+  action: String,
+  packageName: String,
+  userId: Int,
+  uid: Int?,
+  isSystem: Boolean?,
+  removedForAllUsers: Boolean,
+): JsonObject = buildJsonObject {
+  put("action", action)
+  put("packageName", packageName)
+  put("userId", userId)
+  if (uid != null) {
+    put("uid", uid)
+  }
+  if (isSystem != null) {
+    put("isSystem", isSystem)
+  }
+  if (removedForAllUsers) {
+    put("removedForAllUsers", true)
+  }
+}
+
 internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
   if (reportedMs > 0) reportedMs else nowMs
 
@@ -946,6 +976,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private val jsonLenient = Json { ignoreUnknownKeys = true }
 
+  private fun webSocketFrameJson(
+    type: String,
+    timestamp: Long = System.currentTimeMillis(),
+    requestId: String? = null,
+    perfTiming: JsonElement? = null,
+    buildContent: JsonObjectBuilder.() -> Unit,
+  ): String =
+    jsonCompact.encodeToString(
+      buildJsonObject {
+        put("type", type)
+        put("timestamp", timestamp)
+        if (requestId != null) {
+          put("requestId", requestId)
+        }
+        buildContent()
+        if (perfTiming != null) {
+          put("perfTiming", perfTiming)
+        }
+      },
+    )
+
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
@@ -1109,9 +1160,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
           ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
           }
 
           override fun getConnectionCount() = webSocketServer.getConnectionCount()
@@ -1181,9 +1241,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
           ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
           }
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
@@ -1493,15 +1562,33 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerf(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
           ) {
-            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
           }
 
           override suspend fun broadcastWithPerfSync(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
           ) {
-            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
+            webSocketServer.broadcastWithPerfSync { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
           }
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
@@ -1561,9 +1648,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerfSync(
-            messageBuilder: (perfTiming: JsonElement?) -> String,
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
           ) {
-            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
+            webSocketServer.broadcastWithPerfSync { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
           }
 
           override suspend fun broadcastSetKeyboardProfileResult(
@@ -1574,33 +1670,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
         },
-    )
-  }
-  /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
-  private val sdkControlController by lazy {
-    SdkControlController(
-      host =
-        object : SdkControlController.Host {
-          override fun sendBroadcast(intent: Intent) = this@CtrlProxy.sendBroadcast(intent)
-
-          override fun sendOrderedBroadcast(intent: Intent, resultReceiver: BroadcastReceiver) =
-            this@CtrlProxy.sendOrderedBroadcast(
-              intent,
-              null,
-              resultReceiver,
-              null,
-              Activity.RESULT_OK,
-              null,
-              null,
-            )
-
-          override fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
-            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-              serviceScope.launch { webSocketServer.broadcast(result) }
-            }
-          }
-        },
-      recompositionStore = recompositionStore,
     )
   }
   /**
@@ -2794,7 +2863,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) = handleGetPermission(requestId, permission, requestPermission)
 
   override suspend fun setRecompositionTracking(enabled: Boolean) =
-    sdkControlController.setRecompositionTrackingEnabled(enabled)
+    setRecompositionTrackingEnabled(enabled)
 
   override suspend fun setAccessibilityFlags(
     includeNotImportantViews: Boolean,
@@ -2810,7 +2879,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
 
   override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
-    sdkControlController.broadcastNetworkMockRules(requestId, rulesJson)
+    broadcastNetworkMockRules(requestId, rulesJson)
 
   override suspend fun setNetworkErrorSimulation(
     enabled: Boolean,
@@ -2818,14 +2887,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     limit: Int?,
     expiresAtEpochMs: Long?,
     remainingMs: Long?,
-  ) =
-    sdkControlController.broadcastNetworkErrorSimulation(
-      enabled,
-      errorType,
-      limit,
-      expiresAtEpochMs,
-      remainingMs,
-    )
+  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override suspend fun getCurrentFocus(requestId: String?) =
     focusController.handleGetCurrentFocus(requestId)
@@ -3038,6 +3100,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
     packageController.performLaunchIntent(requestId, packageName)
 
+  private fun setRecompositionTrackingEnabled(enabled: Boolean) {
+    recompositionStore.setEnabled(enabled)
+    broadcastRecompositionControl(enabled)
+    Log.d(TAG, "Recomposition tracking ${if (enabled) "enabled" else "disabled"}")
+  }
+
   private fun applyAccessibilityFlags(
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
@@ -3085,6 +3153,84 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         "retrieveInteractiveWindows=$retrieveInteractiveWindows, " +
         "occlusionEnabled=$occlusionEnabled",
     )
+  }
+
+  private fun broadcastRecompositionControl(enabled: Boolean) {
+    try {
+      val intent =
+        Intent(AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL).apply {
+          putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, enabled)
+        }
+      sendBroadcast(intent)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to broadcast recomposition control", e)
+    }
+  }
+
+  private fun broadcastNetworkMockRules(requestId: String?, rulesJson: String) {
+    try {
+      val intent =
+        Intent(NetworkMockRuleStore.ACTION_NETWORK_MOCK_RULES).apply {
+          putExtra(NetworkMockRuleStore.EXTRA_RULES_JSON, rulesJson)
+        }
+      if (requestId == null) {
+        sendBroadcast(intent)
+        Log.d(TAG, "Broadcast network mock rules")
+        return
+      }
+      // The app's rule store answers an ordered broadcast through its result data (which rules the
+      // device's regex engine rejected); forward that to the host as the correlated reply. An SDK
+      // that predates the reply leaves the data null and the host reports "not confirmed".
+      sendOrderedBroadcast(
+        intent,
+        null,
+        NetworkMockRulesReplyReceiver(requestId, ::replyNetworkMockRules),
+        null,
+        Activity.RESULT_OK,
+        null,
+        null,
+      )
+      Log.d(TAG, "Broadcast network mock rules (awaiting report)")
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to broadcast network mock rules", e)
+      if (requestId != null) {
+        replyNetworkMockRules(
+          networkMockRulesFailure(
+            requestId,
+            "Failed to broadcast network mock rules: ${e.message}",
+          ),
+        )
+      }
+    }
+  }
+
+  private fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
+    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+      serviceScope.launch { webSocketServer.broadcast(result) }
+    }
+  }
+
+  private fun broadcastNetworkErrorSimulation(
+    enabled: Boolean,
+    errorType: String?,
+    limit: Int?,
+    expiresAtEpochMs: Long?,
+    remainingMs: Long?,
+  ) {
+    try {
+      val intent =
+        Intent(NetworkMockRuleStore.ACTION_NETWORK_ERROR_SIMULATION).apply {
+          remainingMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_REMAINING_MS, it) }
+          putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_ENABLED, enabled)
+          errorType?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_TYPE, it) }
+          limit?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_LIMIT, it) }
+          expiresAtEpochMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_EXPIRES_AT, it) }
+        }
+      sendBroadcast(intent)
+      Log.d(TAG, "Broadcast network error simulation: enabled=$enabled type=$errorType")
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to broadcast network error simulation", e)
+    }
   }
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
@@ -3283,7 +3429,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val timestamp = timeProvider.currentTimeMillis()
       val message =
-        packageEventFrame(timestamp, action, packageName, userId, uid, isSystem, removedForAllUsers)
+        webSocketFrameJson("package_event", timestamp = timestamp) {
+          put(
+            "event",
+            packageEventJson(action, packageName, userId, uid, isSystem, removedForAllUsers),
+          )
+        }
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: CancellationException) {

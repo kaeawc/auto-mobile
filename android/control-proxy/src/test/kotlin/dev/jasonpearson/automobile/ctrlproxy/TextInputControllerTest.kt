@@ -16,12 +16,14 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -163,21 +165,35 @@ class TextInputControllerTest {
 
     override fun isRunning() = running
 
-    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
-      val type = frame.getValue("type").jsonPrimitive.content
-      events += "frame:$type"
-      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming"))
+    override suspend fun broadcastWithPerf(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    ) {
+      record(type, requestId, buildContent)
     }
 
     override suspend fun broadcastWithPerfSync(
-      messageBuilder: (perfTiming: JsonElement?) -> String,
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
     ) {
-      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
-      val type = frame.getValue("type").jsonPrimitive.content
       syncTypes += type
+      record(type, requestId, buildContent)
+    }
+
+    private fun record(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    ) {
       events += "frame:$type"
-      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming"))
+      frames +=
+        type to
+          buildJsonObject {
+            if (requestId != null) put("requestId", requestId)
+            buildContent()
+          }
     }
 
     override fun connectionCount() = 1

@@ -16,7 +16,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.put
 
 /**
  * The CtrlProxy IME request surface: commitText (and its cancellation tombstones), keyboard profile
@@ -67,7 +69,11 @@ internal class ImeController(
   interface ResponseSender {
     fun isRunning(): Boolean
 
-    suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String)
+    suspend fun broadcastWithPerfSync(
+      type: String,
+      requestId: String?,
+      buildContent: JsonObjectBuilder.() -> Unit,
+    )
 
     suspend fun broadcastSetKeyboardProfileResult(
       build: (perfTiming: String?) -> SetKeyboardProfileResult,
@@ -191,14 +197,11 @@ internal class ImeController(
     host.launchRequestScope(requestId) {
       val result = state.finished.await()
       resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
-        responseSender.broadcastWithPerfSync { perfTiming ->
-          cancelImeCommitResultFrame(
-            requestId,
-            targetRequestId,
-            result.partialApplication,
-            result.committedUnits,
-            perfTiming,
-          )
+        responseSender.broadcastWithPerfSync("cancel_ime_commit_result", requestId) {
+          put("success", true)
+          put("targetRequestId", targetRequestId)
+          put("partialApplication", result.partialApplication)
+          if (result.committedUnits > 0) put("committedUnits", result.committedUnits)
         }
       }
     }
@@ -305,19 +308,17 @@ internal class ImeController(
     }
 
     resultBroadcaster.guard(requestId, "commit_text_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        commitTextResultFrame(
-          requestId,
-          success,
-          error,
-          totalTimeMs,
-          partialApplication,
-          committedUnits,
-          insertedText,
-          trace,
-          editorConsumed,
-          perfTiming,
-        )
+      responseSender.broadcastWithPerfSync("commit_text_result", requestId) {
+        put("success", success)
+        put("totalTimeMs", totalTimeMs)
+        if (partialApplication) put("partialApplication", true)
+        if (committedUnits > 0) put("committedUnits", committedUnits)
+        if (insertedText != null) put("insertedText", insertedText)
+        if (editorConsumed) put("editorConsumed", true)
+        if (trace != null) put("trace", Json.encodeToJsonElement(trace))
+        if (error != null) {
+          put("error", error)
+        }
       }
       Log.d(
         TAG,
@@ -372,17 +373,14 @@ internal class ImeController(
     }
 
     resultBroadcaster.guard(requestId, "keyboard_profiles_result") {
-      responseSender.broadcastWithPerfSync { perfTiming ->
-        keyboardProfilesResultFrame(
-          requestId,
-          success,
-          catalogVersion,
-          supportedCatalogVersions,
-          activeProfileId,
-          profiles,
-          error,
-          perfTiming,
-        )
+      responseSender.broadcastWithPerfSync("keyboard_profiles_result", requestId) {
+        put("success", success)
+        put("catalogId", "automobile_behavior_profiles")
+        if (catalogVersion != null) put("catalogVersion", catalogVersion)
+        put("supportedCatalogVersions", jsonCompact.encodeToJsonElement(supportedCatalogVersions))
+        if (activeProfileId != null) put("activeProfileId", activeProfileId)
+        if (success) put("profiles", jsonCompact.encodeToJsonElement(profiles))
+        if (error != null) put("error", error)
       }
     }
   }

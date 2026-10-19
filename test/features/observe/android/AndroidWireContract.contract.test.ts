@@ -31,9 +31,14 @@ const responses: Record<
   Record<string, "required" | "optional">
 > = CTRL_PROXY_RESPONSE_FIELDS;
 
-// Every device frame now has a WebSocketResponse subclass (#11877); a new entry here documents a
-// frame a device emitter builds without one.
-const HAND_SERIALIZED_RESPONSE_TYPES: Record<string, string> = {};
+// #11877: these device emitters build JSON without a WebSocketResponse subclass.
+const HAND_SERIALIZED_RESPONSE_TYPES: Record<string, string> = {
+  display_transition: "ResultFrames.kt displayTransitionFrame builds the display event JSON.",
+  cancel_ime_commit_result:
+    "CtrlProxy.kt handleCancelImeCommit builds the cancellation reply JSON.",
+  insert_text_state_result: "CtrlProxy.kt handleInsertTextState builds the state reply JSON.",
+  insert_text_result: "CtrlProxy.kt broadcastInsertTextResult builds the insertion reply JSON.",
+};
 const KOTLIN_FIELDS_TS_IGNORES: Record<string, string> = {};
 // Each key names one concrete exception, never a wildcard. Normal success/push messages inherit
 // the host's optional error slot even when only protocol-level failures use it.
@@ -44,6 +49,10 @@ const TS_ONLY_RESPONSE_FIELDS: Record<string, string> = {
   "hierarchy_update.frameContext":
     "CtrlProxy.kt hierarchy broadcaster appends frameContext to hand-built JSON.",
   "screenshot.error": "WsMessageBase permits an error; screenshot failures use screenshot_error.",
+  "screenshot_error.displayId":
+    "ResultFrames.kt screenshotErrorFrame adds the failed display identity.",
+  "screenshot_error.panelUniqueId":
+    "ResultFrames.kt screenshotErrorFrame adds the failed panel identity.",
   "interaction_event.error": "WsMessageBase permits an error; InteractionEvent has no error slot.",
   "package_event.error": "WsMessageBase permits an error; PackageEvent has no error slot.",
   "navigation_event.error":
@@ -67,15 +76,15 @@ const TS_ONLY_RESPONSE_FIELDS: Record<string, string> = {
     "WsMessageBase permits an error; discovery failures live inside state.",
   "sdk_capabilities.error":
     "WsMessageBase permits an error; capability failures live inside state.",
-  "display_transition.error":
-    "WsMessageBase permits an error; DisplayTransitionEvent has no error slot.",
-  "cancel_ime_commit_result.error":
-    "WsMessageBase permits an error; CancelImeCommitResult has no error slot.",
-  "cancel_ime_commit_result.totalTimeMs":
-    "Optional host timing slot; the cancellation reply omits it.",
-  "insert_text_state_result.error":
-    "WsMessageBase permits an error; InsertTextStateResult has no error slot.",
-  "insert_text_state_result.totalTimeMs": "Optional host timing slot; the state reply omits it.",
+  "commit_text_result.trace": "CtrlProxy.kt broadcastCommitTextResult adds opt-in IME trace JSON.",
+  "commit_text_result.insertedText":
+    "CtrlProxy.kt broadcastCommitTextResult adds the measured editor delta.",
+  "commit_text_result.editorConsumed":
+    "CtrlProxy.kt broadcastCommitTextResult adds editor consumption evidence.",
+  "commit_text_result.partialApplication":
+    "CtrlProxy.kt broadcastCommitTextResult adds partial application evidence.",
+  "commit_text_result.committedUnits":
+    "CtrlProxy.kt broadcastCommitTextResult adds the applied unit count.",
   "preference_files.totalTimeMs": "Optional host timing slot; storage broadcaster omits it.",
   "preferences.totalTimeMs": "Optional host timing slot; storage broadcaster omits it.",
   "preferences.entries":

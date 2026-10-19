@@ -72,7 +72,7 @@ describe("daemon_stalled handover on a recoverable session release", () => {
 
   test("a broker-owned session keeps its stall handover for the successor daemon", () => {
     const subject = proxy();
-    subject["brokerSessions"].sessions.set(SESSION, "request-1");
+    subject["sessionBrokerSessions"].set(SESSION, "request-1");
     subject["sessionState"].stallHandovers.set(SESSION, {
       handover: stalledHandover(SESSION),
       delivered: false,

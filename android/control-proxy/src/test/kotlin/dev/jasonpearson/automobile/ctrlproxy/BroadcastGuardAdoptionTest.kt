@@ -908,7 +908,6 @@ class BroadcastGuardAdoptionTest {
         "FocusController.kt",
         "TextInputController.kt",
         "ImeController.kt",
-        "SdkControlController.kt",
         "GestureController.kt",
         "FailureReceivers.kt",
         "PackageScreenReceivers.kt",

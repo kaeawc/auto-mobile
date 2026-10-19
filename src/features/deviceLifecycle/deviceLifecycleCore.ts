@@ -51,6 +51,7 @@ import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutEr
 import { fixedBackoff } from "../../utils/Backoff";
 import type { DaemonStateLike } from "../../daemon/daemonState";
 import {
+  daemonStateLikeFrom,
   defaultDaemonContext,
   type DaemonContext,
   type DevicePoolReads,
@@ -1156,6 +1157,8 @@ export interface DeviceToolsDependencies {
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
   idGenerator: IdGenerator;
   timer: Timer;
+  /** The daemon's session and device-pool state; sourced from DaemonContext by default. */
+  daemonState: DaemonStateLike;
   lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   /**
    * Re-resolve an emulator's AVD name from the RUNTIME rather than from any
@@ -1307,6 +1310,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
       androidAdbFactory: unadmittedAdbClientFactory,
+      daemonState: daemonStateLikeFrom(defaultDaemonContext),
       deviceResourceControllerFactory: () =>
         new DefaultDeviceResourceController(
           undefined,
@@ -4173,6 +4177,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
+    daemonState: deps.daemonState ?? currentDeps.daemonState,
     lifecycleCoordinator: resolveDeviceToolsLifecycleCoordinator(deps, currentDeps),
     get androidEmulatorProcessStopper() {
       return deps.androidEmulatorProcessStopper ?? currentDeps.androidEmulatorProcessStopper;

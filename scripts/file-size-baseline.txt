@@ -59,7 +59,7 @@
 1223	src/features/preferences/AppPreferences.ts
 1291	src/features/prototype/prototypeSpec.ts
 1271	src/features/prototype/prototypeValidation.ts
-2886	src/features/systemTray/systemTrayHelpers.ts
+2377	src/features/systemTray/systemTrayHelpers.ts
 1686	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
 1731	src/features/video/FfmpegVideoProcessingBackend.ts
@@ -86,8 +86,8 @@
 2185	src/server/videoRecordingManager.ts
 1434	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
-1809	src/utils/android-cmdline-tools/AdbClient.ts
+1177	src/utils/android-cmdline-tools/AdbClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
-3140	src/utils/ios-cmdline-tools/SimCtlClient.ts
+1005	src/utils/ios-cmdline-tools/SimCtlClient.ts
 1263	src/utils/logger.ts

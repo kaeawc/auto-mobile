@@ -1,3 +1,5 @@
+import { AndroidObservationStream } from "../../../src/features/observe/android/AndroidObservationStream";
+import { CtrlProxyObservationStream } from "../../../src/features/observe/ios/CtrlProxyObservationStream";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -271,7 +273,9 @@ test.each(["android", "ios"] as const)(
       expect(transientCloses).toBe(1);
       expect(singletonConnects).toBe(0);
       expect(singletonCloses).toBe(0);
-      expect(clientClass.getExistingInstance(device.deviceId)).toBe(existing);
+      expect<typeof existing | null>(clientClass.getExistingInstance(device.deviceId)).toBe(
+        existing,
+      );
     } finally {
       Reflect.set(clientClass, "getExistingInstance", previousExisting);
       Reflect.set(clientClass, "createForObservationRead", previousFactory);
@@ -508,7 +512,7 @@ test("Android real client routes a changed correlated observer frame through the
       timer,
     },
   );
-  const push = spyOn(client, "pushHierarchyToObservationStream");
+  const push = spyOn(AndroidObservationStream.prototype, "pushHierarchyToObservationStream");
   try {
     expect(await client.ensureConnected()).toBe(true);
     expect((Reflect.get(client, "requestManager") as RequestManager).getPendingCount()).toBe(0);
@@ -578,7 +582,7 @@ test("Android real client keeps an identical observer frame private", async () =
       timer,
     },
   );
-  const push = spyOn(client, "pushHierarchyToObservationStream");
+  const push = spyOn(AndroidObservationStream.prototype, "pushHierarchyToObservationStream");
   try {
     expect(await client.ensureConnected()).toBe(true);
     expect((Reflect.get(client, "requestManager") as RequestManager).getPendingCount()).toBe(0);
@@ -622,7 +626,7 @@ test("iOS real client resolves a correlated observer frame without cache or stre
     sockets.factory,
     timer,
   );
-  const push = spyOn(client, "pushHierarchyToObservationStream");
+  const push = spyOn(CtrlProxyObservationStream.prototype, "pushHierarchyToObservationStream");
   try {
     expect(await client.ensureConnected()).toBe(true);
     expect((Reflect.get(client, "requestManager") as RequestManager).getPendingCount()).toBe(0);
@@ -888,12 +892,17 @@ test("unowned observer bounds its transient connection by the hierarchy deadline
   Reflect.set(daemon, "deviceSessionRegistry", {});
   let closes = 0;
   const originalFactory = IOSCtrlProxyClient.createForObservationRead;
-  IOSCtrlProxyClient.createForObservationRead = (() => ({
-    connectForObservationRead: () => new Promise<boolean>(() => {}),
-    close: async () => {
-      closes++;
-    },
-  })) as typeof IOSCtrlProxyClient.createForObservationRead;
+  const transient = IOSCtrlProxyClient.createForTesting(
+    device,
+    8765,
+    createInstantFailureWebSocketFactory(timer),
+    timer,
+  );
+  transient.connectForObservationRead = () => new Promise<boolean>(() => {});
+  transient.close = async () => {
+    closes++;
+  };
+  IOSCtrlProxyClient.createForObservationRead = () => transient;
   try {
     const capture = createDeviceHierarchyCapture(device, { timer });
     const pending = capture.capture({ freshness: "fresh", observerMode: true, timeoutMs: 30 });
@@ -1214,7 +1223,7 @@ test("Android observer preservation policies use separate flights and isolate on
       timer,
     },
   );
-  const push = spyOn(client, "pushHierarchyToObservationStream");
+  const push = spyOn(AndroidObservationStream.prototype, "pushHierarchyToObservationStream");
   try {
     expect(await client.ensureConnected()).toBe(true);
     Reflect.set(client, "hierarchyNavigationDetector", { onHierarchyUpdate: () => {} });

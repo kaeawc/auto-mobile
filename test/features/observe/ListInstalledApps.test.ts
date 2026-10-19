@@ -17,6 +17,7 @@ import type {
   AndroidInstalledPackageSource,
 } from "../../../src/features/observe/ListInstalledApps";
 import { logger } from "../../../src/utils/logger";
+import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 
 /**
  * Stands in for the on-device accessibility service: one canned
@@ -187,6 +188,112 @@ describe("ListInstalledApps", function () {
   });
 
   describe("executeDetailed", function () {
+    describe("listing failures", () => {
+      let repository: FakeInstalledAppsRepository;
+
+      beforeEach(() => {
+        repository = new FakeInstalledAppsRepository();
+        listInstalledApps = new ListInstalledApps(
+          mockDevice,
+          new FakeAdbClientFactory(fakeAdb),
+          new FakeSimctl(),
+          {
+            cacheEnabled: true,
+            installedAppsRepository: repository,
+            timer: new FakeTimer(),
+            installedPackageSource: new FakeInstalledPackageSource({
+              available: false,
+              reason: "No fake CtrlProxy connection",
+            }),
+          },
+        );
+      });
+
+      test("preserves the typed package-listing error", async () => {
+        const error = new AdbDeviceTransportUnavailableError(
+          mockDevice.deviceId,
+          new Error("device offline"),
+        );
+        fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+        fakeAdb.setCommandError("shell pm list packages --user 0", error);
+
+        const result = await listInstalledApps.executeDetailedResult();
+
+        expect(result.successful).toBe(false);
+        expect(result.error).toBe(error);
+        expect(result.error).toBeInstanceOf(AdbDeviceTransportUnavailableError);
+        expect(await repository.listInstalledApps(mockDevice.deviceId)).toEqual([]);
+      });
+
+      test.each([false, true])(
+        "keeps the first error of equal priority (transport: %s)",
+        async (transport) => {
+          const first = transport
+            ? new AdbDeviceTransportUnavailableError(mockDevice.deviceId, new Error("offline"))
+            : new Error("first user failed");
+          const second = transport
+            ? new AdbDeviceTransportUnavailableError(
+                mockDevice.deviceId,
+                new Error("offline again"),
+              )
+            : new Error("second user failed");
+          fakeAdb.setUsers([
+            { userId: 0, name: "Owner", flags: 13, running: true },
+            { userId: 10, name: "Work", flags: 30, running: true },
+          ]);
+          fakeAdb.setCommandError("shell pm list packages --user 0", first);
+          fakeAdb.setCommandError("shell pm list packages --user 10", second);
+
+          const result = await listInstalledApps.executeDetailedResult();
+
+          expect(result.successful).toBe(false);
+          expect(result.error).toBe(first);
+        },
+      );
+
+      test("prefers an original error with a transport cause and keeps partial apps uncached", async () => {
+        const transport = new AdbDeviceTransportUnavailableError(
+          mockDevice.deviceId,
+          new Error("device offline"),
+        );
+        const wrapped = new Error("work profile listing failed", { cause: transport });
+        fakeAdb.setUsers([
+          { userId: 0, name: "Owner", flags: 13, running: true },
+          { userId: 10, name: "Work", flags: 30, running: true },
+          { userId: 11, name: "Other", flags: 30, running: true },
+        ]);
+        fakeAdb.setCommandError("shell pm list packages --user 0", new Error("permission denied"));
+        fakeAdb.setCommandError("shell pm list packages --user 10", wrapped);
+        fakeAdb.setCommandResponse(
+          "shell pm list packages --user 11",
+          createExecResult("package:com.example.partial\n", ""),
+        );
+
+        const result = await listInstalledApps.executeDetailedResult(undefined, {
+          namesOnly: true,
+        });
+
+        expect(result.successful).toBe(false);
+        expect(result.error).toBe(wrapped);
+        expect(result.apps.profiles[11]).toEqual([
+          expect.objectContaining({ packageName: "com.example.partial" }),
+        ]);
+        expect(await repository.listInstalledApps(mockDevice.deviceId)).toEqual([]);
+      });
+
+      test("reports an actionable failure when no users are reported", async () => {
+        fakeAdb.setUsers([]);
+
+        const result = await listInstalledApps.executeDetailedResult();
+
+        expect(result.successful).toBe(false);
+        expect(result.error).toBeInstanceOf(Error);
+        expect(result.error).toMatchObject({
+          message: expect.stringContaining("No users reported"),
+        });
+      });
+    });
+
     test("should list apps from all user profiles", async function () {
       // Configure two users: primary and work profile
       const users: AndroidUser[] = [

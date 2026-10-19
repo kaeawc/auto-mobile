@@ -1,5 +1,7 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
+import {
+  createTestableUnixSocketServer,
+  type TestUnixSocketServer,
+} from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -30,12 +32,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * exactly as daemon.ts wires it. Only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const SESSION = "ide-mid-call-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
@@ -45,7 +41,7 @@ describe("idle release while the holder's device call is in flight", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let internals: TestUnixSocketServer;
   let deviceCallStarted: boolean;
   let deviceCallSignal: AbortSignal | undefined;
   let finishDeviceCall: () => void;
@@ -169,7 +165,7 @@ describe("idle release while the holder's device call is in flight", () => {
         }) as unknown as AndroidCtrlProxyManager,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
+    const server = createTestableUnixSocketServer(
       "unused",
       {
         isInitialized: () => true,
@@ -180,16 +176,16 @@ describe("idle release while the holder's device call is in flight", () => {
       null,
       { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals.startAcceptingRequests();
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals.acceptConnection(socket);
   };
 
   const tearDown = async () => {
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all(internals.inFlightRequestHandlers());
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
     spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
     PlatformDeviceManagerFactory.reset();
@@ -248,7 +244,7 @@ describe("idle release while the holder's device call is in flight", () => {
 
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all(internals.inFlightRequestHandlers());
 
     expect(socket.responses.find((frame) => frame.id === "frame")).toMatchObject({ success: true });
     // The route ended its execution: nothing keeps the session past the write.
@@ -282,7 +278,7 @@ describe("idle release while the holder's device call is in flight", () => {
 
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all(internals.inFlightRequestHandlers());
 
     expect(socket.responses.find((frame) => frame.id === "frame")).toMatchObject({ success: true });
     expect(executionTracker.hasActiveSessionUuidExecutions(SESSION)).toBe(false);
@@ -314,7 +310,7 @@ describe("idle release while the holder's device call is in flight", () => {
 
     finishDeviceCall();
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all(internals.inFlightRequestHandlers());
 
     expect(socket.responses.find((frame) => frame.id === "frame")).toMatchObject({
       success: false,

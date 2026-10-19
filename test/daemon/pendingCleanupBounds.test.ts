@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { NetworkState } from "../../src/utils/NetworkState";
 import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
 import {

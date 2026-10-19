@@ -10,7 +10,7 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { TouchTrackFailure } from "../features/record/android/types";
 import { DualTrackRecorder } from "../features/record/android";
-import { defaultDaemonContext } from "../daemon/daemonContext";
+import { defaultDaemonContext } from "./daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { isOwnerWithinBase } from "../db/videoRecordingRepository";
 

@@ -12,7 +12,7 @@ import {
   resetToolCallRecordingState,
   startToolCallRecording,
   stopToolCallRecording,
-} from "../../../src/server/toolCallRecordingManager";
+} from "../../../src/daemon/toolCallRecordingManager";
 import { createJSONToolResponse } from "../../../src/utils/toolUtils";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createDefaultPlanExecutor } from "../../../src/server/planExecutorFactory";

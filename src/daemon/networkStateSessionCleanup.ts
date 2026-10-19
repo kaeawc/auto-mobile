@@ -2,7 +2,7 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   type SessionManager,
   type SessionReleaseOptions,
-} from "../daemon/sessionManager";
+} from "./sessionManager";
 import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";

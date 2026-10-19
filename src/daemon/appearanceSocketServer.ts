@@ -11,7 +11,7 @@ import {
   getAppearanceConfig,
   resolveAppearanceMode,
   updateAppearanceConfig,
-} from "../server/appearanceManager";
+} from "./appearanceManager";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {

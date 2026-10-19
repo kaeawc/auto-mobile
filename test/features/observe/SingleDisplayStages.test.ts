@@ -122,7 +122,19 @@ describe("SingleDisplayEnrichStage", () => {
       timer: () => new FakeTimer(),
       platformTraits: () => platformObservationTraits("android", () => android),
       screenshotRecorder: () => unused("screenshotRecorder"),
-      pathProtection: () => ({ protect: async (p: string) => (p === "/shot.png" ? 99 : 0) }),
+      pathProtection: () => ({
+        removeIfUnprotected: async () => {
+          throw new Error("Unexpected removal");
+        },
+        isProtected: () => false,
+        start: () => {},
+        sweep: async () => {},
+        sweepOnce: async () => {},
+        write: async () => {
+          throw new Error("Unexpected write");
+        },
+        protect: async (p: string) => (p === "/shot.png" ? 99 : 0),
+      }),
       performanceAuditor: () => auditor,
       accessibilityAuditor: () => auditor,
       accessibilityStateDetector: () => auditor,

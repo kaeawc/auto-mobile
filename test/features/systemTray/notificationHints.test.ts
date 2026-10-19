@@ -177,5 +177,5 @@ it("enumerates separate notification windows topmost first without repeated root
       { windowLayer: 1, hierarchy: { node: app } },
     ],
   };
-  expect(getHierarchyRoots(capture)).toEqual([tray, app]);
+  expect(getHierarchyRoots(wireCapture(capture))).toEqual([tray, app]);
 });

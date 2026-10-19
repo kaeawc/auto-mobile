@@ -1,3 +1,5 @@
+import { createObserveResultForTest } from "./flatHierarchyBuilders";
+import { wireCapture } from "../../helpers/wireCapture";
 import { expect, test } from "bun:test";
 import { appear, disappear } from "../../../src/features/observe/ConditionPredicates";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
@@ -5,9 +7,9 @@ import type { ObserveResult } from "../../../src/models";
 
 const bounds = { left: 0, top: 0, right: 20, bottom: 20 };
 const observation = (...nodes: object[]): ObserveResult =>
-  ({
-    viewHierarchy: { hierarchy: { node: nodes.map((node) => ({ bounds, ...node })) } },
-  }) as ObserveResult;
+  createObserveResultForTest({
+    viewHierarchy: wireCapture({ hierarchy: { node: nodes.map((node) => ({ bounds, ...node })) } }),
+  });
 
 test("positive waits lock contains mode when the first poll falls back from exact", () => {
   const modes: Array<string | undefined> = [];

@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterEach, describe, expect, test } from "bun:test";
 import { getDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
@@ -76,7 +77,7 @@ describe("iOS navigation-event graph workflow", () => {
     // Model the iOS back action that returns the user to the learned source screen.
     graph.setCurrentScreenValue("Home");
     let replayArgs: Record<string, unknown> | undefined;
-    ToolRegistry.register("tapOn", "tapOn", {}, async (args) => {
+    ToolRegistry.register("tapOn", "tapOn", z.record(z.string(), z.unknown()), async (args) => {
       replayArgs = args;
       return { success: true };
     });

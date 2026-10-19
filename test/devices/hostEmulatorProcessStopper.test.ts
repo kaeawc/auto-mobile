@@ -13,7 +13,7 @@ import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createExecResult } from "../../src/utils/execResult";
 import { logger } from "../../src/utils/logger";
-import { ProcessTableReader } from "../../src/features/bootAdmission/processTableRetry";
+import { ProcessTableReader } from "../../src/devices/bootAdmission/processTableRetry";
 import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 const command = "/My SDK/emulator/qemu-system-aarch64 -avd Pixel -port 5554";

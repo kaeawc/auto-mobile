@@ -117,7 +117,7 @@ describe("IdentifyInteractions scoring characterization", () => {
   });
 
   test("confidence retains type floors, identifier weights, boolean/string flags, and cap", () => {
-    const empty: Element = {};
+    const empty: Element = { bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     for (const [type, expected] of [
       ["action", 0.6],
       ["input", 0.85],
@@ -128,20 +128,54 @@ describe("IdentifyInteractions scoring characterization", () => {
       expect(classifier.computeConfidence(empty, type, false)).toBe(expected);
     }
     expect(
-      classifier.computeConfidence({ clickable: true, "resource-id": "submit" }, "action", true),
-    ).toBe(0.85);
-    expect(
-      classifier.computeConfidence({ clickable: "true", "content-desc": "Send" }, "action", true),
-    ).toBe(0.8);
-    expect(
-      classifier.computeConfidence({ scrollable: true, "resource-id": "feed" }, "scroll", true),
-    ).toBe(0.8);
-    expect(
-      classifier.computeConfidence({ scrollable: "true", text: "Home" }, "navigation", false),
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          clickable: true,
+          "resource-id": "submit",
+        },
+        "action",
+        true,
+      ),
     ).toBe(0.85);
     expect(
       classifier.computeConfidence(
-        { clickable: true, scrollable: true, "resource-id": "all", "content-desc": "All" },
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          clickable: "true",
+          "content-desc": "Send",
+        },
+        "action",
+        true,
+      ),
+    ).toBe(0.8);
+    expect(
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          scrollable: true,
+          "resource-id": "feed",
+        },
+        "scroll",
+        true,
+      ),
+    ).toBe(0.8);
+    expect(
+      classifier.computeConfidence(
+        { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, scrollable: "true", text: "Home" },
+        "navigation",
+        false,
+      ),
+    ).toBe(0.85);
+    expect(
+      classifier.computeConfidence(
+        {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          clickable: true,
+          scrollable: true,
+          "resource-id": "all",
+          "content-desc": "All",
+        },
         "action",
         true,
       ),
@@ -174,9 +208,24 @@ describe("IdentifyInteractions scoring characterization", () => {
 
   test("builds contiguous ids, admits unlabeled scrolls, and honors optional details", () => {
     const candidates = [
-      { element: { clickable: true }, hasText: false },
-      { element: { scrollable: true }, typeHint: "scroll" as const, hasText: false },
-      { element: { text: "Submit", clickable: true, "resource-id": "submit" }, hasText: true },
+      {
+        element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, clickable: true },
+        hasText: false,
+      },
+      {
+        element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, scrollable: true },
+        typeHint: "scroll" as const,
+        hasText: false,
+      },
+      {
+        element: {
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "Submit",
+          clickable: true,
+          "resource-id": "submit",
+        },
+        hasText: true,
+      },
     ];
     const result = classifier.buildInteractions(
       candidates,
@@ -520,8 +569,18 @@ describe("IdentifyInteractions captured Compose editability", () => {
     const field = parser
       .flattenViewHierarchy(fields.viewHierarchy!)
       .find(({ element }) => element.class === "android.widget.EditText")!.element;
-    expect(classifier.getTypeHint({ actions: field.actions })).toBe("input");
-    expect(classifier.classifyInteraction({ actions: field.actions })).toBe("input");
+    expect(
+      classifier.getTypeHint({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        actions: field.actions,
+      }),
+    ).toBe("input");
+    expect(
+      classifier.classifyInteraction({
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        actions: field.actions,
+      }),
+    ).toBe("input");
   });
 
   test.each([
@@ -533,7 +592,8 @@ describe("IdentifyInteractions captured Compose editability", () => {
     { class: "XCUIElementTypeTextView" },
     { password: true },
     { password: "true" },
-  ])("preserves native input class and password signals %j", (element) => {
+  ])("preserves native input class and password signals %j", (attributes) => {
+    const element = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, ...attributes };
     expect(classifier.getTypeHint(element)).toBe("input");
     expect(classifier.classifyInteraction(element)).toBe("input");
   });

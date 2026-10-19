@@ -915,24 +915,19 @@ function createCountingDBEdge(
   to: string,
   onFromScreenRead: () => void,
 ): DBNavigationEdge {
-  const edge = {
+  const edge: DBNavigationEdge = {
+    get from_screen() {
+      onFromScreenRead();
+      return from;
+    },
     id,
     app_id: "com.test.app",
-    to,
     to_screen: to,
     tool_name: "tapOn",
     tool_args: "{}",
     timestamp: 1000,
     created_at: "2026-01-01T00:00:00.000Z",
-  } as DBNavigationEdge;
-
-  Object.defineProperty(edge, "from_screen", {
-    enumerable: true,
-    get: () => {
-      onFromScreenRead();
-      return from;
-    },
-  });
+  };
 
   return edge;
 }
@@ -1661,7 +1656,9 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
       await manager.setCurrentApp(APP_ID);
 
       const calls: number[] = [];
-      manager.setGraphUpdateListener(() => calls.push(1));
+      manager.setGraphUpdateListener(() => {
+        calls.push(1);
+      });
       manager.setGraphUpdateListener(null);
 
       await manager.setCurrentApp("com.test.other");

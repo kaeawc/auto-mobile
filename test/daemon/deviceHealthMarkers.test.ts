@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
-import {
-  InMemoryDeviceHealthMarkers,
-  NotifyingDeviceHealthMarkers,
-} from "../../src/daemon/deviceHealthMarkers";
+import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
+import { NotifyingDeviceHealthMarkers } from "../../src/daemon/notifyingDeviceHealthMarkers";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 test("health reasons are incarnation scoped, timestamped, and cleared independently", () => {

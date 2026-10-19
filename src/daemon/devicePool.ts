@@ -76,10 +76,10 @@ import {
 } from "./foreignDeviceOwnership";
 import {
   InMemoryDeviceHealthMarkers,
-  NotifyingDeviceHealthMarkers,
   type DeviceHealthMarkers,
   type DeviceHealthMarker,
 } from "./deviceHealthMarkers";
+import { NotifyingDeviceHealthMarkers } from "./notifyingDeviceHealthMarkers";
 import { type BackoffPolicy } from "../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -219,8 +219,8 @@ import {
 import {
   EmulatorProcessLifecycle,
   type EmulatorProcessLifecyclePoolPort,
-  type EmulatorProcessOutputTail,
 } from "./emulatorProcessLifecycle";
+import { type EmulatorProcessOutputTail } from "./EmulatorProcessOutputTail";
 import {
   MissingDeviceLiveness,
   type MissingDeviceEvictionOptions,
@@ -242,13 +242,13 @@ import {
   type CurrentDisconnectStatus,
 } from "./deviceDisconnectHandler";
 export type { CurrentDisconnectStatus } from "./deviceDisconnectHandler";
-export { McpSessionRecoveryInProgressError } from "./deviceAutolockManager";
+export { McpSessionRecoveryInProgressError } from "./McpSessionRecoveryInProgressError";
 import {
   AndroidRebootCoordinator,
-  UnconfirmedRecoveryShutdownError,
   type AndroidEmulatorRecoveryOptions,
   type AndroidRebootCoordinatorPoolPort,
 } from "./androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
 import {
   AndroidRecoveryRecordLedger,
   type AndroidRecoveryRecord,
@@ -857,7 +857,7 @@ export class DevicePool {
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
   private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
-  private readonly idleDeviceReaper: IdleDeviceReaper;
+  private idleDeviceReaper: IdleDeviceReaper;
   private readonly autolockManager: DeviceAutolockManager;
   private readonly disconnectHandler: DeviceDisconnectHandler;
   private readonly androidRebootCoordinator: AndroidRebootCoordinator;
@@ -917,8 +917,8 @@ export class DevicePool {
   }
 
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
-  private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
-  private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly managedExecutionOwnership: DevicePoolDependencies["managedExecutionOwnership"];
   private readonly bindingExclusion: BindingExclusion | undefined;
   /** Devices held for the persisted rows restart recovery is working through (#11294). */
@@ -8713,6 +8713,9 @@ export class DevicePool {
       startedDeviceProcesses: this.startedDeviceProcesses,
       startedDeviceProcessOutput: this.startedDeviceProcessOutput,
       rehydrationReservations: this.rehydrationReservations,
+      intentionalShutdowns: this.intentionalShutdowns,
+      isReservedForShutdown: (device: PooledDevice) => this.isReservedForShutdown(device),
+      restartReadiness: this.deviceReservations.restartReadiness,
       cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
         () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),
         (replacement) => {
@@ -8762,6 +8765,18 @@ export class DevicePool {
           this.completeEmulatorLossRecovery = replacement;
         },
       ),
+      /** Swaps the host-facing collaborators a daemon-built pool captured at construction. */
+      installHostCollaborators: (collaborators: {
+        deviceManager: PlatformDeviceManager;
+        foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+        iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+      }): void => {
+        this.deviceManager = collaborators.deviceManager;
+        this.foreignDeviceOwnership = collaborators.foreignDeviceOwnership;
+        this.iosForeignDeviceOwnership = collaborators.iosForeignDeviceOwnership;
+        // The reaper captured the previous device manager when the pool was built.
+        this.idleDeviceReaper = this.createIdleDeviceReaper();
+      },
       setDeviceManager: (manager: PlatformDeviceManager): void => {
         this.deviceManager = manager;
       },

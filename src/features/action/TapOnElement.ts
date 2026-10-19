@@ -114,8 +114,8 @@ import {
   TakeScreenshotCapturer,
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
-import { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
+import { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
@@ -438,6 +438,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hashViewHierarchy: this.hashViewHierarchy.bind(this),
       replaceObservationHierarchy: this.replaceObservationHierarchy.bind(this),
       verifyFocusedInputTarget: this.verifyFocusedInputTarget.bind(this),
+      handleElementNotFound: this.handleElementNotFound.bind(this),
       executeAndroidLongPress: this.executeAndroidLongPress.bind(this),
       executeiOSTap: this.executeiOSTap.bind(this),
       executeiOSTapWithCoordinates: this.executeiOSTapWithCoordinates.bind(this),

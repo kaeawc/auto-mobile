@@ -2,10 +2,8 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import { deviceRestartReleaseReason } from "../db/deviceSessionRepository";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
-import {
-  UnconfirmedRecoveryShutdownError,
-  type AndroidEmulatorRecoveryOptions,
-} from "./androidRebootCoordinator";
+import { type AndroidEmulatorRecoveryOptions } from "./androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
 import type { AndroidRecoveryRecord } from "./androidRecoveryRecordLedger";
 import type { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
 import type {

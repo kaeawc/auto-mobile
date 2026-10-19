@@ -1,6 +1,6 @@
 import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
-import { EventEmitter } from "node:events";
+import { FakeSocket as SharedFakeSocket } from "../fakes/FakeNetServer";
 import { spyOn } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -36,31 +36,7 @@ import {
  * release that lifts a released holder's strokes.
  */
 
-export class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
+export class FakeSocket extends SharedFakeSocket {
   answer(id: string): DaemonResponse | undefined {
     return this.responses.find((frame) => frame.id === id);
   }
@@ -111,14 +87,12 @@ export function createDirectFrameRig(
   const unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
   const discovered = createFakeDeviceManager(devices);
-  PlatformDeviceManagerFactory.setInstance({
-    getBootedDevicesDetailed: async (
-      ...args: Parameters<typeof discovered.getBootedDevicesDetailed>
-    ) => {
-      await client.discovery?.();
-      return discovered.getBootedDevicesDetailed(...args);
-    },
-  });
+  const discoverDevices = discovered.getBootedDevicesDetailed.bind(discovered);
+  discovered.getBootedDevicesDetailed = async (...args) => {
+    await client.discovery?.();
+    return discoverDevices(...args);
+  };
+  PlatformDeviceManagerFactory.setInstance(discovered);
   spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
     const called = (what: string) => {
       deviceCalls.push(`${device.deviceId}:${what}`);
@@ -182,7 +156,7 @@ export function createDirectFrameRig(
   const server = createHarnessServer(
     "unused",
     {
-      isInitialized: () => true,
+      ...createFakeDaemonState(),
       getSessionManager: () => sessionManager,
       getDevicePool: () => fakePool,
     },

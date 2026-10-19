@@ -1,4 +1,4 @@
-import { anyDeviceReadOnlyArgShapeMatches } from "../../src/server/deviceReadOnlyArgShapes";
+import { anyDeviceReadOnlyArgShapeMatches } from "../../src/daemon/deviceReadOnlyArgShapes";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerPrototypeTools } from "../../src/server/prototypeTools";

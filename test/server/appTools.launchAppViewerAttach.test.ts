@@ -5,7 +5,7 @@ import {
   setInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { PrototypeViewerConnections } from "../../src/features/prototype/ios/prototypeViewerAttach";

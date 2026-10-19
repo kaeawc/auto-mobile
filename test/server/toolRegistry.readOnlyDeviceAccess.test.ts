@@ -52,7 +52,7 @@ import {
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";

@@ -1,6 +1,6 @@
 import type { z, ZodType } from "zod/v4";
 import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
-import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
+import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
 import {
   runWithPostActionCaptureScope,
   postActionCaptures,
@@ -10,7 +10,7 @@ import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
   type ToolTransportRecovery,
-} from "./toolTransportRecovery";
+} from "../daemon/toolTransportRecovery";
 import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceReadiness } from "../devices/DeviceReadiness";

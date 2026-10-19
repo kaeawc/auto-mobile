@@ -11,7 +11,7 @@ import {
 } from "../../src/features/utility/LocationRoutePlayer";
 import type { MockLocationClears } from "../../src/features/utility/MockLocationClear";
 import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

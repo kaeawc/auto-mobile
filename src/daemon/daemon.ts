@@ -175,7 +175,7 @@ import { executionTracker } from "./executionTracker";
 import {
   createDeviceStateChangeNotifier,
   type DeviceStateChangeNotifier,
-} from "../server/deviceStateChangeNotifier";
+} from "./deviceStateChangeNotifier";
 import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
@@ -184,7 +184,7 @@ import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
-import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";

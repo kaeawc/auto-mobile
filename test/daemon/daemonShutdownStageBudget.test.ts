@@ -11,7 +11,7 @@ import * as databaseModule from "../../src/db";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PROCESS_SHUTDOWN_TIMEOUT_MS } from "../../src/processLifecycle";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,

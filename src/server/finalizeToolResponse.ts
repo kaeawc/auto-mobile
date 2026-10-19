@@ -35,7 +35,7 @@ import {
   collectWindowTruncations,
   isHostOutputTruncationReason,
 } from "../features/observe/truncationReasons";
-import { buildObservationScreenshotUri } from "./observationResourceUris";
+import { buildObservationScreenshotUri } from "../daemon/observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
 /**

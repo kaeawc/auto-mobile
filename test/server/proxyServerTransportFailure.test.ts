@@ -1,7 +1,7 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
 import { Client, ProtocolError } from "@modelcontextprotocol/client";
 import { InMemoryTransport, Server } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { McpError } from "../../src/daemon/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   DeviceControlTransportError,

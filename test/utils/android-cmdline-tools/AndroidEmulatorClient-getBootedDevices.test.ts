@@ -454,6 +454,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       architecture: "arm64",
     });
     const client = new AndroidEmulatorClient({
+      emulatorPathLocator: async () => "emulator",
       execAsync: async (_file, args) =>
         execResult(args[0] === "-list-avds" ? "Pixel_9_API_36\n" : ""),
       timer: new FakeTimer(),
@@ -461,8 +462,6 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       avdConfigReader: config,
     });
     // The command is faked; host SDK detection must not run on this path.
-    (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-      async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
       expect.objectContaining({

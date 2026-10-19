@@ -1,5 +1,4 @@
 import { makePool } from "../helpers/makePool";
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
 import {
@@ -319,7 +318,7 @@ describe("allocation discovery outside assignmentMutex", () => {
         expect(pool.getRecoveryEligibility(device.deviceId).eligible).toBe(true);
       }
       const original = pool.getDevice(device.deviceId);
-      const internals = poolInternals(pool);
+      const internals = pool.testHooks;
       const releaseLock = Promise.withResolvers<void>();
       const holder = internals.assignmentMutex.runExclusive(() => releaseLock.promise);
       manager.setBootedDevices(device.platform, []);

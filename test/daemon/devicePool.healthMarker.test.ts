@@ -1,5 +1,4 @@
 import { makePool } from "../helpers/makePool";
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
@@ -1349,13 +1348,13 @@ test("throwing incarnation listener warns and does not break initialization or r
 test("pool signals only a newly tracked spawned Android process", async () => {
   const started: string[] = [];
   const h = await harness(1, undefined, (id) => started.push(id));
-  const pool = poolInternals(h.pool);
-  await pool.trackStartedDeviceProcess(device, undefined);
+  const pool = h.pool.testHooks;
+  await pool.trackStartedDeviceProcess.call(device, undefined);
   expect(started).toEqual([]);
   const child = new FakeChildProcess();
-  await pool.trackStartedDeviceProcess(device, child);
+  await pool.trackStartedDeviceProcess.call(device, child);
   expect(started).toEqual([device.deviceId]);
-  await pool.trackStartedDeviceProcess(device, child);
+  await pool.trackStartedDeviceProcess.call(device, child);
   expect(started).toEqual([device.deviceId]);
 });
 
@@ -1434,9 +1433,9 @@ test("process-start listener deadline releases real pool tracking with quarantin
     commands++;
     await gate.promise;
   });
-  const pool = poolInternals(h.pool);
+  const pool = h.pool.testHooks;
   let settled = false;
-  const tracking = pool.trackStartedDeviceProcess(device, new FakeChildProcess()).then(() => {
+  const tracking = pool.trackStartedDeviceProcess.call(device, new FakeChildProcess()).then(() => {
     settled = true;
   });
   await flush();
@@ -1461,10 +1460,10 @@ test("a rejected process-start listener warns without failing real pool tracking
   const h = await harness(1, undefined, () => {
     throw failure;
   });
-  const pool = poolInternals(h.pool);
+  const pool = h.pool.testHooks;
   const child = new FakeChildProcess();
   try {
-    await expect(pool.trackStartedDeviceProcess(device, child)).resolves.toBeUndefined();
+    await expect(pool.trackStartedDeviceProcess.call(device, child)).resolves.toBeUndefined();
     expect(h.pool.hasStartedDeviceProcess(device.deviceId, child)).toBe(true);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("process-start listener failed"),

@@ -8711,6 +8711,29 @@ export class DevicePool {
       runtimeIdentity: this.runtimeIdentity,
       idleDeviceReaper: this.idleDeviceReaper,
       startedDeviceProcesses: this.startedDeviceProcesses,
+      startedDeviceProcessOutput: this.startedDeviceProcessOutput,
+      deferredDeviceReleases: this.deferredDeviceReleases,
+      deviceHealthMarkers: this.deviceHealthMarkers,
+      mcpSessionRecoveryDevices: this.mcpSessionRecoveryDevices,
+      releasedDeviceCaptures: this.releasedDeviceCaptures,
+      captureReleasedDevice: this.captureReleasedDevice.bind(this),
+      runCoordinatedDeviceStart: this.runCoordinatedDeviceStart.bind(this),
+      adbServerResetQuarantinedSessions: this.adbServerResetQuarantinedSessions,
+      adbServerResetRecoveryReservations: this.adbServerResetRecoveryReservations,
+      recoveryCoordinator: this.recoveryCoordinator,
+      androidRecoveryRecordLedger: this.androidRecoveryRecordLedger,
+      emulatorLossLedger: this.emulatorLossLedger,
+      startAndroidRecoveryRecord: this.startAndroidRecoveryRecord.bind(this),
+      joinSessionPreservingRecovery: this.joinSessionPreservingRecovery.bind(this),
+      setAfterAndroidStartupRecoverySnapshot: (hook: (() => void) | undefined): void => {
+        this.afterAndroidStartupRecoverySnapshot = hook;
+      },
+      completeEmulatorLossRecovery: interceptableMethod(
+        () => this.completeEmulatorLossRecovery.bind(this),
+        (replacement) => {
+          this.completeEmulatorLossRecovery = replacement;
+        },
+      ),
       setDeviceManager: (manager: PlatformDeviceManager): void => {
         this.deviceManager = manager;
       },

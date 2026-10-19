@@ -82,7 +82,9 @@ describe("device-addressed resource reads pass both funnels", () => {
     const matched = ResourceRegistry.matchTemplate(uri);
     expect(matched).toBeDefined();
 
-    const content = await matched!.template.handler(matched!.params);
+    const content = await ("handler" in matched!.template
+      ? matched!.template.handler(matched!.params)
+      : matched!.template.handlerWithReadContext(matched!.params, {}));
 
     expect(JSON.parse(content.text ?? "{}").error).toMatch(/identity is unresolved/);
   });

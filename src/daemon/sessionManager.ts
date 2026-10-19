@@ -10134,6 +10134,11 @@ export class SessionManager {
   /**
    * Stop cleanup timer (called on daemon shutdown)
    */
+  /** @internal Typed view of private state for unit tests; not part of the public API. */
+  get testHooks() {
+    return { sessions: this.sessions } as const;
+  }
+
   stopCleanupTimer(): void {
     if (this.cleanupTimer) {
       this.timer.clearInterval(this.cleanupTimer);

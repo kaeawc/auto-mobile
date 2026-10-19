@@ -8713,6 +8713,8 @@ export class DevicePool {
       startedDeviceProcesses: this.startedDeviceProcesses,
       startedDeviceProcessOutput: this.startedDeviceProcessOutput,
       rehydrationReservations: this.rehydrationReservations,
+      foreignDeviceOwnership: this.foreignDeviceOwnership,
+      refreshForeignOwnership: this.refreshForeignOwnership.bind(this),
       cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
         () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),
         (replacement) => {

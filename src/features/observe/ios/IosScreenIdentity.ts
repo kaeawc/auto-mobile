@@ -9,6 +9,16 @@ type HierarchyNodeLike = {
   node?: HierarchyNodeLike | HierarchyNodeLike[];
 };
 
+/**
+ * What the identity code reads from a hierarchy. A converted {@link ViewHierarchyResult} satisfies
+ * it, and so does the runner's raw XCTest tree (root node with direct attrs and child arrays),
+ * which some callers hand over before conversion.
+ */
+export type IosIdentityHierarchy = Pick<
+  ViewHierarchyResult,
+  "packageName" | "screenWidth" | "screenHeight" | "screenScale"
+> & { hierarchy?: HierarchyNodeLike };
+
 const MODAL_CLASSES = new Set([
   "UIActionSheet",
   "UIAlertController",
@@ -89,7 +99,7 @@ function hasNodeAttrs(value: unknown): boolean {
   );
 }
 
-function rootNode(viewHierarchy: ViewHierarchyResult | undefined): HierarchyNodeLike | undefined {
+function rootNode(viewHierarchy: IosIdentityHierarchy | undefined): HierarchyNodeLike | undefined {
   const hierarchy: HierarchyNodeLike | undefined = viewHierarchy?.hierarchy;
   if (!hierarchy) {
     return undefined;
@@ -297,7 +307,7 @@ function keyboardNodeIsOnScreen(
  * and the diff's keyboard collapse so they cannot disagree.
  */
 export function isIosKeyboardVisible(
-  viewHierarchy: ViewHierarchyResult | undefined,
+  viewHierarchy: IosIdentityHierarchy | undefined,
   fallbackScreen?: { width?: number; height?: number },
 ): boolean {
   const screen =
@@ -342,7 +352,7 @@ function confidence(signals: CandidateSignals): ScreenIdentity["confidence"] {
  * no usable `screenWidth`/`screenHeight`, so the identity cannot disagree with it.
  */
 export function deriveIosScreenIdentity(
-  viewHierarchy: ViewHierarchyResult | undefined,
+  viewHierarchy: IosIdentityHierarchy | undefined,
   fallbackScreen?: { width?: number; height?: number },
 ): ScreenIdentity | undefined {
   const root = rootNode(viewHierarchy);

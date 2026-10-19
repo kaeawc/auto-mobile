@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+# shellcheck source=scripts/ios/run_with_timeout.sh
 source "${SCRIPT_DIR}/ios/run_with_timeout.sh"
 
 acceptance_run_token() {

@@ -8,9 +8,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
-# shellcheck source=scripts/lib/vcs-diff.sh disable=SC1091
+# shellcheck source=scripts/lib/vcs-diff.sh
 source "$ROOT/scripts/lib/vcs-diff.sh"
-# shellcheck source=scripts/lib/db-integration-paths.sh disable=SC1091
+# shellcheck source=scripts/lib/db-integration-paths.sh
 source "$ROOT/scripts/lib/db-integration-paths.sh"
 
 # Keep local validation hermetic when the caller cannot chmod the default
@@ -149,10 +149,11 @@ fast_validation_static_checks() {
 
 db_integration_fast_path() {
   local branch_changes worktree_changes rc paths_changed
+  local -a path_filters=()
   branch_changes="$(vcs_changed_files_since_merge_base origin/main)"
   rc=$?
   if [[ "$rc" -ne 0 ]]; then return "$rc"; fi
-  worktree_changes="$(vcs_touched_files_including_deleted)"
+  worktree_changes="$(vcs_touched_files_including_deleted ${path_filters[@]+"${path_filters[@]}"})"
   rc=$?
   if [[ "$rc" -ne 0 ]]; then return "$rc"; fi
   paths_changed="$(db_integration_paths_changed <<< "${branch_changes}"$'\n'"${worktree_changes}")"
@@ -165,7 +166,6 @@ db_integration_fast_path() {
 }
 
 affected_selection_dir=""
-# shellcheck disable=SC2317,SC2329 # invoked via the EXIT trap
 cleanup_affected_selection() {
   local exit_code=$?
   if [[ -n "$affected_selection_dir" ]]; then
@@ -178,14 +178,20 @@ cleanup_affected_selection() {
 }
 
 affected_test_selection() {
-  local branch_changes worktree_changes untracked_changes="" selection_dir file
+  local branch_changes worktree_changes untracked_changes="" selection_dir file rc caller_options="$-"
+  local -a path_filters=()
   local -a units=() integrations=() bats_files=()
-  # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
-  branch_changes="$(vcs_changed_files_since_merge_base origin/main)" || return $?
-  # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
-  worktree_changes="$(vcs_touched_files_including_deleted)" || return $?
-  # shellcheck disable=SC2310 # Failures are propagated explicitly via `|| return $?`.
-  if ! vcs_uses_jj; then
+  set +e
+  branch_changes="$(vcs_changed_files_since_merge_base origin/main)"
+  rc=$?
+  if [[ "$caller_options" == *e* ]]; then set -e; fi
+  if [[ "$rc" -ne 0 ]]; then return "$rc"; fi
+  set +e
+  worktree_changes="$(vcs_touched_files_including_deleted ${path_filters[@]+"${path_filters[@]}"})"
+  rc=$?
+  if [[ "$caller_options" == *e* ]]; then set -e; fi
+  if [[ "$rc" -ne 0 ]]; then return "$rc"; fi
+  if [[ ! -d .jj || -e .git ]]; then
     untracked_changes="$(git ls-files --others --exclude-standard)" || return $?
   fi
   mkdir -p "$ROOT/scratch"

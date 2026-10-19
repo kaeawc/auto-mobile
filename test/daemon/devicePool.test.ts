@@ -357,7 +357,7 @@ describe("DevicePool", () => {
       await binding;
       const reservation = await reservationPromise;
       try {
-        expect(reservation?.session).toBe(sessionManager.getSession("owner-session"));
+        expect(reservation?.session).toBe(sessionManager.getSession("owner-session") ?? undefined);
       } finally {
         await reservation?.release();
       }
@@ -396,13 +396,13 @@ describe("DevicePool", () => {
       const abortedReservation = devicePool
         .reserveDeviceForShutdown(owner.deviceId, controller.signal)
         .then(
-          (reservation) => ({ reservation }),
-          (error: unknown) => ({ error }),
+          (reservation) => ({ reservation, error: undefined }),
+          (error: unknown) => ({ reservation: undefined, error }),
         );
       controller.abort(new Error("shutdown reservation cancelled"));
       const retryReservation = devicePool.reserveDeviceForShutdown(owner.deviceId).then(
-        (reservation) => ({ reservation }),
-        (error: unknown) => ({ error }),
+        (reservation) => ({ reservation, error: undefined }),
+        (error: unknown) => ({ reservation: undefined, error }),
       );
 
       persistence.finishUpsert();
@@ -413,7 +413,9 @@ describe("DevicePool", () => {
 
       const retryOutcome = await retryReservation;
       expect(retryOutcome.error).toBeUndefined();
-      expect(retryOutcome.reservation?.session).toBe(sessionManager.getSession("owner-session"));
+      expect(retryOutcome.reservation?.session).toBe(
+        sessionManager.getSession("owner-session") ?? undefined,
+      );
       await retryOutcome.reservation?.release();
     });
 
@@ -516,7 +518,9 @@ describe("DevicePool", () => {
 
     test("should initialize with multiple devices", async () => {
       const deviceIds = ["emulator-5554", "emulator-5556", "emulator-5558"];
-      await devicePool.initializeWithDevices(deviceIds.map(createBootedDevice));
+      await devicePool.initializeWithDevices(
+        deviceIds.map((deviceId) => createBootedDevice(deviceId)),
+      );
       expect(devicePool.getTotalDeviceCount()).toBe(3);
       expect(devicePool.getAvailableDeviceCount()).toBe(3);
       for (const deviceId of deviceIds) {

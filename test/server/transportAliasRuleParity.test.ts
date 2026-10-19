@@ -137,7 +137,7 @@ async function runScenario(scenario: Scenario, cleanups: Array<() => void>) {
   const ios = spyOnIosClientFactory(() => ({
     bindSession: () => undefined,
     getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-    requestTapCoordinates: async () => ({ success: true }),
+    requestTapCoordinates: async () => ({ success: true, totalTimeMs: 0 }),
   }));
   cleanups.push(() => ios.mockRestore());
   const wire = InMemoryControlSocket.attach({

@@ -49,6 +49,12 @@ import {
   setObserveCacheStore,
 } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import {
+  NO_CACHED_HIERARCHY,
+  syncedHierarchyFor,
+  xcTestHierarchyFor,
+} from "../../helpers/iosHierarchyResponses";
+import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
+import {
   spyOnIosClientInstance,
   spyOnIosExistingInstance,
 } from "../../helpers/iosCtrlProxyClientSpies";
@@ -1612,7 +1618,7 @@ describe("LaunchApp", () => {
   test("warns with the underlying iOS hierarchy sync error and continues", async () => {
     const client = {
       async getLatestHierarchy() {
-        return null;
+        return NO_CACHED_HIERARCHY;
       },
       async requestHierarchySync() {
         throw new Error("hierarchy socket closed");
@@ -1641,7 +1647,7 @@ describe("LaunchApp", () => {
     let unsubscribeCount = 0;
     const client = {
       async getLatestHierarchy() {
-        return null;
+        return NO_CACHED_HIERARCHY;
       },
       onPushUpdate() {
         return () => {
@@ -1649,7 +1655,7 @@ describe("LaunchApp", () => {
         };
       },
       async requestHierarchySync() {
-        return { hierarchy: { packageName } };
+        return syncedHierarchyFor(packageName);
       },
     };
     const getInstanceSpy = spyOnIosClientInstance(client);
@@ -1682,7 +1688,7 @@ describe("LaunchApp", () => {
       let unsubscribeCount = 0;
       const client = {
         async getLatestHierarchy() {
-          return null;
+          return NO_CACHED_HIERARCHY;
         },
         onPushUpdate() {
           return () => {
@@ -1716,20 +1722,20 @@ describe("LaunchApp", () => {
       platform: "ios",
       deviceId: "11111111-1111-1111-1111-111111111111",
     };
-    let pushUpdate: ((hierarchy: { packageName?: string }) => void) | undefined;
+    let pushUpdate: ((hierarchy: XCTestHierarchy) => void) | undefined;
     let unsubscribeCount = 0;
     const client = {
       async getLatestHierarchy() {
-        return null;
+        return NO_CACHED_HIERARCHY;
       },
-      onPushUpdate(callback: (hierarchy: { packageName?: string }) => void) {
+      onPushUpdate(callback: (hierarchy: XCTestHierarchy) => void) {
         pushUpdate = callback;
         return () => {
           unsubscribeCount += 1;
         };
       },
       async requestHierarchySync() {
-        return { hierarchy: { packageName: "com.apple.springboard" } };
+        return syncedHierarchyFor("com.apple.springboard");
       },
     };
     const getInstanceSpy = spyOnIosClientInstance(client);
@@ -1748,7 +1754,7 @@ describe("LaunchApp", () => {
       expect(settled).toBe(false);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
-      pushUpdate?.({ packageName });
+      pushUpdate?.(xcTestHierarchyFor(packageName));
       await wait;
       expect(info).toHaveBeenCalledWith(expect.stringContaining("iOS hierarchy ready via push"));
 

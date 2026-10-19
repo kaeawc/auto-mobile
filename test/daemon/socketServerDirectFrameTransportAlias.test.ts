@@ -136,7 +136,7 @@ describe("a direct frame naming a held handset by its other transport id", () =>
       ) => {
         args[7]?.();
         driven.push(`ios-tap:${device.deviceId}`);
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       },
       setPreference: async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
         if (typeof args[5] === "object") {

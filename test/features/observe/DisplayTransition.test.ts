@@ -253,7 +253,7 @@ describe("display transitions", () => {
         },
       ]);
       const client = spyOnIosClientInstance({
-        getLatestHierarchy: async () => ({ hierarchy: null }),
+        getLatestHierarchy: async () => ({ hierarchy: null, fresh: false }),
       });
       try {
         const screen = new RealObserveScreen(
@@ -296,7 +296,7 @@ describe("display transitions", () => {
     const cacheStore = new FakeObserveCacheStore(timer);
     setObserveCacheStore(cacheStore);
     const client = spyOnIosClientInstance({
-      getLatestHierarchy: async () => ({ hierarchy: null }),
+      getLatestHierarchy: async () => ({ hierarchy: null, fresh: false }),
     });
     const screen = new RealObserveScreen(
       duo,

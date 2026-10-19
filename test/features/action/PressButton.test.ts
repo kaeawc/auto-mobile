@@ -286,7 +286,7 @@ describe("PressButton", () => {
           hook();
         }
         expect(marks).toBe(1);
-        return { success: true };
+        return { success: true, totalTimeMs: 0 };
       };
       const instance = spyOnIosClientInstance({
         requestPressHome: request,

@@ -14,6 +14,13 @@ import { logger, LogLevel } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { recoverRootlessAccessibilityService } from "../../../src/features/observe/android/ObserveAccessibilityRecovery";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { xcTestHierarchyFor } from "../../helpers/iosHierarchyResponses";
+import type {
+  CtrlProxyHierarchyResponse,
+  XCTestHierarchy,
+} from "../../../src/features/observe/ios/types";
+import type { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { CtrlProxyReconnectStatus } from "../../../src/models";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -420,7 +427,7 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const fakeIosClient = {
-        getLatestHierarchy: async () => ({
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> => ({
           hierarchy: null,
           fresh: false,
           reconnectStatus: {
@@ -467,7 +474,7 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const getInstanceSpy = spyOnIosClientInstance({
-        getLatestHierarchy: async () => ({
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> => ({
           hierarchy: null,
           fresh: false,
           unavailableReason: reason,
@@ -502,19 +509,26 @@ describe("ViewHierarchy", function () {
       let reads = 0;
       let starts = 0;
       const fakeIosClient = {
-        getLatestHierarchy: async () =>
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> =>
           ++reads === 1
             ? {
                 hierarchy: null,
+                fresh: false,
                 unavailableReason: "unknown",
                 unavailableDetail: "dead",
               }
-            : { hierarchy: { hierarchy: { role: "text", text: "Recovered" } }, fresh: true },
+            : {
+                hierarchy: xcTestHierarchyFor("com.example.app", {
+                  role: "text",
+                  text: "Recovered",
+                }),
+                fresh: true,
+              },
         ensureRecoveryStarted: () => {
           starts++;
         },
         isConnected: () => false,
-        awaitRecovery: async (budget: number) => {
+        awaitRecovery: async (budget: number): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           expect(budget).toBe(20_000);
           return "recovered";
         },
@@ -544,16 +558,23 @@ describe("ViewHierarchy", function () {
       let reads = 0;
       let waits = 0;
       const client = {
-        getLatestHierarchy: async () =>
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> =>
           ++reads === 1
             ? {
                 hierarchy: null,
+                fresh: false,
                 unavailableReason: "service_recovering",
                 unavailableDetail: "startup superseded",
               }
-            : { hierarchy: { hierarchy: { role: "text", text: "Recovered" } }, fresh: true },
+            : {
+                hierarchy: xcTestHierarchyFor("com.example.app", {
+                  role: "text",
+                  text: "Recovered",
+                }),
+                fresh: true,
+              },
         ensureRecoveryStarted: () => {},
-        awaitRecovery: async () => {
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           waits++;
           return "recovered";
         },
@@ -584,10 +605,11 @@ describe("ViewHierarchy", function () {
       let reads = 0;
       let waits = 0;
       const client = {
-        getLatestHierarchy: async () =>
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> =>
           ++reads === 1
             ? {
                 hierarchy: null,
+                fresh: false,
                 reconnectStatus: {
                   state: "cooldown",
                   retryAfterMs: 1000,
@@ -596,9 +618,15 @@ describe("ViewHierarchy", function () {
                   maxConnectionAttempts: 3,
                 },
               }
-            : { hierarchy: { hierarchy: { role: "text", text: "Recovered" } }, fresh: true },
+            : {
+                hierarchy: xcTestHierarchyFor("com.example.app", {
+                  role: "text",
+                  text: "Recovered",
+                }),
+                fresh: true,
+              },
         ensureRecoveryStarted: () => {},
-        awaitRecovery: async () => {
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           waits++;
           return "recovered";
         },
@@ -628,10 +656,11 @@ describe("ViewHierarchy", function () {
       };
       let reads = 0;
       const client = {
-        getLatestHierarchy: async () => {
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> => {
           reads++;
           return {
             hierarchy: null,
+            fresh: false,
             unavailableReason: "connection_lost",
             unavailableDetail: "runner socket closed",
             reconnectStatus: {
@@ -644,7 +673,7 @@ describe("ViewHierarchy", function () {
           };
         },
         ensureRecoveryStarted: () => {},
-        awaitRecovery: async () => "timed_out",
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => "timed_out",
       };
       const spy = spyOnIosClientInstance(client);
       try {
@@ -669,12 +698,12 @@ describe("ViewHierarchy", function () {
         name: "Test iPhone",
         platform: "ios",
       };
-      const staleHierarchy = {
+      const staleHierarchy: XCTestHierarchy = {
         updatedAt: 1750934585218,
         packageName: "com.example.cached",
-        hierarchy: { node: { $: { text: "Cached screen" } } },
+        hierarchy: { node: { text: "Cached screen" } },
       };
-      const reconnectStatus = {
+      const reconnectStatus: CtrlProxyReconnectStatus = {
         state: "cooldown",
         retryAfterMs: 1800,
         retryAfterSeconds: 2,
@@ -682,7 +711,7 @@ describe("ViewHierarchy", function () {
         maxConnectionAttempts: 3,
       };
       const fakeIosClient = {
-        getLatestHierarchy: async () => ({
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> => ({
           hierarchy: staleHierarchy,
           fresh: false,
           updatedAt: 1750934585218,
@@ -701,7 +730,7 @@ describe("ViewHierarchy", function () {
 
         const result = await viewHierarchyWithMocks.getiOSViewHierarchy();
 
-        expect(result.hierarchy).toEqual(staleHierarchy.hierarchy);
+        expect(Object.entries(result.hierarchy)).toEqual(Object.entries(staleHierarchy.hierarchy));
         expect(result.updatedAt).toBe(1750934585218);
         expect(result.ctrlProxyReconnect).toEqual(reconnectStatus);
       } finally {
@@ -716,9 +745,10 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const fakeIosClient = {
-        getLatestHierarchy: async () => ({
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> => ({
           hierarchy: {
             updatedAt: 1750934585218,
+            packageName: "com.example.app",
             hierarchy: {
               role: "text",
               text: "Overview",
@@ -753,7 +783,7 @@ describe("ViewHierarchy", function () {
         platform: "ios",
       };
       const fakeIosClient = {
-        getLatestHierarchy: async () => ({
+        getLatestHierarchy: async (): Promise<CtrlProxyHierarchyResponse> => ({
           hierarchy: {
             updatedAt: 1750934585218,
             packageName: "com.example.app",
@@ -808,7 +838,7 @@ describe("ViewHierarchy", function () {
         ) => {
           receivedSignal = signal;
           // A wedged CtrlProxy: this settles ONLY when the caller cancels.
-          return new Promise((_resolve, reject) => {
+          return new Promise<CtrlProxyHierarchyResponse>((_resolve, reject) => {
             signal?.addEventListener("abort", () => reject(new Error("Operation cancelled")), {
               once: true,
             });
@@ -1789,7 +1819,7 @@ describe("Offscreen Node Filtering", function () {
         ensureRecoveryStarted: () => {
           starts++;
         },
-        awaitRecovery: async () => "failed",
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => "failed",
       });
       timer.enableAutoAdvance();
       const recoveryManager = AndroidCtrlProxyManager.createForTestingWithDeps(
@@ -1911,7 +1941,7 @@ describe("Offscreen Node Filtering", function () {
         ensureRecoveryStarted: () => {
           starts++;
         },
-        awaitRecovery: async (budget: number) => {
+        awaitRecovery: async (budget: number): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           expect(budget).toBe(10_000);
           return "recovered";
         },
@@ -1936,7 +1966,7 @@ describe("Offscreen Node Filtering", function () {
         ensureRecoveryStarted: () => {
           recovering = true;
         },
-        awaitRecovery: async () => "timed_out",
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => "timed_out",
         isRecoveryInFlight: () => recovering,
       });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), recoveringClient);
@@ -1950,7 +1980,8 @@ describe("Offscreen Node Filtering", function () {
         getAccessibilityHierarchy: async () => null,
         isConnected: () => false,
         ensureRecoveryStarted: () => {},
-        awaitRecovery: async () => "not_recovering",
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> =>
+          "not_recovering",
         isRecoveryInFlight: () => false,
         getRestartBudgetSnapshot: () => ({
           state: "exhausted",
@@ -1980,7 +2011,7 @@ describe("Offscreen Node Filtering", function () {
         },
         isConnected: () => false,
         ensureRecoveryStarted: () => {},
-        awaitRecovery: async (budget: number) => {
+        awaitRecovery: async (budget: number): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           expect(budget).toBe(1000 - MIN_RECOVERY_REFETCH_BUDGET_MS);
           await timer.sleep(budget);
           return "recovered";
@@ -2007,7 +2038,7 @@ describe("Offscreen Node Filtering", function () {
         },
         isConnected: () => false,
         ensureRecoveryStarted: () => {},
-        awaitRecovery: async (budget: number) => {
+        awaitRecovery: async (budget: number): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           waitBudget = budget;
           await timer.sleep(budget);
           return "failed";
@@ -2031,7 +2062,7 @@ describe("Offscreen Node Filtering", function () {
       const client = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
         ensureRecoveryStarted: () => starts++,
-        awaitRecovery: async () => {
+        awaitRecovery: async (): ReturnType<IOSCtrlProxyClient["awaitRecovery"]> => {
           waits++;
           return "recovered";
         },

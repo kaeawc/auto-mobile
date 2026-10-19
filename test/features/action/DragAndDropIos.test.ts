@@ -28,6 +28,7 @@ import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { xcTestHierarchyFor } from "../../helpers/iosHierarchyResponses";
 
 // Simulator-shaped UDID so isIosSimulatorUdid would pass (not that dragAndDrop branches on it,
 // but keeps the device realistic).
@@ -93,7 +94,7 @@ describe("DragAndDrop - iOS", () => {
     iosDragClient = fakeIosClient;
     fakeAndroidClient = new FakeCtrlProxy();
     runnerFinishedAt = 0;
-    fakeIosClient.setHierarchyData(createHierarchy());
+    fakeIosClient.setHierarchyData(xcTestHierarchyFor("com.test.app", {}, Date.now()));
     fakeIosClient.setViewHierarchyResult(createHierarchy());
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
@@ -510,7 +511,9 @@ describe("DragAndDrop - iOS", () => {
         ],
       },
     } as any;
-    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setHierarchyData(
+      xcTestHierarchyFor("com.test.app", {}, freshHierarchy.updatedAt),
+    );
     fakeIosClient.setViewHierarchyResult(freshHierarchy);
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
@@ -522,7 +525,9 @@ describe("DragAndDrop - iOS", () => {
 
   test("drag uses cleaned visible children and excludes filtered iOS nodes", async () => {
     const freshHierarchy = iosProjectionFixture();
-    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setHierarchyData(
+      xcTestHierarchyFor("com.test.app", {}, freshHierarchy.updatedAt),
+    );
     fakeIosClient.setViewHierarchyResult(freshHierarchy);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 
@@ -701,7 +706,9 @@ describe("DragAndDrop - iOS", () => {
       packageName: "com.test.app",
       updatedAt: Date.now(),
     } as any;
-    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setHierarchyData(
+      xcTestHierarchyFor("com.test.app", {}, freshHierarchy.updatedAt),
+    );
     fakeIosClient.setViewHierarchyResult(freshHierarchy);
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 

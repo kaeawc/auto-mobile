@@ -1,3 +1,4 @@
+import { getStructuredPayload } from "../../src/utils/toolUtils";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 
 /**
@@ -66,4 +67,19 @@ export function toolField(response: unknown, key: string): unknown {
     return undefined;
   }
   return structured[key];
+}
+
+/**
+ * The payload of an envelope-shaped tool result, or `undefined` when it carries none. Mirrors
+ * `getStructuredPayload` for handler results, which resolve to `unknown` and so cannot be passed to
+ * it directly.
+ */
+export function toolPayload(response: unknown): Record<string, unknown> | undefined {
+  if (typeof response !== "object" || response === null) {
+    return undefined;
+  }
+  return getStructuredPayload({
+    structuredContent: "structuredContent" in response ? response.structuredContent : undefined,
+    content: "content" in response ? response.content : undefined,
+  });
 }

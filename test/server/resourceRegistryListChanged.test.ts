@@ -159,7 +159,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     manager.getBootedDevices = async () => {
       discoveryCalls++;
       if (discoveryCalls === 1) {
-        return await oldDiscovery.promise;
+        return [...(await oldDiscovery.promise)];
       }
       return [newestDevice];
     };

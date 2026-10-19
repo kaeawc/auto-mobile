@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   PROTOTYPE_PATCH_CAPABILITY,
@@ -102,9 +103,9 @@ describe("prototype patch host", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
     });
   }
-  async function call(input: unknown, device = android) {
+  async function call(input: Record<string, unknown>, device = android) {
     const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(result.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(result));
   }
   const show = (device = android) => call({ action: "show", spec }, device);
   const patch = (ops: unknown = replace, extra: Record<string, unknown> = {}, device = android) =>
@@ -385,7 +386,7 @@ describe("prototype patch host", () => {
   });
   test("state requires baseRevision and leaves state tests to the device", async () => {
     await show();
-    const ops = [{ op: "test", path: "/state/liked", value: true }];
+    const ops = [{ op: "test" as const, path: "/state/liked", value: true }];
     expect((await patch(ops)).error).toBe(
       "Invalid patch at baseRevision: required when a patch has /state ops",
     );
@@ -415,7 +416,7 @@ describe("prototype patch host", () => {
     const timeout = {
       success: false,
       error: "prototype_result timed out after 50ms",
-      delivery: "indeterminate",
+      delivery: "indeterminate" as const,
     };
     proxy.setPatchResult(timeout);
     const output = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(android, {
@@ -423,8 +424,8 @@ describe("prototype patch host", () => {
       id: "orders",
       ops: replace,
     });
-    expect(output.structuredContent).not.toHaveProperty("delivery");
-    expect(prototypeOutputSchema.parse(output.structuredContent).error).toEndWith(
+    expect(toolStructured(output)).not.toHaveProperty("delivery");
+    expect(prototypeOutputSchema.parse(toolStructured(output)).error).toEndWith(
       " The device may or may not have applied the patch: show the prototype again before the next patch.",
     );
     proxy.setPatchResult({ success: true });
@@ -582,7 +583,7 @@ describe("prototype patch host", () => {
     await show();
     const ops = [
       {
-        op: "replaceNode",
+        op: "replaceNode" as const,
         id: "label",
         node: { id: "label", type: "column", children: [{ type: "text", id: "new", text: "new" }] },
       },

@@ -69,6 +69,11 @@ async function connect(context: ResourceReadContext): Promise<FakeMcpServer> {
   return server;
 }
 
+/** The `uri` a resource-updated notification carries, if any. */
+function notifiedUri(params: unknown): unknown {
+  return typeof params === "object" && params !== null && "uri" in params ? params.uri : undefined;
+}
+
 describe("navigation resource session resolution", () => {
   let harness: Awaited<ReturnType<typeof installInMemoryNavManager>>;
   let a: NavigationGraphManager;
@@ -306,7 +311,7 @@ describe("navigation resource session resolution", () => {
     await a.setCurrentApp("app.a.sole-update");
     await timer.advanceTimeAsync(1000);
     expect(
-      server.server.notifications.map((notification) => notification.params?.uri).sort(),
+      server.server.notifications.map((notification) => notifiedUri(notification.params)).sort(),
     ).toEqual([graphUri, "automobile:navigation/history", "automobile:navigation/apps"].sort());
     server.server.notifications.length = 0;
     sessions.sessionIds = ["A", "B"];

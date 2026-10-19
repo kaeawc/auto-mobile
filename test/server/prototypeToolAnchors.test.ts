@@ -1,3 +1,5 @@
+import { toolStructured } from "../helpers/toolResponse";
+import { createExecResult } from "../../src/utils/execResult";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   PROTOTYPE_ANCHOR_CAPABILITY,
@@ -85,9 +87,9 @@ describe("prototype show with anchors (#9316)", () => {
     restore();
   });
 
-  async function call(input: unknown, device = android) {
+  async function call(input: Record<string, unknown>, device = android) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   test("an element anchor is sent as resolved dp bounds and reported with the hierarchy time", async () => {
@@ -202,12 +204,14 @@ describe("prototype show with anchors (#9316)", () => {
   test("element anchors on another display are refused", async () => {
     client.setSupportedCommands([PROTOTYPE_ANCHOR_CAPABILITY, PROTOTYPE_DISPLAY_CAPABILITY]);
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover-key" type INTERNAL, real 100 x 100}\n' +
-        'Display id 2: DisplayInfo{uniqueId "local:inner-key" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+          'Display id 2: DisplayInfo{uniqueId "local:inner-key" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+    );
     unsubscribe();
     const timer = new FakeTimer();
     unsubscribe = registerPrototypeTools({
@@ -292,9 +296,9 @@ describe("an anchor-refused app-layer show leaves the device untouched (#11379)"
     restore();
   });
 
-  async function call(input: unknown, device = android) {
+  async function call(input: Record<string, unknown>, device = android) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   function expectUntouched() {
@@ -347,12 +351,14 @@ describe("an anchor-refused app-layer show leaves the device untouched (#11379)"
       PROTOTYPE_DISPLAY_CAPABILITY,
       "prototype_window_options_v1",
     ]);
-    adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:cover-key" type INTERNAL, real 100 x 100}\n' +
-        'Display id 2: DisplayInfo{uniqueId "local:inner-key" type INTERNAL, real 200 x 200}',
-      stderr: "",
-    });
+          'Display id 2: DisplayInfo{uniqueId "local:inner-key" type INTERNAL, real 200 x 200}',
+        "",
+      ),
+    );
     const fold: BootedDevice = {
       ...android,
       displays: {
@@ -440,9 +446,9 @@ describe("prototype show with anchors on an iOS simulator (#9316)", () => {
     restore();
   });
 
-  async function call(input: unknown) {
+  async function call(input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(ios, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const shows = () => agent.requests.filter((request) => request.type === "show_prototype");
 

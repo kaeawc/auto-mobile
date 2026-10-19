@@ -1,4 +1,4 @@
-import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/interfaces/AvdManager";
+import type { SystemImageFilter } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { getAbortSignal } from "../../../src/utils/AbortContext";
 import { createListingHandlers } from "../../../src/server/deviceToolsListing";
 import {
@@ -10,6 +10,7 @@ import {
   setDeviceLockProbe,
   resetBootedDevicesResourceCache,
   getBootedDevicesForPlatforms,
+  type OrientationReaderFactory,
 } from "../../../src/server/bootedDeviceResources";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
@@ -63,7 +64,7 @@ describe("Android inventory read budgets", () => {
       lockSignal = getAbortSignal();
       return lateLock.promise;
     });
-    const orientationReaderFactory = () => ({
+    const orientationReaderFactory: OrientationReaderFactory = () => ({
       readOrientation: async (_device, signal) => {
         orientationSignal = signal;
         return lateOrientation.promise;
@@ -122,7 +123,9 @@ describe("Android inventory read budgets", () => {
   test("9s images response is retryable and a late catalog completes the next read without new children", async () => {
     const timer = new FakeTimer();
     const manager = new FakeDeviceUtils();
-    manager.setDeviceImages("android", [{ name: "Pixel_9", platform: "android" }]);
+    manager.setDeviceImages("android", [
+      { name: "Pixel_9", platform: "android", isRunning: false },
+    ]);
     const avds = new SlowCatalog(timer);
     const handler = createDeviceImageResourcesHandler({
       deviceManager: manager,

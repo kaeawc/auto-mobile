@@ -280,6 +280,11 @@ export class FakeSimctl implements SimCtl {
   /**
    * Get list of method calls for a specific method (for test assertions)
    */
+  /** The argv of every `executeCommandArgs` call, in order. */
+  getCommandArgsCalls(): readonly (readonly string[])[] {
+    return this.commandArgsCalls;
+  }
+
   getMethodCalls(methodName: string): Array<Record<string, unknown>> {
     return this.methodCalls.get(methodName) || [];
   }
@@ -306,6 +311,8 @@ export class FakeSimctl implements SimCtl {
   clearCallHistory(): void {
     this.methodCalls.clear();
   }
+
+  private readonly commandArgsCalls: string[][] = [];
 
   /**
    * Record a method call with parameters
@@ -355,6 +362,7 @@ export class FakeSimctl implements SimCtl {
     _signal?: AbortSignal,
   ): Promise<ExecResult> {
     this.recordCall("executeCommandArgs", { args, timeoutMs });
+    this.commandArgsCalls.push(args);
 
     const argvKey = JSON.stringify(args);
 

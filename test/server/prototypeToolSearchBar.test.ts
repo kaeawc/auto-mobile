@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_SEARCH_BAR_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
@@ -29,11 +30,11 @@ const android: BootedDevice = { deviceId: "fake-data", platform: "android", name
 const ios: BootedDevice = { deviceId: "sim-data", platform: "ios", name: "Sim" };
 const plain = {
   id: "orders",
-  window: { placement: { type: "fullscreen" as const } },
+  window: { placement: { type: "fullscreen" as const }, opacity: 100 },
   state: { liked_7: false },
   root: { type: "text" as const, text: "Hello" },
 };
-const bound = {
+const bound: PrototypeSpec = {
   ...plain,
   state: { query: "", active: true },
   root: {
@@ -44,7 +45,10 @@ const bound = {
     child: { type: "text", text: "Result" },
   },
 };
-const usages = [bound, { ...bound, root: { type: "column", children: [bound.root] } }];
+const usages: PrototypeSpec[] = [
+  bound,
+  { ...bound, root: { type: "column", children: [bound.root] } },
+];
 describe("prototype search bar host", () => {
   let client: FakeCtrlProxy;
   let agent: FakePrototypeAgentClient;
@@ -120,10 +124,10 @@ describe("prototype search bar host", () => {
   async function call(device: BootedDevice, spec: unknown) {
     return callWith(device, { action: "show", spec });
   }
-  async function callWith(device: BootedDevice, input: unknown) {
+  async function callWith(device: BootedDevice, input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
 
@@ -150,10 +154,7 @@ describe("prototype search bar host", () => {
         expect(payload).toMatchObject({
           success: false,
           error: new ActionableError(
-            prototypeSearchBarUnsupportedMessage(
-              prototypeSearchBarFields(spec as PrototypeSpec),
-              platform,
-            ),
+            prototypeSearchBarUnsupportedMessage(prototypeSearchBarFields(spec), platform),
           ).message,
         });
         expect(await callWith(device, { action: "status" })).toEqual(before);

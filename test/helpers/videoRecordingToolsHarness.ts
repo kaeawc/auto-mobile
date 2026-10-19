@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { toolJson } from "./toolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   registerVideoRecordingTools,
@@ -28,4 +30,13 @@ export function createVideoRecordingToolsHarness() {
       ToolRegistry.removeToolForTesting("videoRecording");
     },
   };
+}
+
+const recordingEntriesSchema = z.object({
+  recordings: z.array(z.looseObject({ recordingId: z.string(), deviceId: z.string().optional() })),
+});
+
+/** The `recordings` array of a videoRecording tool response, with each entry's id checked. */
+export function recordingEntries(response: unknown) {
+  return recordingEntriesSchema.parse(toolJson(response)).recordings;
 }

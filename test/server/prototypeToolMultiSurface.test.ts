@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   ctrlProxyRequests,
@@ -24,7 +25,7 @@ const capability = "prototype_multi_surface_v1";
 const device = { deviceId: "multi-surface", platform: "android" as const, name: "Fake" };
 const spec = (id: string, text = id) => ({
   id,
-  window: { placement: { type: "fullscreen" as const } },
+  window: { placement: { type: "fullscreen" as const }, opacity: 100 },
   state: { value: id },
   root: { type: "text" as const, text },
 });
@@ -70,7 +71,7 @@ describe("prototype multiple surfaces", () => {
   });
   async function call(input: Record<string, unknown>, target: BootedDevice = device) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(target, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   const show = (id: string, extra: Record<string, unknown> = {}) =>
     call({ action: "show", spec: spec(id), replaceOthers: false, ...extra });

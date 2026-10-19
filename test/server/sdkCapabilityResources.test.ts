@@ -1,3 +1,4 @@
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   registerSdkCapabilityResources,
@@ -69,7 +70,7 @@ describe("sdkCapabilityResources", () => {
     if (!match) {
       throw new Error(`no template matched: ${uri}`);
     }
-    return JSON.parse((await match.template.handler(match.params)).text ?? "{}");
+    return JSON.parse((await invokeResourceTemplate(match)).text ?? "{}");
   }
 
   test("matches both the bare and app-scoped URI", () => {

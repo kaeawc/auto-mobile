@@ -1,3 +1,4 @@
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -82,7 +83,7 @@ describe("device-addressed resource reads pass both funnels", () => {
     const matched = ResourceRegistry.matchTemplate(uri);
     expect(matched).toBeDefined();
 
-    const content = await matched!.template.handler(matched!.params);
+    const content = await invokeResourceTemplate(matched!);
 
     expect(JSON.parse(content.text ?? "{}").error).toMatch(/identity is unresolved/);
   });

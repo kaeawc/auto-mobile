@@ -1,7 +1,6 @@
-import { fakeServerContext } from "../helpers/fakeServerContext";
-import { Client } from "@modelcontextprotocol/client";
-import { Server, type LoggingLevel, InMemoryTransport } from "@modelcontextprotocol/server";
-import { McpError } from "../../src/server/mcpError";
+import { toolText } from "../helpers/toolResponse";
+import { Client, ProtocolError } from "@modelcontextprotocol/client";
+import { type LoggingLevel, InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
@@ -9,7 +8,6 @@ import {
   livenessHandoverPayload,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
-import type { BindingsResult } from "../../src/daemon/sessionBroker/provisioning/acquisitionResult";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -30,63 +28,50 @@ const stalled: LivenessHandover = {
   lastAcknowledgedHeartbeatAt: 10,
   action: "restart_daemon_then_resume_by_session_uuid",
 };
-const extra = fakeServerContext({ signal: new AbortController().signal, id: 1 });
 
-/** Exercise the registered handlers without a daemon connection or host process. */
+/** Exercise the registered handlers over an in-memory MCP link, without a daemon or host process. */
 async function stalledHandlerAnswer(
-  bindings: BindingsResult | undefined,
   surface: "tool" | "resource",
   handover = stalled,
   sessionUuid = SESSION,
 ) {
-  const registration = spyOn(Server.prototype, "setRequestHandler");
-  let harness: ReturnType<typeof createProxyMcpServer>;
-  let registrations: typeof registration.mock.calls;
-  try {
-    harness = createProxyMcpServer({
-      bindings,
-      proxyConfig: {
-        timer: new FakeTimer(),
-        clientFactory: () => new FakeDaemonClient(),
-        daemonManager: new FakeDaemonManager(),
-        daemonAvailabilityProbe: async () => true,
-        autoStartDaemon: false,
-      },
-    });
-    registrations = [...registration.mock.calls];
-  } finally {
-    registration.mockRestore();
-  }
+  const { server, proxy } = createProxyMcpServer({
+    proxyConfig: {
+      timer: new FakeTimer(),
+      clientFactory: () => new FakeDaemonClient(),
+      daemonManager: new FakeDaemonManager(),
+      daemonAvailabilityProbe: async () => true,
+      autoStartDaemon: false,
+    },
+  });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "stalled-answer-client", version: "0.0.1" });
   const refused = new DaemonSessionStalledError(sessionUuid, handover);
-  const call = spyOn(
-    harness.proxy,
-    surface === "tool" ? "callTool" : "readResource",
-  ).mockRejectedValue(refused);
+  const call = spyOn(proxy, surface === "tool" ? "callTool" : "readResource").mockRejectedValue(
+    refused,
+  );
   try {
-    const schema = surface === "tool" ? "tools/call" : "resources/read";
-    const handler = registrations.findLast(([registered]) => registered === schema)?.[1];
-    if (!handler) {
-      throw new Error("Missing handler");
-    }
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
     if (surface === "tool") {
-      const result = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
+      const result = await client.callTool({ name: "tapOn" });
       expect(result.isError).toBe(true);
-      return (result.content[0] as { text: string }).text;
+      const first: unknown = result.content[0];
+      return toolText({ content: [first] });
     }
-    try {
-      await handler({ method: "resources/read", params: { uri: "automobile:hierarchy" } }, extra);
-    } catch (error) {
-      if (!(error instanceof McpError)) {
-        throw error;
-      }
-      expect(error.code).toBe(-32603);
-      return JSON.stringify(error.data);
+    const error: unknown = await client
+      .readResource({ uri: "automobile:hierarchy" })
+      .catch((caught: unknown) => caught);
+    if (!(error instanceof ProtocolError)) {
+      throw new Error("Expected resource refusal");
     }
-    throw new Error("Expected resource refusal");
+    expect(error.code).toBe(-32603);
+    return JSON.stringify(error.data);
   } finally {
     call.mockRestore();
-    await harness.server.close();
-    await harness.proxy.close();
+    await client.close();
+    await server.close();
+    await proxy.close();
   }
 }
 
@@ -194,11 +179,9 @@ describe("proxy server liveness stall reporting", () => {
   test.each(["tool", "resource"] as const)(
     "generic and non-binding daemon stalls keep their %s refusal byte for byte",
     async (surface) => {
-      for (const bindings of [undefined]) {
-        const text = await stalledHandlerAnswer(bindings, surface);
-        expect(JSON.parse(text)).toEqual(livenessHandoverPayload(stalled));
-        expect(text).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
-      }
+      const text = await stalledHandlerAnswer(surface);
+      expect(JSON.parse(text)).toEqual(livenessHandoverPayload(stalled));
+      expect(text).toBe(JSON.stringify(livenessHandoverPayload(stalled)));
     },
   );
 

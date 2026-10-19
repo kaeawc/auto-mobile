@@ -392,8 +392,8 @@ describe("host toolchain resource", () => {
       simctl: {
         getDeviceInfo: async () => null,
         listSimulatorImages: async () => [
-          { name: "one", platform: "ios", deviceId: "one", state: "Booted" },
-          { name: "two", platform: "ios", deviceId: "two", state: "Shutdown" },
+          { name: "one", platform: "ios", deviceId: "one", isRunning: true, state: "Booted" },
+          { name: "two", platform: "ios", deviceId: "two", isRunning: false, state: "Shutdown" },
         ],
       },
     });

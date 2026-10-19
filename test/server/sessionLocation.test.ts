@@ -191,7 +191,7 @@ describe("session location admission", () => {
       expect(callback).toBeDefined();
       callback!();
       await clears.clearAfter("session", device.deviceId, Promise.resolve());
-      expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+      expect(simctl.getCommandArgsCalls()).toHaveLength(1);
       await manager.releaseSession("session");
       expect(
         createSessionLocationAppliedCallback({
@@ -232,8 +232,8 @@ describe("session location admission", () => {
       await manager.createSession("session", device.deviceId, "ios");
       await manager.releaseSession("session");
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
-      expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
-      expect(simctl.getMethodCalls("executeCommandArgs")[0].args[2]).toBe("set");
+      expect(simctl.getCommandArgsCalls()).toHaveLength(1);
+      expect(simctl.getCommandArgsCalls()[0][2]).toBe("set");
     } finally {
       markSet.mockRestore();
       manager.stopCleanupTimer();
@@ -387,15 +387,12 @@ describe("session route cleanup", () => {
       await mutation;
       await flush();
       expect(markSet).not.toHaveBeenCalled();
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
-        "set",
-        "clear",
-      ]);
+      expect(simctl.getCommandArgsCalls().map((args) => args[2])).toEqual(["set", "clear"]);
       const pending = manager.getPendingDeviceCleanup(device.deviceId);
       expect(pending).not.toBeNull();
       timer.advanceTime(250);
       await pending;
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
+      expect(simctl.getCommandArgsCalls().map((args) => args[2])).toEqual([
         "set",
         "clear",
         "clear",
@@ -468,7 +465,7 @@ describe("session route cleanup", () => {
       await flush();
       expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
       expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
-      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
+      expect(simctl.getCommandArgsCalls().map((args) => args[2])).toEqual([
         "set",
         "clear",
         "clear",

@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   prototypeOutputSchema,
@@ -79,7 +80,7 @@ describe("prototype inspect (#10494)", () => {
   async function call(input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   test("inspect is an argument-free action", () => {
@@ -301,7 +302,7 @@ describe("prototype inspect across sessions (#10494)", () => {
       const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
       const run = async (session: string, input: Record<string, unknown>) =>
         runWithToolSelectionContext({ routingSessionUuid: session }, async () =>
-          prototypeOutputSchema.parse((await handler(device, input)).structuredContent),
+          prototypeOutputSchema.parse(toolStructured(await handler(device, input))),
         );
       await run("session-a", {
         action: "show",

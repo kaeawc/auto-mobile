@@ -269,6 +269,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return [...this.prototypeHistory];
   }
 
+  /** The show requests only, in order, each carrying its optional `displayId`. */
+  getShowHistory() {
+    return this.prototypeHistory.flatMap((entry) => (entry.method === "show" ? [entry] : []));
+  }
+
   async requestShowPrototype(
     spec: PrototypeSpec,
     timeoutMs = 5000,

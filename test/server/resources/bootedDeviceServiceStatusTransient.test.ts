@@ -103,7 +103,14 @@ describe("iOS service status command applicability", () => {
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status
 // enrichment. `readiness.unknown` and `capabilities.automation === null` are the freshly-discovered
 // defaults; a transient probe failure must leave them untouched (#7053).
-function bootedIosDevice(deviceId: string) {
+type BootedDeviceInfo = Parameters<typeof enrichDeviceServiceStatuses>[0][number];
+
+/** The identity a service-status probe is handed for a booted simulator. */
+function iosProbeTarget(deviceId: string) {
+  return { name: "iPhone 15 Pro", platform: "ios" as const, deviceId };
+}
+
+function bootedIosDevice(deviceId: string): BootedDeviceInfo {
   const description = describeDevice({
     kind: "booted",
     device: { name: "iPhone 15 Pro", platform: "ios", deviceId },
@@ -176,7 +183,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
 
   test("a hung service-status probe yields a transient timeout diagnostic, not a settled status", async () => {
     const timer = new FakeTimer();
-    const device = bootedIosDevice("SIM-A");
+    const device = iosProbeTarget("SIM-A");
     const outcomePromise = probeServiceStatusWithBudget(
       device,
       neverSettles,
@@ -199,7 +206,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
     const probe: ServiceStatusProbe = () =>
       Promise.reject(new Error("connect ECONNREFUSED 127.0.0.1"));
     const outcome = await probeServiceStatusWithBudget(
-      bootedIosDevice("SIM-A"),
+      iosProbeTarget("SIM-A"),
       probe,
       timer.now() + 5000,
       timer,
@@ -286,7 +293,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
       return new Promise<never>(() => {});
     };
     const outcome = await probeServiceStatusWithBudget(
-      bootedIosDevice("SIM-A"),
+      iosProbeTarget("SIM-A"),
       probe,
       timer.now(),
       timer,
@@ -299,7 +306,7 @@ describe("booted iOS service-status transient handling (#7053)", () => {
   test("bounds the wait by the remaining budget, not a fixed default", async () => {
     const timer = new FakeTimer();
     const outcomePromise = probeServiceStatusWithBudget(
-      bootedIosDevice("SIM-A"),
+      iosProbeTarget("SIM-A"),
       neverSettles,
       timer.now() + 100,
       timer,

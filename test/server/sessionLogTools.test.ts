@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import type { BootedDevice } from "../../src/models";
@@ -20,9 +21,12 @@ describe("resetAppLogs tool (#7006)", () => {
       (tool) => tool.name === "resetAppLogs",
     );
     expect(definition).toBeDefined();
-    expect(definition!.inputSchema.properties.appId).toBeDefined();
-    expect(definition!.inputSchema.properties.paths).toBeDefined();
-    expect(definition!.inputSchema.properties.container).toBeDefined();
+    const { properties } = z
+      .object({ properties: z.record(z.string(), z.unknown()) })
+      .parse(definition!.inputSchema);
+    expect(properties.appId).toBeDefined();
+    expect(properties.paths).toBeDefined();
+    expect(properties.container).toBeDefined();
 
     const validate = compileAjv2020(definition!.inputSchema);
     expect(validate({ appId: "com.example.app", paths: ["logs/app.log"] })).toBe(true);

@@ -380,7 +380,8 @@ describe("withReverseReport", () => {
       unreversiblePorts: [],
       reverseFailures: [{ prototypeId: "p", port: 1, error: "x" }],
     };
-    expect(withReverseReport({ success: true }, report)).toEqual({
+    const reported: unknown = withReverseReport({ success: true }, report);
+    expect(reported).toEqual({
       success: true,
       reverseFailures: report.reverseFailures,
     });

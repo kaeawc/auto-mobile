@@ -1,3 +1,4 @@
+import { toolJson } from "../helpers/toolResponse";
 import { makePool } from "../helpers/makePool";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
@@ -177,7 +178,7 @@ test("setActiveDevice selects an acquired session without an explicit UUID", asy
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(androidSession);
 }, 30000);
 
@@ -198,9 +199,14 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
-    const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
+    const request = {
+      id: "routing",
+      type: "mcp_request" as const,
+      method: "tools/call",
+      params: { name, arguments: args },
+    };
     await socket.testHooks.restoreSelectorSessions(args, socketSessionId);
-    const route = socket.testHooks.getMcpForwardRoute(request, socketSessionId);
+    const route = await socket.testHooks.getMcpForwardRoute(request, socketSessionId);
     routes.push(route.clientKey);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
@@ -283,7 +289,9 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         },
       );
     }
-    const forwarded = socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000);
+    const forwarded = z
+      .record(z.string(), z.unknown())
+      .parse(socket.testHooks.withSocketSessionAutolockKey(args, socketSessionId, 10000));
     const result = await fixture.client.callTool({ name, arguments: forwarded });
     socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
     return result;
@@ -569,7 +577,7 @@ test("setActiveDevice rebinds the session of the device's platform, never the ot
     platform: "android",
     __mcpSessionId: "client",
   });
-  expect(JSON.parse(result.content[0].text).sessionUuid).toBe(androidSession);
+  expect(toolJson(result).sessionUuid).toBe(androidSession);
   expect(manager.getSession(androidSession!)?.assignedDevice).toBe(devices[2].deviceId);
   expect(manager.getSession(iosSession!)?.platform).toBe("ios");
   expect(manager.getSession(iosSession!)?.assignedDevice).toBe(devices[1].deviceId);

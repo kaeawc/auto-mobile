@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import { selectedDisplayPin } from "../../src/features/observe/SessionDisplayCon
 import { rotateSchema } from "../../src/server/interactionTools";
 import { runSessionDisplayPin } from "../../src/server/sessionDisplayPin";
 import { createExecResult } from "../../src/utils/execResult";
-import type { BootedDevice, ObserveResult } from "../../src/models";
+import type { BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -52,14 +53,13 @@ describe("rotate in a session pinned to a non-default display", () => {
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
     observeScreen.enableAutoVaryHierarchy();
-    observeScreen.setObserveResult(
-      () =>
-        ({
-          timestamp: 0,
-          screenSize: { width: 1080, height: 2400 },
-          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-          viewHierarchy: { node: {} },
-        }) as ObserveResult,
+    observeScreen.setObserveResult(() =>
+      buildObserveResult({
+        updatedAt: 0,
+        screenSize: { width: 1080, height: 2400 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} } },
+      }),
     );
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);

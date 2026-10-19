@@ -12,6 +12,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import type { DeviceReadyOptions, ResolvedDeviceIdentity } from "../../src/devices/DeviceReadiness";
 import type { IosBootInstrumentation } from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import {
   isSessionlessDeviceRead,
@@ -292,6 +293,13 @@ const access = {
   isAuthorized: () => true,
 };
 
+/** The `sessionUuid` a tool call carried, if any; the registered schemas are generic. */
+function sessionUuidOf(args: unknown): unknown {
+  return typeof args === "object" && args !== null && "sessionUuid" in args
+    ? args.sessionUuid
+    : undefined;
+}
+
 beforeAll(async () => {
   expect(DaemonState.getInstance().isInitialized()).toBe(false);
   registeredBefore = ToolRegistry.getEveryRegisteredTool();
@@ -326,7 +334,7 @@ beforeAll(async () => {
           h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
             deviceId: device.deviceId,
-            sessionUuid: args.sessionUuid,
+            sessionUuid: sessionUuidOf(args),
             readPath: isSessionlessDeviceRead(),
           });
           return { success: true };
@@ -751,6 +759,11 @@ for (const platform of ["android", "ios"] as const) {
                   identities.some((id) => [h!.device.name, h!.device.deviceId].includes(id))
                   ? {
                       deviceId: h!.device.deviceId,
+                      target: {
+                        platform: requestedPlatform,
+                        stableDeviceId: h!.device.deviceId,
+                        deviceId: h!.device.deviceId,
+                      },
                       sessionUuid: "restart-owner",
                       owned: true,
                       restartHandoff: true,
@@ -1308,6 +1321,11 @@ for (const platform of ["android", "ios"] as const) {
             return claimed && kind === "reservation" && p === platform && identities.includes(id)
               ? {
                   deviceId: h!.device.deviceId,
+                  target: {
+                    platform: p,
+                    stableDeviceId: h!.device.deviceId,
+                    deviceId: h!.device.deviceId,
+                  },
                   sessionUuid: "late-owner",
                   owned: false,
                   restartHandoff: true,
@@ -1439,6 +1457,11 @@ for (const platform of ["android", "ios"] as const) {
             return p === platform && identities.includes(id)
               ? {
                   deviceId: h!.device.deviceId,
+                  target: {
+                    platform: p,
+                    stableDeviceId: h!.device.deviceId,
+                    deviceId: h!.device.deviceId,
+                  },
                   sessionUuid: "restart-owner",
                   owned: true,
                   restartHandoff: true,
@@ -1514,6 +1537,11 @@ function reserveReadTarget(platform: Platform, id: string): void {
       return p === platform && identities.includes(id)
         ? {
             deviceId: h!.device.deviceId,
+            target: {
+              platform: p,
+              stableDeviceId: h!.device.deviceId,
+              deviceId: h!.device.deviceId,
+            },
             sessionUuid: "restart-owner",
             owned: true,
             restartHandoff: true,
@@ -1911,7 +1939,8 @@ for (const platform of ["android", "ios"] as const) {
         const coldVerify =
           phase === "cold boot"
             ? spyOn(current.manager, "verifyAndroidDevice").mockImplementation(
-                (id, options, resolved) => verify(id, "android", options, resolved),
+                (id: string, options?: DeviceReadyOptions, resolved?: ResolvedDeviceIdentity) =>
+                  verify(id, "android", options, resolved),
               )
             : undefined;
         if (!coldVerify) {

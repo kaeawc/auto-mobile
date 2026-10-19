@@ -1,6 +1,6 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
-import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionTools";
+import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionToolHandlers";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {

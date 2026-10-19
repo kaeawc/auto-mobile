@@ -3,10 +3,8 @@ import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { createMcpServer } from "../../src/server/index";
-import {
-  DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
-  finalizeToolResponse,
-} from "../../src/server/finalizeToolResponse";
+import { DEFAULT_OBSERVATION_INLINE_MAX_BYTES } from "../../src/server/finalizeSizing";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";

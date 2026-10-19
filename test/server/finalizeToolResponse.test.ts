@@ -4,8 +4,8 @@ import {
   resolveActionsCompactMetadata,
 } from "../../src/utils/outputReductionFlags";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { DEFAULT_OBSERVATION_INLINE_MAX_BYTES } from "../../src/server/finalizeSizing";
 import {
-  DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
   DIFF_PASSTHROUGH_METADATA_FIELDS,
   finalizeToolResponse,
   type ObservationArtifactWriter,

@@ -172,9 +172,6 @@ src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_TRICKLE_ICE
 src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_ALLOWED_ORIGINS
 src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_ENDPOINT
 src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_TOKEN
-src/index.ts	AUTOMOBILE_APPEARANCE_SYNC
-src/index.ts	AUTOMOBILE_DISABLED_TOOLS
-src/index.ts	AUTOMOBILE_ENABLED_TOOLS
 src/server/appFileSupport.ts	AUTOMOBILE_APP_FILE_BACKUP
 src/server/appFileSupport.ts	AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY
 src/server/planHealthSummary.ts	AUTOMOBILE_PLAN_HEALTH_DIR
@@ -182,6 +179,9 @@ src/server/proxyServer.ts	AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER
 src/server/proxyServer.ts	AUTOMOBILE_ACCEPTANCE_LIVE
 src/server/sharedStorageService.ts	AUTOMOBILE_SHARED_STORAGE_BACKUP
 src/server/toolRegistry.ts	AUTOMOBILE_ALWAYS_LOAD_TOOLS
+src/startup/runStartup.ts	AUTOMOBILE_DISABLED_TOOLS
+src/startup/runStartup.ts	AUTOMOBILE_ENABLED_TOOLS
+src/startup/stdioServer.ts	AUTOMOBILE_APPEARANCE_SYNC
 src/utils/android-cmdline-tools/AdbClient.ts	AUTOMOBILE_TEST_MODE
 src/utils/android-cmdline-tools/AdbClient.ts	DEBUG_ADB_EXEC
 src/utils/android-cmdline-tools/AdbServerLifecycle.ts	AUTOMOBILE_MANAGED_ADB_SERVER

@@ -1,42 +1,59 @@
-import { isDeepStrictEqual } from "node:util";
+import type { DisplayObservation, ObserveResult } from "../models/ObserveResult";
 import {
-  terminalScreenshotUnavailable,
   isTerminalScreenshotUnavailable,
+  terminalScreenshotUnavailable,
 } from "../utils/PostActionCaptureContext";
-import type { ObserveResult, DisplayObservation } from "../models/ObserveResult";
+import { buildObservationScreenshotUri } from "./observationResourceUris";
+import { stripInternalObservationFields } from "./observationInternalFields";
 import {
-  sanitizeObserveResult,
-  projectSanitizedObserveSkeleton,
+  collectWindowTruncations,
+  isHostOutputTruncationReason,
+} from "../features/observe/truncationReasons";
+import {
   diffObserveResult,
-  isSameObservationScreen,
-  type SanitizeObserveConfig,
+  projectSanitizedObserveSkeleton,
+  sanitizeObserveResult,
   type ObserveResultCloner,
+  type SanitizeObserveConfig,
 } from "../features/observe/output/ObserveResultOutput";
+import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
+import { ToolResponseSerialization, exceedsInlineLimit } from "./finalizeShared";
+import { artifactMode, spillOversizedPayload } from "./finalizeInlineLimit";
+import {
+  artifactNonObservationPayload,
+  isObserveDiff,
+  writeObservationArtifact,
+  writeObserveDiffBodyArtifact,
+} from "./finalizeArtifactWriters";
+import {
+  canCompactActionMetadata,
+  commitDeliveredActionMetadata,
+  commitDeliveredBaseline,
+  compactActionMetadata,
+  pickObserveWaitMetadata,
+} from "./finalizeActionMetadata";
 import {
   applyObserveScopeExperiments,
   applyObserveScopeToSkeleton,
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
-import type { ObserveScopeInput } from "../models/ObserveScope";
-import { z } from "zod/v4";
-import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
-import {
-  classifyObservationAction,
-  type ObservationActionClass,
-} from "../features/action/observationActionClass";
 import { serverConfig } from "../utils/ServerConfig";
-import { observationOfPayload, stringifyToolResponse } from "../utils/toolUtils";
-import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
-import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
+import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
+import type { ObserveScopeInput } from "../models/ObserveScope";
+import { observationOfPayload } from "../utils/toolUtils";
+import {
+  dropDiffNodeLists,
+  hasRenderableHierarchy,
+  hasScreenChangedEffect,
+  isEmptyObserveDiff,
+  isObserveResult,
+  observationScreenIdentity,
+  replacedMostActionableNodes,
+  shouldDiffObservation,
+} from "./observationDiffPredicates";
+import { classifyObservationAction } from "../features/action/observationActionClass";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
-import {
-  collectWindowTruncations,
-  isHostOutputTruncationReason,
-} from "../features/observe/truncationReasons";
-import { buildObservationScreenshotUri } from "./observationResourceUris";
-import { stripInternalObservationFields } from "./observationInternalFields";
 
 /**
  * Read/write access to per-session diff/metadata baselines and the display revision
@@ -103,22 +120,6 @@ export interface ObservationArtifactWriter {
 }
 
 export type ObservationArtifactMode = "always" | "oversized";
-
-export const DEFAULT_OBSERVATION_INLINE_MAX_BYTES = 64 * 1024;
-
-const OBSERVE_WAIT_METADATA_KEYS = [
-  "awaitedElement",
-  "awaitDuration",
-  "awaitTimeout",
-  "matched",
-  "settled",
-  "timedOut",
-  "timeoutReason",
-  "polls",
-  "waitMs",
-  "matchedElement",
-  "candidates",
-] as const;
 
 /**
  * Action tools that embed a post-action observation AND expose the `raw`/`project`
@@ -371,6 +372,7 @@ export interface FinalizeToolResponseContext {
 }
 
 type ObservationDiffMode = "diff" | "full";
+
 type ObservationDiffReason =
   | "diff_emitted"
   | "missing_baseline"
@@ -380,7 +382,7 @@ type ObservationDiffReason =
   | "disabled"
   | "stripped_by_actions_no_observe";
 
-interface ObservationDiffScreenIdentity {
+export interface ObservationDiffScreenIdentity {
   activeWindow?: ObserveResult["activeWindow"];
   hierarchyPackageName?: string;
   screenIdentity?: ObserveResult["screenIdentity"];
@@ -392,26 +394,6 @@ interface ObservationDiffMetadata {
   hint?: string;
   fromScreen?: ObservationDiffScreenIdentity;
   toScreen?: ObservationDiffScreenIdentity;
-}
-
-/** Request-local renderings: inline text strips extras; complete JSON preserves them. */
-class ToolResponseSerialization {
-  private readonly inline = new Map<unknown, string>();
-  private readonly complete = new Map<unknown, string>();
-
-  text(payload: unknown): string {
-    if (!this.inline.has(payload)) {
-      this.inline.set(payload, stringifyToolResponse(payload));
-    }
-    return this.inline.get(payload)!;
-  }
-
-  artifact(payload: unknown): string {
-    if (!this.complete.has(payload)) {
-      this.complete.set(payload, JSON.stringify(payload));
-    }
-    return this.complete.get(payload)!;
-  }
 }
 
 /**
@@ -439,22 +421,156 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     return response;
   }
   const serialization = new ToolResponseSerialization();
-  const artifactWriter = ctx.artifactWriter;
-  if (artifactWriter) {
-    ctx = {
-      ...ctx,
-      artifactWriter: {
-        writeJsonArtifact: (input) =>
-          artifactWriter.writeJsonArtifact({
-            ...input,
-            serialized: input.serialized ?? serialization.artifact(input.data),
-          }),
-      },
-    };
-  }
+  ctx = withSerializedArtifacts(ctx, serialization);
   const payload = envelopeView.payload;
   const hasStructured = envelopeView.hasStructured;
 
+  const stage = createObservationStage(ctx, payload);
+  const renderedDisplay = renderedDisplayFacts(stage);
+  const observation = finalizeObservation(stage);
+  let sanitizedPayload = artifactServedPayload(stage, observation, hasStructured, serialization);
+
+  sanitizedPayload = boundOversizedPayload(
+    ctx,
+    sanitizedPayload ?? payload,
+    sanitizedPayload,
+    hasStructured,
+    serialization,
+  );
+
+  // Artifacts retain complete metadata. Compact only the residue delivered inline,
+  // and preserve the original envelope when compaction has nothing to remove.
+  if (canCompactActionMetadata(ctx, payload, envelopeView.envelope)) {
+    const inlinePayload = sanitizedPayload ?? payload;
+    const compacted = compactActionMetadata(inlinePayload, ctx);
+    if (compacted !== inlinePayload) {
+      sanitizedPayload = compacted;
+    }
+  }
+
+  if (!sanitizedPayload) {
+    commitDeliveredActionMetadata(ctx, payload, payload);
+    return response;
+  }
+
+  // Rewrite both representations from the same object so they cannot diverge.
+  writeToolEnvelopePayload(
+    envelopeView,
+    sanitizedPayload,
+    envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
+  );
+  commitDeliveredActionMetadata(ctx, payload, sanitizedPayload);
+  commitDeliveredBaseline(ctx, observation.pendingBaselineUpdate, renderedDisplay);
+
+  return response;
+}
+
+/** The served payload after the observation (and, in `always` mode, the response) spills to artifacts. */
+function artifactServedPayload(
+  stage: ObservationStage,
+  observation: ObservationOutcome,
+  hasStructured: boolean,
+  serialization: ToolResponseSerialization,
+): Record<string, unknown> | undefined {
+  const { ctx, payload } = stage;
+  let sanitizedPayload = observation.sanitizedPayload;
+  if (
+    ctx.artifactWriter &&
+    !ctx.internal &&
+    observation.hasArtifactableObservation &&
+    sanitizedPayload &&
+    shouldArtifactObservationPayload(ctx, sanitizedPayload, hasStructured, serialization)
+  ) {
+    sanitizedPayload = artifactObservationPayload(stage, sanitizedPayload);
+  }
+
+  if (artifactMode(ctx) === "always") {
+    sanitizedPayload ??= artifactWriteOrInline(
+      ctx,
+      "response",
+      () => artifactNonObservationPayload(ctx, payload),
+      undefined,
+    );
+  }
+  return sanitizedPayload;
+}
+
+/** Routes artifact writes through the one serialization this response shares with its envelope. */
+function withSerializedArtifacts(
+  ctx: FinalizeToolResponseContext,
+  serialization: ToolResponseSerialization,
+): FinalizeToolResponseContext {
+  const artifactWriter = ctx.artifactWriter;
+  if (!artifactWriter) {
+    return ctx;
+  }
+  return {
+    ...ctx,
+    artifactWriter: {
+      writeJsonArtifact: (input) =>
+        artifactWriter.writeJsonArtifact({
+          ...input,
+          serialized: input.serialized ?? serialization.artifact(input.data),
+        }),
+    },
+  };
+}
+
+/** Everything the observation-shaping steps of one finalize call share. */
+interface ObservationStage {
+  readonly ctx: FinalizeToolResponseContext;
+  readonly payload: Record<string, unknown>;
+  readonly cfg: SanitizeObserveConfig;
+  /** Sanitized copies of one source observation, uncapped and capped, computed once. */
+  readonly sanitizedCopies: (source: ObserveResult) => {
+    uncapped: ObserveResult;
+    capped: ObserveResult;
+  };
+  readonly scopeConfig: ReturnType<typeof buildObserveScopeConfig>;
+  readonly scopeActive: boolean;
+  readonly noObserveEnabled: boolean;
+  readonly diffActive: boolean;
+  readonly canDiff: boolean;
+  readonly isObserveTool: boolean;
+}
+
+/** What the observation-shaping steps decided about the served payload. */
+interface ObservationOutcome {
+  sanitizedPayload: Record<string, unknown> | undefined;
+  hasArtifactableObservation: boolean;
+  pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
+}
+
+/**
+ * Progressive-disclosure scoping experiments (issue #4344), now always honored: each dimension is
+ * intersected with the per-call `scope` request in `buildObserveScopeConfig`, so with no `scope`
+ * arg this is a no-op. Agent-facing only: internal tool-to-tool consumers read the full
+ * `.observation.viewHierarchy`, so scoping (like the diff/strip transforms) is suppressed for
+ * `ctx.internal`.
+ */
+function resolveObservationScope(ctx: FinalizeToolResponseContext) {
+  const scopeFlags = {
+    focus: true,
+    overview: true,
+    region: true,
+  };
+  const scopeConfig = buildObserveScopeConfig(
+    scopeFlags,
+    ctx.args?.scope as ObserveScopeInput | undefined,
+  );
+  const scopeActive =
+    !ctx.internal &&
+    (scopeFlags.focus ||
+      scopeFlags.overview ||
+      scopeFlags.region ||
+      (scopeConfig.gatedOff?.length ?? 0) > 0);
+  return { scopeConfig, scopeActive };
+}
+
+function createObservationStage(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+): ObservationStage {
   const cfg: SanitizeObserveConfig = {
     // Elements are dropped by default; `--observe-result-include-elements` opts
     // back in. Bounds compaction is now an unconditional default.
@@ -483,26 +599,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     return copies;
   };
 
-  // Progressive-disclosure scoping experiments (issue #4344), now always honored:
-  // each dimension is intersected with the per-call `scope` request in
-  // `buildObserveScopeConfig`, so with no `scope` arg this is a no-op. Agent-facing
-  // only: internal tool-to-tool consumers read the full `.observation.viewHierarchy`,
-  // so scoping (like the diff/strip transforms) is suppressed for `ctx.internal`.
-  const scopeFlags = {
-    focus: true,
-    overview: true,
-    region: true,
-  };
-  const scopeConfig = buildObserveScopeConfig(
-    scopeFlags,
-    ctx.args?.scope as ObserveScopeInput | undefined,
-  );
-  const scopeActive =
-    !ctx.internal &&
-    (scopeFlags.focus ||
-      scopeFlags.overview ||
-      scopeFlags.region ||
-      (scopeConfig.gatedOff?.length ?? 0) > 0);
+  const { scopeConfig, scopeActive } = resolveObservationScope(ctx);
 
   // Internal tool-to-tool calls (#3053) always get the full sanitized observation:
   // the diff/strip transforms are for the agent-facing wire only, so an internal
@@ -513,383 +610,486 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   // observation entirely, so `--actions-diff-observe` is moot when both are on.
   const diffActive =
     serverConfig.isActionsDiffObserveEnabled() && !noObserveEnabled && !ctx.internal;
-  const canDiff = diffActive && !!ctx.sessionUuid && !!ctx.baselineStore;
-  const isObserveTool = ctx.name === "observe";
+  return {
+    ctx,
+    payload,
+    cfg,
+    sanitizedCopies,
+    scopeConfig,
+    scopeActive,
+    noObserveEnabled,
+    diffActive,
+    canDiff: diffActive && !!ctx.sessionUuid && !!ctx.baselineStore,
+    isObserveTool: ctx.name === "observe",
+  };
+}
 
-  // Locate the ObserveResult: the payload itself for `observe`, else `.observation`.
-  let sanitizedPayload: Record<string, unknown> | undefined;
-  let hasArtifactableObservation = false;
-  let pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
-  const renderedObservation = observationOfPayload(ctx.name, payload);
-  const renderedDisplayKey = isObserveResult(renderedObservation)
-    ? renderedObservation.display?.key
-    : undefined;
-  const renderedDisplayGeneration = isObserveResult(renderedObservation)
-    ? renderedObservation.display?.generation
-    : undefined;
-  const renderedDisplayRevision =
+/** The display facts the delivered baseline is keyed by. */
+function renderedDisplayFacts(stage: ObservationStage) {
+  const renderedObservation = observationOfPayload(stage.ctx.name, stage.payload);
+  const rendered = isObserveResult(renderedObservation) ? renderedObservation : undefined;
+  return {
+    key: rendered?.display?.key,
+    generation: rendered?.display?.generation,
+    revision: deliveredDisplayRevision(stage, rendered),
+  };
+}
+
+function deliveredDisplayRevision(
+  stage: ObservationStage,
+  rendered: ObserveResult | undefined,
+): number | undefined {
+  const { ctx, isObserveTool, noObserveEnabled } = stage;
+  const eligible =
     !ctx.internal &&
     !(isObserveTool && ctx.args?.display === "all") &&
-    (isObserveTool || !noObserveEnabled) &&
-    isObserveResult(renderedObservation) &&
-    typeof renderedObservation.displayRevision === "number"
-      ? renderedObservation.displayRevision
-      : undefined;
+    (isObserveTool || !noObserveEnabled);
+  return eligible && typeof rendered?.displayRevision === "number"
+    ? rendered.displayRevision
+    : undefined;
+}
+
+/** Locate the ObserveResult: the payload itself for `observe`, else `.observation`. */
+function finalizeObservation(stage: ObservationStage): ObservationOutcome {
+  const { payload, isObserveTool } = stage;
   if (isObserveTool && isObserveResult(payload)) {
-    // `observe` always emits the full sanitized observation (no-observe never
-    // strips the observe tool itself) and resets the diff baseline to it (#2761).
-    const observeResult = payload;
-    const { uncapped, capped: sanitized } = sanitizedCopies(observeResult);
-    if (canDiff && ctx.args?.display !== "all") {
-      // Diff against the full sanitized tree, never the scoped/projected copy — the
-      // next action must see real state, not what this observe payload was cropped
-      // to (scope experiments #4344) or projected to (skeleton #4388).
-      pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
-    }
-    // Served (agent-facing) copy: skeleton projection (#4388) and scope experiments
-    // (#4344) are alternative croppings of the observe payload; both apply only to
-    // the headline `observe` payload, never to embedded action observations. Skeleton
-    // is the more aggressive projection (it replaces viewHierarchy/elements), so when
-    // requested it wins. Its skeleton reads the original elements to retain
-    // non-enumerable ancestry provenance even when elements are dropped from output.
-    let served: ObserveResult = sanitized;
-    if (resolveObserveProjection(ctx.args) === "skeleton") {
-      served = projectSanitizedObserveSkeleton(sanitized, observeResult);
-      // Skeleton replaces the hierarchy, so FOCUS/REGION run on the full uncapped
-      // tree and the skeleton keeps only the rows that survive them.
-      if (scopeActive) {
-        served = applyObserveScopeToSkeleton(served, uncapped, scopeConfig);
-      }
-    } else if (scopeActive) {
-      // Scope-then-cap (#5074): use the already-sanitized UNCAPPED copy so the scope
-      // transforms see every warning, then cap the scoped result — an in-scope
-      // warning is never lost to a cap taken against the full tree. The baseline
-      // above stays the capped `sanitized` full tree.
-      served = applyObserveScopeExperiments(uncapped, scopeConfig);
-      // A no-op scope returns its input. Keep subsequent output-only metadata
-      // off the cached baseline when capped and uncapped are the same object.
-      if (served === uncapped) {
-        served = { ...served };
-      }
-      if (served.layoutWarnings) {
-        served.layoutWarnings = capLayoutWarnings(served.layoutWarnings);
-      }
-    }
-    if (observeResult.displays) {
-      served = {
-        ...served,
-        displays: observeResult.displays.map((entry) => {
-          const source: ObserveResult = {
-            observationId: observeResult.observationId,
-            updatedAt: observeResult.updatedAt,
-            ...entry,
-            systemInsets: entry.systemInsets ?? observeResult.systemInsets,
-          };
-          let panel = sanitizeObserveResult(source, cfg, ctx.cloneObservation);
-          if (resolveObserveProjection(ctx.args) === "skeleton") {
-            const projected = projectSanitizedObserveSkeleton(panel, source);
-            panel = scopeActive
-              ? applyObserveScopeToSkeleton(projected, panel, scopeConfig)
-              : projected;
-          } else if (scopeActive) {
-            panel = applyObserveScopeExperiments(panel, scopeConfig);
-          }
-          return {
-            display: panel.display,
-            screenSize: panel.screenSize,
-            freshness: entry.freshness,
-            ...copyDefinedFields(panel, [
-              "viewHierarchy",
-              "skeleton",
-              "context",
-              "keyboard",
-              "truncationReasons",
-              "windowTruncations",
-              "screenshotPath",
-              "screenshotExpiresAt",
-              "observeScope",
-            ]),
-          } satisfies DisplayObservation;
-        }),
-      };
-    }
-    attachObservationScreenshotUri(
-      served,
-      observeResult.screenshotCaptureAttempted,
-      isTerminalScreenshotUnavailable(observeResult),
-    );
-    sanitizedPayload = served;
-    hasArtifactableObservation = true;
-  } else if (!isObserveTool && payload.observation !== undefined) {
-    if (noObserveEnabled) {
-      // `--actions-no-observe` (#2762/#3026): drop the embedded observation from
-      // the served payload (output-only — the handler still computed it for its
-      // own success detection). Wins over the diff flag: nothing left to diff.
-      const stripped = { ...payload };
-      delete stripped.observation;
-      stripped.observationDiff = {
-        mode: "full",
-        reason: "stripped_by_actions_no_observe",
-      } satisfies ObservationDiffMetadata;
-      sanitizedPayload = stripped;
-    } else if (isObserveResult(payload.observation)) {
-      const rawObservation = payload.observation as ObserveResult;
-      const { capped: sanitized } = sanitizedCopies(rawObservation);
-      // Action observations default to the compact skeleton (issue #5872) — the
-      // same response-shape control `observe` already has — so a client no longer
-      // pays the full raw hierarchy on every tapOn/sendKeys/launchApp. Scoped to
-      // SKELETON_DEFAULT_ACTION_TOOLS (the tools that also expose the `raw`/`project`
-      // opt-out), so the default and the escape hatch never diverge. The compact
-      // form lands under the same `skeleton` key `observe` uses; `raw:true` /
-      // `project:"full"` opts back into the raw `viewHierarchy`. Internal
-      // tool-to-tool consumers always keep the full tree, while a computed diff
-      // replaces the action observation only on the path that emits a diff.
-      const servedObservation =
-        !ctx.internal &&
-        SKELETON_DEFAULT_ACTION_TOOLS.has(ctx.name) &&
-        resolveObserveProjection(ctx.args) === "skeleton"
-          ? projectSanitizedObserveSkeleton(sanitized, rawObservation)
-          : sanitized;
-      let observationOut: unknown = servedObservation;
-      let observationDiff: ObservationDiffMetadata | undefined;
-      if (ctx.internal) {
-        // Internal envelopes are consumed by in-process tool callers, not agents.
-        // Keep them on the pre-diff/pre-strip shape without agent-facing metadata.
-      } else if (!diffActive) {
-        observationDiff = {
-          mode: "full",
-          reason: "disabled",
-          hint: "Set --actions-diff-observe to receive diffs.",
-        };
-      } else if (!ctx.sessionUuid || !ctx.baselineStore) {
-        observationDiff = {
-          mode: "full",
-          reason: "missing_session",
-          hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
-          toScreen: observationScreenIdentity(sanitized),
-        };
-      } else if (!hasRenderableHierarchy(sanitized)) {
-        const baseline = ctx.baselineStore.get(ctx.sessionUuid);
-        observationDiff = {
-          mode: "full",
-          reason: "unrenderable_hierarchy",
-          fromScreen: baseline ? observationScreenIdentity(baseline) : undefined,
-          toScreen: observationScreenIdentity(sanitized),
-        };
-      } else {
-        // canDiff is provably true here: not internal, diffActive, session +
-        // baseline store present, and the hierarchy is renderable.
-        // Emit a diff vs the baseline when it exists and the screen is unchanged;
-        // otherwise fall back to the full observation (cross-screen diffs are
-        // meaningless, and there is nothing to diff on the first action). Either
-        // way, update the baseline to this observation so the next action diffs
-        // against current state.
-        const baseline = ctx.baselineStore!.get(ctx.sessionUuid!);
-        if (!baseline) {
-          observationDiff = {
-            mode: "full",
-            reason: "missing_baseline",
-            toScreen: observationScreenIdentity(sanitized),
-          };
-        } else if (!hasRenderableHierarchy(baseline)) {
-          observationDiff = {
-            mode: "full",
-            reason: "unrenderable_hierarchy",
-            fromScreen: observationScreenIdentity(baseline),
-            toScreen: observationScreenIdentity(sanitized),
-          };
-        } else if (
-          shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
-        ) {
-          const diff = diffObserveResult(baseline, sanitized, {
-            collapseKeyboard: servedObservation.skeleton !== undefined,
-            skipStatusBar: servedObservation.skeleton !== undefined,
-            layoutWarningsDiffMode: servedObservation.skeleton !== undefined ? "perEntry" : "full",
-            projectAddedRemoved: servedObservation.skeleton !== undefined,
-          });
-          // Always attach a usable selector surface alongside the diff (issue #6221
-          // item 4.1): a client that gets a diff must never be left with no
-          // `skeleton` to act on — including when the request is `raw:true` /
-          // `project:"full"` (PR #6242 review PRRT_kwDOP-GF5M6fq3iK), where
-          // `servedObservation` itself carries no skeleton. `diffObserveResult`
-          // cannot compute this itself — `elements` is already dropped from
-          // `sanitized` by the time it runs — so it is resolved here instead.
-          const skeletonProjection =
-            servedObservation.skeleton !== undefined
-              ? servedObservation
-              : projectSanitizedObserveSkeleton(sanitized, rawObservation);
-          diff.skeleton = skeletonProjection.skeleton ?? [];
-          // Issue #6256: a diff must not silently drop the state-readout
-          // `context` alongside `skeleton`. `undefined`
-          // (no surviving readout row) is dropped on serialization just like an
-          // absent key, so no extra branch is needed here.
-          diff.context = skeletonProjection.context;
-          diff.keyboard = skeletonProjection.keyboard;
-          Object.assign(
-            diff,
-            copyDefinedFields(
-              payload.observation as ObserveResult,
-              DIFF_PASSTHROUGH_METADATA_FIELDS,
-            ),
-          );
-          // Issue #6601: nor may a diff silently drop the hierarchy's truncation
-          // provenance — see resolveDiffTruncationReasons.
-          diff.truncationReasons = resolveDiffTruncationReasons(
-            baseline,
-            servedObservation,
-            payload.observation as ObserveResult,
-          );
-          // Window attribution describes the current capture, unlike the merged flat reasons.
-          const windowTruncations =
-            servedObservation.windowTruncations ??
-            collectWindowTruncations((payload.observation as ObserveResult).viewHierarchy?.windows);
-          Object.assign(diff, windowTruncations ? { windowTruncations } : {});
-          const emitFull =
-            (hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff)) ||
-            (servedObservation.skeleton !== undefined &&
-              classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
-              replacedMostActionableNodes(diff));
-          observationOut = emitFull ? servedObservation : dropDiffNodeLists(diff);
-          observationDiff = {
-            mode: emitFull ? "full" : "diff",
-            reason: emitFull ? "screen_changed" : "diff_emitted",
-            fromScreen: observationScreenIdentity(baseline),
-            toScreen: observationScreenIdentity(sanitized),
-          };
-        } else {
-          observationOut = servedObservation;
-          observationDiff = {
-            mode: "full",
-            reason: "screen_changed",
-            fromScreen: observationScreenIdentity(baseline),
-            toScreen: observationScreenIdentity(sanitized),
-          };
-        }
-        pendingBaselineUpdate = { sessionUuid: ctx.sessionUuid!, observation: sanitized };
-      }
-      if (observationOut && typeof observationOut === "object") {
-        attachObservationScreenshotUri(
-          observationOut as {
-            deviceId?: string;
-            observationId?: string;
-            observationScreenshotResourceUri?: string;
-            screenshotCaptureAttempted?: boolean;
-          },
-          (payload.observation as ObserveResult).screenshotCaptureAttempted,
-          isTerminalScreenshotUnavailable(payload.observation as ObserveResult),
-        );
-      }
-      sanitizedPayload = {
-        ...payload,
-        observation: observationOut,
-      };
-      if (observationDiff) {
-        sanitizedPayload.observationDiff = observationDiff;
-      }
-      hasArtifactableObservation = true;
-    }
+    return finalizeObserveResult(stage, payload);
   }
-
-  if (
-    ctx.artifactWriter &&
-    !ctx.internal &&
-    hasArtifactableObservation &&
-    sanitizedPayload &&
-    shouldArtifactObservationPayload(ctx, sanitizedPayload, hasStructured, serialization)
-  ) {
-    if (isObserveTool) {
-      // Keep compact wait status inline: without it, an artifacted `observe`
-      // response hides whether the requested condition matched or timed out.
-      sanitizedPayload = {
-        ...pickObserveWaitMetadata(sanitizedPayload),
-        ...writeObservationArtifact(ctx, sanitizedPayload),
-      };
-    } else {
-      const inlinePayload = sanitizedPayload;
-      const observation = inlinePayload.observation;
-      sanitizedPayload = artifactWriteOrInline(
-        ctx,
-        "observation",
-        () => ({
-          ...inlinePayload,
-          observation:
-            isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
-              ? writeObserveDiffBodyArtifact(ctx, observation)
-              : writeObservationArtifact(ctx, observation),
-        }),
-        inlinePayload,
-      );
-    }
+  if (!isObserveTool && payload.observation !== undefined) {
+    return finalizeActionObservation(stage);
   }
+  return {
+    sanitizedPayload: undefined,
+    hasArtifactableObservation: false,
+    pendingBaselineUpdate: undefined,
+  };
+}
 
-  if (artifactMode(ctx) === "always") {
-    sanitizedPayload ??= artifactWriteOrInline(
-      ctx,
-      "response",
-      () => artifactNonObservationPayload(ctx, payload),
-      undefined,
-    );
+function finalizeObserveResult(
+  stage: ObservationStage,
+  observeResult: ObserveResult,
+): ObservationOutcome {
+  const { ctx } = stage;
+  // `observe` always emits the full sanitized observation (no-observe never
+  // strips the observe tool itself) and resets the diff baseline to it (#2761).
+  const { uncapped, capped: sanitized } = stage.sanitizedCopies(observeResult);
+  // Diff against the full sanitized tree, never the scoped/projected copy — the
+  // next action must see real state, not what this observe payload was cropped
+  // to (scope experiments #4344) or projected to (skeleton #4388).
+  const pendingBaselineUpdate =
+    stage.canDiff && ctx.args?.display !== "all"
+      ? { sessionUuid: ctx.sessionUuid!, observation: sanitized }
+      : undefined;
+  let served = serveObserveHeadline(stage, observeResult, uncapped, sanitized);
+  if (observeResult.displays) {
+    served = {
+      ...served,
+      displays: observeResult.displays.map((entry) =>
+        serveDisplayObservation(stage, observeResult, entry),
+      ),
+    };
   }
-
-  // Hard ceiling (issue #6870). Spilling `observation` bounds only the
-  // observation: `observationDiff` rides at the TOP level beside it, and so does
-  // every other tool field, so a response could still be handed to the client
-  // far over the inline limit — which a one-shot `--cli` transport then cut
-  // mid-string into unparseable JSON. With a writer available, spill whatever
-  // residue is still oversized and keep only the headline fields inline, so the
-  // client always gets complete, parseable JSON plus a pointer to the rest.
-  const boundedCandidate = sanitizedPayload ?? payload;
-  if (
-    ctx.artifactWriter &&
-    !ctx.internal &&
-    exceedsInlineLimit(boundedCandidate, hasStructured, serialization)
-  ) {
-    try {
-      sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured, serialization);
-    } catch (error) {
-      // The operation itself already succeeded; only the spill failed (a full or
-      // read-only tool-output directory). Throwing here would return NO result
-      // for work the device has already done, which for a side-effecting tool
-      // invites a duplicate retry. Fall back to the pre-#6870 behaviour — serve
-      // the payload un-spilled — and leave a trace, since the response then
-      // exceeds the ceiling. The `--cli` renderer still refuses to cut JSON
-      // mid-string and emits its own truncation notice instead.
-      logger.warn(
-        `finalizeToolResponse: could not spill the oversized ${ctx.name} response: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  // Artifacts retain complete metadata. Compact only the residue delivered inline,
-  // and preserve the original envelope when compaction has nothing to remove.
-  if (canCompactActionMetadata(ctx, payload, envelopeView.envelope)) {
-    const inlinePayload = sanitizedPayload ?? payload;
-    const compacted = compactActionMetadata(inlinePayload, ctx);
-    if (compacted !== inlinePayload) {
-      sanitizedPayload = compacted;
-    }
-  }
-
-  if (!sanitizedPayload) {
-    commitDeliveredActionMetadata(ctx, payload, payload);
-    return response;
-  }
-
-  // Rewrite both representations from the same object so they cannot diverge.
-  writeToolEnvelopePayload(
-    envelopeView,
-    sanitizedPayload,
-    envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
+  attachObservationScreenshotUri(
+    served,
+    observeResult.screenshotCaptureAttempted,
+    isTerminalScreenshotUnavailable(observeResult),
   );
-  commitDeliveredActionMetadata(ctx, payload, sanitizedPayload);
-  commitDeliveredBaseline(ctx, pendingBaselineUpdate, {
-    revision: renderedDisplayRevision,
-    key: renderedDisplayKey,
-    generation: renderedDisplayGeneration,
-  });
+  return { sanitizedPayload: served, hasArtifactableObservation: true, pendingBaselineUpdate };
+}
 
-  return response;
+/**
+ * Served (agent-facing) copy: skeleton projection (#4388) and scope experiments (#4344) are
+ * alternative croppings of the observe payload; both apply only to the headline `observe` payload,
+ * never to embedded action observations. Skeleton is the more aggressive projection (it replaces
+ * viewHierarchy/elements), so when requested it wins. Its skeleton reads the original elements to
+ * retain non-enumerable ancestry provenance even when elements are dropped from output.
+ */
+function serveObserveHeadline(
+  stage: ObservationStage,
+  observeResult: ObserveResult,
+  uncapped: ObserveResult,
+  sanitized: ObserveResult,
+): ObserveResult {
+  const { ctx, scopeActive, scopeConfig } = stage;
+  if (resolveObserveProjection(ctx.args) === "skeleton") {
+    const projected = projectSanitizedObserveSkeleton(sanitized, observeResult);
+    // Skeleton replaces the hierarchy, so FOCUS/REGION run on the full uncapped
+    // tree and the skeleton keeps only the rows that survive them.
+    return scopeActive ? applyObserveScopeToSkeleton(projected, uncapped, scopeConfig) : projected;
+  }
+  if (!scopeActive) {
+    return sanitized;
+  }
+  // Scope-then-cap (#5074): use the already-sanitized UNCAPPED copy so the scope
+  // transforms see every warning, then cap the scoped result — an in-scope
+  // warning is never lost to a cap taken against the full tree. The baseline
+  // stays the capped `sanitized` full tree.
+  let served = applyObserveScopeExperiments(uncapped, scopeConfig);
+  // A no-op scope returns its input. Keep subsequent output-only metadata
+  // off the cached baseline when capped and uncapped are the same object.
+  if (served === uncapped) {
+    served = { ...served };
+  }
+  if (served.layoutWarnings) {
+    served.layoutWarnings = capLayoutWarnings(served.layoutWarnings);
+  }
+  return served;
+}
+
+function serveDisplayObservation(
+  stage: ObservationStage,
+  observeResult: ObserveResult,
+  entry: NonNullable<ObserveResult["displays"]>[number],
+): DisplayObservation {
+  const { ctx, cfg, scopeActive, scopeConfig } = stage;
+  const source: ObserveResult = {
+    observationId: observeResult.observationId,
+    updatedAt: observeResult.updatedAt,
+    ...entry,
+    systemInsets: entry.systemInsets ?? observeResult.systemInsets,
+  };
+  let panel = sanitizeObserveResult(source, cfg, ctx.cloneObservation);
+  if (resolveObserveProjection(ctx.args) === "skeleton") {
+    const projected = projectSanitizedObserveSkeleton(panel, source);
+    panel = scopeActive ? applyObserveScopeToSkeleton(projected, panel, scopeConfig) : projected;
+  } else if (scopeActive) {
+    panel = applyObserveScopeExperiments(panel, scopeConfig);
+  }
+  return {
+    display: panel.display,
+    screenSize: panel.screenSize,
+    freshness: entry.freshness,
+    ...copyDefinedFields(panel, [
+      "viewHierarchy",
+      "skeleton",
+      "context",
+      "keyboard",
+      "truncationReasons",
+      "windowTruncations",
+      "screenshotPath",
+      "screenshotExpiresAt",
+      "observeScope",
+    ]),
+  } satisfies DisplayObservation;
+}
+
+/** An action tool's embedded `.observation`: stripped, or sanitized and optionally diffed. */
+function finalizeActionObservation(stage: ObservationStage): ObservationOutcome {
+  const { payload } = stage;
+  if (stage.noObserveEnabled) {
+    // `--actions-no-observe` (#2762/#3026): drop the embedded observation from
+    // the served payload (output-only — the handler still computed it for its
+    // own success detection). Wins over the diff flag: nothing left to diff.
+    const stripped = { ...payload };
+    delete stripped.observation;
+    stripped.observationDiff = {
+      mode: "full",
+      reason: "stripped_by_actions_no_observe",
+    } satisfies ObservationDiffMetadata;
+    return {
+      sanitizedPayload: stripped,
+      hasArtifactableObservation: false,
+      pendingBaselineUpdate: undefined,
+    };
+  }
+  if (!isObserveResult(payload.observation)) {
+    return {
+      sanitizedPayload: undefined,
+      hasArtifactableObservation: false,
+      pendingBaselineUpdate: undefined,
+    };
+  }
+  const rawObservation = payload.observation as ObserveResult;
+  const { capped: sanitized } = stage.sanitizedCopies(rawObservation);
+  // Action observations default to the compact skeleton (issue #5872) — the
+  // same response-shape control `observe` already has — so a client no longer
+  // pays the full raw hierarchy on every tapOn/sendKeys/launchApp. Scoped to
+  // SKELETON_DEFAULT_ACTION_TOOLS (the tools that also expose the `raw`/`project`
+  // opt-out), so the default and the escape hatch never diverge. The compact
+  // form lands under the same `skeleton` key `observe` uses; `raw:true` /
+  // `project:"full"` opts back into the raw `viewHierarchy`. Internal
+  // tool-to-tool consumers always keep the full tree, while a computed diff
+  // replaces the action observation only on the path that emits a diff.
+  const servedObservation =
+    !stage.ctx.internal &&
+    SKELETON_DEFAULT_ACTION_TOOLS.has(stage.ctx.name) &&
+    resolveObserveProjection(stage.ctx.args) === "skeleton"
+      ? projectSanitizedObserveSkeleton(sanitized, rawObservation)
+      : sanitized;
+  const diffed = resolveActionObservationDiff(stage, sanitized, servedObservation, rawObservation);
+  if (diffed.observationOut && typeof diffed.observationOut === "object") {
+    attachObservationScreenshotUri(
+      diffed.observationOut as {
+        deviceId?: string;
+        observationId?: string;
+        observationScreenshotResourceUri?: string;
+        screenshotCaptureAttempted?: boolean;
+      },
+      rawObservation.screenshotCaptureAttempted,
+      isTerminalScreenshotUnavailable(rawObservation),
+    );
+  }
+  const sanitizedPayload: Record<string, unknown> = {
+    ...payload,
+    observation: diffed.observationOut,
+  };
+  if (diffed.observationDiff) {
+    sanitizedPayload.observationDiff = diffed.observationDiff;
+  }
+  return {
+    sanitizedPayload,
+    hasArtifactableObservation: true,
+    pendingBaselineUpdate: diffed.pendingBaselineUpdate,
+  };
+}
+
+interface ActionObservationDiff {
+  observationOut: unknown;
+  observationDiff: ObservationDiffMetadata | undefined;
+  pendingBaselineUpdate?: { sessionUuid: string; observation: ObserveResult };
+}
+
+function resolveActionObservationDiff(
+  stage: ObservationStage,
+  sanitized: ObserveResult,
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+): ActionObservationDiff {
+  const { ctx } = stage;
+  if (ctx.internal) {
+    // Internal envelopes are consumed by in-process tool callers, not agents.
+    // Keep them on the pre-diff/pre-strip shape without agent-facing metadata.
+    return { observationOut: servedObservation, observationDiff: undefined };
+  }
+  if (!stage.diffActive) {
+    return {
+      observationOut: servedObservation,
+      observationDiff: {
+        mode: "full",
+        reason: "disabled",
+        hint: "Set --actions-diff-observe to receive diffs.",
+      },
+    };
+  }
+  if (!ctx.sessionUuid || !ctx.baselineStore) {
+    return {
+      observationOut: servedObservation,
+      observationDiff: {
+        mode: "full",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        toScreen: observationScreenIdentity(sanitized),
+      },
+    };
+  }
+  if (!hasRenderableHierarchy(sanitized)) {
+    const baseline = ctx.baselineStore.get(ctx.sessionUuid);
+    return {
+      observationOut: servedObservation,
+      observationDiff: {
+        mode: "full",
+        reason: "unrenderable_hierarchy",
+        fromScreen: baseline ? observationScreenIdentity(baseline) : undefined,
+        toScreen: observationScreenIdentity(sanitized),
+      },
+    };
+  }
+  // canDiff is provably true here: not internal, diffActive, session +
+  // baseline store present, and the hierarchy is renderable.
+  // Emit a diff vs the baseline when it exists and the screen is unchanged;
+  // otherwise fall back to the full observation (cross-screen diffs are
+  // meaningless, and there is nothing to diff on the first action). Either
+  // way, update the baseline to this observation so the next action diffs
+  // against current state.
+  const baseline = ctx.baselineStore.get(ctx.sessionUuid);
+  return {
+    ...diffAgainstBaseline(stage, baseline, sanitized, servedObservation, rawObservation),
+    pendingBaselineUpdate: { sessionUuid: ctx.sessionUuid, observation: sanitized },
+  };
+}
+
+function diffAgainstBaseline(
+  stage: ObservationStage,
+  baseline: ObserveResult | undefined,
+  sanitized: ObserveResult,
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+): ActionObservationDiff {
+  const { ctx } = stage;
+  if (!baseline) {
+    return {
+      observationOut: servedObservation,
+      observationDiff: {
+        mode: "full",
+        reason: "missing_baseline",
+        toScreen: observationScreenIdentity(sanitized),
+      },
+    };
+  }
+  if (!hasRenderableHierarchy(baseline)) {
+    return {
+      observationOut: servedObservation,
+      observationDiff: {
+        mode: "full",
+        reason: "unrenderable_hierarchy",
+        fromScreen: observationScreenIdentity(baseline),
+        toScreen: observationScreenIdentity(sanitized),
+      },
+    };
+  }
+  if (!shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))) {
+    return {
+      observationOut: servedObservation,
+      observationDiff: {
+        mode: "full",
+        reason: "screen_changed",
+        fromScreen: observationScreenIdentity(baseline),
+        toScreen: observationScreenIdentity(sanitized),
+      },
+    };
+  }
+  return emitObservationDiff(stage, baseline, sanitized, servedObservation, rawObservation);
+}
+
+function emitObservationDiff(
+  stage: ObservationStage,
+  baseline: ObserveResult,
+  sanitized: ObserveResult,
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+): ActionObservationDiff {
+  const { ctx, payload } = stage;
+  const skeletonServed = servedObservation.skeleton !== undefined;
+  const diff = diffObserveResult(baseline, sanitized, {
+    collapseKeyboard: skeletonServed,
+    skipStatusBar: skeletonServed,
+    layoutWarningsDiffMode: skeletonServed ? "perEntry" : "full",
+    projectAddedRemoved: skeletonServed,
+  });
+  // Always attach a usable selector surface alongside the diff (issue #6221
+  // item 4.1): a client that gets a diff must never be left with no
+  // `skeleton` to act on — including when the request is `raw:true` /
+  // `project:"full"` (PR #6242 review PRRT_kwDOP-GF5M6fq3iK), where
+  // `servedObservation` itself carries no skeleton. `diffObserveResult`
+  // cannot compute this itself — `elements` is already dropped from
+  // `sanitized` by the time it runs — so it is resolved here instead.
+  const skeletonProjection = skeletonServed
+    ? servedObservation
+    : projectSanitizedObserveSkeleton(sanitized, rawObservation);
+  diff.skeleton = skeletonProjection.skeleton ?? [];
+  // Issue #6256: a diff must not silently drop the state-readout
+  // `context` alongside `skeleton`. `undefined`
+  // (no surviving readout row) is dropped on serialization just like an
+  // absent key, so no extra branch is needed here.
+  diff.context = skeletonProjection.context;
+  diff.keyboard = skeletonProjection.keyboard;
+  Object.assign(diff, copyDefinedFields(rawObservation, DIFF_PASSTHROUGH_METADATA_FIELDS));
+  attachDiffTruncation(diff, baseline, servedObservation, rawObservation);
+  const emitFull =
+    (hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff)) ||
+    (skeletonServed &&
+      classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
+      replacedMostActionableNodes(diff));
+  return {
+    observationOut: emitFull ? servedObservation : dropDiffNodeLists(diff),
+    observationDiff: {
+      mode: emitFull ? "full" : "diff",
+      reason: emitFull ? "screen_changed" : "diff_emitted",
+      fromScreen: observationScreenIdentity(baseline),
+      toScreen: observationScreenIdentity(sanitized),
+    },
+  };
+}
+
+function attachDiffTruncation(
+  diff: ReturnType<typeof diffObserveResult>,
+  baseline: ObserveResult,
+  servedObservation: ObserveResult,
+  rawObservation: ObserveResult,
+): void {
+  // Issue #6601: nor may a diff silently drop the hierarchy's truncation
+  // provenance — see resolveDiffTruncationReasons.
+  diff.truncationReasons = resolveDiffTruncationReasons(
+    baseline,
+    servedObservation,
+    rawObservation,
+  );
+  // Window attribution describes the current capture, unlike the merged flat reasons.
+  const windowTruncations =
+    servedObservation.windowTruncations ??
+    collectWindowTruncations(rawObservation.viewHierarchy?.windows);
+  Object.assign(diff, windowTruncations ? { windowTruncations } : {});
+}
+
+/** Spills the observation of a served payload to an artifact, keeping only a reference inline. */
+function artifactObservationPayload(
+  stage: ObservationStage,
+  sanitizedPayload: Record<string, unknown>,
+): Record<string, unknown> {
+  const { ctx } = stage;
+  if (stage.isObserveTool) {
+    // Keep compact wait status inline: without it, an artifacted `observe`
+    // response hides whether the requested condition matched or timed out.
+    return {
+      ...pickObserveWaitMetadata(sanitizedPayload),
+      ...writeObservationArtifact(ctx, sanitizedPayload),
+    };
+  }
+  const inlinePayload = sanitizedPayload;
+  const observation = inlinePayload.observation;
+  return artifactWriteOrInline(
+    ctx,
+    "observation",
+    () => ({
+      ...inlinePayload,
+      observation:
+        isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
+          ? writeObserveDiffBodyArtifact(ctx, observation)
+          : writeObservationArtifact(ctx, observation),
+    }),
+    inlinePayload,
+  );
+}
+
+/**
+ * Hard ceiling (issue #6870). Spilling `observation` bounds only the
+ * observation: `observationDiff` rides at the TOP level beside it, and so does
+ * every other tool field, so a response could still be handed to the client
+ * far over the inline limit — which a one-shot `--cli` transport then cut
+ * mid-string into unparseable JSON. With a writer available, spill whatever
+ * residue is still oversized and keep only the headline fields inline, so the
+ * client always gets complete, parseable JSON plus a pointer to the rest.
+ */
+function boundOversizedPayload(
+  ctx: FinalizeToolResponseContext,
+  boundedCandidate: Record<string, unknown>,
+  sanitizedPayload: Record<string, unknown> | undefined,
+  hasStructured: boolean,
+  serialization: ToolResponseSerialization,
+): Record<string, unknown> | undefined {
+  if (
+    !ctx.artifactWriter ||
+    ctx.internal ||
+    !exceedsInlineLimit(boundedCandidate, hasStructured, serialization)
+  ) {
+    return sanitizedPayload;
+  }
+  try {
+    return spillOversizedPayload(ctx, boundedCandidate, hasStructured, serialization);
+  } catch (error) {
+    // The operation itself already succeeded; only the spill failed (a full or
+    // read-only tool-output directory). Throwing here would return NO result
+    // for work the device has already done, which for a side-effecting tool
+    // invites a duplicate retry. Fall back to the pre-#6870 behaviour — serve
+    // the payload un-spilled — and leave a trace, since the response then
+    // exceeds the ceiling. The `--cli` renderer still refuses to cut JSON
+    // mid-string and emits its own truncation notice instead.
+    logger.warn(
+      `finalizeToolResponse: could not spill the oversized ${ctx.name} response: ${errorMessage(error)}`,
+      error,
+    );
+    return sanitizedPayload;
+  }
 }
 
 /**
@@ -920,480 +1120,6 @@ function artifactWriteOrInline<T>(
   }
 }
 
-/** Skipped for a response the client will never receive (#10081). */
-function commitDeliveredActionMetadata(
-  ctx: FinalizeToolResponseContext,
-  originalPayload: Record<string, unknown>,
-  servedPayload: Record<string, unknown>,
-): void {
-  if (ctx.delivered !== false && canRecordActionMetadata(ctx)) {
-    recordInlineActionMetadata(
-      servedPayload,
-      ctx,
-      actionMetadataDeviceId(originalPayload, ctx.name),
-    );
-  }
-}
-
-/** Skipped for a response the client will never receive (#10081). */
-function commitDeliveredBaseline(
-  ctx: FinalizeToolResponseContext,
-  pending: { sessionUuid: string; observation: ObserveResult } | undefined,
-  display: {
-    revision: number | undefined;
-    key: string | undefined;
-    generation: number | undefined;
-  },
-): void {
-  if (ctx.delivered === false) {
-    return;
-  }
-  if (pending) {
-    ctx.baselineStore!.set(pending.sessionUuid, pending.observation, display.revision);
-  } else if (ctx.sessionUuid && display.revision !== undefined) {
-    ctx.baselineStore?.setDisplayRevision?.(
-      ctx.sessionUuid,
-      display.revision,
-      display.key,
-      display.generation,
-    );
-  }
-}
-
-/** Only these independently compared blocks are omitted; join keys and screen identity stay inline. */
-const ACTION_METADATA_FIELDS = [
-  "insets",
-  "systemInsets",
-  "backStack",
-  "gfxMetrics",
-  "displayedTimeMetrics",
-  "deviceLock",
-  "accessibilityState",
-  "freshness",
-] as const;
-const HIERARCHY_METADATA_FIELDS = ["insets", "systemInsets"] as const;
-
-function canRecordActionMetadata(ctx: FinalizeToolResponseContext): boolean {
-  return (
-    (ctx.actionsCompactMetadata ?? serverConfig.isActionsCompactMetadataEnabled()) &&
-    !ctx.internal &&
-    !!ctx.sessionUuid &&
-    !!ctx.baselineStore?.getActionMetadata &&
-    !!ctx.baselineStore.setActionMetadata
-  );
-}
-
-function canCompactActionMetadata(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-  envelope: object,
-): boolean {
-  return (
-    canRecordActionMetadata(ctx) &&
-    ctx.name !== "observe" &&
-    payload.success !== false &&
-    payload.error === undefined &&
-    (envelope as { isError?: boolean }).isError !== true
-  );
-}
-
-function actionMetadataBlocks(
-  payload: Record<string, unknown>,
-  name: string,
-): Record<string, unknown> {
-  const observation = observationOfPayload(name, payload);
-  if (!isRecord(observation)) {
-    return {};
-  }
-  const blocks: Record<string, unknown> = {};
-  for (const field of ACTION_METADATA_FIELDS) {
-    if (observation[field] !== undefined) {
-      blocks[field] = observation[field];
-    }
-  }
-  if (isRecord(observation.viewHierarchy)) {
-    for (const field of HIERARCHY_METADATA_FIELDS) {
-      if (observation.viewHierarchy[field] !== undefined) {
-        blocks[`viewHierarchy.${field}`] = observation.viewHierarchy[field];
-      }
-    }
-  }
-  return blocks;
-}
-
-function actionMetadataDeviceId(
-  payload: Record<string, unknown>,
-  name: string,
-): string | undefined {
-  const observation = observationOfPayload(name, payload);
-  const deviceId = isRecord(observation) ? observation.deviceId : undefined;
-  return typeof deviceId === "string" && deviceId.length > 0 ? deviceId : undefined;
-}
-
-function hasDuplicateActionElement(
-  payload: Record<string, unknown>,
-  outputSchema: unknown,
-): boolean {
-  return (
-    payload.element !== undefined &&
-    isRecord(payload.selectedElement) &&
-    isDeepStrictEqual(payload.element, payload.selectedElement.matchedElement) &&
-    !requiredOutputSchemaKeys(outputSchema).includes("element")
-  );
-}
-
-/**
- * Per-capture stamps inside an otherwise static block. They change on every call
- * and nothing reads them, so they must not keep an unchanged block inline.
- * `freshness` is deliberately absent: its `ageMs` is documented for a consumer
- * working to a tighter budget, so any change there is a real change.
- */
-const ACTION_METADATA_VOLATILE_FIELDS: Partial<
-  Record<(typeof ACTION_METADATA_FIELDS)[number], readonly string[]>
-> = { backStack: ["capturedAt"] };
-
-/** Blocks whose per-call warning shape must stay visible even when unchanged. */
-function isAlwaysSentActionBlock(field: string, block: unknown): boolean {
-  if (field === "freshness") {
-    return !isRecord(block) || block.isFresh !== true;
-  }
-  if (field === "gfxMetrics") {
-    return isRecord(block) && block.isStable === false;
-  }
-  // The error-fallback shape (partial) is otherwise identical call to call once capturedAt is ignored.
-  return field === "backStack" && isRecord(block) && block.partial === true;
-}
-
-/** Wire form of a block with its volatile keys removed, so in-memory `undefined` keys cannot differ from the recorded JSON round-trip. */
-function comparableActionBlock(field: string, block: unknown): unknown {
-  const wire: unknown = JSON.parse(stringifyToolResponse(block));
-  const volatile =
-    ACTION_METADATA_VOLATILE_FIELDS[field as keyof typeof ACTION_METADATA_VOLATILE_FIELDS];
-  if (!isRecord(wire) || !volatile) {
-    return wire;
-  }
-  return Object.fromEntries(Object.entries(wire).filter(([key]) => !volatile.includes(key)));
-}
-
-function isUnchangedActionBlock(field: string, block: unknown, previous: unknown): boolean {
-  if (block === undefined || previous === undefined || isAlwaysSentActionBlock(field, block)) {
-    return false;
-  }
-  return isDeepStrictEqual(
-    comparableActionBlock(field, block),
-    comparableActionBlock(field, previous),
-  );
-}
-
-function compactActionMetadata(
-  payload: Record<string, unknown>,
-  ctx: FinalizeToolResponseContext,
-): Record<string, unknown> {
-  let next = payload;
-  if (hasDuplicateActionElement(payload, ctx.outputSchema)) {
-    next = { ...payload };
-    delete next.element;
-  }
-  const deviceId = actionMetadataDeviceId(payload, ctx.name);
-  if (!deviceId || !isRecord(payload.observation)) {
-    return next;
-  }
-  const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
-  if (!previous) {
-    return next;
-  }
-  const observation = payload.observation;
-  const omittedFields = ACTION_METADATA_FIELDS.filter((field) =>
-    isUnchangedActionBlock(field, observation[field], previous[field]),
-  );
-  const sourceHierarchy = isRecord(observation.viewHierarchy)
-    ? observation.viewHierarchy
-    : undefined;
-  const omittedHierarchyFields = HIERARCHY_METADATA_FIELDS.filter(
-    (field) =>
-      sourceHierarchy?.[field] !== undefined &&
-      isDeepStrictEqual(sourceHierarchy[field], previous[`viewHierarchy.${field}`]),
-  );
-  if (omittedFields.length === 0 && omittedHierarchyFields.length === 0) {
-    return next;
-  }
-
-  const compactedObservation = { ...observation };
-  for (const field of omittedFields) {
-    delete compactedObservation[field];
-  }
-  if (omittedHierarchyFields.length > 0) {
-    const hierarchy = { ...sourceHierarchy };
-    for (const field of omittedHierarchyFields) {
-      delete hierarchy[field];
-    }
-    compactedObservation.viewHierarchy = hierarchy;
-  }
-  return { ...next, observation: compactedObservation };
-}
-
-/** Record only final inline blocks, including observe and errors; artifacts do not count. */
-function recordInlineActionMetadata(
-  payload: Record<string, unknown>,
-  ctx: FinalizeToolResponseContext,
-  deviceId: string | undefined,
-): void {
-  if (!deviceId) {
-    return;
-  }
-  const blocks = actionMetadataBlocks(payload, ctx.name);
-  const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
-  if (Object.keys(blocks).length === 0 && previous) {
-    return;
-  }
-  // An empty snapshot on a device switch invalidates the old device without
-  // claiming delivery of any artifacted/stripped block.
-  // Detach values from the response and use the text serializer's wire representation.
-  const snapshot: Record<string, unknown> = JSON.parse(stringifyToolResponse(blocks));
-  ctx.baselineStore!.setActionMetadata!(ctx.sessionUuid!, deviceId, { ...previous, ...snapshot });
-}
-
-function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    OBSERVE_WAIT_METADATA_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
-      key,
-      payload[key],
-    ]),
-  );
-}
-
-/**
- * The fields kept inline when an oversized residue is spilled wholesale (#6870).
- *
- * A client that gets only an artifact pointer still has to know whether the tool
- * succeeded and, if not, why — reading the spilled file to learn that a tap
- * failed would be a worse contract than the oversized payload it replaced.
- */
-const INLINE_RESIDUE_KEYS = ["success", "error", ...OBSERVE_WAIT_METADATA_KEYS] as const;
-const DEVICE_SESSION_RESIDUE_KEYS = ["sessionUuid", "sessionId"] as const;
-
-/**
- * Per-field cap on what a retained residue field may contribute (#6870).
- *
- * The retained fields are headlines, not payloads, but nothing stops one of them
- * from being huge on its own: a stack trace lands in `error`, and a `countStable`
- * wait that never matched returns every candidate it saw. Copying such a field
- * back verbatim would blow the very ceiling the spill exists to enforce. At
- * {@link INLINE_RESIDUE_KEYS}.length plus the two device-session fields caps the
- * largest acquisition residue at ~48 KB,
- * comfortably inside {@link DEFAULT_OBSERVATION_INLINE_MAX_BYTES} once the
- * artifact envelope is added.
- */
-const INLINE_RESIDUE_FIELD_LIMIT = 4 * 1024;
-
-/**
- * Keep the headline fields inline, each bounded: an oversized string is cut to
- * the cap (still a string, so `error` stays readable), and an oversized
- * structure is replaced with the canonical `{ _truncated, bytes }` marker. The
- * complete value is always in the artifact the caller writes alongside this.
- */
-function pickInlineResidue(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-): Record<string, unknown> {
-  const requiredArrayKeys = new Set(requiredOutputSchemaArrayKeys(ctx.outputSchema));
-  return Object.fromEntries(
-    inlineResidueKeys(ctx)
-      .filter((key) => payload[key] !== undefined)
-      .map((key) => [key, boundResidueField(payload[key], requiredArrayKeys.has(key))]),
-  );
-}
-
-/**
- * Replace an over-ceiling payload with its artifact pointer plus a bounded
- * residue of the headline fields.
- */
-function spillOversizedPayload(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-  hasStructured: boolean,
-  serialization: ToolResponseSerialization,
-): Record<string, unknown> {
-  // The request-local writer shares the complete rendering with the size probe.
-  const artifact = writeJsonArtifact(ctx, "ToolResponse", payload);
-  const spilled = { ...pickInlineResidue(ctx, payload), ...artifact };
-  // The per-field cap is counted in UTF-16 code units, so multi-byte text can
-  // still serialize past the ceiling across every retained field. Fall back to
-  // markers-only, whose size does not depend on the input at all.
-  return exceedsInlineLimit(spilled, hasStructured, serialization)
-    ? { ...markerResidue(ctx, payload), ...artifact }
-    : spilled;
-}
-
-function inlineResidueKeys(ctx: FinalizeToolResponseContext): readonly string[] {
-  const fixedKeys = isDeviceSessionAcquisitionTool(ctx.name)
-    ? [...INLINE_RESIDUE_KEYS, ...DEVICE_SESSION_RESIDUE_KEYS]
-    : INLINE_RESIDUE_KEYS;
-  return [...new Set([...fixedKeys, ...requiredOutputSchemaKeys(ctx.outputSchema)])];
-}
-
-/**
- * Finds required top-level fields on an output Zod object without treating an
- * absent or non-object schema as an error. Zod v4 keeps `.passthrough()` and
- * refinements on ZodObject itself; pipes and transparent wrappers may instead
- * expose their output or unwrapped schema separately.
- */
-function requiredOutputSchemaKeys(schema: unknown): readonly string[] {
-  const objectSchema = unwrapOutputObjectSchema(schema);
-  if (!objectSchema) {
-    return [];
-  }
-  return Object.entries(objectSchema.shape)
-    .filter(([, fieldSchema]) => !fieldSchema.isOptional())
-    .map(([key]) => key);
-}
-
-/** Required output fields whose declared value is an array. */
-function requiredOutputSchemaArrayKeys(schema: unknown): readonly string[] {
-  const objectSchema = unwrapOutputObjectSchema(schema);
-  if (!objectSchema) {
-    return [];
-  }
-  return Object.entries(objectSchema.shape)
-    .filter(([, fieldSchema]) => !fieldSchema.isOptional() && fieldSchema instanceof z.ZodArray)
-    .map(([key]) => key);
-}
-
-function unwrapOutputObjectSchema(schema: unknown): z.ZodObject | undefined {
-  let candidate = schema;
-  const seen = new Set<unknown>();
-  while (candidate && typeof candidate === "object" && !seen.has(candidate)) {
-    seen.add(candidate);
-    if (candidate instanceof z.ZodObject) {
-      return candidate;
-    }
-    if (candidate instanceof z.ZodPipe) {
-      candidate = candidate.out;
-      continue;
-    }
-    const unwrap = (candidate as { unwrap?: unknown }).unwrap;
-    candidate = typeof unwrap === "function" ? unwrap.call(candidate) : undefined;
-  }
-  return undefined;
-}
-
-/**
- * The last-resort residue: non-scalar fields are replaced with the
- * `{ _truncated, bytes }` marker, except arrays become empty arrays to retain
- * their declared schema shape. The inline size is therefore a fixed function of
- * the field COUNT rather than of the payload. Scalars (a `success` boolean, a
- * `polls` count) are the headline a client actually acts on and are always tiny.
- */
-function markerResidue(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    inlineResidueKeys(ctx)
-      .filter((key) => payload[key] !== undefined)
-      .map((key) => [
-        key,
-        Array.isArray(payload[key])
-          ? []
-          : typeof payload[key] === "object" || typeof payload[key] === "string"
-            ? boundStructuredField(payload[key], false, 0)
-            : payload[key],
-      ]),
-  );
-}
-
-function boundResidueField(value: unknown, preserveArrayShape: boolean = false): unknown {
-  if (typeof value === "string") {
-    return value.length <= INLINE_RESIDUE_FIELD_LIMIT
-      ? value
-      : `${truncateBodyText(value, INLINE_RESIDUE_FIELD_LIMIT)}${RESIDUE_TRUNCATION_SUFFIX}`;
-  }
-  if (preserveArrayShape && Array.isArray(value)) {
-    return boundResidueArray(value);
-  }
-  return boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT);
-}
-
-function boundResidueArray(value: unknown[]): unknown[] {
-  if (boundStructuredField(value, false, INLINE_RESIDUE_FIELD_LIMIT) === value) {
-    return value;
-  }
-
-  // Required array fields must remain arrays after a #6950/#6981 spill, unlike
-  // boundStructuredField's telemetry marker behavior; retain real prefix values
-  // only, because the artifact already contains the complete untruncated array.
-  let low = 0;
-  let high = value.length;
-  while (low < high) {
-    const end = Math.ceil((low + high) / 2);
-    const serialized = JSON.stringify(value.slice(0, end));
-    if (serialized !== undefined && serialized.length <= INLINE_RESIDUE_FIELD_LIMIT) {
-      low = end;
-    } else {
-      high = end - 1;
-    }
-  }
-  return value.slice(0, low);
-}
-
-/** Marks a residue string as cut, so a client never reads a partial value as whole. */
-const RESIDUE_TRUNCATION_SUFFIX = "… [truncated; complete value in the tool-output artifact]";
-
-function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode {
-  return ctx.artifactMode ?? "always";
-}
-
-/** Whether the payload, as the client will actually receive it, is over the ceiling. */
-function exceedsInlineLimit(
-  payload: Record<string, unknown>,
-  hasStructured: boolean,
-  serialization: ToolResponseSerialization,
-): boolean {
-  return (
-    emittedByteLength(payload, hasStructured, serialization) > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
-  );
-}
-
-/**
- * Bytes this payload will actually put on the wire (#6870 review).
- *
- * The text part is rendered with `stringifyToolResponse`, whose replacer drops
- * every property named `extras`. But `structuredContent` is assigned the
- * UNSTRIPPED payload object and is serialized by the transport with a plain
- * `JSON.stringify`, extras included. Measuring only the stripped rendering let a
- * result whose bulk is accessibility `extras` measure as a handful of bytes and
- * sail straight past the hard ceiling while 70 KB of structured content went to
- * the client. Measure the larger of the two renderings, so the gate bounds
- * whichever representation is actually emitted.
- */
-function emittedByteLength(
-  payload: Record<string, unknown>,
-  hasStructured: boolean,
-  serialization: ToolResponseSerialization,
-): number {
-  const strippedBytes = Buffer.byteLength(serialization.text(payload), "utf8");
-  if (!hasStructured) {
-    return strippedBytes;
-  }
-  return Math.max(strippedBytes, structuredByteLength(payload, strippedBytes, serialization));
-}
-
-function structuredByteLength(
-  payload: Record<string, unknown>,
-  fallback: number,
-  serialization: ToolResponseSerialization,
-): number {
-  try {
-    return Buffer.byteLength(serialization.artifact(payload), "utf8");
-  } catch (error) {
-    // A payload the transport itself cannot serialize (a cycle, a BigInt) has no
-    // structured byte count to compare against; the stripped rendering is the
-    // only measurement available. Safe to swallow: this is sizing, not delivery.
-    logger.debug(`finalizeToolResponse: structured payload is not measurable: ${error}`);
-    return fallback;
-  }
-}
-
 function shouldArtifactObservationPayload(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
@@ -1407,363 +1133,4 @@ function shouldArtifactObservationPayload(
   // Measures the whole served payload — `observationDiff` and every other
   // top-level field included — not just the observation subtree.
   return exceedsInlineLimit(payload, hasStructured, serialization);
-}
-
-function writeObservationArtifact(
-  ctx: FinalizeToolResponseContext,
-  observationPayload: unknown,
-): ObservationArtifactMetadata {
-  return writeJsonArtifact(
-    ctx,
-    getObservationArtifactPayload(observationPayload),
-    observationPayload,
-  );
-}
-
-/**
- * Keep a diff's compact selector surface and capture metadata inline; only its
- * potentially unbounded body belongs in the artifact (#7217).
- */
-function writeObserveDiffBodyArtifact(
-  ctx: FinalizeToolResponseContext,
-  observation: Record<string, unknown>,
-): Record<string, unknown> {
-  const { added, removed, changed, fields, ...inline } = observation;
-  delete inline.isDiff;
-  const body: Record<string, unknown> = { isDiff: true, added, removed, changed };
-  if (fields !== undefined) {
-    body.fields = fields;
-  }
-  return { ...inline, ...writeObservationArtifact(ctx, body) };
-}
-
-function isObserveDiff(observation: unknown): observation is Record<string, unknown> {
-  return (
-    observation !== null &&
-    typeof observation === "object" &&
-    (observation as Record<string, unknown>).isDiff === true
-  );
-}
-
-function getObservationArtifactPayload(observationPayload: unknown): ObservationArtifactPayload {
-  if (
-    observationPayload &&
-    typeof observationPayload === "object" &&
-    (observationPayload as Record<string, unknown>).isDiff === true
-  ) {
-    return "ObserveDiff";
-  }
-  return "ObserveResult";
-}
-
-function writeJsonArtifact(
-  ctx: FinalizeToolResponseContext,
-  payload: ObservationArtifactPayload,
-  data: unknown,
-): ObservationArtifactMetadata {
-  return ctx.artifactWriter!.writeJsonArtifact({
-    tool: ctx.name,
-    payload,
-    data,
-  });
-}
-
-function artifactNonObservationPayload(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  if (!ctx.artifactWriter || ctx.internal) {
-    return undefined;
-  }
-
-  switch (ctx.name) {
-    case "executePlan":
-      return artifactExecutePlanPayload(ctx, payload);
-    case "getNetworkGraph":
-      return artifactNetworkGraphPayload(ctx, payload);
-    default:
-      return undefined;
-  }
-}
-
-function artifactExecutePlanPayload(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  let changed = false;
-  const nextPayload: Record<string, unknown> = { ...payload };
-  if (isRecord(payload.failedStep)) {
-    const failureObservation = artifactPlanObservation(
-      ctx,
-      payload.failedStep.failureObservation,
-      "ExecutePlanFailureObservation",
-    );
-    if (failureObservation) {
-      nextPayload.failedStep = { ...payload.failedStep, failureObservation };
-      changed = true;
-    }
-  }
-
-  if (Array.isArray(payload.deviceFailures)) {
-    nextPayload.deviceFailures = payload.deviceFailures.map((failure) => {
-      if (!isRecord(failure)) {
-        return failure;
-      }
-      const failureObservation = artifactPlanObservation(
-        ctx,
-        failure.failureObservation,
-        "ExecutePlanFailureObservation",
-      );
-      if (!failureObservation) {
-        return failure;
-      }
-      changed = true;
-      return { ...failure, failureObservation };
-    });
-  }
-
-  if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {
-    let debugChanged = false;
-    const steps = payload.debug.steps.map((step) => {
-      if (!isRecord(step) || !isRecord(step.details)) {
-        return step;
-      }
-
-      let detailsChanged = false;
-      let details = step.details;
-      const stepObservation = artifactPlanObservation(
-        ctx,
-        details.stepObservation,
-        "ExecutePlanDebugStepObservation",
-      );
-      if (stepObservation) {
-        details = { ...details, stepObservation };
-        detailsChanged = true;
-      }
-
-      const failureObservation = artifactPlanObservation(
-        ctx,
-        details.failureObservation,
-        "ExecutePlanDebugFailureObservation",
-      );
-      if (failureObservation) {
-        details = { ...details, failureObservation };
-        detailsChanged = true;
-      }
-
-      if (!detailsChanged) {
-        return step;
-      }
-      debugChanged = true;
-      return { ...step, details };
-    });
-
-    if (debugChanged) {
-      nextPayload.debug = { ...payload.debug, steps };
-      changed = true;
-    }
-  }
-
-  return changed ? nextPayload : undefined;
-}
-
-function artifactPlanObservation(
-  ctx: FinalizeToolResponseContext,
-  observation: unknown,
-  payloadPrefix: string,
-): Record<string, unknown> | undefined {
-  if (!isRecord(observation)) {
-    return undefined;
-  }
-
-  let changed = false;
-  const next: Record<string, unknown> = { ...observation };
-  if (observation.viewHierarchy !== undefined) {
-    next.viewHierarchy = writeJsonArtifact(
-      ctx,
-      `${payloadPrefix}ViewHierarchy`,
-      observation.viewHierarchy,
-    );
-    changed = true;
-  }
-  if (observation.rawViewHierarchy !== undefined) {
-    next.rawViewHierarchy = writeJsonArtifact(
-      ctx,
-      `${payloadPrefix}RawViewHierarchy`,
-      observation.rawViewHierarchy,
-    );
-    changed = true;
-  }
-
-  return changed ? next : undefined;
-}
-
-function artifactNetworkGraphPayload(
-  ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  if (!Array.isArray(payload.graph)) {
-    return undefined;
-  }
-
-  return {
-    ...payload,
-    graph: writeJsonArtifact(ctx, "NetworkGraph", payload.graph),
-    graphSummary: {
-      hostCount: payload.graph.length,
-    },
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * A value is treated as an `ObserveResult` for sanitization purposes when it is
- * an object carrying observe-specific fields. Hierarchy collection can fail
- * while the rest of observe still completes, so `viewHierarchy` is only one
- * marker; debug-perf fields on hierarchy-less observations must still be
- * stripped at the wire boundary.
- */
-const OBSERVE_RESULT_MARKERS: ReadonlyArray<string> = [
-  "updatedAt",
-  "screenSize",
-  "systemInsets",
-  "viewHierarchy",
-  "rawViewHierarchy",
-  "elements",
-  "perfTiming",
-  "perfTimingTruncated",
-  "gfxMetrics",
-  "performanceAudit",
-  "accessibilityAudit",
-  "freshness",
-];
-
-function isObserveResult(value: unknown): value is ObserveResult {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const record = value as Record<string, unknown>;
-  return OBSERVE_RESULT_MARKERS.some((key) => key in record);
-}
-
-function hasRenderableHierarchy(observation: ObserveResult): boolean {
-  return !!observation.viewHierarchy?.hierarchy;
-}
-
-function hasScreenChangedEffect(payload: Record<string, unknown>): boolean {
-  const effect = payload.effect;
-  return (
-    effect !== null &&
-    typeof effect === "object" &&
-    (effect as Record<string, unknown>).screenChanged === true
-  );
-}
-
-/**
- * Owner decision on #11637 item 2: a diff always ships beside its `skeleton`
- * (#6221/#6242), which already lists every actionable node on the current
- * screen, so the added/removed node lists repeat it. Call after the emptiness /
- * replacement checks read them; `changed` stays because the skeleton cannot say
- * what moved from what.
- */
-function dropDiffNodeLists(
-  diff: ReturnType<typeof diffObserveResult>,
-): Partial<ReturnType<typeof diffObserveResult>> {
-  const wireDiff: Partial<typeof diff> = { ...diff };
-  delete wireDiff.added;
-  delete wireDiff.removed;
-  return wireDiff;
-}
-
-function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean {
-  return (
-    diff.added.length === 0 &&
-    diff.removed.length === 0 &&
-    diff.changed.length === 0 &&
-    diff.displayChanged === undefined &&
-    diff.fields === undefined
-  );
-}
-
-/** Fewest replaced actionable rows that can read as a screen replacement. */
-const MIN_REPLACED_ACTIONABLE_NODES = 3;
-
-/**
- * Whether a same-screen-identity diff actually replaces the screen's actionable
- * content (#11638): sub-screens of one activity (Settings' `SubSettings`) share
- * an identity, so navigating between them would otherwise be emitted as a diff
- * of unrelated rows. At least half of the current actionable skeleton having
- * been both added and removed means the client needs the new screen, not a delta.
- */
-function replacedMostActionableNodes(diff: ReturnType<typeof diffObserveResult>): boolean {
-  const replaced = Math.min(diff.added.length, diff.removed.length);
-  return replaced >= MIN_REPLACED_ACTIONABLE_NODES && replaced * 2 >= (diff.skeleton?.length ?? 0);
-}
-
-function observationScreenIdentity(observation: ObserveResult): ObservationDiffScreenIdentity {
-  const identity: ObservationDiffScreenIdentity = {};
-  if (observation.activeWindow) {
-    identity.activeWindow = observation.activeWindow;
-  }
-  if (observation.viewHierarchy?.packageName) {
-    identity.hierarchyPackageName = observation.viewHierarchy.packageName;
-  }
-  if (observation.screenIdentity) {
-    identity.screenIdentity = observation.screenIdentity;
-  }
-  return identity;
-}
-
-function shouldDiffObservation(
-  baseline: ObserveResult,
-  next: ObserveResult,
-  actionClass: ObservationActionClass,
-): boolean {
-  if (actionClass === "inPlace" || actionClass === "scroll") {
-    return isSameStableMutationSurface(baseline, next);
-  }
-  return isSameObservationScreen(baseline, next);
-}
-
-function isSameStableMutationSurface(baseline: ObserveResult, next: ObserveResult): boolean {
-  if (!hasSameWindowPackageSurface(baseline, next)) {
-    return false;
-  }
-
-  return hasCompatibleStableMutationIdentity(baseline, next);
-}
-
-function hasCompatibleStableMutationIdentity(
-  baseline: ObserveResult,
-  next: ObserveResult,
-): boolean {
-  const baselineIdentity = baseline.screenIdentity;
-  const nextIdentity = next.screenIdentity;
-  if (!baselineIdentity || !nextIdentity) {
-    return true;
-  }
-
-  return (
-    baselineIdentity.platform === nextIdentity.platform &&
-    baselineIdentity.source === nextIdentity.source &&
-    baselineIdentity.key === nextIdentity.key
-  );
-}
-
-/** The window/package facts that identify which app surface an observation shows. */
-function windowPackageSurface(result: ObserveResult): readonly string[] {
-  return [
-    result.activeWindow?.appId ?? "",
-    result.activeWindow?.activityName ?? "",
-    result.viewHierarchy?.packageName ?? "",
-  ];
-}
-
-function hasSameWindowPackageSurface(baseline: ObserveResult, next: ObserveResult): boolean {
-  const nextSurface = windowPackageSurface(next);
-  return windowPackageSurface(baseline).every((value, index) => value === nextSurface[index]);
 }

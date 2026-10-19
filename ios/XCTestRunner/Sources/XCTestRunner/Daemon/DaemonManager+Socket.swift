@@ -200,8 +200,8 @@ extension DaemonManager {
         }
 
         // Set socket receive timeout (carries sub-second precision; never {0,0}, which would disable it).
-        var tv = Self.receiveTimeout(forSeconds: timeoutSeconds)
-        if setsockopt(socketFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+        var receiveTimeout = Self.receiveTimeout(forSeconds: timeoutSeconds)
+        if setsockopt(socketFd, SOL_SOCKET, SO_RCVTIMEO, &receiveTimeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
             print("[AutoMobile] Failed to set daemon socket receive timeout: \(errno)")
         }
 

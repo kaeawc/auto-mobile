@@ -42,7 +42,7 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // Session objects and autolock session-candidate records.
   "src/daemon/deviceAutolockManager.ts": 3,
   // PlanLossTarget capture records, not the target's nested device.
-  "src/daemon/deviceDisconnectHandler.ts": 2,
+  "src/daemon/planDeviceLossMonitor.ts": 2,
   // DeviceHoldFacts is an already captured availability projection.
   "src/daemon/deviceHold.ts": 2,
   // Deferred-release record (1) and discovery options (1).

@@ -46,10 +46,10 @@ final class PrototypeKeyboardLiftTests: XCTestCase {
     }
 
     func testAnimationFollowsKeyboardDurationUnlessMotionIsOff() {
-        let on = PrototypeMotion(specMotion: nil, reduceMotion: false)
-        XCTAssertEqual(PrototypeKeyboardLift.animationDuration(keyboardDuration: 0.25, motion: on), 0.25)
-        XCTAssertNil(PrototypeKeyboardLift.animationDuration(keyboardDuration: nil, motion: on))
-        XCTAssertNil(PrototypeKeyboardLift.animationDuration(keyboardDuration: 0, motion: on))
+        let enabled = PrototypeMotion(specMotion: nil, reduceMotion: false)
+        XCTAssertEqual(PrototypeKeyboardLift.animationDuration(keyboardDuration: 0.25, motion: enabled), 0.25)
+        XCTAssertNil(PrototypeKeyboardLift.animationDuration(keyboardDuration: nil, motion: enabled))
+        XCTAssertNil(PrototypeKeyboardLift.animationDuration(keyboardDuration: 0, motion: enabled))
         XCTAssertNil(PrototypeKeyboardLift.animationDuration(
             keyboardDuration: 0.25, motion: PrototypeMotion(specMotion: "none", reduceMotion: false)
         ))
@@ -75,7 +75,13 @@ final class PrototypeKeyboardLiftTests: XCTestCase {
             lift: 700
         )
         XCTAssertEqual(capped.y, 0)
-        let top = PrototypeSheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: "top", height: 200, lift: 300)
+        let top = PrototypeSheetFrame.rect(
+            containerWidth: 400,
+            containerHeight: 800,
+            edge: "top",
+            height: 200,
+            lift: 300
+        )
         XCTAssertEqual(top.y, 0, "a top sheet ignores the lift")
     }
 

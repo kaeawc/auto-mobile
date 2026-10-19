@@ -31,9 +31,11 @@ function setup(limit = 256) {
     timer,
     ISOLATED_DAEMON_RECOVERY,
     null,
-    new FakeIdGenerator(["p"]),
-    "darwin",
-    limit,
+    {
+      idGenerator: new FakeIdGenerator(["p"]),
+      platformOverride: "darwin",
+      maxInboundFrameBytes: limit,
+    },
   );
   client.testHooks.attachSocket(socket);
   const feed = (frame: unknown) =>
@@ -224,16 +226,11 @@ async function withSocketConnection(
     callbacks.push(connectionListenerOf(args)!);
     return socket;
   });
-  const client = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    new FakeIdGenerator(["p", "q"]),
-    "win32",
-    128,
-  );
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    idGenerator: new FakeIdGenerator(["p", "q"]),
+    platformOverride: "win32",
+    maxInboundFrameBytes: 128,
+  });
   try {
     await scenario(client, sockets, callbacks, timer);
   } finally {

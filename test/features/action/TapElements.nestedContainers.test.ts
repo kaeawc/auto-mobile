@@ -492,16 +492,10 @@ for (const action of ["tap", "longPress"] as const) {
     if (!element) {
       throw new Error("Expected scoped target");
     }
-    await tap.executeAndroidTap(
-      action,
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      { action, container: scope, selectionStrategy: "unique" },
-      true,
-    );
+    await tap.executeAndroidTap(action, 50, 50, 500, element, {
+      options: { action, container: scope, selectionStrategy: "unique" },
+      isTalkBackEnabled: true,
+    });
     expect(talkBack.directActivationCalls).toHaveLength(0);
     expect(talkBack.longPressCalls).toHaveLength(0);
     expect(action === "tap" ? talkBack.preciseTapCalls : talkBack.fallbackCalls).toHaveLength(1);
@@ -551,16 +545,10 @@ test("tapOn scoped long press does not reselect a global native resource ID", as
     "requestAction",
   ).mockResolvedValue({ success: true, action: "long_click", totalTimeMs: 1 });
   try {
-    await tap.executeAndroidTap(
-      "longPress",
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      { action: "longPress", container: scope, selectionStrategy: "unique" },
-      false,
-    );
+    await tap.executeAndroidTap("longPress", 50, 50, 500, element, {
+      options: { action: "longPress", container: scope, selectionStrategy: "unique" },
+      isTalkBackEnabled: false,
+    });
     expect(native).not.toHaveBeenCalled();
     expect(adb.getCommandCalls().map(({ command }) => command)).toEqual([
       "shell input touchscreen swipe 50 50 50 50 500",

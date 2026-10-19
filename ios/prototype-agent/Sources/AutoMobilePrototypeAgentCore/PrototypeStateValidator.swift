@@ -13,6 +13,13 @@ import Foundation
 /// raw bytes). The static slider, chip, fab, progress and radio rules are kept: they live in the
 /// same Android functions and cost nothing.
 enum PrototypeStateValidator {
+    private static func actionRejection(_ actions: [PrototypeAction], state: [String: JSONValue]) -> String? {
+        for action in actions {
+            if let message = stateActionError(action, state) { return message }
+        }
+        return nil
+    }
+
     /// The first rule `root` breaks when it holds `state`, or nil when the state is valid.
     /// `nonStateBytes` is the size of the shown spec outside its `state` (`PrototypeSession` measures it
     /// at show); the spec byte cap is checked first, as Android's `validate` does.
@@ -35,10 +42,7 @@ enum PrototypeStateValidator {
         for node in nodes {
             if let message = refreshError(node, state) { return message }
         }
-        for action in actions {
-            if let message = stateActionError(action, state) { return message }
-        }
-        return nil
+        return actionRejection(actions, state: state)
     }
 
     // MARK: Spec size
@@ -194,7 +198,7 @@ enum PrototypeStateValidator {
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
               (1900 ... 2100).contains(year), (1 ... 12).contains(month)
         else { return false }
-        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        let leap = (year.isMultiple(of: 4) && !year.isMultiple(of: 100)) || year.isMultiple(of: 400)
         let days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         return (1 ... days[month - 1]).contains(day)
     }

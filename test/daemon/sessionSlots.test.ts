@@ -425,7 +425,7 @@ test("generic slot payloads represent every designed state without manager depen
     retiring: new Set([op]),
     settled: Promise.resolve(),
   };
-  expect(states.map(({ tag }) => tag)).toEqual(SLOT_TAGS);
+  expect(states.map(({ tag }) => tag)).toEqual([...SLOT_TAGS]);
   expect(slot.uuid).toBe(uuid);
   expect(slot.state).toBe(states[0]);
   expect(slot.retiring.has(op)).toBe(true);

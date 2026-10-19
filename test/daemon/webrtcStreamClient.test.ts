@@ -119,7 +119,7 @@ test("valid WebRTC envelope preserves extras and unchecked additive fields acros
   const split = bytes.indexOf(Buffer.from("😀")) + 1;
   socket.feed(bytes.subarray(0, split));
   socket.feed(bytes.subarray(split));
-  await expect(result).resolves.toEqual(futureResponse);
+  expect<unknown>(await result).toEqual(futureResponse);
   expect(socket.destroyed).toBe(true);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });

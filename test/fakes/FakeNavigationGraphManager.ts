@@ -7,7 +7,6 @@ import {
   ToolCallInteraction,
   ExportedGraph,
   UIState,
-  BackStackInfo,
   HierarchyNavigationEvent,
   NavigationSuggestionInfo,
   NavigationGraphSummary,
@@ -27,6 +26,7 @@ import type {
   NavigationBuildContextChange,
   NavigationGraphService,
 } from "../../src/features/navigation/NavigationGraphManager";
+import type { RecordedBackStack } from "../../src/features/navigation/NavigationGraphService";
 
 interface StashedGraph {
   nodes: Map<string, NavigationNode>;
@@ -305,7 +305,7 @@ export class FakeNavigationGraphManager implements NavigationGraphService {
     this.emitGraphUpdated();
   }
 
-  async recordBackStack(backStack: BackStackInfo): Promise<void> {
+  async recordBackStack(backStack: RecordedBackStack): Promise<void> {
     this.trackCall("recordBackStack", [backStack]);
   }
 

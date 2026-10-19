@@ -3,7 +3,6 @@ import type { NavigationEdgeTarget } from "../../db/navigationRepository";
 import { NavigationRepository } from "../../db/navigationRepository";
 import { TestCoverageRepository } from "../../db/testCoverageRepository";
 import type { NavigationEdge as DBNavigationEdge, TestCoverageSession } from "../../db/types";
-import { BackStackInfo } from "../../models";
 import {
   NavigationGraphRecorder,
   assertNavigationWriteCurrent,
@@ -39,6 +38,7 @@ import type {
   NavigationBuildContext,
   NavigationBuildContextChange,
   NavigationGraphService,
+  RecordedBackStack,
 } from "./NavigationGraphService";
 
 export type { NavigationEvent, IncomingNavigationEvent, NavigationEdge, UIState };
@@ -680,7 +680,7 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Record back stack information for the current screen.
    * Updates the current node with back stack depth and task ID.
    */
-  public async recordBackStack(backStack: BackStackInfo): Promise<void> {
+  public async recordBackStack(backStack: RecordedBackStack): Promise<void> {
     if (!this.recordingState.currentAppId || !this.recordingState.currentScreen) {
       logger.debug(`[NAVIGATION_GRAPH] Cannot record back stack - no current app or screen`);
       return;

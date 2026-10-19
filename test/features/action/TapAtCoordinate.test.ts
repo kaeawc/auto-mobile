@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -2877,11 +2878,13 @@ describe("TapAtCoordinate TalkBack", () => {
         postures: [],
       },
     });
-    h.adb.setCommandResponse("cmd display get-displays", {
-      stdout:
+    h.adb.setCommandResponse(
+      "cmd display get-displays",
+      createExecResult(
         'Display id 0: DisplayInfo{uniqueId "local:0" type INTERNAL, real 10 x 10}\nDisplay id 2: DisplayInfo{uniqueId "local:2" type EXTERNAL, real 10 x 10}',
-      stderr: "",
-    });
+        "",
+      ),
+    );
     h.observeScreen.setObserveResult({
       ...observation(10, 10),
       display: { key: "2", role: "external", generation: 7 },

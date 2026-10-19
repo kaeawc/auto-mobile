@@ -294,6 +294,17 @@ export type ViewHierarchyNode = {
   text?: string;
   class?: string;
   checked?: boolean | string;
+  /**
+   * Emitted by the iOS runner (`UIElementInfo.checkable`/`selected`, e.g.
+   * `test/fixtures/ios/keyboard-modes/software-docked.runner-hierarchy.json`); string-typed on the wire.
+   */
+  checkable?: boolean | string;
+  selected?: boolean | string;
+  /**
+   * Accessibility action names (`click`, `focus`, ...) from the Android extractor
+   * (`ViewHierarchyExtractor.kt`) and the iOS runner (`UIElementInfo.actions`).
+   */
+  actions?: string[];
   extras?: Record<string, string>;
 };
 

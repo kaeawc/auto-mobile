@@ -5,7 +5,7 @@ import {
   DaemonShuttingDownError,
   DaemonUnavailableError,
 } from "../../../src/daemon/client";
-import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/daemonErrors";
+import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/DaemonVersionMismatchError";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../../src/daemon/types";
 
 function classifier(

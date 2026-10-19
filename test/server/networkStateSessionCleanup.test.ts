@@ -5,7 +5,7 @@ import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
   type NetworkDeviceStatePusher,
-} from "../../src/server/networkStateSessionCleanup";
+} from "../../src/daemon/networkStateSessionCleanup";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 

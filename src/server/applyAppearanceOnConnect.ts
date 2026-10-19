@@ -1,5 +1,5 @@
 import type { AppearanceMode, BootedDevice } from "../models";
-import { getAppearanceConfig, resolveAppearanceMode } from "./appearanceManager";
+import { getAppearanceConfig, resolveAppearanceMode } from "../daemon/appearanceManager";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";

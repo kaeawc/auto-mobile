@@ -14,7 +14,7 @@ import {
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
 import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
-import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
+import { ambientExecutionIdReader } from "../features/toolSelection/ambientExecutionIdReader";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
@@ -186,11 +186,11 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../utils/NetworkState";
-import {} from "../server/networkStateSessionCleanup";
+import {} from "./networkStateSessionCleanup";
 import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
 import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";

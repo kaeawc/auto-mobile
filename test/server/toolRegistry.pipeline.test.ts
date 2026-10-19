@@ -29,7 +29,7 @@ import {
   resetToolCallRecordingState,
   startToolCallRecording,
   stopToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,

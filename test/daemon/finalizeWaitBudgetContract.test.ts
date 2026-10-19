@@ -26,7 +26,7 @@ import {
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../../src/utils/NetworkState";
-import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**

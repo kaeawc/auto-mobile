@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  ambientDeviceExecutionBinding,
-  ambientExecutionIdReader,
-} from "../../src/server/deviceExecutionBinding";
+import { ambientDeviceExecutionBinding } from "../../src/server/deviceExecutionBinding";
+import { ambientExecutionIdReader } from "../../src/features/toolSelection/ambientExecutionIdReader";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
 

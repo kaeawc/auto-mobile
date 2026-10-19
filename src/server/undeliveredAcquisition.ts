@@ -8,7 +8,7 @@ import { ActionableError } from "../models/ActionableError";
 import { isClientCancelled, runOutsideRequestContext } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import { ambientExecutionIdReader } from "./deviceExecutionBinding";
+import { ambientExecutionIdReader } from "../features/toolSelection/ambientExecutionIdReader";
 import { executionTracker } from "./executionTracker";
 
 /**

@@ -16,7 +16,7 @@ import {
   getToolCallRecorder,
   resetToolCallRecordingState,
   startToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { defaultTimer } from "../../src/utils/SystemTimer";

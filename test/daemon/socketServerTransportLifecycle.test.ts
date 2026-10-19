@@ -20,7 +20,7 @@ import {
   getToolCallRecordingStatus,
   resetToolCallRecordingState,
   startToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { daemonNotificationFrameSchema } from "../helpers/wireMessageSchemas";
 
 class RpcSocket extends FakeSocket {

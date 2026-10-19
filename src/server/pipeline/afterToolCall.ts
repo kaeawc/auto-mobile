@@ -13,7 +13,7 @@ import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Timer } from "../../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../daemon/constants";
-import { getToolCallRecorder } from "../toolCallRecordingManager";
+import { getToolCallRecorder } from "../../daemon/toolCallRecordingManager";
 import { formatToolResultLog } from "../toolResultLog";
 import { formatStructuredToolError } from "../../utils/formatStructuredToolError";
 import {

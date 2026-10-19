@@ -44,7 +44,7 @@ import {
 } from "./socketServer/notificationFanOut";
 import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
-import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../utils/toolEnvelopePayload";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,
@@ -57,7 +57,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import type { Client } from "@modelcontextprotocol/client";
-import { dropToolCallRecording } from "../server/toolCallRecordingManager";
+import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";

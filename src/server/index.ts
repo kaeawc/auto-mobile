@@ -16,7 +16,7 @@ import {
   createReleaseSubscribedBindingStore,
   daemonSessionToolBindingStore,
 } from "./daemonSessionToolBindingStore";
-import { dropToolCallRecording } from "./toolCallRecordingManager";
+import { dropToolCallRecording } from "../daemon/toolCallRecordingManager";
 
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";

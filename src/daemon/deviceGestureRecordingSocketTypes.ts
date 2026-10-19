@@ -1,5 +1,5 @@
 import type { Platform } from "../models";
-import type { DeviceGestureRecordingStatus } from "../server/deviceGestureRecordingManager";
+import type { DeviceGestureRecordingStatus } from "./deviceGestureRecordingManager";
 import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
 export interface DeviceGestureRecordingCommand extends SocketRequest {

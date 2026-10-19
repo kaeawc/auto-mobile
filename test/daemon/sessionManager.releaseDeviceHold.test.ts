@@ -17,7 +17,7 @@ import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { NetworkState } from "../../src/utils/NetworkState";
 import {
   deferHeldPlanAppCleanup,

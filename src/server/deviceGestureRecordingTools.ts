@@ -13,7 +13,7 @@ import {
   getDeviceGestureRecordingStatus,
   type DeviceGestureRecordingStatus,
   NoUserInputCapturedError,
-} from "./deviceGestureRecordingManager";
+} from "../daemon/deviceGestureRecordingManager";
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,

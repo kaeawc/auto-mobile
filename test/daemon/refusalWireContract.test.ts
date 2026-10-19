@@ -84,7 +84,15 @@ import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
 import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
-import * as daemonClient from "../../src/daemon/client";
+import * as nsDaemonRequestNotDeliveredError from "../../src/daemon/DaemonRequestNotDeliveredError";
+import * as nsDaemonUnavailableError from "../../src/daemon/DaemonUnavailableError";
+import * as nsUnknownToolError from "../../src/daemon/UnknownToolError";
+import * as nsReleaseErrors from "../../src/daemon/releaseErrors";
+import * as nsDaemonSessionCreationRejectedError from "../../src/daemon/sessionErrors/DaemonSessionCreationRejectedError";
+import * as nsPooledAvdIdentityError from "../../src/features/deviceLifecycle/PooledAvdIdentityError";
+import * as daemonHandshakeMismatch from "../../src/daemon/DaemonHandshakeMismatchError";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
 import * as toolUnavailable from "../../src/daemon/toolUnavailableError";
 import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
@@ -199,8 +207,8 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/inputDeviceOwnership": inputOwnership,
   "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
-  "server/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
-  "server/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
+  "daemon/DeviceOutsideBoundSessionError": deviceOutsideBoundSession,
+  "daemon/SessionOutsideBoundSessionError": sessionOutsideBoundSession,
   "server/planExecutionInProgressRefusal": planLockRefusal,
   "server/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
   "daemon/McpTimeoutError": mcpTimeouts,
@@ -209,7 +217,13 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/SdkTooOldError": sdkTooOld,
   "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,
-  "daemon/client": daemonClient,
+  "daemon/DaemonHandshakeMismatchError": daemonHandshakeMismatch,
+  "daemon/DaemonRequestNotDeliveredError": nsDaemonRequestNotDeliveredError,
+  "daemon/DaemonUnavailableError": nsDaemonUnavailableError,
+  "daemon/UnknownToolError": nsUnknownToolError,
+  "daemon/releaseErrors": nsReleaseErrors,
+  "daemon/sessionErrors/DaemonSessionCreationRejectedError": nsDaemonSessionCreationRejectedError,
+  "features/deviceLifecycle/PooledAvdIdentityError": nsPooledAvdIdentityError,
   "daemon/deviceControlTransportFailure": controlTransport,
   "daemon/toolUnavailableError": toolUnavailable,
   "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
@@ -702,7 +716,7 @@ beforeAll(async () => {
           "explicit-release",
         ),
       ],
-      ["daemon_shutting_down", new daemonClient.DaemonShuttingDownError()],
+      ["daemon_shutting_down", new DaemonShuttingDownError()],
     ] as const;
     for (const [name, error] of cases) {
       const call = spyOn(harness.proxy, "callTool").mockRejectedValue(error);
@@ -721,7 +735,7 @@ beforeAll(async () => {
       }
     }
     const sessionUuid = "11111111-2222-4333-8444-555555555555";
-    const loss = new daemonClient.DaemonBoundSessionLostError({
+    const loss = new DaemonBoundSessionLostError({
       code: "bound_session_lost",
       sessionUuid,
       reason: "daemon-shutdown",

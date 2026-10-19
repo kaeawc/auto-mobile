@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -52,6 +53,7 @@ internal class ScreenshotController(
   private val host: Host,
   private val displayController: DisplayController,
   private val timeProvider: TimeProvider,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
@@ -79,7 +81,7 @@ internal class ScreenshotController(
       return ScreenshotCaptureOutcome.Failure(null)
     }
 
-    return withContext(Dispatchers.IO) {
+    return withContext(ioDispatcher) {
       try {
         val startTime = timeProvider.currentTimeMillis()
 

@@ -220,7 +220,7 @@ describe("InstallApp", () => {
     platform: "ios",
   };
 
-  let fakeAdb: FakeAdbExecutor;
+  let fakeAdb: InstallAppFakeAdbExecutor;
   let fakeAdbFactory: AdbClientFactory;
   let fakeHost: FakeHostCommandExecutor;
   let fakeLocator: FakeAndroidBuildToolsLocator;
@@ -1555,7 +1555,7 @@ describe("InstallApp", () => {
       "downgrade reinstall finishes before reporting cancellation: %s (during reinstall: %s)",
       async (source, duringReinstall) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const controller = new AbortController();
         const pending = Promise.withResolvers<ExecResult>();
@@ -1602,11 +1602,11 @@ describe("InstallApp", () => {
       },
     );
 
-    test.each(cancellationSources)(
+    test.each([...cancellationSources])(
       "cancelled downgrade reinstall failure discloses missing app: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const failure = new Error("adb: device offline");
         adb.reinstallError = failure;
@@ -1622,11 +1622,11 @@ describe("InstallApp", () => {
       },
     );
 
-    test.each(cancellationSources)(
+    test.each([...cancellationSources])(
       "cancelled downgrade reinstall output failure discloses missing app: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         adb.setCommandResponseSequence(command, [
           createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
@@ -1648,7 +1648,7 @@ describe("InstallApp", () => {
       "cancellation before downgrade uninstall prevents removal and reinstall: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const controller = new AbortController();
         adb.abortAfterCommand("shell am force-stop", controller);
@@ -1664,7 +1664,7 @@ describe("InstallApp", () => {
       "cancellation during downgrade uninstall does not trigger reinstall: %s",
       async (source) => {
         const command = configureDowngrade();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         const controller = new AbortController();
         const uninstall = adb.executeCommand.bind(adb);
@@ -1688,7 +1688,7 @@ describe("InstallApp", () => {
       async (source) => {
         configureDowngrade();
         fakeTimer = new FakeTimer();
-        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        const adb = fakeAdb;
         adb.honourRequestAbort = true;
         emptyUserTenListingAfterUninstall(adb);
         const pending = Promise.withResolvers<ExecResult>();

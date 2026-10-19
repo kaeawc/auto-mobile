@@ -787,25 +787,6 @@ describe("PressButton", () => {
 });
 
 // Validate the actual fake-backed branch results before and after finalization.
-const executeForOutputSchema = PressButton.prototype.execute;
-let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
-beforeOutputSchema(() => {
-  executeOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "execute").mockImplementation(
-    async function (this: PressButton, ...args: Parameters<PressButton["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
-      const payload = { message: "Result", ...result };
-      expect(pressButtonResultSchema.parse(payload)).toBeDefined();
-      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
-        name: "pressButton",
-        outputSchema: pressButtonResultSchema,
-        artifactWriter: new FakeArtifactWriter(),
-      });
-      expect(pressButtonResultSchema.parse(finalized.structuredContent)).toBeDefined();
-      return result;
-    },
-  );
-});
-afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
 // Validate the actual fake-backed branch results before and after finalization.
 const pressForOutputSchema = PressButton.prototype.press;
 let pressOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;

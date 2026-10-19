@@ -338,14 +338,6 @@ test/server/deviceTools.cancelDuringCrossDaemonClaim.test.ts TS2769 1
 test/server/deviceTools.createIfMissing.test.ts TS18046 1
 test/server/deviceTools.deleteDeviceTypedRefusals.test.ts TS2345 2
 test/server/deviceTools.queuedStartAlreadyRunning.test.ts TS2322 1
-test/server/deviceTools.startDevice.test.ts TS18046 53
-test/server/deviceTools.startDevice.test.ts TS2322 21
-test/server/deviceTools.startDevice.test.ts TS2345 2
-test/server/deviceTools.startDevice.test.ts TS2554 15
-test/server/deviceTools.startDevice.test.ts TS2571 1
-test/server/deviceTools.startDevice.test.ts TS2739 1
-test/server/deviceTools.startDevice.test.ts TS2741 2
-test/server/deviceTools.startDevice.test.ts TS7006 30
 test/server/deviceTools.undeliveredAcquisition.test.ts TS2345 1
 test/server/deviceTools.undeliveredAcquisition.test.ts TS2540 2
 test/server/deviceTools.undeliveredAcquisition.test.ts TS2769 1

@@ -50,27 +50,27 @@ describe("TalkBack semantic scroll route reports an ignored duration (#12987)", 
     spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
       hierarchy: { node: { $: { "resource-id": "test:id/scrollView" } } },
     });
-    return new TalkBackSwipeExecutor(
+    return new TalkBackSwipeExecutor({
       device,
-      new FakeGestureExecutor(),
-      proxy,
-      detector,
-      new FakeAdbClient(),
+      executeGesture: new FakeGestureExecutor(),
+      accessibilityService: proxy,
+      accessibilityDetector: detector,
+      adb: new FakeAdbClient(),
       timer,
-    );
+    });
   }
 
   test("an explicit durationMs is flagged as ignored with the route named", async () => {
-    const result = await executor().executeAndroidSwipeWithAccessibility(
-      100,
-      500,
-      100,
-      200,
-      "up",
-      container,
-      { duration: 3000, durationExplicit: true },
-      new NoOpPerformanceTracker(),
-    );
+    const result = await executor().executeAndroidSwipeWithAccessibility({
+      x1: 100,
+      y1: 500,
+      x2: 100,
+      y2: 200,
+      direction: "up",
+      containerElement: container,
+      gestureOptions: { duration: 3000, durationExplicit: true },
+      perf: new NoOpPerformanceTracker(),
+    });
     expect(result.durationIgnored).toBe(true);
     expect(result.warnings?.[0]).toContain("TalkBack semantic scroll");
     // #12968: the nominal duration must not become a fabricated velocity.
@@ -78,16 +78,16 @@ describe("TalkBack semantic scroll route reports an ignored duration (#12987)", 
   });
 
   test("a speed preset stays quiet but still marks the duration nominal", async () => {
-    const result = await executor().executeAndroidSwipeWithAccessibility(
-      100,
-      500,
-      100,
-      200,
-      "up",
-      container,
-      { duration: 300 },
-      new NoOpPerformanceTracker(),
-    );
+    const result = await executor().executeAndroidSwipeWithAccessibility({
+      x1: 100,
+      y1: 500,
+      x2: 100,
+      y2: 200,
+      direction: "up",
+      containerElement: container,
+      gestureOptions: { duration: 300 },
+      perf: new NoOpPerformanceTracker(),
+    });
     expect(result.durationIgnored).toBe(true);
     expect(result.warnings).toBeUndefined();
   });

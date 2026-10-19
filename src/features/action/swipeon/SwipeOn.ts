@@ -227,15 +227,15 @@ export class SwipeOn extends BaseVisualChange {
           observeResult,
         ),
     }));
-    this.talkBackExecutor = new TalkBackSwipeExecutor(
+    this.talkBackExecutor = new TalkBackSwipeExecutor({
       device,
-      this.executeGesture,
-      this.accessibilityService,
-      this.accessibilityDetector,
-      this.adb,
-      this.timer,
+      executeGesture: this.executeGesture,
+      accessibilityService: this.accessibilityService,
+      accessibilityDetector: this.accessibilityDetector,
+      adb: this.adb,
+      timer: this.timer,
       featureFlags,
-    );
+    });
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor =
       dependencies.voiceOverExecutor ??
@@ -816,30 +816,30 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeScreenSwipe", () =>
           this.device.platform === "ios"
-            ? this.voiceOverExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                null, // No container for screen swipe
+            ? this.voiceOverExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              )
-            : this.talkBackExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                null, // No container for screen swipe
+              })
+            : this.talkBackExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              ),
+              }),
         );
         if (
           this.stopAfterIosGestureFailure &&
@@ -949,30 +949,30 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeElementSwipe", () =>
           this.device.platform === "ios"
-            ? this.voiceOverExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                element ?? null, // Use the container element
+            ? this.voiceOverExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: element ?? null,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              )
-            : this.talkBackExecutor.executeSwipeGesture(
-                Math.floor(startX),
-                Math.floor(startY),
-                Math.floor(endX),
-                Math.floor(endY),
-                options.direction,
-                element, // Use the container element
+              })
+            : this.talkBackExecutor.executeSwipeGesture({
+                x1: Math.floor(startX),
+                y1: Math.floor(startY),
+                x2: Math.floor(endX),
+                y2: Math.floor(endY),
+                direction: options.direction,
+                containerElement: element,
                 gestureOptions,
                 perf,
                 boomerang,
                 signal,
-              ),
+              }),
         );
         throwIfAborted(signal);
         // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.

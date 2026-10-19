@@ -85,22 +85,22 @@ describe("gesture request sequences", () => {
         calls.push(`two:${x1}:${y1}:${x2}:${y2}:${duration}:${offset}:${timeout}`);
         return { success: true, totalTimeMs: 1 };
       };
-      const executor = new TalkBackSwipeExecutor(
+      const executor = new TalkBackSwipeExecutor({
         device,
-        new FakeGestureExecutor(),
-        proxy,
-        new FakeAccessibilityDetector(),
-        new FakeAdbClient(),
+        executeGesture: new FakeGestureExecutor(),
+        accessibilityService: proxy,
+        accessibilityDetector: new FakeAccessibilityDetector(),
+        adb: new FakeAdbClient(),
         timer,
-      );
-      const run = executor.executeAndroidSwipeWithAccessibility(
-        100,
-        500,
-        100,
-        200,
-        "up",
-        mode === "absent" ? null : element,
-        {
+      });
+      const run = executor.executeAndroidSwipeWithAccessibility({
+        x1: 100,
+        y1: 500,
+        x2: 100,
+        y2: 200,
+        direction: "up",
+        containerElement: mode === "absent" ? null : element,
+        gestureOptions: {
           duration: 400,
           displayFence: {
             assertCurrent: () => {
@@ -108,9 +108,9 @@ describe("gesture request sequences", () => {
             },
           },
         },
-        new NoOpPerformanceTracker(),
-        controller.signal,
-      );
+        perf: new NoOpPerformanceTracker(),
+        signal: controller.signal,
+      });
       if (mode === "abort") {
         await expect(run).rejects.toThrow("Operation cancelled");
       } else {

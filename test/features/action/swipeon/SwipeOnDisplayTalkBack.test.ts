@@ -101,7 +101,10 @@ test("TalkBack on, default display: an explicit durationMs reaches the TalkBack 
     'Display id 0: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
   );
   await h.action.execute({ ...swipe, durationMs: 700 });
-  expect(h.talkback.mock.calls[0]?.[6]).toMatchObject({ duration: 700, durationExplicit: true });
+  expect(h.talkback.mock.calls[0]?.[0].gestureOptions).toMatchObject({
+    duration: 700,
+    durationExplicit: true,
+  });
 });
 
 test("TalkBack on, default display: a speed preset does not mark the duration explicit", async () => {
@@ -112,7 +115,7 @@ test("TalkBack on, default display: a speed preset does not mark the duration ex
     'Display id 0: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
   );
   await h.action.execute(swipe);
-  expect(h.talkback.mock.calls[0]?.[6]?.durationExplicit).toBeUndefined();
+  expect(h.talkback.mock.calls[0]?.[0].gestureOptions?.durationExplicit).toBeUndefined();
 });
 
 test("TalkBack off: swipeOn on a display keeps the raw CtrlProxy swipe and no TalkBack call", async () => {

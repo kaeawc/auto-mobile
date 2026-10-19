@@ -1,3 +1,4 @@
+import type { SwipeGestureRequest } from "../../../src/features/action/swipeon/types";
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import type { DragRequest } from "../../../src/utils/interfaces/DragRequest";
 import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
@@ -1085,7 +1086,7 @@ describe("explicit action display", () => {
       observedInteraction: async (run: (current: ObserveResult) => Promise<object>) =>
         run(observation),
       talkBackExecutor: {
-        executeSwipeGesture: async (x1: number, y1: number, x2: number, y2: number) => {
+        executeSwipeGesture: async ({ x1, y1, x2, y2 }: SwipeGestureRequest) => {
           defaultCoordinates.push(x1, y1, x2, y2);
           return { success: true, x1, y1, x2, y2, duration: 300 };
         },

@@ -397,7 +397,7 @@ test("iOS display boomerang falls through with config to the existing default ex
     returnSpeed: 2,
   });
   expect(result.success).toBe(true);
-  expect(executor.mock.calls[0]?.[8]).toEqual({ apexPauseMs: 25, returnSpeed: 2 });
+  expect(executor.mock.calls[0]?.[0].boomerang).toEqual({ apexPauseMs: 25, returnSpeed: 2 });
   expect(h.gesture.getSwipeCalls().map((leg) => leg.options?.duration)).toEqual([100, 50]);
   expect(h.timer.getSleepHistory()).toEqual([25]);
 });

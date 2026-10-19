@@ -10,7 +10,7 @@ import {
   SetUIStateElementSelector,
 } from "../../models/SetUIStateOptions";
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
-import { FieldTypeDetector } from "./FieldTypeDetector";
+import { FieldTypeDetector, type FieldTypeDetection } from "./FieldTypeDetector";
 import type { InputTextMode } from "./InputText";
 import type { Keyboard } from "./Keyboard";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
@@ -129,7 +129,7 @@ interface SetUIStateDependencies {
   clearText?: ClearTextLike;
   swipeOn?: SwipeOnLike;
   observeScreen?: ObserveScreen;
-  fieldTypeDetector?: FieldTypeDetector;
+  fieldTypeDetector?: FieldTypeDetection;
   timer?: Timer;
 }
 
@@ -279,7 +279,7 @@ const RESPONSE_HEADROOM_MS = 3_000;
  * regardless of the order provided by the caller.
  */
 export class SetUIState extends BaseVisualChange {
-  private fieldTypeDetector: FieldTypeDetector;
+  private fieldTypeDetector: FieldTypeDetection;
   private readonly selector: ResolverElementSelector;
   private dependencies: SetUIStateDependencies;
 

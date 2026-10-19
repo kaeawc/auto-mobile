@@ -24,7 +24,6 @@ export function renderPrototypeIconSymbolData(table: PrototypeIconSymbolData): s
     "// Generated from schemas/prototype-ios-icon-symbols.json; do not edit.",
     "// Regenerate: bun scripts/ios/generate-prototype-icon-symbols.ts",
     "// swiftformat:disable all",
-    "// swiftlint:disable all",
     `let prototypeIconSymbolPlaceholder = ${JSON.stringify(table.placeholder)}`,
     'let prototypeIconSymbolData = #"""',
     ...lines,

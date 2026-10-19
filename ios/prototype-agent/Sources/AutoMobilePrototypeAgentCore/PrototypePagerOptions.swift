@@ -63,18 +63,22 @@ enum PrototypePagerOptions {
         try distance(points, path: "\(path).dp", minimum: 1e-6)
     }
 
+    private static func validatePager(_ node: [String: JSONValue], path: String, verticalScrollAncestor: Bool) throws {
+        if let axis = node["axis"], axis != .string("horizontal"), axis != .string("vertical") {
+            throw violation("\(path).axis", "Invalid enum value")
+        }
+        if let spacing = node["pageSpacing"] { try distance(spacing, path: "\(path).pageSpacing") }
+        if let peek = node["peek"] { try validatePeek(peek, path: "\(path).peek") }
+        if let size = node["pageSize"] { try validatePageSize(size, path: "\(path).pageSize") }
+        if verticalScrollAncestor, node["axis"] == .string("vertical") {
+            throw violation("\(path).axis", "A vertical pager cannot appear inside a vertical scroll")
+        }
+    }
+
     private static func visit(_ value: JSONValue, path: String, verticalScrollAncestor: Bool) throws {
         guard case let .object(node) = value else { return }
         if node["type"] == .string("pager") {
-            if let axis = node["axis"], axis != .string("horizontal"), axis != .string("vertical") {
-                throw violation("\(path).axis", "Invalid enum value")
-            }
-            if let spacing = node["pageSpacing"] { try distance(spacing, path: "\(path).pageSpacing") }
-            if let peek = node["peek"] { try validatePeek(peek, path: "\(path).peek") }
-            if let size = node["pageSize"] { try validatePageSize(size, path: "\(path).pageSize") }
-            if verticalScrollAncestor, node["axis"] == .string("vertical") {
-                throw violation("\(path).axis", "A vertical pager cannot appear inside a vertical scroll")
-            }
+            try validatePager(node, path: path, verticalScrollAncestor: verticalScrollAncestor)
         }
         let insideVerticalScroll = verticalScrollAncestor ||
             (node["type"] == .string("scroll") && node["axis"] != .string("horizontal"))
@@ -105,8 +109,7 @@ struct PrototypePagerLayout: Equatable {
     /// Strict intersection excludes pages whose edge merely touches the viewport.
     func visiblePages(selected: Int, count: Int, viewportExtent: Double) -> [Int] {
         // `count` is the page count parameter, not a collection.
-        // swiftlint:disable:next empty_count
-        guard count > 0, viewportExtent.isFinite, viewportExtent > 0 else { return [] }
+        guard count >= 1, viewportExtent.isFinite, viewportExtent > 0 else { return [] }
         let extent: Double
         switch pageSize {
         case .fill: extent = max(0, viewportExtent - start - end)

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, expect } from "bun:test";
+import nodeChildProcess from "node:child_process";
 
 // Fake-only scenario guard: refuse and record every host process launch for a test file.
 
@@ -39,9 +40,10 @@ export function guardHostCommands(): HostCommandGuard {
       commands.push(command);
       throw new Error(`scenario launched a host command: ${command}`);
     };
-  // eslint-disable-next-line @typescript-eslint/no-require-imports -- the mutable CJS module object
-  const childProcess = require("node:child_process") as Record<string, unknown>;
-  const bun = Bun as unknown as Record<string, unknown>;
+  // The default import is the mutable CJS module object (the namespace import is read-only);
+  // viewing both it and `Bun` as string-keyed records lets the guard swap their launchers.
+  const childProcess: Record<string, unknown> = nodeChildProcess;
+  const bun: Record<string, unknown> = Bun;
   const saved: Array<[Record<string, unknown>, string, unknown]> = [
     ...CHILD_PROCESS_LAUNCHERS.map((name): [Record<string, unknown>, string, unknown] => [
       childProcess,

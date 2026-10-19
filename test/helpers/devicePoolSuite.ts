@@ -1,6 +1,5 @@
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 import {
   DevicePool,
   type DevicePoolDependencies,
@@ -256,13 +255,26 @@ export class ThrowingDiscoveryFakeDeviceManager extends FakeDeviceManager {
   }
 }
 
-export class FakeChildProcess extends EventEmitter {
-  pid = 12345;
-  exitCode: number | null | undefined = undefined;
-  signalCode: NodeJS.Signals | null | undefined = undefined;
+/**
+ * A running emulator process: a real `ChildProcess` (so it needs no cast anywhere a device
+ * manager hands one back) whose `kill()` ends it at once, with no timer to advance.
+ */
+export class FakeChildProcess extends ChildProcess {
+  // Bun's ChildProcess throws on stdio access without a spawn handle; own fields shadow that.
+  override stdin = null;
+  override stdout = null;
+  override stderr = null;
+  override pid: number | undefined = 12345;
+  override exitCode: number | null = null;
+  override signalCode: NodeJS.Signals | null = null;
+  override killed = false;
   killCount = 0;
-  kill(): boolean {
+
+  override kill(signal?: NodeJS.Signals | number): boolean {
     this.killCount++;
+    this.killed = true;
+    this.signalCode = typeof signal === "string" ? signal : "SIGTERM";
+    this.emit("exit", null, this.signalCode);
     return true;
   }
 }
@@ -395,13 +407,14 @@ export class FakeDeviceManagerWithFailingRecoveryStart extends FakeDeviceManager
   }
 }
 
-export class StubbornChildProcess extends EventEmitter {
-  readonly pid = 12345;
-  readonly exitCode = null;
-  readonly signalCode = null;
+export class StubbornChildProcess extends ChildProcess {
+  override stdin = null;
+  override stdout = null;
+  override stderr = null;
+  override readonly pid = 12345;
   readonly signals: Array<NodeJS.Signals | number | undefined> = [];
 
-  kill(signal?: NodeJS.Signals | number): boolean {
+  override kill(signal?: NodeJS.Signals | number): boolean {
     this.signals.push(signal);
     return true;
   }
@@ -415,7 +428,7 @@ export class FakeDeviceManagerWithStubbornProcess extends FakeDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 }
 
@@ -505,12 +518,6 @@ export class StubbornRecoveryChildProcess extends FakeChildProcess {
   readonly sigtermSent = Promise.withResolvers<void>();
   readonly sigkillSent = Promise.withResolvers<void>();
 
-  constructor() {
-    super();
-    this.exitCode = null;
-    this.signalCode = null;
-  }
-
   override kill(signal?: NodeJS.Signals | number): boolean {
     this.killCount++;
     this.signals.push(signal);
@@ -561,7 +568,7 @@ export class DeferredLivenessRecoveryDeviceManager extends FakeDeviceManager {
   override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
     this.resolveRecoveryStarted();
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 
   override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
@@ -580,26 +587,17 @@ export class DeferredLivenessRecoveryDeviceManager extends FakeDeviceManager {
   }
 }
 
-// Hands back a spawned handle from startDevice, then fails readiness — used to
-// assert the pool cancels a hung boot via handle.kill() (issue #3952). Reuses
-// FakeChildProcess, adding only a kill counter.
-export class KillTrackingChildProcess extends FakeChildProcess {
-  killCount = 0;
-  override kill(): boolean {
-    this.killCount++;
-    return true;
-  }
-}
-
+// FakeDeviceManagerWithFailingReadiness hands back a spawned handle from startDevice, then fails
+// readiness — used to assert the pool cancels a hung boot via handle.kill() (issue #3952).
 export class FakeDeviceManagerWithFailingReadiness extends FakeDeviceManager {
-  readonly childProcess = new KillTrackingChildProcess();
+  readonly childProcess = new FakeChildProcess();
 
   async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 
   async waitForDeviceReady(): Promise<BootedDevice> {
@@ -608,14 +606,14 @@ export class FakeDeviceManagerWithFailingReadiness extends FakeDeviceManager {
 }
 
 export class FakeDeviceManagerWithPendingReadiness extends FakeDeviceManager {
-  readonly childProcess = new KillTrackingChildProcess();
+  readonly childProcess = new FakeChildProcess();
 
   override async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
   ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess as unknown as ChildProcess;
+    return this.childProcess;
   }
 
   override async waitForDeviceReady(

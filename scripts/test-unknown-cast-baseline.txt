@@ -113,10 +113,8 @@
 1	test/fixtures/observe/observeFixture.ts
 1	test/helpers/daemonHeartbeatHandler.ts
 3	test/helpers/daemonRestartScenario.ts
-4	test/helpers/devicePoolSuite.ts
 5	test/helpers/directFrameRig.ts
 1	test/helpers/fakeDeviceManagerSimctl.ts
-1	test/helpers/hostCommandGuard.ts
 7	test/helpers/inMemoryDaemonWire.ts
 1	test/helpers/livenessScenarioHarness.test.ts
 9	test/helpers/livenessScenarioHarness.ts

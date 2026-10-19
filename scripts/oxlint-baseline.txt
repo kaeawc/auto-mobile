@@ -288,7 +288,6 @@
 1	src/utils/provisionedDeviceTransportFence.ts	eslint(max-classes-per-file)
 1	src/utils/workingDirectory.ts	auto-mobile(catch-convention)
 1	src/vision/applyVisionFallback.ts	eslint(max-params)
-1	test/helpers/hostCommandGuard.ts	oxlint-disable(@typescript-eslint/no-require-imports)
 2	src/daemon/manager.ts	eslint(complexity)
 2	src/daemon/socketServer/restartAdmission.ts	oxlint-disable(complexity)
 2	src/features/action/LaunchApp.ts	eslint(complexity)

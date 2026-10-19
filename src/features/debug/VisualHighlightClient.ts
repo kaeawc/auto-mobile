@@ -1,4 +1,4 @@
-import { DeviceReadiness } from "../../devices/DeviceReadiness";
+import { DeviceReadiness } from "../../daemon/readiness/DeviceReadiness";
 import {
   ActionableError,
   BootedDevice,

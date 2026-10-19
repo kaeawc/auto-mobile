@@ -8,7 +8,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "./appearanceManager";
-import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
+import { resolveAppearanceSessionKey } from "./appearanceSessionKey";
 import {
   DefaultDeviceSettingsAccess,
   DeviceSettingDefaults,
@@ -36,7 +36,7 @@ import {
   type NavigationGraphService,
 } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";

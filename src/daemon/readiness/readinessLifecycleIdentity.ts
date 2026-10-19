@@ -1,13 +1,13 @@
-import { BootedDevice } from "../models";
-import { isAndroidEmulatorSerial } from "../utils/androidSerial";
-import { discoverySourceFor } from "../utils/discoverySource";
-import { isUnresolvedAndroidEmulatorName } from "./deviceIdentityEvidence";
+import { BootedDevice } from "../../models";
+import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
+import { discoverySourceFor } from "../../utils/discoverySource";
+import { isUnresolvedAndroidEmulatorName } from "../../devices/deviceIdentityEvidence";
 import type { ConnectedPlatformScan } from "./DeviceReadiness";
 import {
   selectorLifecycleIdentity,
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleIdentity,
-} from "./virtualDeviceLifecycleCoordinator";
+} from "../../devices/virtualDeviceLifecycleCoordinator";
 export function lifecycleIdentityForDevice(
   device: BootedDevice,
 ): StableVirtualDeviceIdentity | VirtualDeviceLifecycleIdentity {
@@ -31,7 +31,7 @@ export function isScanAuthoritativeFor(scan: ConnectedPlatformScan, device: Boot
   return scan.scannedSources[discoverySourceFor(device.platform, device.deviceId)] === true;
 }
 
-import type { VirtualDeviceLifecycleLease } from "./virtualDeviceLifecycleCoordinator";
+import type { VirtualDeviceLifecycleLease } from "../../devices/virtualDeviceLifecycleCoordinator";
 
 /** What a lifecycle-start operation may do to keep its AVD lease past its own return. */
 export interface LifecycleStartHold {

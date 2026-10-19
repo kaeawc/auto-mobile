@@ -12,7 +12,7 @@ import {
   resolveAppearanceMode,
   updateAppearanceConfig,
 } from "./appearanceManager";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,

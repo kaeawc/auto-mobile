@@ -1,4 +1,4 @@
-import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
+import { defaultDaemonContext, type DaemonContext } from "./daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
 /**

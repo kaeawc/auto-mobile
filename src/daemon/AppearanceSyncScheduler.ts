@@ -1,6 +1,6 @@
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../models";
 import { defaultDaemonContext } from "./daemonContext";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
 import { getAppearanceConfig, resolveAppearanceMode } from "./appearanceManager";

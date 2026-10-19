@@ -11,8 +11,5 @@
 1	test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts
 1	test/features/observe/shared/SharedGestureDelegate.test.ts
 1	test/features/observe/shared/SharedTextDelegate.test.ts
-2	test/server/alwaysLoadTools.test.ts
 2	test/server/androidNavigationWorkflow.integration.test.ts
-4	test/server/deviceTools.provisionDevice.test.ts
-1	test/server/interactionTools.clipboard.test.ts
 2	test/utils/DeviceSessionManager.test.ts

@@ -651,7 +651,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
     "test/features/observe/TakeScreenshot.Encoding.test.ts",
     "test/features/observe/TakeScreenshot.iOS.test.ts",
     "test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts",
-    "test/server/databaseResourcesPagination.test.ts",
   ];
 
   test("every file that installs a CtrlProxy getInstance mock is inventoried", () => {

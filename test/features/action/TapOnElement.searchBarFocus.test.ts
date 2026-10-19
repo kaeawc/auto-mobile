@@ -2,14 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
-import type {
-  BootedDevice,
-  Element,
-  ObserveResult,
-  ViewHierarchyResult,
-} from "../../../src/models";
+import type { BootedDevice, Element, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ResultFaker } from "../../fakes/ResultFaker";
 
 const device: BootedDevice = {
   deviceId: "fixture-ios",
@@ -71,16 +67,8 @@ function verifySelectedField(
   options: TapOnElementOptions = { text: "Search videos", action: "focus" },
 ): boolean {
   const tap = new TapOnElement(device, null, { timer: new FakeTimer() });
-  const verifier = tap as unknown as {
-    verifyFocusedInputTarget: (
-      options: TapOnElementOptions,
-      target: Element,
-      observation: ObserveResult,
-      labelText?: string,
-    ) => boolean;
-  };
-  const observation = { viewHierarchy: hierarchy } as ObserveResult;
-  return verifier.verifyFocusedInputTarget(options, target, observation, "Search videos");
+  const observation = ResultFaker.observeResult({ viewHierarchy: hierarchy });
+  return tap.testHooks.verifyFocusedInputTarget(options, target, observation, "Search videos");
 }
 
 describe("iOS search bar focus fixture", () => {

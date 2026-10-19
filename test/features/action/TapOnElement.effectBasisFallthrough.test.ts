@@ -33,7 +33,7 @@ function createTapOnElement(): TapOnElement {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return new TapOnElement(
-    { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
+    { name: "test-device", platform: "android", deviceId: "emulator-5554" },
     new FakeAdbClient(),
     { timer },
   );

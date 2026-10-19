@@ -1,3 +1,4 @@
+import { ActionableError } from "../../../src/models/ActionableError";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { accessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
@@ -489,6 +490,76 @@ describe("TapAtCoordinate", () => {
       expect(runnerDelivered + adb.getExecutedCommands().length).toBe(2);
       expect(result.error).toBeUndefined();
     }
+  });
+
+  describe("iOS stale frame context after a gesture (#13437)", () => {
+    const staleError = () =>
+      new ActionableError(
+        "CtrlProxy iOS tap failed: Command execution failed: Stale frame context; observe a fresh frame before retrying",
+      );
+
+    function createIosTapAt(runnerFrames: string[], observations: ObserveResult[]) {
+      const sent: Array<string | undefined> = [];
+      const observeScreen = new FakeObserveScreen();
+      observeScreen.setObserveSequence(observations);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const unused: CoordinateTapClient = {
+        requestTapCoordinates: async () => ({ success: true }),
+      };
+      const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        androidClient: unused,
+        iosClient: unused,
+        invalidateIosCache: () => {},
+        dispatchIosCoordinateTap: async (_client, _x, _y, _duration, frameContext) => {
+          sent.push(frameContext);
+          if (frameContext === undefined || !runnerFrames.includes(frameContext)) {
+            throw staleError();
+          }
+        },
+      });
+      setFakeTapAtWindow(tapAt);
+      tapAt.observeScreen = observeScreen;
+      return { tapAt, observeScreen, sent };
+    }
+
+    test("a cached frame the runner rejects is replaced by one fresh frame and the tap lands", async () => {
+      const { tapAt, observeScreen, sent } = createIosTapAt(
+        ["epoch:2"],
+        [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2")],
+      );
+
+      const result = await tapAt.execute({ x: 10, y: 20 });
+
+      expect(result).toMatchObject({ success: true, x: 10, y: 20 });
+      expect(sent).toEqual(["epoch:1", "epoch:2"]);
+      expect(
+        observeScreen
+          .getExecuteOptions()
+          .slice(0, 2)
+          .map((options) => options.freshness),
+      ).toEqual(["cached-ok", "fresh"]);
+    });
+
+    test("retries only once and never when the fresh layout differs", async () => {
+      const twice = createIosTapAt(
+        [],
+        [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2")],
+      );
+      const failed = await twice.tapAt.execute({ x: 10, y: 20 });
+      expect(failed.success).toBe(false);
+      expect(failed.error).toContain("Stale frame context");
+      expect(twice.sent).toEqual(["epoch:1", "epoch:2"]);
+
+      const changed = createIosTapAt(
+        ["epoch:2"],
+        [observation(100, 200, "epoch:1"), observation(100, 200, "epoch:2", 0, { text: "other" })],
+      );
+      const refused = await changed.tapAt.execute({ x: 10, y: 20 });
+      expect(refused.success).toBe(false);
+      expect(changed.sent).toEqual(["epoch:1"]);
+    });
   });
 
   test("stale first frame retries once before delivering exactly two Android taps", async () => {

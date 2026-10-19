@@ -8,6 +8,7 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
 } from "./sessionLivenessWindows";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../config/env";
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**
@@ -18,7 +19,7 @@ export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 function getUserId(): string {
   if (platform() === "win32") {
     // Windows doesn't have UIDs, use username as fallback
-    return process.env.USERNAME || "default";
+    return readEnvRaw(AMBIENT_ENV.USERNAME) || "default";
   }
   // Unix systems: use actual UID
   return process.getuid?.()?.toString() || "default";
@@ -39,7 +40,7 @@ const uid = getUserId();
  * yields "" (the resident, unsuffixed names).
  */
 export function resolveDaemonIsolationSuffix(env: NodeJS.ProcessEnv = process.env): string {
-  const auxDir = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  const auxDir = readEnvRaw(ENV.AUX_SOCKET_DIR, env)?.trim();
   if (!auxDir) {
     return "";
   }
@@ -62,11 +63,11 @@ function readDaemonStatePathOverride(
 ): string | undefined {
   switch (extension) {
     case "sock":
-      return env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
+      return readEnvRaw(ENV.DAEMON_SOCKET_PATH, env);
     case "pid":
-      return env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
+      return readEnvRaw(ENV.DAEMON_PID_FILE_PATH, env);
     case "lock":
-      return env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+      return readEnvRaw(ENV.DAEMON_LOCK_FILE_PATH, env);
   }
 }
 
@@ -175,7 +176,7 @@ export const INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM = "__acceptanceDiscoveryO
 export const INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM = "__acceptanceDiscoveryCapability";
 
 /** Environment variable carrying the live-acceptance discovery capability. */
-export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY";
+export const ACCEPTANCE_DISCOVERY_CAPABILITY_ENV = ENV.ACCEPTANCE_DISCOVERY_CAPABILITY.name;
 
 /**
  * Port range to try if default port is unavailable
@@ -223,7 +224,7 @@ export const LOCK_FILE_PATH = resolveDaemonStatePath("lock");
  * daemon publishes this in its PID record so log retention can associate a
  * specific `daemon-launch-*.log` with its actual child owner.
  */
-export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
+export const DAEMON_LAUNCH_LOG_PATH_ENV = ENV.DAEMON_LAUNCH_LOG_PATH.name;
 
 /**
  * Connection timeout in milliseconds
@@ -233,8 +234,8 @@ export const DAEMON_LAUNCH_LOG_PATH_ENV = "AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH";
  */
 export function resolveConnectionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_DAEMON_TIMEOUT_MS",
-    "AUTO_MOBILE_DAEMON_TIMEOUT_MS",
+    ENV.DAEMON_TIMEOUT_MS.name,
+    ENV.DAEMON_TIMEOUT_MS.legacyName,
     { fallback: 120000 },
     env,
   );
@@ -252,8 +253,8 @@ const MAX_DAEMON_STARTUP_TIMEOUT_MS = 2_147_483_647;
 export function resolveDaemonStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return Math.min(
     readEnvPositiveInteger(
-      "AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS",
-      "AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS",
+      ENV.DAEMON_STARTUP_TIMEOUT_MS.name,
+      ENV.DAEMON_STARTUP_TIMEOUT_MS.legacyName,
       { fallback: 30000 },
       env,
     ),
@@ -294,8 +295,8 @@ export function resolveExistingDaemonReachabilityTimeoutMs(
 ): number {
   return Math.min(
     readEnvPositiveInteger(
-      "AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
-      "AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS",
+      ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS.name,
+      ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS.legacyName,
       { fallback: 10000 },
       env,
     ),
@@ -629,8 +630,8 @@ export const MAX_CLI_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
  */
 export function getCliSessionIdleTimeoutMs(): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
-    "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+    ENV.CLI_SESSION_IDLE_TIMEOUT_MS.name,
+    ENV.CLI_SESSION_IDLE_TIMEOUT_MS.legacyName,
     {
       fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
       min: MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS,
@@ -680,11 +681,7 @@ export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLea
  * mismatched client must be allowed through during an incident. Clients that
  * declare no handshake fields are always allowed regardless of this flag.
  */
-const handshakeDisableOverride = (
-  process.env.AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE ??
-  process.env.AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE ??
-  ""
-)
+const handshakeDisableOverride = (readEnvRaw(ENV.DAEMON_DISABLE_HANDSHAKE) ?? "")
   .trim()
   .toLowerCase();
 export const DAEMON_HANDSHAKE_ENABLED = !(

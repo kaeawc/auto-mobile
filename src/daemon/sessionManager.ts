@@ -48,7 +48,6 @@ import {
 } from "./sessionDefaultRestorers";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
 import { ignoresManagedExecutionIdleDeadline } from "../models/managedExecutionLiveness";
-import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
@@ -77,7 +76,7 @@ import {
   runOutsideRequestContext,
   runWithAbortSignal,
 } from "../utils/AbortContext";
-import { requestAcquisitionReceipt } from "./acquisitionReceipt";
+import { requestAcquisitionReceipt, type DeferredRebindCleanup } from "./acquisitionReceipt";
 import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
@@ -195,6 +194,7 @@ import {
   type TerminalReleaseIntent,
   type TerminalReleaseJournal,
 } from "./terminalReleaseJournal";
+import { ENV } from "../config/env";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -1377,8 +1377,8 @@ export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionRel
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-    "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    ENV.SESSION_HEARTBEAT_TIMEOUT_MS.name,
+    ENV.SESSION_HEARTBEAT_TIMEOUT_MS.legacyName,
     { fallback: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS },
   );
 }
@@ -1451,8 +1451,8 @@ function hasLapsedRestartRecoveryWindow(persisted: DeviceSession, nowMs: number)
  */
 export function getDefaultPreFirstHeartbeatGraceMs(): number {
   return readEnvPositiveInteger(
-    "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-    "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+    ENV.SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS.name,
+    ENV.SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS.legacyName,
     { fallback: DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS },
   );
 }

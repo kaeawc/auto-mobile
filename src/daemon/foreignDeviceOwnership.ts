@@ -36,6 +36,7 @@ import {
   DaemonDeviceLeaseOwnerProbe,
   DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
 } from "./deviceLeaseOwnerQuery";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 /**
  * Whether another live AutoMobile process drives a device this pool can see. Multi-device
@@ -166,7 +167,7 @@ function tcpServerScope(host: string, port: string): string {
  * Daemons sharing a server see the same devices, so they must share its claims (#10708).
  */
 export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
-  const socket = env.ADB_SERVER_SOCKET?.trim();
+  const socket = readEnvRaw(AMBIENT_ENV.ADB_SERVER_SOCKET, env)?.trim();
   if (socket) {
     if (socket.startsWith("tcp:")) {
       const endpoint = socket.slice("tcp:".length);
@@ -178,8 +179,8 @@ export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
     return `socket-${Buffer.from(socket).toString("base64url")}`;
   }
   return tcpServerScope(
-    env.ANDROID_ADB_SERVER_ADDRESS?.trim() || DEFAULT_ADB_SERVER_HOST,
-    env.ANDROID_ADB_SERVER_PORT?.trim() || DEFAULT_ADB_SERVER_PORT,
+    readEnvRaw(AMBIENT_ENV.ANDROID_ADB_SERVER_ADDRESS, env)?.trim() || DEFAULT_ADB_SERVER_HOST,
+    readEnvRaw(AMBIENT_ENV.ANDROID_ADB_SERVER_PORT, env)?.trim() || DEFAULT_ADB_SERVER_PORT,
   );
 }
 

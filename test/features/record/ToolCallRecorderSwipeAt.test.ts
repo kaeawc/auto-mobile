@@ -1,3 +1,4 @@
+import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { ToolCallRecorder } from "../../../src/features/record/ToolCallRecorder";
 import { logger } from "../../../src/utils/logger";
@@ -10,7 +11,7 @@ const device: BootedDevice = { deviceId: "swipe-rec", platform: "android", name:
 function record(args: Record<string, unknown>) {
   const recorder = new ToolCallRecorder();
   recorder.start();
-  recorder.record("swipeAt", args);
+  recordPlanCall(recorder, "swipeAt", args);
   return recorder.stopWithWarnings();
 }
 

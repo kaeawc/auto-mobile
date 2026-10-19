@@ -232,6 +232,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const finalizedResponse = finalizeToolResponse(response, {
       name,
       loudArtifactWrites: traits?.loudArtifactWrites,
+      defaultsToSkeletonObservation: traits?.defaultsToSkeletonObservation,
       outputSchema,
       args,
       sessionUuid,
@@ -359,7 +360,7 @@ function recordCompletedToolCall(
     toolError: ReturnType<typeof toolResponseError>;
   },
 ) {
-  const { args, name, toolStartMs } = input;
+  const { args, name, toolStartMs, traits } = input;
   const { durationMs, toolSuccess, toolError } = result;
   const telemetryArgs = { ...args };
   deleteInternalToolParams(telemetryArgs);
@@ -373,6 +374,10 @@ function recordCompletedToolCall(
   });
 
   if (toolSuccess) {
-    getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(name, args);
+    getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(
+      name,
+      args,
+      traits,
+    );
   }
 }

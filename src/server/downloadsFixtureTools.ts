@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { stageSessionDownloadsResultSchema } from "./downloadsFixtureToolOutputSchemas";
@@ -40,8 +41,10 @@ export function registerDownloadsFixtureTools(
       );
     },
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: false,
       outputSchema: stageSessionDownloadsResultSchema,
+      stagesFiles: true,
       shouldEnsureDevice: () => false,
       nonDeviceHandler: async (
         args: StageSessionDownloadsArgs,

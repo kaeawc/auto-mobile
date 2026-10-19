@@ -141,3 +141,50 @@ export const inspectPackageSigningResultSchema = z
       .passthrough(),
   })
   .passthrough();
+
+export const appLifecycleResultSchema = z.object({
+  message: z.string(),
+  success: z.boolean(),
+  supported: z.boolean(),
+  action: z.enum(["background", "killBackgrounded"]),
+  platform: z.enum(["android", "ios"]),
+  appId: z.string(),
+  mechanism: z.enum(["home", "am-kill", "unsupported"]),
+  userId: z.number().int().nonnegative().optional(),
+  pid: z.number().int().positive().optional(),
+  pidBefore: z.number().int().positive().optional(),
+  pidAfter: z.number().int().positive().nullable().optional(),
+  processReclaimed: z.boolean().optional(),
+  errorCode: z
+    .enum([
+      "app_not_running",
+      "app_in_foreground",
+      "background_not_verified",
+      "kill_failed",
+      "ambiguous_user",
+      "invalid_app_id",
+    ])
+    .optional(),
+  error: z.string().optional(),
+});
+
+export const crashAppResultSchema = z.object({
+  message: z.string(),
+  success: z.boolean(),
+  supported: z.boolean(),
+  platform: z.enum(["android", "ios"]),
+  appId: z.string(),
+  processId: z.number().int().positive().optional(),
+  mechanism: z.enum(["android_am_crash", "ios_simulator_sigabrt", "unsupported"]),
+  timestamp: z.number().int().nonnegative(),
+  wasRunning: z.boolean().optional(),
+  confirmed: z.boolean(),
+  evidence: z
+    .object({
+      source: z.enum(["android_logcat", "ios_unified_log"]),
+      summary: z.string(),
+    })
+    .optional(),
+  userId: z.number().int().nonnegative().optional(),
+  error: z.string().optional(),
+});

@@ -1,6 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import generatedDefinitions from "../../schemas/tool-definitions.json";
-import { SKELETON_DEFAULT_ACTION_TOOLS } from "../../src/server/finalizeToolResponse";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { skeletonDefaultActionTools } from "../helpers/skeletonDefaultTools";
+
+isolateToolRegistry();
+
+let SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string>;
+beforeAll(() => {
+  SKELETON_DEFAULT_ACTION_TOOLS = skeletonDefaultActionTools();
+});
 
 // Import the generated contract directly: no registry, DB, daemon or device setup.
 const definitions: readonly {

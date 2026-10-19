@@ -257,9 +257,9 @@ describe("MCP Tools Schema", () => {
   // observation by default but cannot be asked for the raw tree is a silent
   // one-way door (the footgun PR #5885 avoided). Every tool the finalize step
   // skeletonizes by default MUST therefore advertise the opt-out.
-  test("every SKELETON_DEFAULT_ACTION_TOOLS member advertises the raw/project opt-out", async () => {
-    const { SKELETON_DEFAULT_ACTION_TOOLS } =
-      await import("../../../src/server/finalizeToolResponse");
+  test("every defaultsToSkeletonObservation tool advertises the raw/project opt-out", async () => {
+    const { skeletonDefaultActionTools } = await import("../../helpers/skeletonDefaultTools");
+    const SKELETON_DEFAULT_ACTION_TOOLS = skeletonDefaultActionTools();
     expect(SKELETON_DEFAULT_ACTION_TOOLS.size).toBeGreaterThan(0);
     for (const toolName of SKELETON_DEFAULT_ACTION_TOOLS) {
       const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);

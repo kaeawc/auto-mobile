@@ -14,8 +14,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOn } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { crashAppResultSchema } from "../../src/server/appToolOutputSchemas";
 import {
-  crashAppResultSchema,
   describeListAppsResult,
   registerAppTools,
   resetInstalledAppResourceRefresh,

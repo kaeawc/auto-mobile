@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "../../src/server/toolRegistryTypes";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -701,6 +702,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       await handler.handle({
         name: "tapOn",
         args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+        traits: PLAN_RELEVANT,
         device: undefined,
         internalCall: false,
         response: createStructuredToolResponse({ success: true }),

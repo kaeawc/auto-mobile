@@ -27,6 +27,8 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   get responses(): Response[] {
     return this._writtenData.map((frame) => JSON.parse(frame) as Response);
   }
+  /** Called with each written frame, e.g. to deliver it to the other end of an in-memory pair. */
+  public onWrite: ((frame: string) => void) | undefined;
   private _writtenData: string[] = [];
   private _peer: FakeSocket<unknown> | null = null;
 
@@ -93,6 +95,7 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
     const str = typeof data === "string" ? data : Buffer.from(data).toString();
     this.written.push(typeof data === "string" ? data : Buffer.from(data));
     this._writtenData.push(str);
+    this.onWrite?.(str);
     callback?.();
     return this.writeReturnValue;
   }

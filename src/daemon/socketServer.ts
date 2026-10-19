@@ -56,7 +56,6 @@ import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
-import type { Client } from "@modelcontextprotocol/client";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {} from "../server/toolUnavailableError";
@@ -275,6 +274,7 @@ import {
   currentForwardSessionKey,
   currentForwardTaskOwnerKey,
   FORWARD_KEY_IDLE_MS,
+  type ForwardMcpClient,
   type McpClientFactory,
   runWithForwardSessionKey,
 } from "./socketServer/forwardSessionKey";
@@ -6664,7 +6664,7 @@ export class UnixSocketServer {
   }
 
   protected async handleIdeRequest(
-    mcpClient: Client,
+    mcpClient: ForwardMcpClient,
     request: DaemonRequest,
     timeoutMs: number,
     socketSessionId: string,
@@ -6959,7 +6959,7 @@ export class UnixSocketServer {
     boundSessionUuid?: string,
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
-  ): Promise<Client> {
+  ): Promise<ForwardMcpClient> {
     return await this.mcpDispatcher.connect({
       boundSessionUuid,
       toolSelectionProfileUuid,

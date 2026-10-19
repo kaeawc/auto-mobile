@@ -675,11 +675,11 @@ describe("provider-owned identity recovery", () => {
 
   test("fix 2: completeness follows the authenticated provider socket map", async () => {
     const h = harness();
-    const providerSockets = { control: socketPath, future: "/isolated/future.sock" };
+    const providerSockets = { ...sockets, future: "/isolated/future.sock" };
     h.setOwner({ ...complete, running: true, reportedSockets: providerSockets });
     h.results.set(REPUBLISH, { accepted: true });
     spyOn(h.client, "callDaemonMethod").mockImplementation(async () => {
-      h.setRecord({ ...complete, sockets: providerSockets as any });
+      h.setRecord({ ...complete, sockets: providerSockets });
       return { accepted: true };
     });
     expect((await h.manager.status()).recovery?.state).toBe("repaired");

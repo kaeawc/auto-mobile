@@ -1,6 +1,9 @@
 import type { NavigationEdgeTarget } from "../../db/navigationRepository";
 import type { TestCoverageSession } from "../../db/types";
 import type { BackStackInfo } from "../../models";
+
+/** The part of a back-stack capture the graph records: its depth and current task. */
+export type RecordedBackStack = Pick<BackStackInfo, "depth" | "currentTaskId">;
 import type {
   ExportedGraph,
   HierarchyNavigationEvent,
@@ -53,7 +56,7 @@ export interface NavigationGraphService
 
   // Screen tracking
   getCurrentScreen(): string | null;
-  recordBackStack(backStack: BackStackInfo): Promise<void>;
+  recordBackStack(backStack: RecordedBackStack): Promise<void>;
 
   // Navigation events
   recordNavigationEvent(event: IncomingNavigationEvent): Promise<void>;

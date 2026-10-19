@@ -2,7 +2,6 @@ import { holderOf } from "./deviceBinding";
 import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
-import { getAbortSignal } from "../utils/AbortContext";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../utils/logger";
@@ -154,10 +153,6 @@ export class DeviceRuntimeIdentity {
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    const signals = [options.signal, getAbortSignal()].filter(
-      (signal): signal is AbortSignal => signal !== undefined,
-    );
-    options = { ...options, signal: signals.length > 0 ? AbortSignal.any(signals) : undefined };
     for (const device of devices) {
       // A caller that settled its deadline/abort can no longer safely apply a
       // stale snapshot to pooled entries an unrelated acquisition may have bound

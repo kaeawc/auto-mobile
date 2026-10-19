@@ -1,5 +1,4 @@
 # AutoMobile test unknown-cast ratchet baseline -- see scripts/test-as-any-baseline.sh
-1	test/daemon/daemonDevicePoolStartup.test.ts
 3	test/daemon/daemonForeignForwardWiring.test.ts
 4	test/daemon/daemonShutdownSessionRelease.test.ts
 3	test/daemon/hierarchyStreamDiff.test.ts

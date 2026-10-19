@@ -15,7 +15,7 @@ import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarker
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   registerLocationRouteSessionCleanup,
   LocationRouteRegistry,

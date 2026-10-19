@@ -9,7 +9,7 @@ import { SdkCapabilityProbeSupersededError } from "../../../../src/features/obse
 import { BootedDevice, HighlightShape } from "../../../../src/models";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { IosRunnerBusyError } from "../../../../src/features/observe/ios/runnerErrorCodes";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
   FakeWebSocket,

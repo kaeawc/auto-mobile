@@ -7,7 +7,7 @@ import type {
   FailureType,
   StackTraceElement,
   AggregatedToolCallInfo,
-} from "../../server/failuresResources";
+} from "../../models/failureAnalytics";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import crypto from "node:crypto";

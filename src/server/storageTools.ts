@@ -24,7 +24,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { ResourceRegistry } from "./resourceRegistry";
 import type { KeyValueType, PreferenceStoreResolution } from "../features/storage/storageTypes";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "./storageSdkErrors";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../utils/storageSdkErrors";
 import {
   clearAndroidKeyValueFileDirect,
   dataStoreInspectionDisabledReason,

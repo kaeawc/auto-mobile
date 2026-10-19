@@ -25,7 +25,7 @@ import {
 } from "../../src/server/recordingSessionCleanup";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
 import { FakeTimer } from "../fakes/FakeTimer";
 

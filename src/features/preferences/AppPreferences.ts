@@ -10,7 +10,7 @@ import { CtrlProxyServicePortChangedError } from "../observe/ios/CtrlProxyServic
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { toActionableError } from "../../models/ActionableError";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../server/storageSdkErrors";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../utils/storageSdkErrors";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   defaultAdbClientFactory,

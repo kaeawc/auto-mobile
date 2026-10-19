@@ -54,8 +54,8 @@ import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyTex
 import { CtrlProxyVoiceOver } from "../../../../src/features/observe/ios/CtrlProxyVoiceOver";
 import { IOS_KNOWN_REQUEST_TYPE_SET } from "../../../../src/features/observe/ios/ctrlProxyRequestTypes";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
-import { buildNetworkMockRules } from "../../../../src/server/networkMockRules";
-import { NetworkState } from "../../../../src/server/NetworkState";
+import { buildNetworkMockRules } from "../../../../src/utils/networkMockRules";
+import { NetworkState } from "../../../../src/utils/NetworkState";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { serializeIosRequest } from "../../../../src/features/observe/ios/serializeIosRequest";
 import { FakeTimer } from "../../../fakes/FakeTimer";

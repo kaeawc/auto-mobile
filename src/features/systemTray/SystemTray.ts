@@ -1,7 +1,7 @@
 import type { BootedDevice } from "../../models";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { SystemTrayArgs, SystemTrayNotificationArgs } from "./systemTrayTypes";
-import type { ProgressCallback } from "../../server/toolRegistry";
+import type { ProgressCallback } from "../action/BaseVisualChange";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";

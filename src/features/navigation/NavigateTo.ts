@@ -12,7 +12,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
-import { throwIfInternalToolFailed } from "../../server/internalToolCall";
+import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import {
   NavigationGraphManager,
   type NavigationEdge,
@@ -20,7 +20,7 @@ import {
 } from "./NavigationGraphManager";
 import type { PathResult, ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
 import { edgeReplayKey } from "../../db/edgeReplayKey";
-import { ProgressCallback } from "../../server/toolRegistry";
+import type { ProgressCallback } from "../action/BaseVisualChange";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";
 import { UIStateSetup } from "./interfaces/UIStateSetup";

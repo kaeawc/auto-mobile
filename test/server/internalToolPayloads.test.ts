@@ -10,7 +10,7 @@ import {
   StructuredToolResponse,
 } from "../../src/utils/toolUtils";
 import { ObserveToolPayload, SwipeOnToolPayload } from "../../src/models";
-import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 
 /**
  * Issue #3222 (follow-up to #2932 / PR #3217): thread the concrete payload type

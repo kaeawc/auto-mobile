@@ -48,7 +48,7 @@ export {
 } from "../../prototype/prototypeStorageWire";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
-import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
+import type { NetworkMockRuleSync } from "../../../utils/networkMockRules";
 import type { KeyValueType } from "../../storage/storageTypes";
 import type { SettingsNamespace, SettingsValueType } from "./types";
 

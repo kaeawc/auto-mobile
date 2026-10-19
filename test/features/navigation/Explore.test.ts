@@ -23,7 +23,7 @@ import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManag
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 
 // Import extracted functions for testing
 import {

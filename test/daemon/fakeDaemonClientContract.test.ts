@@ -27,7 +27,7 @@ function refusalOf(error: unknown): Record<string, unknown> {
   if (!(error instanceof Error)) {
     return { thrown: String(error) };
   }
-  return { name: error.name, message: error.message, ...structuredClone({ ...error }) };
+  return { ...structuredClone({ ...error }), name: error.name, message: error.message };
 }
 
 /** Records what `client` answered for every request the proxy made through it. */
@@ -64,8 +64,9 @@ function recording(
         pushed.push(structuredClone(notification));
         handler(notification);
       }),
-    subscribeToNotifications: () =>
-      record("daemon/subscribe-notifications", {}, () => client.subscribeToNotifications!()),
+    subscribeToNotifications: async () => {
+      await record("daemon/subscribe-notifications", {}, () => client.subscribeToNotifications!());
+    },
     onConnectionClosed: (handler) => client.onConnectionClosed!(handler),
   };
 }
@@ -209,6 +210,7 @@ describe("FakeDaemonClient backed by the daemon answers as the daemon does (#114
       releaseReason: "idle-timeout",
       releasedAtMs: 1,
       terminal: true,
+      heartbeat: { lastHeartbeatMs: 1, hasReceivedHeartbeat: true, timeoutMs: 1_000, ageMs: 0 },
     };
     fake.emitNotification(
       "notifications/session/released",

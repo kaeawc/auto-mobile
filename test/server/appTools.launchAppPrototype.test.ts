@@ -226,7 +226,7 @@ describe("launchApp prototype:true (#10567)", () => {
     const h = setup();
     appTools.configure("terminateApp", {
       createTerminateApp: () => ({
-        execute: async () => ({ success: false, error: "devicectl failed" }),
+        execute: async () => ({ success: false, error: "devicectl failed", packageName: APP }),
       }),
     });
     await launch(SIMULATOR, { prototype: true });

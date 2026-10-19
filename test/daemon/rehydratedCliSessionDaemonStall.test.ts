@@ -121,6 +121,9 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
     const session = manager.getSession("rehydrated-cli")!;
     const windowStart = session.awaitingOwnerSince ?? Number.NaN;
     const idleDue = idleReleaseAt(session);
+    if (idleDue === null) {
+      throw new Error("Expected the rehydrated session to report an idle release");
+    }
 
     timer.setCurrentTime(STALL_MS);
     manager.forgiveDaemonStall(STALL_MS, 0, STALL_MS, 0);

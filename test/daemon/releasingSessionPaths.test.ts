@@ -19,12 +19,13 @@ import {
   releasingSessionId as sessionId,
   releasingDeviceId as deviceId,
 } from "../helpers/releasingSessionHarness";
+import { bindDevice } from "../../src/daemon/deviceBinding";
 
 const notFound = {
   success: false,
   error: `Session not found: ${sessionId}`,
   code: DAEMON_SESSION_NOT_FOUND_CODE,
-};
+} as const;
 
 describe("remaining paths during session release", () => {
   let h: ReturnType<typeof releasingSessionHarness>;
@@ -238,8 +239,7 @@ describe("remaining paths during session release", () => {
     if (!device || !port) {
       throw new Error("Expected pooled device and liveness port");
     }
-    device.sessionId = sessionId;
-    device.status = "assigned";
+    bindDevice(device, sessionId);
     return { pool, device, port };
   }
 

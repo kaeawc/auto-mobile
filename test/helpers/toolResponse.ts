@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/server";
+import { getStructuredPayload } from "../../src/utils/toolUtils";
 
 /**
  * Shape-checking readers for MCP tool results in tests. Tool handlers return
@@ -66,4 +67,12 @@ export function toolField(response: unknown, key: string): unknown {
     return undefined;
   }
   return structured[key];
+}
+
+/**
+ * Payload of a handler result via `getStructuredPayload` (structuredContent, else the JSON text
+ * block), or `undefined` when the result is not envelope-shaped.
+ */
+export function toolPayload(response: unknown): Record<string, unknown> | undefined {
+  return isRecord(response) ? getStructuredPayload(response) : undefined;
 }

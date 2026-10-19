@@ -159,6 +159,9 @@ describe("terminal receipt recovery cost and retention", () => {
     devices.canDestroy = true;
     await broker.recover();
     const cleaned = await broker.status("dirty");
+    if (!cleaned) {
+      throw new Error("Expected a receipt status after confirmed cleanup");
+    }
     expect(cleaned).toMatchObject({ outcome: "failed", cleanupPending: false });
     // Confirmed cleanup changed the answer, so the replay window restarts from it.
     timer.advanceTime(RECEIPT_RETENTION_MS - 1);

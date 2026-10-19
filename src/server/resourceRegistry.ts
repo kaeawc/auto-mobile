@@ -281,7 +281,8 @@ class ResourceRegistryClass {
     this.listRefreshers.set(name, refresh);
   }
 
-  private async refreshBeforeList(): Promise<void> {
+  /** Await every registered list refresher; the resources/list handler calls this before replying. */
+  async refreshBeforeList(): Promise<void> {
     for (const [name, refresh] of this.listRefreshers) {
       try {
         await refresh();

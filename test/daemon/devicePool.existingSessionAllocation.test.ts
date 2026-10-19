@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { markDeviceError } from "../../src/daemon/deviceBinding";
+import { bindDevice, markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -249,7 +249,7 @@ for (const criteria of [false, true]) {
         platform: "android",
       });
       // The session survives, but the pool no longer attributes d1 to it.
-      pool.getDevice("d1")!.sessionId = "someone-else";
+      bindDevice(pool.getDevice("d1")!, "someone-else");
 
       const outcome = String(await settle(observe(["base"], 2_000).result));
 

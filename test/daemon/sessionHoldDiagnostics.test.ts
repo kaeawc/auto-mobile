@@ -11,6 +11,7 @@ import {
   sessionHoldDiagnostics,
   vetoedIdleReleaseAt,
   type SessionHoldSnapshot,
+  type SessionHolderKind,
 } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
@@ -63,7 +64,7 @@ function stateFor(manager: SessionManager, observers?: ObserverSessionRegistry):
 }
 
 describe("classifySessionHolderKind", () => {
-  test.each([
+  test.each<[Parameters<typeof classifySessionHolderKind>[0], SessionHolderKind]>([
     [{ livenessPolicy: "cli-idle" as const, livenessOwnerToken: "t" }, "cli"],
     [{ livenessPolicy: "heartbeat" as const, livenessOwnerToken: "t" }, "stdio-proxy"],
     [{ livenessPolicy: "heartbeat" as const, clientName: "AutoMobile Desktop" }, "desktop"],

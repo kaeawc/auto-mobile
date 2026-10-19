@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -87,7 +88,7 @@ describe("selector startDevice among held and idle matching devices", () => {
 
   async function startDevice(args: Record<string, unknown>): Promise<any> {
     const result = await ToolRegistry.getTool("startDevice")!.handler(args);
-    return JSON.parse(result.content[0].text);
+    return toolJson(result);
   }
 
   const android = (serial: string, name: string): BootedDevice => ({

@@ -13,6 +13,7 @@ import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 
 const SESSION = "s1";
 const DEVICE = "emulator-5554";
@@ -748,7 +749,10 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
   });
 
   /** R2 fences the session long enough to drop R1's owed entry, then is superseded too. */
-  async function overlapSupersededRelease(reason: string, failLateWrite = false): Promise<void> {
+  async function overlapSupersededRelease(
+    reason: SessionReleaseReason,
+    failLateWrite = false,
+  ): Promise<void> {
     let landReleaseWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       landReleaseWrite = resolve;
@@ -773,7 +777,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await settleMicrotasks();
   }
 
-  test.each(["cli-idle-timeout", "heartbeat-timeout"])(
+  test.each(["cli-idle-timeout", "heartbeat-timeout"] as const)(
     "overlapping superseded %s preserves the live session after a busy rewrite",
     async (reason) => {
       await supersededReleaseWithFailingRewrite(1);

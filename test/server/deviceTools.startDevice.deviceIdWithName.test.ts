@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolJson } from "../helpers/toolResponse";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
@@ -93,7 +94,7 @@ describe("startDevice with a deviceId and a name", () => {
   async function startOutcome(args: Record<string, unknown>): Promise<string> {
     try {
       const result = await ToolRegistry.getTool("startDevice")!.handler(args);
-      return `bound ${JSON.parse(result.content[0].text).name}`;
+      return `bound ${String(toolJson(result).name)}`;
     } catch (error) {
       return `refused: ${error instanceof Error ? error.message : String(error)}`;
     }

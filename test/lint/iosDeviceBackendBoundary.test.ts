@@ -7,6 +7,7 @@ const ROOT = join(import.meta.dir, "..", "..");
 const FILES = [
   "src/features/action/LaunchApp.ts",
   "src/features/action/InstallApp.ts",
+  "src/features/action/IosAppInstaller.ts",
   "src/features/action/TerminateApp.ts",
   "src/features/action/UninstallApp.ts",
   "src/features/action/ClearAppData.ts",

@@ -3689,7 +3689,7 @@ export class Daemon {
    * failures (locked file, temporary disk-full) exit fast so the next launch can
    * retry immediately.
    */
-  private async initializeDatabase(): Promise<void> {
+  async initializeDatabase(): Promise<void> {
     try {
       // getDatabase() + await ensureMigrations(): a failed startup migration
       // rejects here (rather than swallowing on a detached promise).

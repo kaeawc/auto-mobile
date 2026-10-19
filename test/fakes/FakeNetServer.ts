@@ -1,4 +1,4 @@
-import { Socket, type SocketConnectOpts } from "node:net";
+import { Server as NetServer, Socket, type SocketConnectOpts } from "node:net";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 
 /** Any zod schema (v3 or v4): the frames are validated by `parse`, which throws on a mismatch. */
@@ -206,4 +206,9 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
  */
 export class NonThrowingFakeSocket extends FakeSocket {
   public throwOnWriteAfterDestroy = false;
+}
+
+/** A net.Server that reports listening without binding a port, for socket-server subclasses under test. */
+export class FakeListeningNetServer extends NetServer {
+  override listening = true;
 }

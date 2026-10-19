@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { Readable } from "node:stream";
-import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -73,16 +72,8 @@ function unknownEmulator(deviceId: string): BootedDevice {
   return { name: `Unknown (${deviceId})`, platform: "android", deviceId, source: "local" };
 }
 
-function createChild(): ChildProcess & EventEmitter {
-  const child = new EventEmitter() as ChildProcess & EventEmitter;
-  child.stdout = new Readable({ read() {} }) as never;
-  child.stderr = new Readable({ read() {} }) as never;
-  child.killed = false;
-  child.kill = (() => {
-    child.killed = true;
-    return true;
-  }) as ChildProcess["kill"];
-  return child;
+function createChild(): FakeChildProcess {
+  return new FakeChildProcess();
 }
 
 interface Harness {
@@ -90,7 +81,7 @@ interface Harness {
   adbFactory: ScriptedAdbClientFactory;
   advertisements: FakeRunningAvdAdvertisementReader;
   spawnedArgs: string[][];
-  children: Array<ChildProcess & EventEmitter>;
+  children: Array<FakeChildProcess>;
   /** Resolves once the emulator binary has been spawned `count` times. */
   spawnedAtLeast(count: number): Promise<void>;
 }
@@ -99,10 +90,10 @@ function createHarness(): Harness {
   const adbFactory = new ScriptedAdbClientFactory();
   const advertisements = new FakeRunningAvdAdvertisementReader();
   const spawnedArgs: string[][] = [];
-  const children: Array<ChildProcess & EventEmitter> = [];
+  const children: Array<FakeChildProcess> = [];
   const spawnWaiters: Array<{ count: number; resolve: () => void }> = [];
 
-  const spawnFn = ((_command: string, args: string[]) => {
+  const spawnFn: SpawnFn = (_command, args) => {
     spawnedArgs.push(args);
     const child = createChild();
     children.push(child);
@@ -114,9 +105,10 @@ function createHarness(): Harness {
       }
     }
     return child;
-  }) as never;
+  };
 
   const client = new AndroidEmulatorClient({
+    emulatorPathLocator: async () => "emulator",
     execAsync: async () => execResult(),
     spawnFn,
     timer: new FakeTimer(),
@@ -125,14 +117,10 @@ function createHarness(): Harness {
     hostPortAvailabilityChecker: { isPortAvailable: () => true },
     runningAvdAdvertisementReader: advertisements,
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+  client.listAvds = async () => [
     { name: AVD, platform: "android", isRunning: false } as DeviceInfo,
   ];
-  (
-    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
-  ).checkArchitectureCompatibility = async () => ({ compatible: true });
+  client.checkArchitectureCompatibility = async () => ({ compatible: true, hostArch: "arm64" });
 
   return {
     client,
@@ -148,8 +136,8 @@ function createHarness(): Harness {
 }
 
 /** Settle a launch that is deliberately left mid-flight by the test. */
-function completeStartupValidation(child: ChildProcess & EventEmitter): void {
-  child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+function completeStartupValidation(child: FakeChildProcess): void {
+  child.stdout.emit("data", Buffer.from("Detected GPU type: host\n"));
 }
 
 afterEach(() => {

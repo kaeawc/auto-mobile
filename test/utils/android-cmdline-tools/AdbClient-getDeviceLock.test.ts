@@ -17,7 +17,7 @@ function execResult(stdout: string): ExecResult {
     toString: () => stdout,
     trim: () => stdout.trim(),
     includes: (s: string) => stdout.includes(s),
-  } as unknown as ExecResult;
+  };
 }
 
 /** Real KeyguardServiceDelegate block with the three parsed booleans templated. */

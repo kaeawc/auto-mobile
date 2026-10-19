@@ -50,6 +50,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
+import { type DaemonSocketServer, daemonSocketServerDouble } from "./daemonSocketServer";
 import {
   SessionManager,
   type ActiveSessionExecutionQuery,
@@ -505,7 +506,7 @@ export interface DaemonStartHost {
   /** Mark unconfirmed recorders before sessions can bind; never await background recovery. */
   redriveRecorderTeardowns(): Promise<boolean>;
   /** Create the control socket server over this daemon's state and start accepting clients. */
-  bindControlSocket(): Promise<UnixSocketServer>;
+  bindControlSocket(): Promise<DaemonSocketServer>;
   /** Auxiliary sockets, device monitors, the PID file and the health check. */
   startServicesAfterSocketBind(): Promise<void>;
   /** Navigation retention, forwarding-lease idle release, the orphan watchdog and broker reclaim. */
@@ -572,7 +573,7 @@ export class Daemon {
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
-  private socketServer: UnixSocketServer | null = null;
+  private socketServer: DaemonSocketServer | null = null;
   private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
   private enteredDaemonProcess = false;
   /** The machine-touching start steps; `startOn()` replaces the process's own. */
@@ -1684,7 +1685,7 @@ export class Daemon {
   }
 
   /** Create the control socket server over this daemon's state and bind it. */
-  private async bindControlSocket(): Promise<UnixSocketServer> {
+  private async bindControlSocket(): Promise<DaemonSocketServer> {
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
     logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
     logger.info(`Creating UnixSocketServer at "${SOCKET_PATH}"`);
@@ -3586,8 +3587,8 @@ export class Daemon {
       healthCheck: (): SingleFlightInterval | null => this.healthCheck,
       lastDatabaseHealthFailure: (): string | undefined => this.lastDatabaseHealthFailure,
       /** Installs (or clears) a socket server double whose members the shutdown path calls. */
-      setSocketServer: (server: Partial<UnixSocketServer> | null): void => {
-        this.socketServer = server as UnixSocketServer | null;
+      setSocketServer: (server: Partial<DaemonSocketServer> | null): void => {
+        this.socketServer = server && daemonSocketServerDouble(server);
       },
       /** Registers an in-flight HTTP request double that shutdown must close. */
       registerTransport: (

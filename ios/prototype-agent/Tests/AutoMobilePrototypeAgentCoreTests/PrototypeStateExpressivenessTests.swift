@@ -230,7 +230,7 @@ final class PrototypeStateExpressivenessTests: XCTestCase {
     // scans UTF-16 code units: only an ASCII `{` / `}` delimits, whatever follows or precedes it.
 
     private func boundTexts(_ template: String) throws -> [String?] {
-        let encoded = try String(decoding: JSONEncoder().encode(template), as: UTF8.self)
+        let encoded = try XCTUnwrap(String(data: JSONEncoder().encode(template), encoding: .utf8))
         let json = """
         {"id":"a","window":{"placement":{"type":"fullscreen"}},
          "root":{"type":"column","repeat":{"as":"item","items":[{"n":"x"}]},

@@ -1,7 +1,8 @@
 /// Pure text field input policy (#12066). The host validates the authored options before show.
 struct PrototypeTextFieldOptions {
     enum ImeAction: String {
-        case done, next, search, send, go
+        case done, next, search, send
+        case proceed = "go"
     }
 
     enum Keyboard: String {

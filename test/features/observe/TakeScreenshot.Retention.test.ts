@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { logger } from "../../../src/utils/logger";
@@ -146,12 +147,15 @@ test("equivalent reference spellings in both stores survive a stale sweep", asyn
   const statePath = files.add("snapshot-of-state.png", 1, 0);
   const observePath = files.add("snapshot-of-observe.png", 1, 0);
   states.update("retention", "/screenshots/./snapshot-of-state.png");
-  await getObserveCacheStore().put("retention", {
-    updatedAt: timer.now(),
-    screenSize: { width: 1, height: 1 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    screenshotPath: "/screenshots/./snapshot-of-observe.png",
-  });
+  await getObserveCacheStore().put(
+    "retention",
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      screenshotPath: "/screenshots/./snapshot-of-observe.png",
+    }),
+  );
   await sweep();
   expect(files.existsSync(statePath)).toBe(true);
   expect(files.existsSync(observePath)).toBe(true);
@@ -330,12 +334,15 @@ test("over-budget cleanup logs protected count without deleting the live lease",
 test("cache invalidation drops both reference stores without unlinking a returned file", async () => {
   timer.advanceTime(60_000);
   const path = files.add("screenshot_0_device_clear.png", 129 * 1024 * 1024, 0);
-  await getObserveCacheStore().put("retention", {
-    updatedAt: timer.now(),
-    screenSize: { width: 1, height: 1 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    screenshotPath: path,
-  });
+  await getObserveCacheStore().put(
+    "retention",
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1, height: 1 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      screenshotPath: path,
+    }),
+  );
   states.update("retention", path);
   await protection.protect(path);
   const unlink = spyOn(files, "unlink");

@@ -12,6 +12,11 @@ export class ToolResponseSerialization {
     return this.inline.get(payload)!;
   }
 
+  stripExtras(payload: Record<string, unknown>): Record<string, unknown> {
+    const text = this.text(payload);
+    return this.artifact(payload) === text ? payload : JSON.parse(text);
+  }
+
   artifact(payload: unknown): string {
     if (!this.complete.has(payload)) {
       this.complete.set(payload, JSON.stringify(payload));

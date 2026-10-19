@@ -86,6 +86,14 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "In-memory session state and persistence rows; wire builders serialize its release snapshots.",
   ],
   [
+    "src/daemon/sessionManager/forcedStuckRelease.ts",
+    "In-memory release snapshots moved from SessionManager; wire builders serialize them.",
+  ],
+  [
+    "src/daemon/sessionManager/recoveredTerminalReleaseIntents.ts",
+    "Recovered in-memory release state moved from SessionManager; wire builders serialize its snapshots.",
+  ],
+  [
     "src/daemon/planLabelRegistry.ts#PlanLabelRegistry.takeDerivedLabelSessions",
     "Retains a base's in-memory terminal end for its published labels; nothing is serialized here.",
   ],

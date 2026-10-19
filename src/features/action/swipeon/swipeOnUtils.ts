@@ -67,28 +67,38 @@ export const resolveSwipeDirection = (
   options: Pick<SwipeOnOptions, "direction" | "gestureType">,
 ): ResolvedSwipeDirection => resolveDirection(options);
 
+const DIRECTIONS = ["up", "down", "left", "right"] as const;
+const GESTURE_TYPES = ["swipeFingerTowardsDirection", "scrollTowardsDirection"] as const;
+
+function optionalMember<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  message: string,
+): T | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const match = allowed.find((candidate) => candidate === value);
+  if (match === undefined) {
+    throw new Error(message);
+  }
+  return match;
+}
+
 /** Runtime boundary for unvalidated direction options. */
 export function resolveSwipeDirectionRaw(options: unknown): ResolvedSwipeDirection {
   if (typeof options !== "object" || options === null) {
     throw new Error("Expected swipe options");
   }
-  const direction = "direction" in options ? options.direction : undefined;
-  const gestureType = "gestureType" in options ? options.gestureType : undefined;
-  if (
-    direction !== undefined &&
-    direction !== "up" &&
-    direction !== "down" &&
-    direction !== "left" &&
-    direction !== "right"
-  ) {
-    throw new Error("Invalid swipe direction");
-  }
-  if (
-    gestureType !== undefined &&
-    gestureType !== "swipeFingerTowardsDirection" &&
-    gestureType !== "scrollTowardsDirection"
-  ) {
-    throw new Error("Invalid gesture type");
-  }
+  const direction = optionalMember(
+    "direction" in options ? options.direction : undefined,
+    DIRECTIONS,
+    "Invalid swipe direction",
+  );
+  const gestureType = optionalMember(
+    "gestureType" in options ? options.gestureType : undefined,
+    GESTURE_TYPES,
+    "Invalid gesture type",
+  );
   return resolveDirection({ direction, gestureType });
 }

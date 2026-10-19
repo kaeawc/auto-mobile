@@ -4146,12 +4146,8 @@ describe("finalizeToolResponse", () => {
       });
 
       /**
-       * The gate measured with `stringifyToolResponse`, whose replacer deletes
-       * every `extras` property. `structuredContent` is assigned the UNSTRIPPED
-       * payload object and serialized by the transport with a plain
-       * `JSON.stringify`, so a result whose bulk is accessibility `extras`
-       * measured as a few bytes here and was handed to the client at full size —
-       * exactly the overflow the ceiling exists to stop (#6870 review).
+       * Explicit includeExtras still emits the unstripped structured payload.
+       * Its complete size must remain bounded by the #6870 hard ceiling.
        */
       test("measures the unstripped structured payload, not the extras-stripped rendering", () => {
         const writer = new FakeObservationArtifactWriter();
@@ -4160,7 +4156,7 @@ describe("finalizeToolResponse", () => {
             success: true,
             detail: { extras: { accessibility: "x".repeat(70_000) } },
           }),
-          oversizedCtx(writer),
+          { ...oversizedCtx(writer), args: { includeExtras: true } },
         );
 
         const structured = structuredPayload(finalized);
@@ -4182,7 +4178,7 @@ describe("finalizeToolResponse", () => {
             success: true,
             detail: { extras: { accessibility: "x".repeat(70_000) } },
           }),
-          oversizedCtx(writer),
+          { ...oversizedCtx(writer), args: { includeExtras: true } },
         );
 
         expect(writer.writes).toHaveLength(1);

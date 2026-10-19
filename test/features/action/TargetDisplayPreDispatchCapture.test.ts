@@ -11,10 +11,7 @@ import {
   ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV,
   OBSERVE_SETTLED_SCREENSHOT_ENV,
 } from "../../../src/features/observe/automaticScreenshotPolicy";
-import type {
-  ObserveScreenExecuteOptions,
-  ObserveScreen,
-} from "../../../src/features/observe/interfaces/ObserveScreen";
+import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -65,7 +62,7 @@ class CountingObserveScreen extends FakeObserveScreen {
   }
 
   override async captureScreenshot(
-    ...args: Parameters<NonNullable<ObserveScreen["captureScreenshot"]>>
+    ...args: Parameters<FakeObserveScreen["captureScreenshot"]>
   ): Promise<void> {
     this.captures.push(this.phase);
     return super.captureScreenshot(...args);
@@ -94,7 +91,7 @@ class PhaseCtrlProxy extends FakeCtrlProxy {
 function screen(key: string): ObserveResult {
   return {
     observationId: `observe-${key}`,
-    timestamp: 1,
+    updatedAt: 1,
     displayRevision: 0,
     display: {
       key,
@@ -117,7 +114,7 @@ function screen(key: string): ObserveResult {
       screenWidth: 200,
       screenHeight: 200,
     },
-  } as ObserveResult;
+  } satisfies ObserveResult;
 }
 
 function adb(): FakeAdbExecutor {

@@ -260,6 +260,9 @@ describe("remaining session row writes (#11557)", () => {
   test("a losing activity repair rejects its caller without ending the live session", async () => {
     const session = await create();
     const generation = (await row())!.stable_identity_generation;
+    if (generation === undefined) {
+      throw new Error("the persisted row has no stable identity generation");
+    }
     await sweep();
     await db
       .updateTable("device_sessions")

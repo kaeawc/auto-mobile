@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 /**
  * Field-name wire-parity backstop for the iOS control-proxy TS client ↔ Swift runner
  * (issue #2954, checklist item 3 of #2857).
@@ -92,12 +93,9 @@ function createHarness(): Harness {
   const context: HierarchyDelegateContext = {
     serializeRequest: serializeIosRequest,
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      new FakeOpenSocket((data) => {
+        sent.push(data);
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,

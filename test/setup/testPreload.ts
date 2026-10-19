@@ -66,9 +66,13 @@ const auxSocketDir = ensureAuxSocketDir();
 testOverrides.auxSocketDir = auxSocketDir;
 
 const cleanupFlagKey = `__automobile_aux_socket_cleanup_registered_${process.pid}`;
-const globalFlags = globalThis as unknown as Record<string, boolean>;
-if (!globalFlags[cleanupFlagKey]) {
-  globalFlags[cleanupFlagKey] = true;
+if (!(cleanupFlagKey in globalThis)) {
+  Object.defineProperty(globalThis, cleanupFlagKey, {
+    value: true,
+    configurable: true,
+    writable: true,
+    enumerable: true,
+  });
   process.once("exit", () => {
     try {
       rmSync(auxSocketDir, { recursive: true, force: true });

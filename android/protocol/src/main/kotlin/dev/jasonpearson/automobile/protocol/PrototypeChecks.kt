@@ -73,15 +73,16 @@ object PrototypeChecks {
       else -> value?.isString == true && !blank.matcher(value.content).matches()
     }
 
+  private fun isAbsent(value: JsonElement?, primitive: JsonPrimitive?): Boolean =
+    value == null || value == JsonNull || isEmptyText(primitive)
+
+  private fun isEmptyText(value: JsonPrimitive?): Boolean =
+    value?.isString == true && value.content.isEmpty()
+
   private fun passes(value: JsonElement?, check: PrototypeCheck, nodeType: String): Boolean {
     val primitive = value as? JsonPrimitive
     if (check is PrototypeCheck.Required) return required(primitive, nodeType)
-    if (
-      value == null ||
-        value == JsonNull ||
-        (primitive?.isString == true && primitive.content.isEmpty())
-    )
-      return true
+    if (value == null || isAbsent(value, primitive)) return true
     val text = primitive?.takeIf { it.isString }?.content.orEmpty()
     return when (check) {
       is PrototypeCheck.Required -> required(primitive, nodeType)
@@ -98,27 +99,34 @@ object PrototypeChecks {
 
   private fun numeric(value: JsonElement, nodeType: String): Double? {
     val primitive = value as? JsonPrimitive ?: return null
-    if (nodeType == "datePicker" && primitive.isString) {
-      return try {
-        // Date.parse normalizes overflow days in a valid month; reproduce that JS behavior.
-        val parts = primitive.content.split('-')
-        if (parts.size != 3 || parts[0].length != 4 || parts[1].length != 2 || parts[2].length != 2)
-          return null
-        if (parts.any { part -> part.any { it !in '0'..'9' } }) return null
-        val year = parts[0].toIntOrNull() ?: return null
-        val month = parts[1].toIntOrNull() ?: return null
-        val day = parts[2].toIntOrNull() ?: return null
-        if (month !in 1..12 || day !in 1..31) return null
-        LocalDate.of(year, month, 1)
-          .plusDays((day - 1).toLong())
-          .atStartOfDay()
-          .toInstant(ZoneOffset.UTC)
-          .toEpochMilli()
-          .toDouble()
-      } catch (_: DateTimeException) {
-        null
-      }
-    }
+    if (nodeType == "datePicker" && primitive.isString)
+      return PrototypeCheckDate.numeric(primitive.content)
     return primitive.takeIf { !it.isString }?.doubleOrNull?.takeIf { it.isFinite() }
   }
+}
+
+private object PrototypeCheckDate {
+  fun numeric(text: String): Double? {
+    return try {
+      // Date.parse normalizes overflow days in a valid month; reproduce that JS behavior.
+      val parts = text.split('-')
+      if (!hasDateParts(parts)) return null
+      if (parts.any { part -> part.any { it !in '0'..'9' } }) return null
+      val year = parts[0].toIntOrNull() ?: return null
+      val month = parts[1].toIntOrNull() ?: return null
+      val day = parts[2].toIntOrNull() ?: return null
+      if (month !in 1..12 || day !in 1..31) return null
+      LocalDate.of(year, month, 1)
+        .plusDays((day - 1).toLong())
+        .atStartOfDay()
+        .toInstant(ZoneOffset.UTC)
+        .toEpochMilli()
+        .toDouble()
+    } catch (_: DateTimeException) {
+      null
+    }
+  }
+
+  private fun hasDateParts(parts: List<String>): Boolean =
+    parts.map { it.length } == listOf(4, 2, 2)
 }

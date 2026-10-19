@@ -20,11 +20,7 @@ test("an iOS runner supervisor restart starts only its own device", async () => 
     undefined,
     new FakeProcessExecutor(),
   );
-  const supervisorX = (
-    managerX as unknown as {
-      processSupervisor: { start(): Promise<void>; processExited(): void; stop(): void };
-    }
-  ).processSupervisor;
+  const supervisorX = managerX.testHooks.processSupervisor;
   const startX = spyOn(managerX, "start").mockResolvedValue();
   const startY = spyOn(managerY, "start").mockResolvedValue();
   try {

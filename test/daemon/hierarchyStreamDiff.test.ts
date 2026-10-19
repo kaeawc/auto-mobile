@@ -1,3 +1,4 @@
+import { viewHierarchyFromFixture } from "../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import {
   annotateHierarchyDiff,
@@ -29,23 +30,33 @@ describe("annotateHierarchyDiff", () => {
     const singleChild = {
       $: { class: "Root" },
       node: { $: { class: "OnlyChild" } },
-    } as unknown as ViewHierarchyNode;
-    const empty = { $: { class: "Root" }, node: {} } as unknown as ViewHierarchyNode;
+    };
+    const empty = { $: { class: "Root" }, node: {} };
 
     // Both forms must be walked without throwing (across a first frame and a diff).
-    expect(() => annotateHierarchyDiff(null, { hierarchy: { node: singleChild } })).not.toThrow();
-    expect(() => annotateHierarchyDiff(null, { hierarchy: { node: empty } })).not.toThrow();
+    expect(() =>
+      annotateHierarchyDiff(null, viewHierarchyFromFixture({ hierarchy: { node: singleChild } })),
+    ).not.toThrow();
+    expect(() =>
+      annotateHierarchyDiff(null, viewHierarchyFromFixture({ hierarchy: { node: empty } })),
+    ).not.toThrow();
 
     // And they must be walked CORRECTLY: against a childless baseline, the single-child object is one
     // real added node, while the empty `{}` placeholder is ZERO children — not a phantom add.
     const childlessBaseline = {
-      hierarchy: { node: { $: { class: "Root" } } as unknown as ViewHierarchyNode },
+      hierarchy: { node: { $: { class: "Root" } } },
     };
     expect(
-      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: singleChild } }).summary.added,
+      annotateHierarchyDiff(
+        childlessBaseline,
+        viewHierarchyFromFixture({ hierarchy: { node: singleChild } }),
+      ).summary.added,
     ).toBe(1);
     expect(
-      annotateHierarchyDiff(childlessBaseline, { hierarchy: { node: empty } }).summary.added,
+      annotateHierarchyDiff(
+        childlessBaseline,
+        viewHierarchyFromFixture({ hierarchy: { node: empty } }),
+      ).summary.added,
     ).toBe(0);
   });
 

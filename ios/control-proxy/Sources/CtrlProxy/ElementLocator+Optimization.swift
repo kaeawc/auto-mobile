@@ -28,61 +28,67 @@ extension ElementLocator {
             Self.optimizeHierarchy(element, isRoot: isRoot)
         }
 
+        private static let elementClassNames: [XCUIElement.ElementType: String] = [
+            .application: "XCUIApplication",
+            .window: "UIWindow",
+            .button: "UIButton",
+            .staticText: "UILabel",
+            .textField: "UITextField",
+            .secureTextField: "UISecureTextField",
+            .textView: "UITextView",
+            .image: "UIImageView",
+            .icon: "SBIconView",
+            .switch: "UISwitch",
+            .slider: "UISlider",
+            .picker: "UIPickerView",
+            .table: "UITableView",
+            .cell: "UITableViewCell",
+            .scrollView: "UIScrollView",
+            .collectionView: "UICollectionView",
+            .navigationBar: "UINavigationBar",
+            .tabBar: "UITabBar",
+            .toolbar: "UIToolbar",
+            .searchField: "UISearchBar",
+            .alert: "UIAlertController",
+            .sheet: "UIActionSheet",
+            .progressIndicator: "UIProgressView",
+            .activityIndicator: "UIActivityIndicatorView",
+            .segmentedControl: "UISegmentedControl",
+            .stepper: "UIStepper",
+            .datePicker: "UIDatePicker",
+            .webView: "WKWebView",
+            .link: "UILink",
+            .keyboard: "UIKeyboard",
+            .key: "UIKeyboardKey",
+        ]
+
         func mapElementType(_ type: XCUIElement.ElementType) -> String {
-            switch type {
-            case .application: return "XCUIApplication"
-            case .window: return "UIWindow"
-            case .button: return "UIButton"
-            case .staticText: return "UILabel"
-            case .textField: return "UITextField"
-            case .secureTextField: return "UISecureTextField"
-            case .textView: return "UITextView"
-            case .image: return "UIImageView"
-            case .icon: return "SBIconView"
-            case .switch: return "UISwitch"
-            case .slider: return "UISlider"
-            case .picker: return "UIPickerView"
-            case .table: return "UITableView"
-            case .cell: return "UITableViewCell"
-            case .scrollView: return "UIScrollView"
-            case .collectionView: return "UICollectionView"
-            case .navigationBar: return "UINavigationBar"
-            case .tabBar: return "UITabBar"
-            case .toolbar: return "UIToolbar"
-            case .searchField: return "UISearchBar"
-            case .alert: return "UIAlertController"
-            case .sheet: return "UIActionSheet"
-            case .progressIndicator: return "UIProgressView"
-            case .activityIndicator: return "UIActivityIndicatorView"
-            case .segmentedControl: return "UISegmentedControl"
-            case .stepper: return "UIStepper"
-            case .datePicker: return "UIDatePicker"
-            case .webView: return "WKWebView"
-            case .link: return "UILink"
-            case .keyboard: return "UIKeyboard"
-            case .key: return "UIKeyboardKey"
-            default: return "UIView"
-            }
+            Self.elementClassNames[type] ?? "UIView"
         }
 
+        private static let elementRoles: [XCUIElement.ElementType: String] = [
+            .button: "button",
+            .icon: "button",
+            .link: "link",
+            .switch: "switch",
+            .checkBox: "checkbox",
+            .radioButton: "radio",
+            .slider: "slider",
+            .textField: "textfield",
+            .textView: "textfield",
+            .secureTextField: "textfield",
+            .searchField: "textfield",
+            .image: "image",
+            .staticText: "text",
+            .table: "list",
+            .collectionView: "list",
+            .cell: "listitem",
+            .tab: "tab",
+            .progressIndicator: "progressbar",
+        ]
+
         func mapRole(_ type: XCUIElement.ElementType) -> String? {
-            switch type {
-            case .button: return "button"
-            case .icon: return "button"
-            case .link: return "link"
-            case .switch: return "switch"
-            case .checkBox: return "checkbox"
-            case .radioButton: return "radio"
-            case .slider: return "slider"
-            case .textField, .textView, .secureTextField, .searchField: return "textfield"
-            case .image: return "image"
-            case .staticText: return "text"
-            case .table, .collectionView: return "list"
-            case .cell: return "listitem"
-            case .tab: return "tab"
-            case .progressIndicator: return "progressbar"
-            default: return nil
-            }
+            Self.elementRoles[type]
         }
 
         func isScrollableType(_ type: XCUIElement.ElementType) -> Bool {

@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { readToolResponse, toolIsError, toolJson, toolStructured, toolText } from "./toolResponse";
+import {
+  readToolResponse,
+  toolField,
+  toolIsError,
+  toolJson,
+  toolStructured,
+  toolText,
+} from "./toolResponse";
 
 describe("toolResponse helpers", () => {
   const ok = { content: [{ type: "text", text: '{"a":1}' }], structuredContent: { b: 2 } };
@@ -24,5 +31,14 @@ describe("toolResponse helpers", () => {
       "not a JSON object",
     );
     expect(() => toolStructured({ content: [] })).toThrow("no structuredContent");
+  });
+
+  test("toolField reads own structuredContent keys and tolerates missing payloads", () => {
+    const response = { content: [], structuredContent: { success: true } };
+    expect(toolField(response, "success")).toBe(true);
+    expect(toolField(response, "missing")).toBeUndefined();
+    expect(toolField(response, "toString")).toBeUndefined();
+    expect(toolField({ content: [] }, "success")).toBeUndefined();
+    expect(toolField(undefined, "success")).toBeUndefined();
   });
 });

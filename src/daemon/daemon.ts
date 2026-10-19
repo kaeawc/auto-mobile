@@ -81,7 +81,6 @@ import {
 import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
-import { DaemonState } from "./daemonState";
 import {
   BrokerExecutionRelease,
   managedExecutionSessionsFrom,
@@ -398,6 +397,7 @@ import {
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
+import type { DaemonStateWrites } from "./daemonContext";
 
 export type {
   DaemonDependencies,
@@ -767,6 +767,8 @@ export class Daemon {
   /** Exposed for tests only: the in-flight or settled startup provenance warm. */
   private androidAvdProvenanceWarmPromise: Promise<unknown> | undefined;
 
+  private readonly daemonState: DaemonStateWrites;
+
   constructor(options: DaemonOptions = {}, dependencies: DaemonDependencies = {}) {
     const {
       timer,
@@ -785,6 +787,7 @@ export class Daemon {
       recoverFromDatabaseHealthFailure,
       ...retained
     } = resolveDaemonDependencies(dependencies);
+    this.daemonState = retained.daemonState;
     this.httpServerFactory = retained.httpServerFactory;
     this.liveDaemonSessionIdProvider = retained.liveDaemonSessionIdProvider;
     this.avdManagerFactory = retained.avdManagerFactory;
@@ -901,14 +904,13 @@ export class Daemon {
       autolockSessionForMcpSession: (mcpSessionId) =>
         this.devicePool.captureAutolockSessionForMcpSession(mcpSessionId),
     });
-    // Initialize singleton for daemon state access
-    DaemonState.getInstance().initialize(
+    this.daemonState.initialize(
       this.sessionManager,
       this.devicePool,
       this.deviceSessionRegistry,
       this.observerSessionRegistry,
     );
-    DaemonState.getInstance().setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
+    this.daemonState.setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
     this.installManagedExecutionRelease();
     this.installBrokerDeviceAcquisition();
 
@@ -1047,7 +1049,7 @@ export class Daemon {
         });
       },
     });
-    DaemonState.getInstance().setBrokerExecutionReowner(this.managedExecutionReowner);
+    this.daemonState.setBrokerExecutionReowner(this.managedExecutionReowner);
     this.sessionManager.setReleaseDeviceHold((id) =>
       this.managedExecutionReowner?.releaseDeviceHold(id),
     );
@@ -1129,7 +1131,7 @@ export class Daemon {
     this.backgroundRegistryUpgrade = undefined;
     await this.sessionBrokerService?.close();
     this.sessionBrokerService = undefined;
-    DaemonState.getInstance().setSessionBrokerService(undefined);
+    this.daemonState.setSessionBrokerService(undefined);
     this.brokerExecutionRelease?.close();
     this.managedExecutionReowner?.close();
     // Interrupt discovery and the inter-pass wait, then join within 100ms of this stage's 200ms.
@@ -1185,7 +1187,7 @@ export class Daemon {
           .getAllSessions()
           .map((session) => this.sessionManager.ownershipSessionUuid(session.sessionId)),
     });
-    DaemonState.getInstance().setSessionBrokerService(this.sessionBrokerService);
+    this.daemonState.setSessionBrokerService(this.sessionBrokerService);
     // No generic journal work starts before the exclusive host lock and inventory checks.
     if (!this.bindingRedrive && process.env.NODE_ENV !== "test") {
       this.bindingRedrive = acquisition.startJournalRedrive(registry);
@@ -1819,9 +1821,8 @@ export class Daemon {
     this.completeIdentityPublished = true;
 
     // Verify DaemonState is initialized
-    const isInitialized = DaemonState.getInstance().isInitialized();
     logger.info(
-      `DaemonState initialized: ${isInitialized}, device count: ${this.devicePool.getTotalDeviceCount()}`,
+      `DaemonState initialized: ${this.daemonState.isInitialized()}, device count: ${this.devicePool.getTotalDeviceCount()}`,
     );
 
     // Start health check timer (every 30 seconds)

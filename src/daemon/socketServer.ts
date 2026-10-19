@@ -144,7 +144,7 @@ import {
 import { InputText, type AppendKeyEventValidator } from "../features/action/InputText";
 import { imeActionFailedAfterTextEntered } from "../features/action/imeActionFailedAfterTextEntered";
 import { getCurrentBuildIdentity } from "./buildIdentity";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
@@ -1040,7 +1040,7 @@ export class UnixSocketServer {
 
   constructor(
     socketPath: string = SOCKET_PATH,
-    daemonState: SocketDaemonStateAccess = DaemonState.getInstance(),
+    daemonState: SocketDaemonStateAccess = defaultDaemonContext.daemonState(),
     timer: Timer = defaultTimer,
     featureFlagService: FeatureFlagAdmin | null = null,
     handshakeConfig: {

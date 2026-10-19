@@ -31,7 +31,10 @@ import {
 } from "../server/recordingSessionCleanup";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
@@ -59,10 +62,10 @@ export interface DaemonSessionLifecycleHost {
   managedExecutionReowner(): Pick<ManagedExecutionReowner, "noteRecovering"> | undefined;
   devicePool(): Pick<DevicePool, "getDevice" | "getAllDevices" | "releaseDevice">;
   passiveWorkPolicy(): Pick<PassiveWorkPolicy, "allows">;
-  navigationGraphListenerManagers: WeakSet<NavigationGraphManager>;
+  navigationGraphListenerManagers: WeakSet<NavigationGraphService>;
   shutdownReleaseNotifications(): Set<string> | null;
   shutdownFallbackReleaseNotifications(): Set<string> | null;
-  setupNavigationGraphUpdateListener(manager: NavigationGraphManager): void;
+  setupNavigationGraphUpdateListener(manager: NavigationGraphService): void;
   reownRehydratedManagedExecutions(rehydrated: readonly string[]): Promise<void>;
   hasActiveSessionExecution(sessionId: string, query?: ActiveSessionExecutionQuery): boolean;
   latestSessionExecutionDeadlineMs(

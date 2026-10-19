@@ -41,7 +41,7 @@
 1234	src/features/device/SetPosture.ts
 5790	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1084	src/features/navigation/Explore.ts
-1117	src/features/navigation/NavigationGraphManager.ts
+1023	src/features/navigation/NavigationGraphManager.ts
 1567	src/features/observe/DeviceServiceClient.ts
 1026	src/features/observe/TakeScreenshot.ts
 1011	src/features/observe/ViewHierarchy.ts

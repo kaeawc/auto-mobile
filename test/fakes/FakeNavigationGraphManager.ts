@@ -24,6 +24,7 @@ import type { NavigationEdgeTarget } from "../../src/db/navigationRepositoryType
 import type { TestCoverageSession } from "../../src/db/types";
 import type {
   NavigationBuildContext,
+  NavigationBuildContextChange,
   NavigationGraphService,
 } from "../../src/features/navigation/NavigationGraphManager";
 
@@ -63,6 +64,7 @@ export class FakeNavigationGraphManager implements NavigationGraphService {
   private pathResult: PathResult | null = null;
   private historyPage: NavigationGraphHistoryPage | null = null;
   private readonly buildContexts = new Map<string, NavigationBuildContext>();
+  private buildContextListener: ((change: NavigationBuildContextChange) => void) | null = null;
   private readonly nodeScreenshots = new Map<string, string | null>();
   private activeTestSession: TestCoverageSession | null = null;
 
@@ -310,11 +312,53 @@ export class FakeNavigationGraphManager implements NavigationGraphService {
   setBuildContext(context: NavigationBuildContext): void {
     this.trackCall("setBuildContext", [context]);
     this.buildContexts.set(context.appId, context);
+    this.buildContextListener?.({
+      appId: context.appId,
+      deviceId: context.deviceId,
+      buildContext: context,
+    });
   }
 
   clearBuildContext(appId: string): void {
     this.trackCall("clearBuildContext", [appId]);
+    const previous = this.buildContexts.get(appId);
     this.buildContexts.delete(appId);
+    if (previous) {
+      this.buildContextListener?.({ appId, deviceId: previous.deviceId, buildContext: null });
+    }
+  }
+
+  getBuildContexts(): NavigationBuildContext[] {
+    this.trackCall("getBuildContexts", []);
+    return [...this.buildContexts.values()].map((context) => ({ ...context }));
+  }
+
+  setBuildContextUpdateListener(
+    listener: ((change: NavigationBuildContextChange) => void) | null,
+  ): void {
+    this.trackCall("setBuildContextUpdateListener", [listener]);
+    this.buildContextListener = listener;
+  }
+
+  getDeviceIdForApp(appId: string | null): string | null {
+    this.trackCall("getDeviceIdForApp", [appId]);
+    return appId ? (this.buildContexts.get(appId)?.deviceId ?? null) : null;
+  }
+
+  async recordAppForeground(appId: string, deviceId?: string): Promise<void> {
+    this.trackCall("recordAppForeground", [appId, deviceId]);
+  }
+
+  forgetAppScreen(appId: string): void {
+    this.trackCall("forgetAppScreen", [appId]);
+    if (this.currentAppId === appId) {
+      this.currentScreen = null;
+    }
+  }
+
+  forgetAllAppScreens(): void {
+    this.trackCall("forgetAllAppScreens", []);
+    this.currentScreen = null;
   }
 
   /** The build context last given to `setBuildContext` for an app, if any. */

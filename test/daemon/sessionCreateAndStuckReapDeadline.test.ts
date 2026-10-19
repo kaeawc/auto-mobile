@@ -4,7 +4,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   SESSION_CREATION_TIMEOUT_CODE,
   SessionCreationTimeoutError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import {
   STUCK_REAP_WARN_MS,

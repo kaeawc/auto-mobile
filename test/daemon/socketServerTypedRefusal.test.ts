@@ -1,4 +1,4 @@
-import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
+import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";

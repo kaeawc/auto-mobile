@@ -16,7 +16,7 @@ import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
-} from "../daemon/deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 
 /**
  * The tools that acquire a device and mint a device session, returning its

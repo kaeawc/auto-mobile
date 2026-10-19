@@ -42,7 +42,7 @@ import {
 import {
   DeviceUnhealthyError,
   DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { spyOn } from "bun:test";

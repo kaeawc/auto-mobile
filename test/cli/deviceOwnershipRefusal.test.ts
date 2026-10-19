@@ -12,7 +12,7 @@ import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";

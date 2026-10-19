@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceCleanupInProgressError } from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {

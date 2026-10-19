@@ -58,7 +58,7 @@ import {
   DEVICE_UNHEALTHY_CODE,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
-} from "./deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 import {
   currentAllocationCancellationScope,
   withAllocationCancellationScope,
@@ -8457,8 +8457,6 @@ export class DevicePool {
         holder: "session_broker",
         scopeKey: "",
         bindingIndex: null,
-        scopeState: null,
-        execSessionUuid: null,
       });
     }
     return undefined;

@@ -9,7 +9,7 @@ import {
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
   type RetryableDeviceAcquisitionError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import {
   getSessionReleaseCleanupWorstCaseMs,
   getSessionReleaseStuckDeadlineMs,

@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DeviceCleanupInProgressError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

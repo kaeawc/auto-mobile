@@ -33,7 +33,7 @@ import {
   SessionCreationTimeoutError,
   RetryableDeviceAcquisitionError,
   SessionReleasedDuringCreationError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { unsupportedIosButtonResult } from "../../src/features/action/PressButton";

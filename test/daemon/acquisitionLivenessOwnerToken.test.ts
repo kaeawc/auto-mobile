@@ -23,7 +23,7 @@ import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import { freshStartAlreadyBoundError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { freshStartAlreadyBoundError } from "../../src/models/deviceAcquisitionRefusals";
 
 let scenario: LivenessScenario | undefined;
 isolateEmptyToolRegistry();

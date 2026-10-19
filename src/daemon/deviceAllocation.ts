@@ -11,7 +11,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { RetryExecutor } from "../utils/retry/RetryExecutor";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
-import type { DeviceUnhealthyError } from "./deviceAcquisitionRefusals";
+import type { DeviceUnhealthyError } from "../models/deviceAcquisitionRefusals";
 import {
   ALLOCATION_SNAPSHOT_STALE_RETRIES,
   DevicePoolError,

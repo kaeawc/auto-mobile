@@ -192,7 +192,7 @@ import {
 import {
   DeviceTransportOfflineError,
   DeviceUnhealthyError,
-} from "../../daemon/deviceAcquisitionRefusals";
+} from "../../models/deviceAcquisitionRefusals";
 import { DeviceLostError } from "../../models/DeviceLostError";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,

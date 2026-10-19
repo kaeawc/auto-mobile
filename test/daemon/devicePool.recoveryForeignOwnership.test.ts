@@ -1,7 +1,7 @@
 import { makePool } from "../helpers/makePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, describe, expect, test } from "bun:test";
-import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/models/deviceAcquisitionRefusals";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";

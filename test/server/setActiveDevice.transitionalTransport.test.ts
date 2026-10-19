@@ -10,7 +10,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DeviceTransportOfflineError,
   DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import {
   deviceAssignedToOtherSessionError,
   devicePreparedForOtherRequestError,

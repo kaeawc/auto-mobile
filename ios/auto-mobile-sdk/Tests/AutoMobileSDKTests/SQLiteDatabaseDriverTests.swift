@@ -13,11 +13,17 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
             .appendingPathExtension("db")
         driver = SQLiteDatabaseDriver()
 
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-        sqlite3_exec(db, "CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)", nil, nil, nil)
-        sqlite3_exec(db, "INSERT INTO notes (body) VALUES ('alpha'), ('beta'), ('gamma')", nil, nil, nil)
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        defer { sqlite3_close(database) }
+        sqlite3_exec(
+            database,
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL)",
+            nil,
+            nil,
+            nil
+        )
+        sqlite3_exec(database, "INSERT INTO notes (body) VALUES ('alpha'), ('beta'), ('gamma')", nil, nil, nil)
     }
 
     override func tearDownWithError() throws {
@@ -338,11 +344,11 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
     }
 
     func testTriggerRowsAreNotCounted() {
-        var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
-        defer { sqlite3_close(db) }
-        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE audit(n)", nil, nil, nil), SQLITE_OK)
-        XCTAssertEqual(sqlite3_exec(db, """
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        defer { sqlite3_close(database) }
+        XCTAssertEqual(sqlite3_exec(database, "CREATE TABLE audit(n)", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, """
         CREATE TRIGGER notes_audit AFTER INSERT ON notes BEGIN INSERT INTO audit(n) VALUES (NEW.id); END
         """, nil, nil, nil), SQLITE_OK)
         let result = driver.executeSQL(

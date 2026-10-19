@@ -4,6 +4,7 @@
 import "./runtime/bunRuntimeGuard";
 import "./daemon/processEntry";
 import "./daemon/bootAdmissionWiring";
+import "./daemon/ctrlProxyManagerHostWiring";
 import "./runtime/reflectMetadata";
 import { ENV, readEnvRaw } from "./config/env";
 import { errorMessage } from "./utils/describeUnknownError";

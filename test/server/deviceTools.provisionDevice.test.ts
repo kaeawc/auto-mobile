@@ -52,7 +52,6 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -4380,7 +4379,7 @@ describe("provisionDevice handler", () => {
       });
       const provisioned = provisionedTestDevice("android", kind === "created-deadline");
       deviceManager.setDeviceImages("android", [provisioned.device]);
-      deviceManager.setMockChildProcess(provisioned.device.name, child as unknown as ChildProcess);
+      deviceManager.setMockChildProcess(provisioned.device.name, child);
       exactProvisioner.provision = async () => provisioned;
       setDeviceToolsDependencies({
         timer,

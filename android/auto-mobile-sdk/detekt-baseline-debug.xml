@@ -83,6 +83,7 @@
     <ID>TooGenericExceptionCaught:EventBatchReplay.kt:EventBatchReplay$error: Exception</ID>
     <ID>TooGenericExceptionCaught:EventBatchReplay.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:EventPersistence.kt:FileEventPersistence$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:KeystoreBackend.kt:AndroidDeviceLockProbe$error: Exception</ID>
     <ID>TooGenericExceptionCaught:KeystoreStateHandler.kt:KeystoreStateHandler$error: Exception</ID>
     <ID>TooGenericExceptionCaught:Navigation3Adapter.kt:Navigation3Adapter$e: Exception</ID>
     <ID>TooGenericExceptionCaught:NetworkMockRuleStore.kt:NetworkMockRuleStore$e: Exception</ID>

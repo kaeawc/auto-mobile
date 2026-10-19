@@ -22,7 +22,7 @@
 2339	src/daemon/sessionDeviceStateRestore.ts
 9809	src/daemon/sessionManager.ts
 5800	src/daemon/socketServer.ts
-1805	src/daemon/videoStreamSocketServer.ts
+1180	src/daemon/videoStreamSocketServer.ts
 1145	src/db/deviceSessionRepository.ts
 1082	src/db/failureAnalyticsRepository.ts
 1401	src/db/navigationRetention.ts

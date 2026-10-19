@@ -5,8 +5,7 @@
  * `envDaemon.ts`, `envMedia.ts` and `envDevices.ts`, ambient ones below), with its legacy
  * spelling, kind, default and a one-line description, and read through
  * {@link readEnvTrimmed}. Readers take an injected `env` so tests never mutate
- * `process.env`. Unmigrated raw reads are listed in
- * `test/lint/env-registry-baseline.txt`, which may only shrink.
+ * `process.env`. `test/lint/envRegistry.test.ts` fails on any unregistered read.
  */
 
 import { DAEMON_ENV } from "./envDaemon";

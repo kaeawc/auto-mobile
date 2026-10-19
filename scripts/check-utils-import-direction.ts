@@ -1,10 +1,9 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src/utils";
-const BASELINE = "scripts/utils-import-direction-baseline.txt";
 const ALLOWED_TIERS = new Set(["utils", "devices", "ctrlProxy", "models", "constants", "config"]);
 
 interface Violation {
@@ -13,7 +12,7 @@ interface Violation {
 }
 
 // `sourceFiles` and `relative` yield OS separators (backslashes on Windows), but
-// the committed baseline uses forward slashes; normalize both edge paths to match.
+// edges are reported with forward slashes; normalize both edge paths to match.
 export function toPosixPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\r/g, "");
 }
@@ -99,30 +98,12 @@ if (import.meta.main) {
       .flatMap(findViolations)
       .map(({ file, target }) => `${toPosixPath(file)} -> ${toPosixPath(target)}`),
   );
-  const baseline = new Set(readFileSync(BASELINE, "utf8").split(/\r?\n/).filter(Boolean));
-  const newEdges = [...edges].filter((edge) => !baseline.has(edge)).sort();
-
-  if (
-    newEdges.length > 0 &&
-    !(process.argv.includes("--update") && process.argv.includes("--allow-grow"))
-  ) {
-    console.error("error: new utils import direction violations:");
-    for (const edge of newEdges) {
+  if (edges.size > 0) {
+    console.error("error: utils import direction violations:");
+    for (const edge of [...edges].sort()) {
       console.error(edge);
     }
     process.exit(1);
   }
-
-  if (process.argv.includes("--update")) {
-    writeFileSync(
-      BASELINE,
-      [...edges]
-        .sort()
-        .map((edge) => `${edge}\n`)
-        .join(""),
-    );
-    console.log(`utils-import-direction: updated baseline (${edges.size} edges).`);
-  } else {
-    console.log(`utils-import-direction: no new upward imports (${edges.size} existing edges).`);
-  }
+  console.log("utils-import-direction: no upward imports.");
 }

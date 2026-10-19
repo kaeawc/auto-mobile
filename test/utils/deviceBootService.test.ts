@@ -32,7 +32,7 @@ import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { stableStringify } from "../../src/utils/stableStringify";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,

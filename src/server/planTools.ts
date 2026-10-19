@@ -3,7 +3,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
+import { DEVICE_LABEL_DESCRIPTION } from "../utils/schemaHelpers";
 import { registerDeviceGestureRecordingTools } from "./deviceGestureRecordingTools";
 import { registerToolCallRecordingTools } from "./toolCallRecordingTools";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";

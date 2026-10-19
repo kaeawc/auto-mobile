@@ -6,9 +6,9 @@ import {
   networkConditionProfileSchema,
   DEVICE_STATE_READABLE_FIELDS,
 } from "../features/utility/DeviceState";
-import { platformSchema } from "./toolSchemaHelpers";
+import { platformSchema } from "../utils/schemaHelpers";
 import { z } from "zod/v4";
-import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
+import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "../utils/schemaHelpers";
 
 const displayInventoryUnavailableSchema = z.object({
   pin: z.string().optional(),

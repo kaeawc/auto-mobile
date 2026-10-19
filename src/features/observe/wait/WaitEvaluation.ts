@@ -29,7 +29,7 @@ import { throwIfAborted, awaitWhileRequestIsLive } from "../../../utils/toolUtil
 import {
   isDeviceLostError,
   throwDeviceLostFromAbortSignal,
-} from "../../../server/deviceLossOutcome";
+} from "../../../utils/deviceLossOutcome";
 import { BootedDevice, Element, ObserveResult } from "../../../models";
 import { createGlobalPerformanceTracker } from "../../../utils/PerformanceTracker";
 import {

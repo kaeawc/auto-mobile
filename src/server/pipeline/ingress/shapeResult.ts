@@ -14,7 +14,7 @@ import {
   enrichDeviceLossOutcome,
   remainingDeviceLossIncidentWaitMs,
   type DeviceLossOutcome,
-} from "../../deviceLossOutcome";
+} from "../../../utils/deviceLossOutcome";
 import {
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,

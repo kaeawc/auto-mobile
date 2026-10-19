@@ -51,7 +51,7 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { SessionManager } from "../daemon/sessionManager";

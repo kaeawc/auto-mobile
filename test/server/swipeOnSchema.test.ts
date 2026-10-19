@@ -6,7 +6,7 @@ import {
   swipeOnSchema,
   swipeOnHandler,
 } from "../../src/server/interactionTools";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 
 const interactionDeps: InteractionToolDependencies = {};
 const scope = { elementId: "list", container: { text: "Panel", index: 0 } };

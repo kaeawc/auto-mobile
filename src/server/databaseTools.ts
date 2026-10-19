@@ -2,7 +2,7 @@ import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
 import { iosSqlErrorMessage } from "./storageSdkErrors";

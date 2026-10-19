@@ -4,8 +4,11 @@ import { SetUIState, type LiveDeadlineSubscriber } from "../features/action/SetU
 import { BootedDevice } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { elementIdTextFieldsSchema, validateElementIdTextSelector } from "./elementSelectorSchemas";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
+import {
+  elementIdTextFieldsSchema,
+  validateElementIdTextSelector,
+} from "../models/elementSelectorSchemas";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../daemon/constants";
 import { resolveTransportDeadlineMs } from "./transportDeadline";
 import { getLiveDeadlineMs, subscribeLiveDeadline } from "../daemon/liveDeadlineRegistry";

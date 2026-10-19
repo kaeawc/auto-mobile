@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
-import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError, rememberDeviceLossAbort } from "../../src/utils/deviceLossOutcome";
 
 describe("throwIfAborted", () => {
   test("throws the cancellation error when the signal is already aborted", () => {

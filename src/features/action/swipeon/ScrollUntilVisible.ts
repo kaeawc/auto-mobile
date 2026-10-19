@@ -35,7 +35,7 @@ import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { resolveScrollableSwipeTarget } from "./scrollableAncestor";
-import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";

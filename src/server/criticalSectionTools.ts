@@ -15,8 +15,8 @@ import {
   PlanStepError as CriticalSectionStepError,
 } from "../utils/plan/PlanStepExecutor";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { isDeviceLostError } from "./deviceLossOutcome";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
+import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import type { PlanStep } from "../models/Plan";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 

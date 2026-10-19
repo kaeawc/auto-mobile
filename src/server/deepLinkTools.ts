@@ -5,7 +5,7 @@ import { BootedDevice, DeepLinkResult, toActionableError } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { getDeepLinksResultSchema } from "./deepLinkToolOutputSchemas";
 import { logger } from "../utils/logger";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 
 // Schema definitions for tool arguments
 export const getDeepLinksSchema = withAppIdAliases(

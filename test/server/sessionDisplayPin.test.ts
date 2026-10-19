@@ -13,7 +13,7 @@ import { withStaleDisplay } from "../../src/features/observe/StaleDisplayError";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { z } from "zod/v4";
 import { ToolRegistryClass, ToolRegistry } from "../../src/server/toolRegistry";
-import { withPostFlattenJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { withPostFlattenJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import { registerUtilityTools, setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";

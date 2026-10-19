@@ -7,7 +7,7 @@ import {
   provisionedDeviceSchema,
   configuredImageSchema,
 } from "./deviceDescription";
-import { platformSchema, addSessionUuidToSchema } from "./toolSchemaHelpers";
+import { platformSchema, addSessionUuidToSchema } from "../utils/schemaHelpers";
 import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createProvisionDeviceHandlers } from "./deviceToolsProvisioning";

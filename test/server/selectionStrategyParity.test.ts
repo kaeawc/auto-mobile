@@ -8,7 +8,7 @@ import {
   nestedElementContainerSchema,
   resolverSelectorSchema,
   resolverSelectionStrategySchema,
-} from "../../src/server/elementSelectorSchemas";
+} from "../../src/models/elementSelectorSchemas";
 import { highlightSchema, registerHighlightTools } from "../../src/server/highlightTools";
 import {
   dragAndDropSchema,

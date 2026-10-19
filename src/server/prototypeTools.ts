@@ -34,7 +34,7 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../utils/AbortContext";
 import type { ProgressCallback } from "./toolRegistry";
 import { ToolRegistry } from "./toolRegistry";
-import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../utils/schemaHelpers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";

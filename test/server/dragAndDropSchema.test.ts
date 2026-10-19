@@ -6,7 +6,7 @@ import {
   dragAndDropHandler,
   registerInteractionTools,
 } from "../../src/server/interactionTools";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { DragAndDropOptions } from "../../src/models";
 import { warmedTests } from "../helpers/warmedTests";

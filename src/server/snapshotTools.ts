@@ -5,7 +5,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice } from "../models";
 import { deviceSnapshotResultSchema } from "./deviceSnapshotToolOutputSchemas";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "./deviceSnapshotManager";
 
 /** Per-call VM snapshot budget: at most 30 minutes, safely below the timer overflow ceiling. */

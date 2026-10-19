@@ -73,7 +73,7 @@ test("full action observation advertises the optional freshness reason fields", 
   expect(JSON.stringify(freshness)).toContain("unavailableReason");
   expect(JSON.stringify(freshness)).toContain("unavailableDetail");
 });
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import { schemaProperty, schemaPropertyDescription } from "../helpers/toolResponse";
 
 test("crop raster description documents upright output without changing full screenshot metadata", () => {

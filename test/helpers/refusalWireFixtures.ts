@@ -140,7 +140,7 @@ import {
 import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
+import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
 import { logger } from "../../src/utils/logger";
 
 /** How a runner reacts to a refusal; the vocabulary of `expectations.json`. */

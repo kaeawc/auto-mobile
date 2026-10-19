@@ -14,7 +14,7 @@ import {
   skeletonElementSchema,
   viewHierarchyNodeSchema,
 } from "../../src/server/toolOutputSchemas";
-import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+import { applyJsonSchemaOverride } from "../../src/utils/schemaHelpers";
 import {
   advertiseBoundsForCompact,
   BOUNDS_UNION_DESCRIPTION_PREFIX,

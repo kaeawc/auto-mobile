@@ -11,7 +11,7 @@ import type { BootedDevice } from "../../src/models";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import {
   runWithToolSelectionContext,

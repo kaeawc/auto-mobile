@@ -11,7 +11,7 @@ import {
   AdbClient,
   AdbCommandTimeoutError,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../../src/utils/deviceLossOutcome";
 
 type RequestSetText = (
   text: string,

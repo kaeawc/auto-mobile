@@ -25,7 +25,7 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { snapshotOfResultSchema } from "./snapshotOfToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 const finite = z.number().finite();
 const rectangleSchema = z

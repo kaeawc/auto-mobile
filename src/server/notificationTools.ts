@@ -13,7 +13,7 @@ import {
   platformSchema,
   withAppIdAliases,
   withJsonSchemaOverride,
-} from "./toolSchemaHelpers";
+} from "../utils/schemaHelpers";
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   PostNotification,

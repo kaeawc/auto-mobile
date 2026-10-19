@@ -39,7 +39,7 @@ import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { createExecResult } from "../../../src/utils/execResult";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
-import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../../src/utils/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
 import { logger } from "../../../src/utils/logger";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";

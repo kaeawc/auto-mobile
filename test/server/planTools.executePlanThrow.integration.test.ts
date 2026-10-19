@@ -4,7 +4,7 @@ import * as planUtils from "../../src/server/planExecutorFactory";
 import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 isolateToolRegistry();

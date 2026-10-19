@@ -1,4 +1,4 @@
-import type { ResolverSelector } from "../../src/server/elementSelectorSchemas";
+import type { ResolverSelector } from "../../src/models/elementSelectorSchemas";
 import type {
   ElementResolver,
   ElementResolution,

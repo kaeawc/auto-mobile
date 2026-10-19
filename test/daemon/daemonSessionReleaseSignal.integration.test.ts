@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -101,7 +102,7 @@ describe("Daemon session-release signal wiring", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: leaseMs,
       });
-      sessionManager.recordHeartbeat("heartbeat-expired");
+      await deliverDaemonHeartbeat(sessionManager, "heartbeat-expired");
       internals.startHeartbeatMonitor();
 
       await timer.advanceTimeAsync(leaseMs + SUSPECT_GRACE_MS - 1);

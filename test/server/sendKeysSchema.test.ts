@@ -3,10 +3,10 @@ import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
   type InteractionToolDependencies,
-  assertSendKeysRunnerCompatible,
   registerInteractionTools,
   sendKeysSchema,
 } from "../../src/server/interactionTools";
+import { assertSendKeysRunnerCompatible } from "../../src/server/interactionToolHandlers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { SendKeys } from "../../src/features/action/SendKeys";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";

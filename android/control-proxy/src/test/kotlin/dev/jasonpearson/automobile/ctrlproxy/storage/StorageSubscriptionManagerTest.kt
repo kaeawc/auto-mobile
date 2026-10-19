@@ -18,10 +18,11 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit.SECONDS
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -50,6 +51,8 @@ import org.robolectric.shadows.ShadowContentResolver
 @RunWith(RobolectricTestRunner::class)
 class StorageSubscriptionManagerTest {
 
+  private val workerDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+
   private companion object {
     const val LATCH_CEILING_SECONDS = 30L
     const val JOIN_CEILING_MS = 30_000L
@@ -76,6 +79,7 @@ class StorageSubscriptionManagerTest {
     manager.destroy()
     scope.testScheduler.advanceUntilIdle()
     scope.cancel()
+    workerDispatcher.close()
   }
 
   @Test
@@ -1344,7 +1348,7 @@ class StorageSubscriptionManagerTest {
       )
       provider.attachInfo(app, null)
       manager.destroy()
-      manager = StorageSubscriptionManager(app, Dispatchers.IO, this)
+      manager = StorageSubscriptionManager(app, workerDispatcher, this)
       assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
       assertEquals(Looper.getMainLooper(), Looper.myLooper())
       val event = async { manager.changeEvents.first() }
@@ -1373,7 +1377,7 @@ class StorageSubscriptionManagerTest {
       provider.attachInfo(app, null)
       val owner = TestScope(dispatcher)
       manager.destroy()
-      manager = StorageSubscriptionManager(app, Dispatchers.IO, owner)
+      manager = StorageSubscriptionManager(app, workerDispatcher, owner)
       assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
       owner.cancel()
 

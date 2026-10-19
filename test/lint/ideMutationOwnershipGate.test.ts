@@ -53,7 +53,12 @@ describe("mutating ide/* routes reach the device ownership gate (#10827)", () =>
 
   beforeAll(() => {
     methods = new Map();
-    for (const relative of ["socketServer.ts", "socketServer/ideDeviceRoutes.ts"]) {
+    for (const relative of [
+      "socketServer.ts",
+      "socketServer/ideDeviceRoutes.ts",
+      "socketServer/inputDeviceGating.ts",
+      "socketServer/inputStrokes.ts",
+    ]) {
       const file = join(import.meta.dir, "..", "..", "src", "daemon", relative);
       for (const [name, calls] of thisCallsByMethod(file, readFileSync(file, "utf8"))) {
         methods.set(name, calls);

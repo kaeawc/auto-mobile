@@ -110,46 +110,44 @@ private fun isHoverAction(actionMasked: Int): Boolean =
     actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
     actionMasked == MotionEvent.ACTION_HOVER_EXIT
 
+/**
+ * The probe's event log: a running total and the newest [POINTER_PROBE_MAX_EVENTS] lines.
+ *
+ * Hover can reach both the View and the Compose fallback; each MotionEvent is logged once. The two
+ * copies differ in coordinate space, so they are matched by device, action and event time.
+ */
+private class PointerProbeLog {
+  val events = mutableStateListOf<String>()
+  var totalCount by mutableIntStateOf(0)
+    private set
+
+  private var lastHover: Triple<Int, Int, Long>? = null
+
+  fun record(probeEvent: ProbeEvent) {
+    if (isHoverAction(probeEvent.action and MotionEvent.ACTION_MASK)) {
+      val key = Triple(probeEvent.deviceId, probeEvent.action, probeEvent.eventTimeMs)
+      if (key == lastHover) return
+      lastHover = key
+    }
+    totalCount += 1
+    events.add(0, PointerProbeFormatter.format(totalCount, probeEvent))
+    while (events.size > POINTER_PROBE_MAX_EVENTS) {
+      events.removeAt(events.size - 1)
+    }
+  }
+
+  fun clear() {
+    events.clear()
+    totalCount = 0
+  }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PointerProbeScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.pointer.probe", composableName = "PointerProbeScreen") {
-    val events = remember { mutableStateListOf<String>() }
-    var totalCount by remember { mutableIntStateOf(0) }
-    // Hover can reach both the View and the Compose fallback; log each MotionEvent once. The two
-    // copies differ in coordinate space, so they are matched by device, action and event time.
-    val lastHover = remember { arrayOfNulls<Triple<Int, Int, Long>>(1) }
-    val recordEvent: (ProbeEvent) -> Unit = recordEvent@{ probeEvent ->
-      if (isHoverAction(probeEvent.action and MotionEvent.ACTION_MASK)) {
-        val key = Triple(probeEvent.deviceId, probeEvent.action, probeEvent.eventTimeMs)
-        if (key == lastHover[0]) return@recordEvent
-        lastHover[0] = key
-      }
-      totalCount += 1
-      events.add(0, PointerProbeFormatter.format(totalCount, probeEvent))
-      while (events.size > POINTER_PROBE_MAX_EVENTS) {
-        events.removeAt(events.size - 1)
-      }
-    }
-
-    Scaffold(
-      topBar = {
-        AutoMobileTopAppBar(
-          title = { Text(text = "Pointer Probe") },
-          navigationIcon = {
-            IconButton(
-              onClick = onNavigateBack,
-              modifier = Modifier.semantics { testTag = "pointer_probe_back" },
-            ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-              )
-            }
-          },
-        )
-      },
-    ) { paddingValues ->
+    val log = remember { PointerProbeLog() }
+    Scaffold(topBar = { PointerProbeTopBar(onNavigateBack) }) { paddingValues ->
       Column(
         modifier =
           Modifier.fillMaxSize().padding(paddingValues).padding(16.dp).semantics {
@@ -161,65 +159,82 @@ fun PointerProbeScreen(onNavigateBack: () -> Unit) {
           text = "Touch, hover or draw on the gray surface below. Newest events are listed first.",
           style = MaterialTheme.typography.bodyMedium,
         )
-
         Text(
-          text = "Events: $totalCount",
+          text = "Events: ${log.totalCount}",
           style = MaterialTheme.typography.titleMedium,
           modifier = Modifier.semantics { testTag = "pointer_probe_count" },
         )
-
         AutoMobileContentButton(
-          onClick = {
-            events.clear()
-            totalCount = 0
-          },
+          onClick = log::clear,
           modifier = Modifier.fillMaxWidth().semantics { testTag = "pointer_probe_clear" },
         ) {
           Text("Clear")
         }
-
-        Column(
-          modifier =
-            Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).semantics {
-              testTag = "pointer_probe_log"
-            },
-          verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-          events.forEachIndexed { index, line ->
-            Text(
-              text = line,
-              style = MaterialTheme.typography.bodySmall,
-              modifier = Modifier.semantics { testTag = "pointer_probe_event_$index" },
-            )
-          }
-        }
-
-        AndroidView(
-          modifier =
-            Modifier.fillMaxWidth()
-              .height(160.dp)
-              .pointerInput(Unit) {
-                // Fallback: the Compose host may not forward hover to the interop View.
-                awaitPointerEventScope {
-                  while (true) {
-                    val pointerEvent = awaitPointerEvent()
-                    val type = pointerEvent.type
-                    if (
-                      type == PointerEventType.Enter ||
-                        type == PointerEventType.Move ||
-                        type == PointerEventType.Exit
-                    ) {
-                      pointerEvent.motionEvent
-                        ?.takeIf { isHoverAction(it.actionMasked) }
-                        ?.let { recordEvent(probeEventOf("compose-hover", it)) }
-                    }
-                  }
-                }
-              }
-              .semantics { testTag = "pointer_probe_surface" },
-          factory = { context -> PointerProbeView(context) { recordEvent(it) } },
-        )
+        PointerProbeEventList(log.events, Modifier.fillMaxWidth().weight(1f))
+        PointerProbeSurface(onProbeEvent = log::record)
       }
     }
   }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PointerProbeTopBar(onNavigateBack: () -> Unit) {
+  AutoMobileTopAppBar(
+    title = { Text(text = "Pointer Probe") },
+    navigationIcon = {
+      IconButton(
+        onClick = onNavigateBack,
+        modifier = Modifier.semantics { testTag = "pointer_probe_back" },
+      ) {
+        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+      }
+    },
+  )
+}
+
+@Composable
+private fun PointerProbeEventList(events: List<String>, modifier: Modifier) {
+  Column(
+    modifier =
+      modifier.verticalScroll(rememberScrollState()).semantics { testTag = "pointer_probe_log" },
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    events.forEachIndexed { index, line ->
+      Text(
+        text = line,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.semantics { testTag = "pointer_probe_event_$index" },
+      )
+    }
+  }
+}
+
+@Composable
+private fun PointerProbeSurface(onProbeEvent: (ProbeEvent) -> Unit) {
+  AndroidView(
+    modifier =
+      Modifier.fillMaxWidth()
+        .height(160.dp)
+        .pointerInput(Unit) {
+          // Fallback: the Compose host may not forward hover to the interop View.
+          awaitPointerEventScope {
+            while (true) {
+              val pointerEvent = awaitPointerEvent()
+              val type = pointerEvent.type
+              if (
+                type == PointerEventType.Enter ||
+                  type == PointerEventType.Move ||
+                  type == PointerEventType.Exit
+              ) {
+                pointerEvent.motionEvent
+                  ?.takeIf { isHoverAction(it.actionMasked) }
+                  ?.let { onProbeEvent(probeEventOf("compose-hover", it)) }
+              }
+            }
+          }
+        }
+        .semantics { testTag = "pointer_probe_surface" },
+    factory = { context -> PointerProbeView(context) { onProbeEvent(it) } },
+  )
 }

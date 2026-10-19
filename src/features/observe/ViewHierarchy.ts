@@ -453,7 +453,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // it so ObserveScreen can report freshness instead of assuming it.
       return Object.assign(
         this.normalizeIosHierarchy(
-          result.hierarchy,
+          xcTestClient.convertToViewHierarchyResult(result.hierarchy),
           result.updatedAt,
           result.reconnectStatus,
           result.frameContext,
@@ -473,10 +473,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   /**
-   * Convert XCTestHierarchy to ViewHierarchyResult format
+   * Normalize an iOS hierarchy that was already converted from the runner's XCTestHierarchy.
    */
   normalizeIosHierarchy(
-    hierarchy: any,
+    hierarchy: ViewHierarchyResult,
     updatedAt?: number,
     ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
     frameContext?: string,

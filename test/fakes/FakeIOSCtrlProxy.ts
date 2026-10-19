@@ -1,4 +1,5 @@
 import { IOSCtrlProxy } from "../../src/features/observe/ios";
+import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
@@ -774,17 +775,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
-    return {
-      hierarchy: {
-        node: {
-          $: {
-            text: "Fake Hierarchy",
-          },
-        },
-      },
-      packageName: hierarchy.packageName,
-      updatedAt: hierarchy.updatedAt,
-    };
+    return convertIosHierarchy(hierarchy);
   }
 
   readonly doubleTapHistory: Array<{ x: number; y: number }> = [];

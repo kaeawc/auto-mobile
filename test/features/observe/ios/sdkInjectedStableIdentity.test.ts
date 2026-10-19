@@ -1,3 +1,4 @@
+import { convertIosHierarchy } from "../../../helpers/iosHierarchyConverter";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { assignStableViewIds } from "../../../../src/features/observe/android/StableNodeIdentity";
@@ -125,7 +126,7 @@ beforeAll(() => {
 describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () => {
   test("normalization keeps one Forms & Input id across both real captures", () => {
     const ids = [injected, notInjected].map((root) =>
-      normalizedFormsId(normalizeIosHierarchy(runnerHierarchy(root))),
+      normalizedFormsId(normalizeIosHierarchy(convertIosHierarchy(runnerHierarchy(root)))),
     );
     expect(ids).toEqual(["s2-792852e3b847bb51", "s2-792852e3b847bb51"]);
   });
@@ -133,10 +134,12 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
   test("normalization also excludes SDK children in raw XCUITest windows", () => {
     const ids = [injected, notInjected].map((root) => {
       const source = runnerHierarchy(root);
-      const result = normalizeIosHierarchy({
-        ...source,
-        windows: [{ windowLayer: 2, hierarchy: structuredClone(source.hierarchy) }],
-      });
+      const result = normalizeIosHierarchy(
+        convertIosHierarchy({
+          ...source,
+          windows: [{ windowLayer: 2, hierarchy: structuredClone(source.hierarchy) }],
+        }),
+      );
       const window = result.windows?.[0];
       if (!window?.hierarchy) {
         throw new Error("Normalized capture has no window hierarchy");
@@ -173,7 +176,7 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
     "observe and convert-then-normalize action ids agree for the %s capture",
     (suffix) => {
       const root = suffix === "injected" ? injected : notInjected;
-      const observed = normalizeIosHierarchy(runnerHierarchy(root));
+      const observed = normalizeIosHierarchy(convertIosHierarchy(runnerHierarchy(root)));
       const action = normalizeIosHierarchy(
         converter().convertToViewHierarchyResult(runnerHierarchy(root)),
       );

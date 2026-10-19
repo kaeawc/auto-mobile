@@ -1,3 +1,4 @@
+import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -474,6 +475,7 @@ describe("observation display stamp", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const fakeClient = {
+      convertToViewHierarchyResult: convertIosHierarchy,
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
     };
     const getInstance = spyOnIosClientInstance(fakeClient);

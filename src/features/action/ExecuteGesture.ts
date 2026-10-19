@@ -620,20 +620,17 @@ export class ExecuteGesture extends BaseVisualChange {
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
     fence?.assertCurrent();
-    const result = await client.requestMultiFingerSwipe(
-      swipe.start.x,
-      swipe.start.y,
-      swipe.end.x,
-      swipe.end.y,
-      swipe.fingerCount,
+    const result = await client.requestMultiFingerSwipe({
+      x1: swipe.start.x,
+      y1: swipe.start.y,
+      x2: swipe.end.x,
+      y2: swipe.end.y,
+      fingerCount: swipe.fingerCount,
       duration,
-      undefined,
-      undefined,
-      swipe.fingerSpacing,
+      fingerSpacing: swipe.fingerSpacing,
       signal,
-      undefined,
-      () => fence?.assertCurrent(),
-    );
+      beforeSend: () => fence?.assertCurrent(),
+    });
     this.throwIfIosGestureUnconfirmed(result);
     throwIfAborted(signal);
     if (!result.success) {

@@ -358,7 +358,7 @@ interface TraversalResult extends DeviceOperationResult {
  * platform-specific result shapes.
  */
 
-/** Options form of `getAccessibilityHierarchy`, replacing its positional tail. */
+/** Options for `getAccessibilityHierarchy`. */
 export interface AccessibilityHierarchyRequest {
   perf?: PerformanceTracker;
   skipWaitForFresh?: boolean;
@@ -375,14 +375,6 @@ export interface CtrlProxyClient extends DeviceService {
   getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
     request?: AccessibilityHierarchyRequest,
-  ): Promise<ViewHierarchyResult | null>;
-  /** @deprecated Pass an {@link AccessibilityHierarchyRequest} instead of positional arguments. */
-  getAccessibilityHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null>;
 
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;

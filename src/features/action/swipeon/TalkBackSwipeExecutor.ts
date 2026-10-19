@@ -415,13 +415,11 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     const targetError = await nodeActionTargetError(selector, {
       supportsNodeActionSelectors: () => this.accessibilityService.supportsNodeActionSelectors(),
       getAccessibilityHierarchy: () =>
-        this.accessibilityService.getAccessibilityHierarchy(
-          undefined,
+        this.accessibilityService.getAccessibilityHierarchy(undefined, {
           perf,
-          false,
-          undefined,
-          true,
-        ),
+          skipWaitForFresh: false,
+          disableAllFiltering: true,
+        }),
     });
     if (targetError) {
       logger.info(`[SwipeOn] ${targetError}`);

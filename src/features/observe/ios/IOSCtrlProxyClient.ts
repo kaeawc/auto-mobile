@@ -40,6 +40,7 @@ import {
   ScreenScaleMetadata,
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
+import type { MultiFingerSwipeRequest } from "../../../utils/interfaces/MultiFingerSwipeRequest";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
@@ -599,18 +600,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxyActionResult>;
 
   requestMultiFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    fingerCount: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    fingerSpacing?: number,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-    beforeSend?: () => void,
+    request: MultiFingerSwipeRequest,
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   clearCache(): void;

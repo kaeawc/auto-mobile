@@ -120,7 +120,11 @@ export async function deviceLikeAndroidHierarchy(
         ...args,
       );
       if (result) {
-        reads.push({ floor: args[3] ?? 0, fresh: result.fresh, updatedAt: result.updatedAt });
+        reads.push({
+          floor: args[1]?.minTimestamp ?? 0,
+          fresh: result.fresh,
+          updatedAt: result.updatedAt,
+        });
       }
       return result;
     },

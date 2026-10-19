@@ -6,20 +6,17 @@ const swipe = (
   h: ReturnType<typeof createIosDelegateHarness>,
   beforeSend: (() => void) | undefined,
 ) =>
-  new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
-    1,
-    2,
-    3,
-    4,
-    2,
-    300,
-    50,
-    undefined,
-    10,
-    undefined,
-    undefined,
+  new CtrlProxyGestures(h.context).requestMultiFingerSwipe({
+    x1: 1,
+    y1: 2,
+    x2: 3,
+    y2: 4,
+    fingerCount: 2,
+    duration: 300,
+    timeoutMs: 50,
+    fingerSpacing: 10,
     beforeSend,
-  );
+  });
 
 describe("iOS requestMultiFingerSwipe beforeSend fence", () => {
   test("a throwing fence is reported as an undispatched failure with nothing sent", async () => {

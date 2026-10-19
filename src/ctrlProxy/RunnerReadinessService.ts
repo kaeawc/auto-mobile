@@ -20,6 +20,7 @@ import {
   type DeviceReadinessLockRelease,
 } from "../utils/deviceReadinessLock";
 import type { PerformanceTracker } from "../utils/PerformanceTracker";
+import type { AccessibilityHierarchyRequest } from "../utils/interfaces/DeviceService";
 import type { ProxySetupResult } from "../utils/interfaces/ProxyManager";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { ambientPerfFor, runWithPerfTracker, trackAmbient } from "../utils/PerfContext";
@@ -205,12 +206,10 @@ export interface ReadinessClient {
   resetConnectionBudget?(): void;
   getAccessibilityHierarchy?(
     queryOptions?: undefined,
-    perf?: undefined,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    request?: Pick<
+      AccessibilityHierarchyRequest,
+      "skipWaitForFresh" | "minTimestamp" | "disableAllFiltering" | "signal" | "timeoutMs"
+    >,
   ): Promise<ViewHierarchyResult | null>;
   requestTapCoordinates?(
     x: number,
@@ -660,15 +659,13 @@ export class RunnerReadinessService {
         "runner-health",
         1,
         async (signal) =>
-          await client.getAccessibilityHierarchy(
-            undefined,
-            undefined,
-            true,
+          await client.getAccessibilityHierarchy(undefined, {
+            skipWaitForFresh: true,
             minTimestamp,
-            true,
+            disableAllFiltering: true,
             signal,
             timeoutMs,
-          ),
+          }),
       );
       // The production client can fall back to a cached tree when both its
       // fresh-data wait and synchronous request fail. A required read must not

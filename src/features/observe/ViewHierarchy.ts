@@ -526,15 +526,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
     try {
       const accessibilityHierarchy =
-        await this.accessibilityServiceClient.getAccessibilityHierarchy(
-          queryOptions,
+        await this.accessibilityServiceClient.getAccessibilityHierarchy(queryOptions, {
           perf,
           skipWaitForFresh,
           minTimestamp,
-          useRawElementSearch,
+          disableAllFiltering: useRawElementSearch,
           signal,
-          readOptions,
-        );
+          ...(typeof readOptions === "object" ? readOptions : { timeoutMs }),
+        });
 
       if (accessibilityHierarchy) {
         perf.end();

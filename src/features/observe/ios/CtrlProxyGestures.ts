@@ -15,6 +15,7 @@ import {
 import type { CtrlProxyTapResult, DelegateContext } from "./types";
 import type { GestureTimingResult } from "../shared/types";
 import type { SendCommandOptions } from "../DeviceServiceUtils";
+import type { MultiFingerSwipeRequest } from "../../../utils/interfaces/MultiFingerSwipeRequest";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
 import {
@@ -135,31 +136,16 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   /**
    * Request a simultaneous multi-finger swipe gesture.
    *
-   * @param x1 - Start X coordinate
-   * @param y1 - Start Y coordinate
-   * @param x2 - End X coordinate
-   * @param y2 - End Y coordinate
-   * @param fingerCount - Number of fingers
-   * @param duration - Gesture duration in milliseconds (default: 300)
-   * @param timeoutMs - Request timeout in milliseconds (default: 5000)
-   * @param perf - Optional performance tracker
-   * @param beforeSend - Synchronous display/stale fence run immediately before the socket write
+   * @param request - Start and end coordinates, finger count and optional duration (default 300 ms),
+   *   timeout (default 5000 ms), spacing, abort signal and dispatch/fence hooks
    * @returns Gesture timing result
    */
   async requestMultiFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    fingerCount: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    fingerSpacing?: number,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-    beforeSend?: () => void,
+    request: MultiFingerSwipeRequest,
   ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    const { x1, y1, x2, y2, fingerCount, fingerSpacing, signal, perf, onDispatch, beforeSend } =
+      request;
+    const { duration = 300, timeoutMs = 5000 } = request;
     return sendIOSPressCommand(this.context, {
       idPrefix: "multi_finger_swipe",
       responseType: "multi_finger_swipe_result",

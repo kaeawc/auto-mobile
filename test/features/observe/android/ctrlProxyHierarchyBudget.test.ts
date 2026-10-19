@@ -94,15 +94,12 @@ describe("Android CtrlProxyHierarchy fresh-wait budgeting", () => {
   test("the fresh wait is charged against time already spent on the availability check", async () => {
     h = createHarness(800);
 
-    await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      0,
-      false,
-      undefined,
-      1000,
-    );
+    await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      disableAllFiltering: false,
+      timeoutMs: 1000,
+    });
 
     // 1000ms budget, 800ms already burned: at most 200ms is left for the wait.
     expect(h.observedFreshWait()).toBe(200);
@@ -111,15 +108,12 @@ describe("Android CtrlProxyHierarchy fresh-wait budgeting", () => {
   test("an availability check that overruns the whole budget leaves no fresh wait", async () => {
     h = createHarness(1500);
 
-    await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      0,
-      false,
-      undefined,
-      1000,
-    );
+    await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      disableAllFiltering: false,
+      timeoutMs: 1000,
+    });
 
     expect(h.observedFreshWait()).toBe(0);
   });
@@ -127,15 +121,12 @@ describe("Android CtrlProxyHierarchy fresh-wait budgeting", () => {
   test("a fast availability check still gets the full requested wait", async () => {
     h = createHarness(0);
 
-    await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      0,
-      false,
-      undefined,
-      500,
-    );
+    await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      disableAllFiltering: false,
+      timeoutMs: 500,
+    });
 
     expect(h.observedFreshWait()).toBe(500);
   });
@@ -143,15 +134,11 @@ describe("Android CtrlProxyHierarchy fresh-wait budgeting", () => {
   test("without a caller budget the default fresh wait is unchanged", async () => {
     h = createHarness(800);
 
-    await h.hierarchy.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      0,
-      false,
-      undefined,
-      undefined,
-    );
+    await h.hierarchy.getAccessibilityHierarchy(undefined, {
+      skipWaitForFresh: false,
+      minTimestamp: 0,
+      disableAllFiltering: false,
+    });
 
     expect(h.observedFreshWait()).toBe(DEFAULT_FRESH_WAIT_MS);
   });

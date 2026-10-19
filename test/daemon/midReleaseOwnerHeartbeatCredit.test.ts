@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
@@ -67,7 +68,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
       rootedByUs: true,
     });
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION, { livenessOwnerToken: OWNER });
     await drainMicrotasks(50);
     monitor = new SessionHeartbeatMonitor(
       manager,
@@ -519,10 +520,10 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
     );
     manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     expect(await manager.claimLivenessOwnership(labelId, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(labelId);
+    await deliverDaemonHeartbeat(manager, labelId, { livenessOwnerToken: OWNER });
     await advance(2_000);
     expect((await heartbeat()).success).toBe(true);
-    manager.recordHeartbeat(labelId);
+    await deliverDaemonHeartbeat(manager, labelId, { livenessOwnerToken: OWNER });
     restoreMs = 14_000;
     expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
     const baseRelease = manager.releaseSession(SESSION, REASONS[0]);

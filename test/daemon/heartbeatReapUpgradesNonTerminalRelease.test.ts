@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
@@ -218,7 +219,7 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     );
     await manager.createSession(SESSION, DEVICE, "android");
     expect(await manager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION, { livenessOwnerToken: OWNER });
   });
 
   afterEach(async () => {
@@ -331,7 +332,7 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
     // The same UUID is issued again and its release wedges, much later than the first one began.
     await timer.advanceTimeAsync(STUCK_REAP_WARN_MS / 2, () => drainMicrotasks(20));
     await manager.createSession(SESSION, DEVICE, "android");
-    manager.recordHeartbeat(SESSION);
+    await deliverDaemonHeartbeat(manager, SESSION);
     persistence.parkUpsert = new Promise<void>(() => undefined);
     void manager.rebindSession(SESSION, "emulator-5556", "android").catch(() => undefined);
     await drainMicrotasks(20);

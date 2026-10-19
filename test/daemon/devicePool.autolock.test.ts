@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { makePool } from "../helpers/makePool";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -322,7 +323,7 @@ describe("DevicePool autolock", () => {
 
     // Advance to just before expiry
     timer.advanceTime(4000);
-    sessionManager.recordHeartbeat("autolock-session");
+    await deliverDaemonHeartbeat(sessionManager, "autolock-session");
 
     // Liveness is not use, and the suspect grace never extends idleness.
     timer.advanceTime(2000);
@@ -818,7 +819,7 @@ describe("DevicePool autolock", () => {
 
       // A live owner keeps heartbeating, but makes no tool call.
       timer.advanceTime(59 * 1000);
-      sessionManager.recordHeartbeat(sessionId!);
+      await deliverDaemonHeartbeat(sessionManager, sessionId!);
 
       // Past the idle timeout and the suspect grace a heartbeating session earns.
       timer.advanceTime(30 * 1000);

@@ -9,21 +9,15 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createExecResult } from "../../../src/utils/execResult";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
 import { logger } from "../../../src/utils/logger";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 
 function resetSimctlCaches(): void {
-  const simctlClass = Simctl as unknown as {
-    simulatorBoots: Map<string, unknown>;
-    bootPresentationGenerations: Map<string, string>;
-    simulatorAppPresentations: Map<string, unknown>;
-  };
   Simctl.invalidateDeviceListCache();
-  simctlClass.simulatorBoots.clear();
-  simctlClass.bootPresentationGenerations.clear();
-  simctlClass.simulatorAppPresentations.clear();
+  resetSimCtlSharedStateForTesting();
 }
 
 async function waitForCondition(condition: () => boolean, description: string): Promise<void> {

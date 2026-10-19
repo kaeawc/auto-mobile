@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, BootedDevice } from "../../models";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
@@ -36,18 +37,12 @@ export function createNotificationUIDetector(
           signal,
         );
       },
-      requestTapCoordinates: (x, y) => {
+      requestTapCoordinates: (request: TapCoordinatesRequest) => {
+        const { x, y } = request;
+
         throwIfAborted(signal);
         return awaitWhileRequestIsLive(
-          getIosClient(device, getDependencies).requestTapCoordinates(
-            x,
-            y,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            signal,
-          ),
+          getIosClient(device, getDependencies).requestTapCoordinates({ x, y, signal }),
           signal,
         );
       },

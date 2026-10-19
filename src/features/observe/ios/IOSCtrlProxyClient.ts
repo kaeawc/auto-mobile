@@ -1,3 +1,5 @@
+import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
+import type { IosActivateAccessibilityLinkRequest } from "./CtrlProxyVoiceOver";
 import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
 import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
@@ -393,14 +395,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
 
   requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: TapCoordinatesRequest,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
 
   requestDrag(request: DragRequest): Promise<CtrlProxyDragResult>;
@@ -592,13 +587,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult>;
 
   requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosActivateAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult>;
 
   requestMultiFingerSwipe(
@@ -3748,18 +3737,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegated Public Methods - Gestures
   // ===========================================================================
 
-  // oxlint-disable-next-line max-params -- Positional tap signature shared with the delegate.
   async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: TapCoordinatesRequest,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
-    return this.gestures.requestTapCoordinates(
+    const { x, y, duration, timeoutMs, perf, frameContext, signal, onDispatch } = request;
+
+    return this.gestures.requestTapCoordinates({
       x,
       y,
       duration,
@@ -3768,7 +3751,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       frameContext,
       signal,
       onDispatch,
-    );
+    });
   }
 
   async requestDoubleTapCoordinates(
@@ -4144,18 +4127,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
+
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosActivateAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
-    return this.voiceOver.requestActivateAccessibilityLink(
+    const { text, occurrence, ownerResourceId, timeoutMs, perf, signal, onDispatch } = request;
+
+    return this.voiceOver.requestActivateAccessibilityLink({
       text,
       occurrence,
       ownerResourceId,
@@ -4163,7 +4141,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       perf,
       signal,
       onDispatch,
-    );
+    });
   }
 
   async requestMultiFingerSwipe(

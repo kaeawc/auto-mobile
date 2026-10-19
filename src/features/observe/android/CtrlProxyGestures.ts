@@ -18,6 +18,16 @@ import {
   normalizeCtrlProxyMilliseconds,
 } from "./ctrlProxyProtocol";
 
+export interface GestureStartRequest {
+  gestureId: string;
+  x: number;
+  y: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  displayId?: number;
+  beforeSend?: () => void;
+}
+
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
     // `roundCoordinates: true` centralizes coordinate rounding for Android at the delegate layer
@@ -188,16 +198,18 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * The display fence guards start only; a mid-stream transition does not cancel move/end.
    * The runner continues the accepted gesture on its original display.
    */
-  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
-  async requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+
+  async requestGestureStart(request: GestureStartRequest): Promise<A11ySwipeResult> {
+    const {
+      gestureId,
+      x,
+      y,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      displayId,
+      beforeSend,
+    } = request;
+
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
       responseType: "swipe",

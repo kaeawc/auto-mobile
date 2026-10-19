@@ -168,7 +168,7 @@ test("tapOn first selection filters off-screen duplicate with observation fallba
   expect(result.error).toBeUndefined();
   expect(result.success).toBe(true);
   expect(result.element?.bounds).toEqual({ left: 40, top: 100, right: 140, bottom: 200 });
-  expect(dispatch.mock.calls[0].slice(0, 2)).toEqual([90, 150]);
+  expect(dispatch.mock.calls[0][0]).toMatchObject({ x: 90, y: 150 });
 });
 
 test("tapOn incompatible observation size leaves Android matches unfiltered and taps", async () => {
@@ -190,7 +190,7 @@ test("tapOn incompatible observation size leaves Android matches unfiltered and 
   expect(result.error).toBeUndefined();
   expect(result.success).toBe(true);
   expect(result.element?.bounds).toEqual({ left: 40, top: 2500, right: 140, bottom: 2600 });
-  expect(dispatch.mock.calls[0].slice(0, 2)).toEqual([90, 2550]);
+  expect(dispatch.mock.calls[0][0]).toMatchObject({ x: 90, y: 2550 });
 });
 
 test.each(["TapOnElement", "TapAnyElement", "DragAndDrop", "SetUIState"] as const)(

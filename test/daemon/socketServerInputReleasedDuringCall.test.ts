@@ -74,7 +74,7 @@ describe("input/* cut by a session release (#11381)", () => {
       requestTapCoordinates: (
         ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
       ) => {
-        args[6]?.();
+        args[0].onDispatch?.();
         tapEntered.resolve();
         return tapOutcome.promise;
       },

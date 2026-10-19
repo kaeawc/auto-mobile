@@ -822,7 +822,7 @@ describe("TalkBackTapStrategy", () => {
       "a thrown error after coordinate dispatch is indeterminate: %j",
       async (error) => {
         const tap = spyOn(driver, "requestTapCoordinates").mockImplementation(
-          async (_x, _y, _duration, onDispatch) => {
+          async ({ onDispatch: onDispatch }) => {
             onDispatch?.();
             throw error;
           },

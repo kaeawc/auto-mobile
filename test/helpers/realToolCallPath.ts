@@ -1,3 +1,4 @@
+import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
 import { spyOn } from "bun:test";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
@@ -114,7 +115,7 @@ export class RealToolCallPath {
       requestTapCoordinates: async (
         ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
       ) => {
-        args[6]?.();
+        args[0].onDispatch?.();
         return { success: true };
       },
       setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
@@ -124,7 +125,9 @@ export class RealToolCallPath {
         this.ctrlProxyWrites.push("setPreference");
         return { success: true };
       },
-      requestGestureStart: async (gestureId: string) => {
+      requestGestureStart: async (request: GestureStartRequest) => {
+        const { gestureId } = request;
+
         this.gestureFrames.push(`start:${gestureId}`);
         return { success: true };
       },

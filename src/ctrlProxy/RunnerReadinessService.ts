@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../utils/interfaces/TapCoordinatesRequest";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, DeviceLockState } from "../models";
 import { ActionableError, toActionableError } from "../models";
@@ -212,10 +213,7 @@ export interface ReadinessClient {
     >,
   ): Promise<ViewHierarchyResult | null>;
   requestTapCoordinates?(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
+    request: TapCoordinatesRequest,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
@@ -719,15 +717,15 @@ export class RunnerReadinessService {
         "runner-health",
         1,
         async () =>
-          await client.requestTapCoordinates(
+          await client.requestTapCoordinates({
             x,
             y,
-            10,
-            Math.min(
+            duration: 10,
+            timeoutMs: Math.min(
               this.probeTimeout(context),
               this.remainingSystemUiAnrRecoveryBudget(recoveryDeadlineMs),
             ),
-          ),
+          }),
       );
       if (!tap.success) {
         throw new Error(tap.error ?? "unknown tap failure");

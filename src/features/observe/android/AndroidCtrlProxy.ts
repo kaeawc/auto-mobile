@@ -12,6 +12,8 @@ import type {
 } from "../../../models";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { SetTextOptions } from "../DeviceService";
+import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
+import type { AndroidActivateAccessibilityLinkRequest } from "./AndroidActionDispatcher";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import type { ImeCommitActionResult } from "./CtrlProxyText";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
@@ -151,18 +153,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient, AndroidCtrlProxyClien
 
   requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult>;
 
-  requestTapCoordinates(
-    x: number,
-    y: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult>;
+  requestTapCoordinates(request: TapCoordinatesRequest): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(request: DragRequest): Promise<A11yDragResult>;
 
@@ -264,13 +255,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient, AndroidCtrlProxyClien
   supportsCommand(name: string): Promise<boolean>;
 
   requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult>;
 
   supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;

@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../observe/shared/SharedGestureDelegate";
 import type { TapAtPlanContext } from "../../models/TapAtGeometry";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import {
@@ -215,7 +216,7 @@ function resolveTalkBackDependencies(
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
 export class TapAtCoordinate extends BaseVisualChange {
-  private readonly androidClient: CoordinateTapClient<() => void> & {
+  private readonly androidClient: CoordinateTapClient & {
     supportsCommand?: (name: string) => Promise<boolean>;
   };
   private readonly iosDoubleTap: typeof dispatchIosDoubleTap;
@@ -1053,7 +1054,9 @@ export class TapAtCoordinate extends BaseVisualChange {
       requestAction: driver.requestAction.bind(driver),
       requestNodeAction: driver.requestNodeAction.bind(driver),
       supportsNodeActionSelectors: driver.supportsNodeActionSelectors.bind(driver),
-      requestTapCoordinates: async (x, y, duration, onDispatch) => {
+      requestTapCoordinates: async (request: TapCoordinatesRequest) => {
+        const { x, y, duration = 10, onDispatch } = request;
+
         fence.assertCurrent();
         const reportDispatch = () => {
           context.onDispatched?.();
@@ -1068,7 +1071,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               fence,
               reportDispatch,
             )
-          : await driver.requestTapCoordinates(x, y, duration, reportDispatch);
+          : await driver.requestTapCoordinates({ x, y, duration, onDispatch: reportDispatch });
         if (result.success) {
           context.onTapDelivered();
         }
@@ -1127,20 +1130,18 @@ export class TapAtCoordinate extends BaseVisualChange {
   ): Promise<{ success: boolean; error?: string }> {
     let dispatched = false;
     try {
-      const result = await this.androidClient.requestTapCoordinates(
-        point.x,
-        point.y,
+      const result = await this.androidClient.requestTapCoordinates({
+        x: point.x,
+        y: point.y,
         duration,
-        resolveCoordinateTapCtrlProxyTimeoutMs(duration),
-        undefined,
+        timeoutMs: resolveCoordinateTapCtrlProxyTimeoutMs(duration),
         frameContext,
-        () => {
+        onDispatch: () => {
           dispatched = true;
         },
         signal,
-        undefined,
-        fence.assertCurrent,
-      );
+        beforeSend: fence.assertCurrent,
+      });
       // A stale-frame reply proves the device rejected the focus touch. Preserve
       // tapAt's one safe retry even though the request was sent on the wire.
       if (dispatched && !isStaleFrameContextRejection(result.error)) {
@@ -1171,18 +1172,16 @@ export class TapAtCoordinate extends BaseVisualChange {
       const onDispatch = () => {
         dispatched = true;
       };
-      const result = await this.androidClient.requestTapCoordinates(
-        point.x,
-        point.y,
+      const result = await this.androidClient.requestTapCoordinates({
+        x: point.x,
+        y: point.y,
         duration,
-        resolveCoordinateTapCtrlProxyTimeoutMs(duration),
-        undefined,
-        undefined,
+        timeoutMs: resolveCoordinateTapCtrlProxyTimeoutMs(duration),
         onDispatch,
         signal,
-        displayId === 0 ? undefined : displayId,
-        context.assertCurrent,
-      );
+        displayId: displayId === 0 ? undefined : displayId,
+        beforeSend: context.assertCurrent,
+      });
       if (result.success) {
         context.onTapDelivered();
       }

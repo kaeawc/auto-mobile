@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
@@ -53,12 +54,13 @@ describe("InputText.execute", () => {
   let iosGetInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let savedMarkers: readonly string[];
 
-  const createObserveResult = (): ObserveResult => ({
-    timestamp: Date.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: {} } } },
-  });
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
+      updatedAt: Date.now(),
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      viewHierarchy: { hierarchy: { node: { $: {} } } },
+    });
 
   const createInputText = (
     device: BootedDevice,
@@ -360,7 +362,7 @@ describe("InputText.execute", () => {
         },
       );
       const input = createInputText(androidDevice, fakeAdb, () => ({
-        close: async () => ({ success: true, action: "close" }),
+        close: async () => ({ success: true, open: false, action: "close" as const }),
       }));
       const result = runWithAbortSignal(
         undefined,
@@ -508,13 +510,13 @@ describe("InputText.execute", () => {
       tapStrategy: new FakeTapStrategy(),
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     });
-    const observation: ObserveResult = {
+    const observation: ObserveResult = buildObserveResult({
       observationId: "occluded-focus",
       updatedAt: 1,
       screenSize: { width: 400, height: 240 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
-    };
+    });
     tap.observedInteraction = async (action) => ({
       ...(await action(recordObservationRead(observation))),
       observation,

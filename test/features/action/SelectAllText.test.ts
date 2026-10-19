@@ -1,3 +1,4 @@
+import { createObserveResultForTest } from "../observe/flatHierarchyBuilders";
 import { expect, describe, test, spyOn } from "bun:test";
 import { SelectAllText } from "../../../src/features/action/SelectAllText";
 import { BootedDevice } from "../../../src/models";
@@ -25,7 +26,7 @@ describe("SelectAllText Android", () => {
       };
     });
     const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(async (fn) =>
-      fn(),
+      fn(createObserveResultForTest()),
     );
 
     await selectAllText.execute();
@@ -49,7 +50,7 @@ describe("SelectAllText outcomes", () => {
 
   const runWithoutObservation = (selectAllText: SelectAllText) => {
     const observedSpy = spyOn(selectAllText, "observedInteraction").mockImplementation(async (fn) =>
-      fn(),
+      fn(createObserveResultForTest()),
     );
     return { promise: selectAllText.execute(), observedSpy };
   };

@@ -11,9 +11,9 @@ export interface TaskLeaseHoldRequest {
 
 /**
  * Owner decision (2026-10-18, #4668): a task that holds a device keeps that session's device
- * lease alive while it is `working` or `input_required`, so the client need not heartbeat
- * for it. The task layer calls {@link hold} when the work names its device session and the
- * returned release once the task is terminal.
+ * lease alive until its work ends, including work continuing after detached cancellation
+ * (#13090), so the client need not heartbeat for it. The task layer calls {@link hold} when
+ * the work names its device session and the returned release once the work settles.
  */
 export interface TaskLeaseKeepalive {
   hold(request: TaskLeaseHoldRequest): () => void;
@@ -60,7 +60,7 @@ interface ActiveHold {
 /**
  * Keeps a task's device session alive by heartbeating it on the owner's behalf (#4668): once at
  * {@link hold} and then on an interval under the session's heartbeat timeout, until the
- * returned release runs (the task settled), the session is gone, or {@link releaseAll} runs at
+ * returned release runs (the work settled), the session is gone, or {@link releaseAll} runs at
  * daemon shutdown. It renews only the owner lease, never the idle clocks.
  */
 export class HeartbeatTaskLeaseKeepalive implements TaskLeaseKeepalive {

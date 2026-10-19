@@ -1,3 +1,5 @@
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import {
@@ -200,8 +202,10 @@ describe("Keyboard", () => {
         node: {
           $: {},
           node: [
-            focusedInputHierarchy().hierarchy.node,
-            heuristicFalsePositiveHierarchy("Enter code").hierarchy.node,
+            ...new DefaultElementParser().extractRootNodes(focusedInputHierarchy()),
+            ...new DefaultElementParser().extractRootNodes(
+              heuristicFalsePositiveHierarchy("Enter code"),
+            ),
           ],
         },
       },
@@ -364,12 +368,12 @@ describe("Keyboard", () => {
     });
 
     test("falls back to the tap when the resource-id is shared by another node", async () => {
-      const shared: ViewHierarchyResult = {
+      const shared: ViewHierarchyResult = createHierarchyForTest({
         hierarchy: {
           node: {
             $: {},
             node: [
-              selectorField().hierarchy.node,
+              ...new DefaultElementParser().extractRootNodes(selectorField()),
               {
                 $: {
                   "resource-id": "com.example:id/notes",
@@ -379,7 +383,7 @@ describe("Keyboard", () => {
             ],
           },
         },
-      };
+      });
       fakeHierarchy.setResults([shared, keyboardWindowHierarchy(), keyboardWindowHierarchy()]);
 
       const result = await newKeyboard().execute("open");
@@ -475,7 +479,7 @@ describe("Keyboard", () => {
             node: {
               $: {},
               node: [
-                selectorField(field).hierarchy.node,
+                ...new DefaultElementParser().extractRootNodes(selectorField(field)),
                 {
                   $: {
                     class: "android.widget.TextView",

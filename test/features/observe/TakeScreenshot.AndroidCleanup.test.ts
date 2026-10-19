@@ -111,7 +111,7 @@ describe("Android base64 screenshot cleanup", () => {
       const removals: Array<{ args: string[]; options: AdbExecuteOptions }> = [];
       adb.execute = async (args, cleanupOptions = {}) => {
         removals.push({ args, options: cleanupOptions });
-        return new Promise(() => {});
+        return new Promise<ReturnType<typeof createExecResult>>(() => {});
       };
 
       const capture = captureFor(adb).captureScreenshotBase64(
@@ -211,11 +211,11 @@ function filePullHarness(
   const cleanupFailure = new Error("device offline during cleanup");
   const adb = new AdbClient(
     androidDevice("file-pull-cleanup"),
-    async (command) => {
+    async (command: string) => {
       commands.push(command);
       if (command.includes("shell rm -f")) {
         if (cleanupOutcome === "pending") {
-          return new Promise(() => {});
+          return new Promise<ReturnType<typeof createExecResult>>(() => {});
         }
         if (cleanupOutcome === "failure") {
           throw cleanupFailure;

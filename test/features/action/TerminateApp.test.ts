@@ -1,3 +1,5 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
+import { createHierarchyForTest } from "../observe/observeScreenTestBuilders";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import {
@@ -333,7 +335,7 @@ describe("TerminateApp (iOS)", () => {
       const existingClientSpy = spyOnIosExistingInstance(client);
 
       try {
-        const stale: ObserveResult = {
+        const stale: ObserveResult = buildObserveResult({
           display: { key: "primary", role: "inner", posture: "opened", generation: 0 },
           observationId: "pre-terminate",
           updatedAt: fakeTimer.now(),
@@ -344,7 +346,7 @@ describe("TerminateApp (iOS)", () => {
             updatedAt: fakeTimer.now(),
             hierarchy: { node: { text: "pre-terminate screen" } },
           },
-        };
+        });
         await cacheStore.put(iosDevice.deviceId, stale);
         await cacheStore.put("other-device", stale);
         expect((await client.getLatestHierarchy()).hierarchy?.packageName).toBe("com.example.app");
@@ -1098,16 +1100,17 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   // block was popped early and they reparented — the exact bug this fixes.
   const POST_BLOCK_ENTRY_NAMES = ["finalObserve", "uiStability"];
 
-  const createObserveResult = (): ObserveResult => ({
-    updatedAt: Date.now(),
-    screenSize: { width: 1170, height: 2532 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: {
-      hierarchy: { node: [] },
-      packageName: "com.example.app",
+  const createObserveResult = (): ObserveResult =>
+    buildObserveResult({
       updatedAt: Date.now(),
-    },
-  });
+      screenSize: { width: 1170, height: 2532 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: createHierarchyForTest({
+        hierarchy: { node: [] },
+        packageName: "com.example.app",
+        updatedAt: Date.now(),
+      }),
+    });
 
   const topLevelNames = (timings: TimingData): string[] =>
     Array.isArray(timings) ? timings.map((e) => e.name) : Object.keys(timings);
@@ -1358,7 +1361,7 @@ describe("TerminateApp (shared foreground dumpsys, #9758)", () => {
     timer.enableAutoAdvance();
     const adb = new RealAdbClient(
       device,
-      async (command) => {
+      async (command: string) => {
         commands.push(command);
         if (command.includes("dumpsys activity activities")) {
           return createExecResult(capture, "");

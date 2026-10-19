@@ -1,5 +1,4 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import type { McpServer } from "@modelcontextprotocol/server";
 import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerFailuresResources } from "../../src/server/failuresResources";
@@ -36,7 +35,7 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
       async (params) => ({ uri: "automobile:test", text: decodeURIComponent(params.name) }),
     );
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    ResourceRegistry.registerWithServer(server, () => ({}));
     const handler = server.server.handlersBySchema.get("resources/read");
     if (!handler) {
       throw new Error("read handler not registered");

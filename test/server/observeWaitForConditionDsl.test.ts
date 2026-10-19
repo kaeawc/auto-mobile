@@ -1,6 +1,12 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, test } from "bun:test";
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type {
+  BootedDevice,
+  NodeAttributes,
+  ObserveResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../src/models";
 import {
   buildConditionPredicate,
   observeSchema,
@@ -42,20 +48,19 @@ const flatBounds = (left: number, top: number, right: number, bottom: number) =>
 });
 
 /** A flat (resource-id-addressable) view hierarchy wrapping the given children. */
-const makeHierarchy = (children: Record<string, unknown>[]): ViewHierarchyResult =>
-  ({
-    hierarchy: {
-      node: {
-        "resource-id": "root",
-        bounds: flatBounds(0, 0, 200, 200),
-        node: children,
-      },
+const makeHierarchy = (children: ViewHierarchyNode[]): ViewHierarchyResult => ({
+  hierarchy: {
+    node: {
+      $: { "resource-id": "root" },
+      bounds: flatBounds(0, 0, 200, 200),
+      node: children,
     },
-    screenWidth: 200,
-    screenHeight: 200,
-  }) as unknown as ViewHierarchyResult;
+  },
+  screenWidth: 200,
+  screenHeight: 200,
+});
 
-const makeObservation = (children: Record<string, unknown>[], updatedAt = 0): ObserveResult => {
+const makeObservation = (children: ViewHierarchyNode[], updatedAt = 0): ObserveResult => {
   const viewHierarchy = makeHierarchy(children);
   viewHierarchy.updatedAt = updatedAt;
   return {
@@ -67,9 +72,13 @@ const makeObservation = (children: Record<string, unknown>[], updatedAt = 0): Ob
   } as ObserveResult;
 };
 
-const node = (props: Record<string, unknown>): Record<string, unknown> => ({
+const node = ({
+  node: children,
+  ...attrs
+}: NodeAttributes & { node?: ViewHierarchyNode[] }): ViewHierarchyNode => ({
+  $: attrs,
   bounds: flatBounds(0, 0, 10, 10),
-  ...props,
+  ...(children && { node: children }),
 });
 
 // ---------------------------------------------------------------------------

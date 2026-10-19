@@ -1,4 +1,4 @@
-import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -281,7 +281,7 @@ export interface DaemonDeferredRecoverySweepInternals {
 }
 
 export function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {
-  const internals = poolInternals(pool);
+  const internals = pool.testHooks;
   const recoveryState = recoveryInternals(pool);
   expect(pool.isSessionRecoveryInFlight(sessionId)).toBe(false);
   expect(recoveryState.sessionPreservingRecoveries.has(sessionId)).toBe(false);

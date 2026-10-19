@@ -136,12 +136,12 @@ describe("DevicePool.create", () => {
     const factoryInternals = factoryPool.testHooks.collaborators;
     const directInternals = directPool.testHooks.collaborators;
 
-    expect(factoryInternals.timer).toBe(deps.timer);
-    expect(factoryInternals.installedAppsRepository).toBe(deps.installedAppsRepository);
-    expect(factoryInternals.deviceManager).toBe(deps.deviceManager);
-    expect(factoryInternals.retryExecutor).toBe(deps.retryExecutor);
-    expect(factoryInternals.criteriaMatcher).toBe(deps.criteriaMatcher);
-    expect(factoryInternals.onDeviceReady).toBe(deps.onDeviceReady);
+    expect(deps.timer).toBe(factoryInternals.timer);
+    expect(deps.installedAppsRepository).toBe(factoryInternals.installedAppsRepository);
+    expect(deps.deviceManager).toBe(factoryInternals.deviceManager);
+    expect(deps.retryExecutor).toBe(factoryInternals.retryExecutor);
+    expect(deps.criteriaMatcher).toBe(factoryInternals.criteriaMatcher);
+    expect(deps.onDeviceReady).toBe(factoryInternals.onDeviceReady);
     expect(directInternals.timer).toBe(factoryInternals.timer);
     expect(directInternals.installedAppsRepository).toBe(factoryInternals.installedAppsRepository);
     expect(directInternals.deviceManager).toBe(factoryInternals.deviceManager);

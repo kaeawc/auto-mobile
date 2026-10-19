@@ -546,14 +546,9 @@ describe("DevicePool", () => {
 
       function arrangedEach<T>(table: readonly T[]) {
         return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-          test.each(table)(
-            name,
-            async (row: T) => {
-              await arrangeHarness();
-              await fn(row);
-            },
-            timeout,
-          );
+          for (const row of table) {
+            arranged(name.replace("%s", String(row)), () => fn(row), timeout);
+          }
         };
       }
 
@@ -874,7 +869,7 @@ describe("DevicePool", () => {
           sourceImage,
         );
 
-        await sessionManager.releaseSession("owner-session", "test replacement exit");
+        await sessionManager.releaseSession("owner-session", "explicit-release");
         await devicePool.releaseDevice(replacement.deviceId, "owner-session");
         await devicePool.removeDevice(replacement.deviceId, false, handoff.replacementDevice);
         fakeDeviceManager.bootedDevices = [replacement];
@@ -1140,7 +1135,7 @@ describe("DevicePool", () => {
         platform: "android",
       });
       await replacementPublished.promise;
-      const replacementSession = sessionManager.getSession("owner-session");
+      const replacementSession = sessionManager.getSession("owner-session")!;
       expect(replacementSession).not.toBeNull();
       expect(replacementSession).not.toBe(originalSession);
 

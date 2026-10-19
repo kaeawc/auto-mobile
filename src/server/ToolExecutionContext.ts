@@ -103,7 +103,7 @@ export async function createToolExecutionContext(
       sessionOptions.platform,
       execution,
       requireIssuedSession,
-      { requestDeadlineMs: sessionOptions.requestDeadlineMs },
+      { requestDeadlineMs: sessionOptions.requestDeadlineMs, signal },
     ));
 
   if (!sessionManager.isAdmittedForAutomation(session)) {

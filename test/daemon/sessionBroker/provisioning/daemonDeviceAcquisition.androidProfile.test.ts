@@ -74,7 +74,7 @@ async function harness(assigned = true) {
     owner: () => ({ daemonId: "daemon", pid: 1 }),
     timer,
     journal: {
-      owner: { daemonId: "daemon", pid: 1, processGeneration: "gen-1" },
+      owner: { daemonId: "daemon", pid: 1, processGenerationToken: "gen-1" },
       inFlight: new BindingJournalInFlight(),
     },
     invokeTool: async (_name, args) => {

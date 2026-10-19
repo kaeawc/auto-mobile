@@ -7,11 +7,11 @@ import {
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
-  FakeChildProcess,
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,

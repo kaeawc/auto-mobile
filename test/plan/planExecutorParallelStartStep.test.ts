@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { ActionableError } from "../../src/models/ActionableError";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const toolName = "parallelStartStepAction";
@@ -13,12 +13,12 @@ const parallelError = (index: number) =>
   );
 
 describe("PlanExecutor parallel startStep", () => {
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let calls: number[];
   let plan: Plan;
 
   beforeEach(() => {
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     calls = [];
     ToolRegistry.register(
       toolName,

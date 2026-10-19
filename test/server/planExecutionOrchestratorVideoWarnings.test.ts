@@ -3,7 +3,7 @@ import { useScratchRoot } from "../helpers/scratchRoot";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { BootedDevice, PlanExecutionResult, VideoRecordingMetadata } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
   PlanExecutionOrchestrator,

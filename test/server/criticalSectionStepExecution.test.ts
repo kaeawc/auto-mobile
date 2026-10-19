@@ -5,7 +5,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { PlanStepError } from "../../src/utils/plan/PlanStepExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
@@ -20,7 +20,7 @@ describe("criticalSection shares plan step execution (#6535)", () => {
     sessionUuid: z.string().optional(),
   });
   let timer: FakeTimer;
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let restoreTools: () => void;
   let restoreCoordinator: () => void;
   let coordinator: CriticalSectionCoordinator;
@@ -35,7 +35,7 @@ describe("criticalSection shares plan step execution (#6535)", () => {
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
     timer = new FakeTimer();
-    executor = new DefaultPlanExecutor(timer);
+    executor = createDefaultPlanExecutor(timer);
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     registerCriticalSectionTools(timer);

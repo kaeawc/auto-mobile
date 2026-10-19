@@ -307,7 +307,7 @@ interface ActionResult extends DeviceOperationResult {
  * across platforms.
  *
  * Platform-specific gesture, text, and action methods live on the
- * platform-specific interfaces (AndroidCtrlProxy, IOSCtrlProxy) which
+ * platform-specific interfaces (AndroidCtrlProxy, IosCtrlProxy) which
  * extend this one and narrow the gesture/text return types to their
  * platform-specific result shapes.
  */

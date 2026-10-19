@@ -12,13 +12,15 @@ import type {
 } from "../../src/models";
 import {
   type InteractionToolDependencies,
-  acceptIosAppOpenAlert,
-  buildOpenLinkPayload,
   isIosAppOpenAlert,
   openLinkSchema,
   registerInteractionTools,
-  selectAndroidOpenLinkChooser,
 } from "../../src/server/interactionTools";
+import {
+  acceptIosAppOpenAlert,
+  buildOpenLinkPayload,
+  selectAndroidOpenLinkChooser,
+} from "../../src/server/interactionToolHandlers";
 import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import { OpenURL } from "../../src/features/action/OpenURL";
 import { HandleIntentChooser } from "../../src/features/action/HandleIntentChooser";

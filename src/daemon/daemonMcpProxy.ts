@@ -23,10 +23,11 @@ import {
   DaemonConnectionSessionReleasedError,
   DaemonAmbiguousSessionSelectorError,
   DaemonToolUnavailableError,
-  daemonInternalErrors,
   type VersionMismatchReason,
   type BuildMismatchReason,
 } from "./proxy/daemonErrors";
+import { DaemonPreflightConnectionError } from "./proxy/DaemonPreflightConnectionError";
+import { HeldSessionNotFoundError } from "./proxy/HeldSessionNotFoundError";
 export {
   DaemonToolOutcomeUnknownError,
   LifecycleConnectionInFlightError,
@@ -186,8 +187,6 @@ import {
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
-
-const { DaemonPreflightConnectionError, HeldSessionNotFoundError } = daemonInternalErrors;
 
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";

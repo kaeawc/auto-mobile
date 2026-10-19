@@ -3310,15 +3310,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!requiresAdbInput) {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchAndroidCoordinateTap(
-        this.accessibilityService,
-        this.adb,
-        x,
-        y,
-        10,
-        undefined,
-        signal,
-      );
+      await dispatchAndroidCoordinateTap(this.accessibilityService, this.adb, x, y, 10, { signal });
       return;
     }
     logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);

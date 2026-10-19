@@ -177,10 +177,12 @@ export class AwaitIdle implements AwaitIdleInterface {
   }> {
     const stabilityResult = await this.idle.getUiStability(
       packageName,
-      state.prevMissedVsync,
-      state.prevSlowUiThread,
-      state.prevFrameDeadlineMissed,
-      state.prevTotalFrames,
+      {
+        missedVsync: state.prevMissedVsync,
+        slowUiThread: state.prevSlowUiThread,
+        frameDeadlineMissed: state.prevFrameDeadlineMissed,
+        totalFrames: state.prevTotalFrames,
+      },
       state.firstGfxInfoLog,
       new NoOpPerformanceTracker(),
       { timeoutMs, signal },

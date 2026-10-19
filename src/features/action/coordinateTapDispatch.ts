@@ -84,17 +84,22 @@ export function indeterminateTapError(error: string | undefined): ActionableErro
  * Dispatch one Android coordinate tap, preserving TapOnElement's CtrlProxy-first
  * then ADB-fallback behavior for non-element-specific taps.
  */
+export interface AndroidCoordinateTapOptions {
+  frameContext?: string;
+  signal?: AbortSignal;
+  assertCurrent?: () => void;
+  onTapDelivered?: () => void;
+}
+
 export async function dispatchAndroidCoordinateTap(
   accessibilityService: CoordinateTapClient,
   adb: AdbExecutor,
   x: number,
   y: number,
   durationMs: number,
-  frameContext?: string,
-  signal?: AbortSignal,
-  assertCurrent?: () => void,
-  onTapDelivered?: () => void,
+  options: AndroidCoordinateTapOptions = {},
 ): Promise<void> {
+  const { frameContext, signal, assertCurrent, onTapDelivered } = options;
   throwIfAborted(signal);
   let dispatched = false;
   const onDispatch = () => {
@@ -105,32 +110,18 @@ export async function dispatchAndroidCoordinateTap(
   // the iOS client uses that position for an abort signal.
   const androidService = accessibilityService as CoordinateTapClient<() => void>;
   const timeoutMs = resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
-  const result =
-    frameContext === undefined
-      ? await androidService.requestTapCoordinates(
-          x,
-          y,
-          durationMs,
-          timeoutMs,
-          undefined,
-          undefined,
-          onDispatch,
-          signal,
-          undefined,
-          assertCurrent,
-        )
-      : await androidService.requestTapCoordinates(
-          x,
-          y,
-          durationMs,
-          timeoutMs,
-          undefined,
-          frameContext,
-          onDispatch,
-          signal,
-          undefined,
-          assertCurrent,
-        );
+  const result = await androidService.requestTapCoordinates(
+    x,
+    y,
+    durationMs,
+    timeoutMs,
+    undefined,
+    frameContext,
+    onDispatch,
+    signal,
+    undefined,
+    assertCurrent,
+  );
   if (result.success) {
     onTapDelivered?.();
   }

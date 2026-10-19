@@ -244,15 +244,11 @@ export class HomeScreen extends BaseVisualChange {
       return false;
     }
     if (
-      !(await isForegroundLauncher(
-        launcherPackage,
-        this.adb,
-        this.device.deviceId,
-        this.timer,
-        deviceIncarnationToken(this.device.deviceId),
+      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, this.timer, {
+        incarnationToken: deviceIncarnationToken(this.device.deviceId),
         signal,
-        5000,
-      ))
+        timeoutMs: 5000,
+      }))
     ) {
       return false;
     }

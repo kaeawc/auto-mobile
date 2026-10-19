@@ -414,12 +414,12 @@ async function setKeyValueHandler(
             : setAndroidKeyValueDirect(
                 adb,
                 device.deviceId,
-                args.appId,
-                storageName,
-                args.key,
-                value,
-                args.type,
-                args.userId,
+                {
+                  appId: args.appId,
+                  fileName: storageName,
+                  userId: args.userId,
+                },
+                { key: args.key, value, type: args.type },
               ),
         deps,
       ));

@@ -7,6 +7,7 @@ import type { Platform } from "../../models/Platform";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
+import { SampleWindow } from "./SampleWindow";
 
 /**
  * Platform-neutral boot admission (#11181): the ledger of admitted boots, the
@@ -205,7 +206,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
   );
 }
 
-interface LedgerEntry {
+export interface LedgerEntry {
   deviceId?: string;
   /** Pid of the process spawned for the boot, once handed off with one. */
   processId?: number;
@@ -231,16 +232,6 @@ export interface LedgerAdmission {
  */
 export interface LedgerSampleWindow {
   close(): void;
-}
-
-class SampleWindow implements LedgerSampleWindow {
-  readonly ended: LedgerEntry[] = [];
-
-  constructor(private readonly onClose: (window: SampleWindow) => void) {}
-
-  close(): void {
-    this.onClose(this);
-  }
 }
 
 /** Admitted boots a capacity sample's device listing does not show. */

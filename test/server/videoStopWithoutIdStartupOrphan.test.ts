@@ -390,19 +390,11 @@ test("iOS host startup orphan is stopped without an id through redrive and permi
   control.onSignal = () => {
     control.running = false;
   };
-  const ffmpeg = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const ffmpeg = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
   await retainStartupOrphan(async (target, descriptor, options) => {
     expect(target).toBeUndefined();
@@ -434,19 +426,11 @@ async function retainRawHostOrphan(capturePath = "/kept/raw.mov") {
   control.onSignal = () => {
     control.running = false;
   };
-  const ffmpeg = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const ffmpeg = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   await retainStartupOrphan(
     (target, descriptor, options) => ffmpeg.forceStopOrphanedCapture(target, descriptor, options),
     {

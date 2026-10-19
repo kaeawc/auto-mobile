@@ -62,6 +62,16 @@ interface NetworkConditionOperationsDependencies {
   iosAppNetworkRule: () => IosAppNetworkRuleCommandContext | undefined;
 }
 
+interface EmulatorNetworkConditionRequest {
+  profile: NetworkConditionProfile;
+  effectiveInput: SetNetworkConditionInput;
+  values: NetworkConditionValues;
+  degrades: boolean;
+  isReset: boolean;
+  input: SetNetworkConditionInput;
+  base: NetworkConditionResultBase;
+}
+
 export class NetworkConditionOperations {
   constructor(private readonly dependencies: NetworkConditionOperationsDependencies) {}
 
@@ -267,7 +277,7 @@ export class NetworkConditionOperations {
         error: ANDROID_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR,
       };
     }
-    return this.applyEmulatorNetworkCondition(
+    return this.applyEmulatorNetworkCondition({
       profile,
       effectiveInput,
       values,
@@ -275,7 +285,7 @@ export class NetworkConditionOperations {
       isReset,
       input,
       base,
-    );
+    });
   }
 
   /**
@@ -284,16 +294,10 @@ export class NetworkConditionOperations {
    * connectivity (best-effort) so a partial application is never left on the
    * device (issue #6012 review P2).
    */
-  // oxlint-disable-next-line max-params -- Preserve the existing signature during extraction.
   private async applyEmulatorNetworkCondition(
-    profile: NetworkConditionProfile,
-    effectiveInput: SetNetworkConditionInput,
-    values: NetworkConditionValues,
-    degrades: boolean,
-    isReset: boolean,
-    input: SetNetworkConditionInput,
-    base: NetworkConditionResultBase,
+    request: EmulatorNetworkConditionRequest,
   ): Promise<NetworkConditionState> {
+    const { profile, effectiveInput, values, degrades, isReset, input, base } = request;
     const failure = (error: string): NetworkConditionState => ({
       supported: true,
       capability: degrades ? "partial" : "full",

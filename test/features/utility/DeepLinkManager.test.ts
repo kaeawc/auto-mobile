@@ -28,22 +28,7 @@ const createManagerWithElementServices = (
   adb: AdbClientFactory | FakeAdbExecutor,
   parser: DefaultElementParser,
   geometry: DefaultElementGeometry,
-) =>
-  new DeepLinkManager(
-    device,
-    adb,
-    null,
-    null,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      parser,
-      geometry,
-    },
-  );
+) => new DeepLinkManager(device, adb, { elementServices: { parser, geometry } });
 const stderrWarning = "avc: denied { read } for name=package";
 
 describe("DeepLinkManager", () => {

@@ -1,3 +1,5 @@
+import { ProcessEnvironmentReader } from "./ProcessEnvironmentReader";
+export { ProcessEnvironmentReader } from "./ProcessEnvironmentReader";
 /**
  * Opt-in gate for provisioning (creating) simulators/emulators.
  *
@@ -30,12 +32,6 @@ export const CREATED_DEVICE_NAME_PREFIX = "AutoMobile";
 /** Narrow read-only view of the environment, so tests never touch `process.env`. */
 export interface EnvironmentReader {
   get(name: string): string | undefined;
-}
-
-export class ProcessEnvironmentReader implements EnvironmentReader {
-  get(name: string): string | undefined {
-    return process.env[name];
-  }
 }
 
 export interface DeviceCreationGate {

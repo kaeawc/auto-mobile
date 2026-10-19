@@ -1049,8 +1049,7 @@ describe("iOS doctor checked simctl listings", () => {
         expect(command).toBe("xcrun simctl list devices --json");
         throw new Error(message);
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
 
     const result = await checkBootedSimulators({
@@ -1096,8 +1095,7 @@ describe("iOS doctor checked simctl listings", () => {
         expect(command).toBe("xcrun simctl list runtimes --json");
         return createExecResult(stdout);
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
 
     const result = await checkSimulatorRuntimes({
@@ -1138,8 +1136,7 @@ describe("iOS doctor checked simctl listings", () => {
         listingStarted();
         return await pendingListing;
       },
-      timer,
-      "darwin",
+      { timer, platform: "darwin" },
     );
 
     try {

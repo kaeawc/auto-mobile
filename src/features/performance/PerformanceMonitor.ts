@@ -1,4 +1,5 @@
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
+import type { PerformanceMonitorDependencies } from "./PerformanceMonitorDependencies";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -29,9 +30,10 @@ import {
   defaultAdbClientFactory,
   AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFileAsync as sharedExecFileAsync } from "../../utils/HostCommandExecutor";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
+import { DefaultSimCtlClientFactory } from "./DefaultSimCtlClientFactory";
 
 const defaultExecFileAsync: ExecFileAsyncFn = async (file, args) => {
   const result = await sharedExecFileAsync(file, args);
@@ -59,15 +61,6 @@ export type ExecFileAsyncFn = (
  */
 export interface SimCtlClientFactory {
   create(deviceId: string): SimCtl;
-}
-
-/**
- * Default factory that creates real SimCtlClient instances.
- */
-class DefaultSimCtlClientFactory implements SimCtlClientFactory {
-  create(deviceId: string): SimCtl {
-    return new SimCtlClient({ deviceId, name: deviceId, platform: "ios" });
-  }
 }
 
 /**
@@ -178,15 +171,6 @@ export interface PerformanceSamplingCoordinator {
  */
 export type ServerGetter = () => PerformanceDataPusher | null;
 
-/**
- * Continuous performance monitor that samples device metrics at tiered intervals
- * and pushes them to the IDE via PerformancePushSocketServer.
- *
- * Sampling tiers:
- * - Fast (500ms): FPS, frame time, jank count via dumpsys gfxinfo
- * - Medium (2s): CPU usage via /proc/{pid}/stat
- * - Slow (10s): Memory usage via dumpsys meminfo
- */
 export class PerformanceMonitor {
   static readonly TICK_INTERVAL_MS = 500;
   static readonly MEDIUM_INTERVAL_MS = 2000;
@@ -221,16 +205,16 @@ export class PerformanceMonitor {
     { controller: AbortController; promise: Promise<void> }
   >();
 
-  constructor(
-    timer: Timer = defaultTimer,
-    adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
-    serverGetter: ServerGetter = getPerformancePushServer,
-    simCtlClientFactory: SimCtlClientFactory = defaultSimCtlClientFactory,
-    execFileAsync: ExecFileAsyncFn = defaultExecFileAsync,
-    getTelemetryEmitter: () => PerformanceTelemetryEmitter = () => TelemetryRecorder.getInstance(),
-    perfWindowBuffer: PerfWindowBuffer = getPerfWindowBuffer(),
-    frameMetricsStore: SdkFrameMetricsStore = getSdkFrameMetricsStore(),
-  ) {
+  constructor(timer: Timer = defaultTimer, dependencies: PerformanceMonitorDependencies = {}) {
+    const {
+      adbClientFactory = defaultAdbClientFactory,
+      serverGetter = getPerformancePushServer,
+      simCtlClientFactory = defaultSimCtlClientFactory,
+      execFileAsync = defaultExecFileAsync,
+      getTelemetryEmitter = () => TelemetryRecorder.getInstance(),
+      perfWindowBuffer = getPerfWindowBuffer(),
+      frameMetricsStore = getSdkFrameMetricsStore(),
+    } = dependencies;
     this.timer = timer;
     this.adbClientFactory = adbClientFactory;
     this.simCtlClientFactory = simCtlClientFactory;

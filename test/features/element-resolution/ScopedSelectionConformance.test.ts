@@ -145,15 +145,12 @@ function selector(scenario: Scenario) {
 // Preserve concrete AdbClient constructor contracts while all process output
 // comes from the existing fake; spawning is forbidden even on a fallback path.
 function boundaryAdb(fake = new FakeAdbClient()) {
-  return new AdbClient(
-    android,
-    (command: string) => fake.executeCommand(command),
-    () => {
+  return new AdbClient(android, (command: string) => fake.executeCommand(command), {
+    spawnFn: () => {
       throw new Error("Conformance must not spawn a process");
     },
-    undefined,
-    timer(),
-  );
+    timer: timer(),
+  });
 }
 class ScopedObserver extends FakeObserveScreen {
   override captureCacheGeneration(): number {

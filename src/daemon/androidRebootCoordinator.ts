@@ -356,15 +356,11 @@ export class AndroidRebootCoordinator {
       try {
         childProcess = await this.pool.getDeviceManager().startDevice(target);
         ready = this.criteriaMatcher.withDeviceImageMetadata(
-          await waitForDeviceReadyOrCancel(
-            this.pool.getDeviceManager(),
-            target,
-            childProcess,
-            undefined,
+          await waitForDeviceReadyOrCancel(this.pool.getDeviceManager(), target, childProcess, {
             signal,
-            this.pool.getTimer(),
-            settleOwnedBoot,
-          ),
+            timer: this.pool.getTimer(),
+            cancelOwnedBoot: settleOwnedBoot,
+          }),
           recoveryImage,
         );
         readinessCompleted = true;

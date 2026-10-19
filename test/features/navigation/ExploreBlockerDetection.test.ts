@@ -887,7 +887,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         deps,
       );
@@ -914,7 +913,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         { tapActionFactory: tap.factory, timer },
       );
@@ -944,7 +942,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         deps,
       );
@@ -973,7 +970,6 @@ describe("ExploreBlockerDetection", () => {
           androidDevice,
           null,
           parser,
-          async () => {},
           undefined,
           deps,
         );
@@ -997,7 +993,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        async () => {},
         undefined,
         deps,
       );
@@ -1025,7 +1020,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         notesParser,
-        async () => {},
         undefined,
         notesDeps,
       );
@@ -1045,7 +1039,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         genuineParser,
-        async () => {},
         undefined,
         genuineDeps,
       );
@@ -1100,7 +1093,6 @@ describe("ExploreBlockerDetection", () => {
 
     test("handles a permission-and-login screen as a permission dialog, not a login dead-end", async () => {
       // Permission handling still takes precedence over normal login selection.
-      let deadEndCalls = 0;
       const { parser } = makeParser(permissionAndLoginElements);
       const tap = new FakeDialogTapAction();
       const timer = new FakeTimer();
@@ -1111,61 +1103,36 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => {
-          deadEndCalls += 1;
-        },
         undefined,
         { timer, tapActionFactory: tap.factory },
       );
 
-      expect(deadEndCalls).toBe(0);
       expect(tap.calls).toEqual([{ text: "Allow access", action: "tap" }]);
       expect(result).toBe(true);
     });
 
     test("leaves login screens to normal selection before dead-end handling", async () => {
-      let deadEndCalls = 0;
       const { parser } = makeParser(loginElements);
 
-      const result = await detectAndHandleBlockers(
-        observationWith({}),
-        device,
-        null,
-        parser,
-        async () => {
-          deadEndCalls += 1;
-        },
-      );
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser);
 
-      expect(deadEndCalls).toBe(0);
       expect(result).toBe(false);
     });
 
     test("returns false and never handles blockers on a regular screen", async () => {
-      let deadEndCalls = 0;
       const { parser } = makeParser([
         { text: "Home", clickable: true } as Element,
         { text: "Settings", clickable: true } as Element,
       ]);
 
-      const result = await detectAndHandleBlockers(
-        observationWith({}),
-        device,
-        null,
-        parser,
-        async () => {
-          deadEndCalls += 1;
-        },
-      );
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser);
 
       expect(result).toBe(false);
-      expect(deadEndCalls).toBe(0);
     });
 
     test("bails out without extracting elements when the hierarchy carries an error", async () => {
       // Dropping the hierarchy-error guard would extract the login elements.
       // With the guard, extraction never runs.
-      let deadEndCalls = 0;
       const { parser, extractionCount } = makeParser(loginElements);
 
       const result = await detectAndHandleBlockers(
@@ -1173,18 +1140,13 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => {
-          deadEndCalls += 1;
-        },
       );
 
       expect(result).toBe(false);
-      expect(deadEndCalls).toBe(0);
       expect(extractionCount()).toBe(0);
     });
 
     test("returns false when the observation has no view hierarchy", async () => {
-      let deadEndCalls = 0;
       const { parser, extractionCount } = makeParser(loginElements);
 
       const result = await detectAndHandleBlockers(
@@ -1192,13 +1154,9 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => {
-          deadEndCalls += 1;
-        },
       );
 
       expect(result).toBe(false);
-      expect(deadEndCalls).toBe(0);
       expect(extractionCount()).toBe(0);
     });
   });

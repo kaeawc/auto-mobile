@@ -4,7 +4,8 @@ import { promises as fs } from "fs";
 
 import * as path from "path";
 import { ClearAppData, IosAppReinstaller } from "../../../src/features/action/ClearAppData";
-import { ActionableError, AppNotInstalledError } from "../../../src/models/ActionableError";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { AppNotInstalledError } from "../../../src/models/AppNotInstalledError";
 import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";

@@ -3,7 +3,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FfmpegVideoProcessingBackend } from "../../../src/features/video/FfmpegVideoProcessingBackend";
+import {
+  FfmpegVideoProcessingBackend,
+  buildFfmpegArgs,
+} from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -66,8 +69,6 @@ describe("FfmpegVideoProcessingBackend host integration", () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-remux-"));
     const rawPath = path.join(tempDir, "raw.mov");
     const outputPath = path.join(tempDir, "trimmed.mp4");
-    const backend = new FfmpegVideoProcessingBackend();
-    const buildFfmpegArgs = Reflect.get(backend, "buildFfmpegArgs");
 
     try {
       await runCommand("ffmpeg", [
@@ -87,8 +88,7 @@ describe("FfmpegVideoProcessingBackend host integration", () => {
         rawPath,
       ]);
 
-      const args: string[] = await buildFfmpegArgs.call(
-        backend,
+      const args: string[] = buildFfmpegArgs(
         { ...config(outputPath), maxDurationSeconds: 1 },
         { encoder: "libx264", available: false, description: "Software encoding" },
         { type: "file", path: rawPath },

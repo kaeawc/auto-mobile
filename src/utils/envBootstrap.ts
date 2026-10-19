@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { tryOrElse } from "../models/tryOrElse";
 
 export interface EnvBootstrapDeps {
   env: NodeJS.ProcessEnv;
@@ -137,10 +138,9 @@ function androidHomeCandidates({ env, platform, homedir }: EnvBootstrapDeps): st
 }
 
 export function defaultDirectoryExists(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory();
-  } catch {
-    // Bootstrap runs before logger setup; missing tool directories are expected.
-  }
-  return false;
+  // Bootstrap runs before logger setup; missing tool directories are expected.
+  return tryOrElse(
+    () => fs.statSync(p).isDirectory(),
+    () => false,
+  );
 }

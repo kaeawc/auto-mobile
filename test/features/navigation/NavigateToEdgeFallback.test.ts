@@ -127,17 +127,13 @@ describe("navigateTo edge fallback (#10031)", () => {
   };
 
   function navigate(target: string) {
-    return new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      noSetup,
-      { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
-      manager,
-      new FakeTimer(),
-      undefined,
-      undefined,
-      () => observer,
-    ).execute({ targetScreen: target, platform: "ios" });
+    return new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: noSetup,
+      screenWaiter: { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+      navigationManager: manager,
+      timer: new FakeTimer(),
+      foregroundObserverProvider: () => observer,
+    }).execute({ targetScreen: target, platform: "ios" });
   }
 
   /** Home -> Settings recorded twice by tapOn; the Settings tap is the newer, preferred row. */
@@ -230,17 +226,14 @@ describe("navigateTo edge fallback (#10031)", () => {
       shouldUseBackButton: async () => ({ shouldUseBack: false, backPresses: 0, reason: "test" }),
     };
 
-    const result = await new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      noSetup,
-      { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
-      manager,
-      new FakeTimer(),
-      optimizer,
-      undefined,
-      () => observer,
-    ).execute({ targetScreen: "Home", platform: "ios" });
+    const result = await new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: noSetup,
+      screenWaiter: { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+      navigationManager: manager,
+      timer: new FakeTimer(),
+      pathOptimizer: optimizer,
+      foregroundObserverProvider: () => observer,
+    }).execute({ targetScreen: "Home", platform: "ios" });
 
     expect(result.success).toBe(true);
     expect(result.path).toEqual(["pressButton(back)"]);
@@ -372,17 +365,13 @@ describe("navigateTo edge fallback (#10031)", () => {
           return {};
         },
       };
-      const result = await new NavigateTo(
-        device,
-        new FakeAdbClientFactory(),
-        noSetup,
-        { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
-        manager,
-        new FakeTimer(),
-        undefined,
-        undefined,
-        () => unobserved,
-      ).execute({ targetScreen: "Settings", platform: "ios" });
+      const result = await new NavigateTo(device, new FakeAdbClientFactory(), {
+        uiStateSetup: noSetup,
+        screenWaiter: { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+        navigationManager: manager,
+        timer: new FakeTimer(),
+        foregroundObserverProvider: () => unobserved,
+      }).execute({ targetScreen: "Settings", platform: "ios" });
 
       expect(result.success).toBe(false);
       expect(dispatched).toEqual(["tapOn:Settings"]);

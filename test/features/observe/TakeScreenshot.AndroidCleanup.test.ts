@@ -234,9 +234,7 @@ function filePullHarness(
       }
       return createExecResult(command.includes("screencap") ? "AM_SCREENCAP_RC:0" : "", "");
     },
-    null,
-    undefined,
-    timer,
+    { timer },
   );
   const execute = spyOn(adb, "execute");
   const fileSystem = new FakeFileSystem();

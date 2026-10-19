@@ -16,6 +16,8 @@ import {
   type LocationWaypoint,
   type EndedLocationRoute,
 } from "../LocationRoutePlayer";
+import { LocationWriteAdmissionError } from "./LocationWriteAdmissionError";
+export { LocationWriteAdmissionError } from "./LocationWriteAdmissionError";
 
 export type SetDeviceLocationInput =
   | { mode: "static"; latitude: number; longitude: number }
@@ -133,8 +135,6 @@ function routeDurationMs(
   }
   return duration;
 }
-
-export class LocationWriteAdmissionError extends ActionableError {}
 
 interface LocationSimulatorClient {
   executeCommandArgs?(

@@ -100,7 +100,11 @@ describe("navigation internal no-diff marking (#3087)", () => {
         return createStructuredToolResponse({ success: true });
       });
 
-      const navigateTo = new NavigateTo(device, undefined, uiStateSetup, screenWaiter, navManager);
+      const navigateTo = new NavigateTo(device, undefined, {
+        uiStateSetup,
+        screenWaiter,
+        navigationManager: navManager,
+      });
       const result = await navigateTo.execute({ targetScreen: "Detail", platform: "android" });
 
       expect(result.success).toBe(true);

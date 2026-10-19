@@ -115,7 +115,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const timer = new FakeTimer();
     timer.advanceTime(42);
     const observations = new FakeDiscoveryObservationSequence();
-    const adb = new AdbClient(null, execAsync, null, undefined, timer, undefined, observations);
+    const adb = new AdbClient(null, execAsync, { timer, observationSequence: observations });
 
     const devices = await adb.getBootedAndroidDevices();
 
@@ -150,11 +150,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       null,
       async () =>
         createExecResult(["List of devices attached", "emulator-5554\tdevice", ""].join("\n")),
-      null,
-      undefined,
-      timer,
-      undefined,
-      observations,
+      { timer, observationSequence: observations },
     );
 
     const initial = await adb.getBootedAndroidDevices();
@@ -291,10 +287,12 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const adb = new AdbClient(
       { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
       async (): Promise<ExecResult> => createExecResult(""),
-      ((file: string, args: string[]) => {
-        received = { file, args };
-        return child;
-      }) as never,
+      {
+        spawnFn: ((file: string, args: string[]) => {
+          received = { file, args };
+          return child;
+        }) as never,
+      },
     );
     const controller = new AbortController();
 
@@ -336,10 +334,12 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const adb = new AdbClient(
       { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
       async (): Promise<ExecResult> => createExecResult(""),
-      ((_file: string, _args: string[], options?: { signal?: AbortSignal }) => {
-        receivedSignal = options?.signal;
-        return child;
-      }) as never,
+      {
+        spawnFn: ((_file: string, _args: string[], options?: { signal?: AbortSignal }) => {
+          receivedSignal = options?.signal;
+          return child;
+        }) as never,
+      },
     );
     const controller = new AbortController();
 
@@ -362,10 +362,12 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   test("does not spawn when cancellation arrives during executable resolution", async () => {
     let resolveBase: ((value: { adbPath: string; baseArgs: string[] }) => void) | undefined;
     let spawnCalls = 0;
-    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), (() => {
-      spawnCalls++;
-      throw new Error("must not spawn");
-    }) as never);
+    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), {
+      spawnFn: (() => {
+        spawnCalls++;
+        throw new Error("must not spawn");
+      }) as never,
+    });
     (
       adb as unknown as {
         getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
@@ -386,16 +388,13 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   test("does not spawn when executable resolution exhausts the timeout budget", async () => {
     const timer = new FakeTimer();
     let spawnCalls = 0;
-    const adb = new AdbClient(
-      null,
-      async (): Promise<ExecResult> => createExecResult(""),
-      (() => {
+    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), {
+      spawnFn: (() => {
         spawnCalls++;
         throw new Error("must not spawn");
       }) as never,
-      undefined,
       timer,
-    );
+    });
     (
       adb as unknown as {
         getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;

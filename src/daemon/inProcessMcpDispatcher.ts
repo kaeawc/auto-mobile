@@ -12,7 +12,7 @@ import {
 import { JsonBoundaryTransport } from "./jsonBoundaryTransport";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import { executionTracker } from "./executionTracker";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
@@ -204,7 +204,7 @@ export function createDaemonMcpDispatcher(options: {
     createServer: (context, scope) => createStatelessMcpServer(options.base(), context, scope),
     cancelScopeExecutions: (requestScopeId, reason) =>
       executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    forgetScopeBindings: (requestScopeId) => forgetDaemonSessionBindingScope(requestScopeId),
     closeReason: options.closeReason ?? (() => MCP_FORWARD_CLOSED_REASON),
   });
 }

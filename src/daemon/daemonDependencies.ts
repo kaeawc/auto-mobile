@@ -29,7 +29,7 @@ import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLi
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileProvenanceLoader,
-} from "../server/toolSelectionProfileRegistry";
+} from "./toolSelectionProfileRegistry";
 
 export type DaemonProcessBirthTimeProvider = () => number;
 export type DaemonProcessGenerationTokenProvider = () => string | undefined;

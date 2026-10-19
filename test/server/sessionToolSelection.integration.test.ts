@@ -10,7 +10,7 @@ import {
   registerToolSelectionTools,
 } from "../../src/server/toolSelectionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { InMemoryToolSelectionProfileRegistry } from "../../src/server/InMemoryToolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/daemon/InMemoryToolSelectionProfileRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";

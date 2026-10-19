@@ -10,7 +10,7 @@ import {
   RESOURCE_UPDATED_NOTIFICATION_METHOD,
   type ListChangedKind,
   type ResourceUpdateTargets,
-} from "../../server/listChangedBroadcast";
+} from "../listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../sessionReleaseBroadcast";
 import { idleReleaseField } from "../releaseReasons";
 

@@ -1,9 +1,5 @@
-import { spyOn } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
-import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
-import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
@@ -19,22 +15,5 @@ export function installFakeDeviceToolProviders(): () => void {
     restorePipeline();
     Reflect.set(PlatformDeviceManagerFactory, "injectedManager", previousInjectedManager);
     Reflect.set(PlatformDeviceManagerFactory, "instance", previousInstance);
-  };
-}
-
-/** The client constructor creates a manager independently of its injected ADB executor. */
-export function installFakeCtrlProxyManagers(): () => void {
-  const previousInstances = AndroidCtrlProxyManager.registry.entries();
-  const factory = new FakeAdbClientFactory(new FakeAdbExecutor());
-  const getInstance = AndroidCtrlProxyManager.getInstance.bind(AndroidCtrlProxyManager);
-  const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-    (device, adbFactory) => getInstance(device, adbFactory ?? factory),
-  );
-  return () => {
-    managerSpy.mockRestore();
-    AndroidCtrlProxyManager.registry.closeAll();
-    for (const [deviceId, manager] of previousInstances) {
-      AndroidCtrlProxyManager.registry.get(deviceId, () => manager);
-    }
   };
 }

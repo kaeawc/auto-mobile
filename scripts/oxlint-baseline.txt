@@ -78,7 +78,6 @@
 1	src/features/action/LaunchApp.ts	eslint(max-lines-per-function)
 1	src/features/action/LaunchApp.ts	eslint(max-params)
 1	src/features/action/RestoreSnapshot.ts	eslint(max-params)
-1	src/features/action/Rotate.ts	auto-mobile(max-class-lines)
 1	src/features/action/SetUIState.ts	auto-mobile(max-class-lines)
 1	src/features/action/SetUIState.ts	oxlint-disable(prefer-const)
 1	src/features/action/TapAnyElement.ts	auto-mobile(max-class-lines)

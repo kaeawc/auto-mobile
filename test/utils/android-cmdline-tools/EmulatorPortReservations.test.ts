@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { ChildProcess } from "child_process";
 import {
   DefaultEmulatorPortReservations,
   resetEmulatorLaunchReservations,
@@ -8,9 +7,13 @@ import {
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakePortAvailabilityChecker } from "../../fakes/FakePortAvailabilityChecker";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 
-const fakeChild = (exitCode: number | null = null): ChildProcess =>
-  ({ exitCode, signalCode: null }) as unknown as ChildProcess;
+const fakeChild = (exitCode: number | null = null): FakeChildProcess => {
+  const child = new FakeChildProcess();
+  child.exitCode = exitCode;
+  return child;
+};
 
 const completeSnapshot = (...deviceIds: string[]): EmulatorDeviceIdSnapshot => ({
   deviceIds: new Set(deviceIds),

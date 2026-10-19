@@ -5600,7 +5600,9 @@ export async function reserveRecoveredDeviceForReadiness(
   clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
 }
 
-export function getStartDevicePool(daemonState: DaemonStateLike): DevicePool | undefined {
+export function getStartDevicePool(
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
+): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 

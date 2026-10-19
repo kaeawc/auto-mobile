@@ -15,7 +15,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
     private final class FakeFallback: PrototypeViewerContentLoading {
         let content: PrototypeViewerContent
         var calls = 0
-        init(_ content: PrototypeViewerContent = .none) { self.content = content }
+        init(_ content: PrototypeViewerContent = .absent) { self.content = content }
         func load() -> PrototypeViewerContent {
             calls += 1
             return content
@@ -150,7 +150,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
         let empty = PrototypeViewerLayoutLoader(
             reader: FakeReader(.notFound), fallback: absent, registrar: registrar
         ).load(directory: directory)
-        guard case .none = empty.content else { return XCTFail("Expected none") }
+        guard case .absent = empty.content else { return XCTFail("Expected none") }
         XCTAssertFalse(empty.fromSavedLayout)
         XCTAssertEqual(absent.calls, 1)
         XCTAssertTrue(registrar.images.isEmpty)

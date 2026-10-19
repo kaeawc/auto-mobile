@@ -357,7 +357,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
         hasReceivedHeartbeat: false,
       });
       readiness.mockImplementationOnce(
-        async (sessionId, _manager, _pool, _options, _execution, admitted) => {
+        async (sessionId, _manager, _pool, _options, { admittedSession: admitted } = {}) => {
           expect(admitted).toBeUndefined();
           await pool.bindOrReuseDeviceSession({
             sessionId: sessionId!,

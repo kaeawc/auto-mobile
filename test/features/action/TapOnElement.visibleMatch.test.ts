@@ -477,9 +477,11 @@ describe("tapOn visible matched element", () => {
       "tap",
       0,
       result.element!,
-      { text: "Forms & Input", action: "tap" },
-      false,
-      { width: 402, height: 874 },
+      {
+        options: { text: "Forms & Input", action: "tap" },
+        isTalkBackEnabled: false,
+        screenSize: { width: 402, height: 874 },
+      },
     );
     expect(points).toEqual([
       { x: 261, y: 394 },

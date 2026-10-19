@@ -425,11 +425,13 @@ final class PrototypeLimitsTests: XCTestCase {
     func testPartActionOrderAndSkippedDataOperands() throws {
         let long = JSONValue.object(["b": .string(String(repeating: "x", count: 16385))])
         let child = JSONValue.object([
-            "type": .string("topAppBar"), "navigationIcon": .object([
+            "type": .string("topAppBar"),
+            "navigationIcon": .object([
                 "label": .string("ok"), "onTap": .array([
                     .object(["type": .string("emit"), "name": .string("{i.b}")]),
                 ]),
-            ]), "actions": .array([.object(["label": .string("{i.b}")])]),
+            ]),
+            "actions": .array([.object(["label": .string("{i.b}")])]),
         ])
         XCTAssertEqual(
             try rejection(pathRepeatSpec(literalRepeat(child, items: [long]))),

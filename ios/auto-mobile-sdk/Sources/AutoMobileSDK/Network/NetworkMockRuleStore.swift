@@ -382,9 +382,9 @@
             }
         }
 
-        private static func consume(
-            rule: inout CompiledFaultRule, request: FaultRequest,
-            consumedConnections: inout Set<String>, consumedSessions: inout Set<String>
+        private static func canConsume(
+            rule: CompiledFaultRule, request: FaultRequest,
+            consumedConnections: Set<String>, consumedSessions: Set<String>
         )
             -> Bool
         {
@@ -404,6 +404,21 @@
             default:
                 break
             }
+            return true
+        }
+
+        private static func consume(
+            rule: inout CompiledFaultRule, request: FaultRequest,
+            consumedConnections: inout Set<String>, consumedSessions: inout Set<String>
+        )
+            -> Bool
+        {
+            guard canConsume(
+                rule: rule,
+                request: request,
+                consumedConnections: consumedConnections,
+                consumedSessions: consumedSessions
+            ) else { return false }
             if rule.scope == nil, let remaining = rule.remaining {
                 guard remaining > 0 else { return false }
                 rule.remaining = remaining - 1

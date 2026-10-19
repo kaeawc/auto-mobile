@@ -2,11 +2,11 @@ import { promises as fsPromises } from "node:fs";
 import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  CtrlProxyStaleRunnerCacheError,
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
   IosCtrlProxyBuilder,
 } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/CtrlProxyStaleRunnerCacheError";
 import {
   RELEASE_CHECKSUM_REGISTRY,
   resolveAssetVersion,

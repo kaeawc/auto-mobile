@@ -5,7 +5,7 @@ import { AndroidBootAdmissionGate } from "../../src/features/bootAdmission/Andro
 import { IosSimFleetCostCollector } from "../../src/features/iosSimFleet/FleetCostCollector";
 import { InMemoryBootDurationHistory } from "../../src/features/iosSimFleet/BootDurationHistory";
 import { IosSimCapacityGate } from "../../src/features/iosSimFleet/CapacityGate";
-import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../src/features/iosSimFleet/simctlInventory";
 import { toJSONSchema } from "zod/v4";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";

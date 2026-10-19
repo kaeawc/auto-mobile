@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -36,12 +37,12 @@ function execResult(stdout: string): ExecResult {
 }
 
 function observeResult(): ObserveResult {
-  return {
-    timestamp: Date.now(),
+  return buildObserveResult({
+    updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
-  };
+    viewHierarchy: { hierarchy: { node: {} } },
+  });
 }
 
 describe("Rotate on a display whose natural orientation is not portrait (#10103)", () => {

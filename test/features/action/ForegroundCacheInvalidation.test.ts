@@ -26,6 +26,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device = { name: "foreground", deviceId: "foreground", platform: "android" } as const;
 const observation: ObserveResult = buildObserveResult({
+  updatedAt: 0,
   screenSize: { width: 1080, height: 2400 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
   viewHierarchy: { hierarchy: {} },
@@ -61,11 +62,13 @@ describe("shared foreground cache invalidation", () => {
     await cache.put("other-device", observation);
     const generation = cache.currentGeneration(device.deviceId);
     let invalidations = 0;
-    const existing = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue({
-      invalidateCache: () => {
-        invalidations++;
-      },
+    const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      timer,
     });
+    client.invalidateCache = () => {
+      invalidations++;
+    };
+    const existing = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(client);
     try {
       new DefaultDeviceWindowCacheInvalidator().invalidate(device, true);
       expect(invalidations).toBe(1);

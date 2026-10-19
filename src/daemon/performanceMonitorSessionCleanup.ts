@@ -1,4 +1,4 @@
-import type { SessionManager } from "../daemon/sessionManager";
+import type { SessionManager } from "./sessionManager";
 import { getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 
 /** The slice of the performance monitor that session cleanup needs. */

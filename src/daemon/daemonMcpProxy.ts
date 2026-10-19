@@ -188,7 +188,7 @@ const { DaemonPreflightConnectionError, HeldSessionNotFoundError } = daemonInter
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
 import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "../models/deviceAcquisitionRefusals";
-import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../utils/toolEnvelopePayload";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,

@@ -150,7 +150,7 @@ Two different things are called recording:
 - `recordToolCalls` records AutoMobile tool calls to YAML. Injected gestures are
   not seen by the `getevent` recorder by design
   (`DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE` in
-  `src/server/deviceGestureRecordingManager.ts:22`; `docs/tools.md`
+  `src/daemon/deviceGestureRecordingManager.ts:22`; `docs/tools.md`
   `recordToolCalls`). The new `toolType`, `pressure`, `tilt`, `buttons` params and
   `hoverAt` calls therefore ride along in recorded plans for free, with no
   recorder work.

@@ -11,7 +11,7 @@ import {
   joinInFlightDeviceGestureRecordingStop,
   stopDeviceGestureRecording,
   NoUserInputCapturedError,
-} from "../server/deviceGestureRecordingManager";
+} from "./deviceGestureRecordingManager";
 import { logger } from "../utils/logger";
 import {
   DeviceGestureRecordingCommand,

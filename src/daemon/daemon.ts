@@ -185,11 +185,11 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
+import { clearSessionAppearanceConfig } from "./appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../utils/NetworkState";
-import {} from "../server/networkStateSessionCleanup";
+import {} from "./networkStateSessionCleanup";
 import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
 import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";

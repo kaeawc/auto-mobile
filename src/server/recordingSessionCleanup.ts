@@ -10,7 +10,7 @@ import {
   isDeviceGestureRecordingOwnedBy,
   ownedDeviceGestureRecordingId,
   stopDeviceGestureRecording,
-} from "./deviceGestureRecordingManager";
+} from "../daemon/deviceGestureRecordingManager";
 import {
   adoptOwnerlessSegmentedVideoRecordings,
   captureSegmentedRecordingIdsForOwner,

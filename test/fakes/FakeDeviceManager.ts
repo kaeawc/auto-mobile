@@ -5,6 +5,7 @@ import {
   DeviceDestroyOptions,
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
+  DeviceShutdownOptions,
   DeviceStartResult,
   PlatformDeviceManager,
 } from "../../src/devices/deviceUtils";
@@ -234,7 +235,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     };
   }
 
-  async killDevice(_: BootedDevice): Promise<void> {}
+  async killDevice(_: BootedDevice, _options?: DeviceShutdownOptions): Promise<void> {}
 
   destroyedDevices: DeviceInfo[] = [];
 

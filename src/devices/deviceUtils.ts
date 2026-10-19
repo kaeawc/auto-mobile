@@ -1,4 +1,5 @@
 import type { EmulatorProcessStopper } from "../utils/android-cmdline-tools/EmulatorProcessStop";
+import type { WaitForDeviceReadyOrCancelOptions } from "./WaitForDeviceReadyOrCancelOptions";
 import {
   AdbCommandTimeoutError,
   AdbUnavailableError,
@@ -54,6 +55,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
+import { PhysicalIosScanBudgetExceeded } from "./PhysicalIosScanBudgetExceeded";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 
@@ -371,14 +373,8 @@ export interface PlatformDeviceManager {
  * did not spawn; there is nothing to kill, so it is left untouched — which is
  * the correct behavior for adopted devices.
  *
- * @param deviceManager - The platform device manager performing the readiness wait
- * @param device - The device that was started
  * @param handle - The start handle from `startDevice` (null for adopted devices)
- * @param timeoutMs - Optional readiness timeout
- * @param signal - Optional cancellation signal for a non-cooperative readiness wait
- * @param cancelOwnedBoot - Optional idempotent cleanup for the owned launch handle.
- *   Async cleanup is awaited so lifecycle owners can retain their lease until
- *   the launch process settles.
+ * @param options - Readiness timeout, cancellation signal, timer and boot-cleanup hooks.
  * @returns The booted device once ready
  * @throws Re-throws the original readiness error after cancelling the boot
  */
@@ -386,13 +382,16 @@ export async function waitForDeviceReadyOrCancel(
   deviceManager: PlatformDeviceManager,
   device: DeviceInfo,
   handle: ChildProcess | null,
-  timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  signal: AbortSignal | undefined = getAbortSignal(),
-  timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
-  cancelOwnedBoot?: () => void | Promise<void>,
-  createTimeoutError?: () => Error,
-  readinessOptions?: AndroidEmulatorReadinessOptions,
+  options: WaitForDeviceReadyOrCancelOptions = {},
 ): Promise<BootedDevice> {
+  const {
+    timeoutMs = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    signal = getAbortSignal(),
+    timer = defaultTimer,
+    cancelOwnedBoot,
+    createTimeoutError,
+    readinessOptions,
+  } = options;
   const timeoutError = new ActionableError(
     `Device readiness timed out after ${timeoutMs}ms for ${device.deviceId ?? device.name}`,
   );
@@ -435,9 +434,6 @@ export async function waitForDeviceReadyOrCancel(
 
 /** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077, #11122). */
 export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
-
-/** Thrown by the budget race only, so it is never confused with a caller abort. */
-class PhysicalIosScanBudgetExceeded extends Error {}
 
 function skippedPhysicalIosDiscovery(): {
   devices: BootedDevice[];

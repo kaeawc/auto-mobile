@@ -38,7 +38,10 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     Object.assign(child, { stdout });
     const pending = Promise.withResolvers<Awaited<ReturnType<AdbClient["execute"]>>>();
     adbHostProcessExecutor.executeCommandWithChild = () => ({ child, result: pending.promise });
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
+    const client = new AdbClient(null, null, {
+      retryExecutor: defaultRetryExecutor,
+      timer: new FakeTimer(),
+    });
     client["isTestMode"] = false;
     client["getBaseCommandParts"] = async () => ({ adbPath: "adb", baseArgs: [] });
     const chunks: string[] = [];
@@ -81,17 +84,11 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
         dispatches++;
         return { child, result: new Promise(() => {}) };
       };
-      const client = new AdbClient(
-        null,
-        null,
-        null,
-        defaultRetryExecutor,
+      const client = new AdbClient(null, null, {
+        retryExecutor: defaultRetryExecutor,
         timer,
-        undefined,
-        undefined,
-        undefined,
-        15,
-      );
+        defaultTimeoutMs: 15,
+      });
       client["isTestMode"] = false;
       client["getBaseCommandParts"] = async () => ({ adbPath: "adb", baseArgs: [] });
       const result = client.executeCommand("shell input tap 1 2", { timeoutMs: explicitTimeoutMs });
@@ -117,7 +114,10 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       dispatches++;
       return { child, result: new Promise(() => {}) };
     };
-    const client = new AdbClient(null, null, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(null, null, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
     client["isTestMode"] = false;
     client["getBaseCommandParts"] = async () => ({ adbPath: "adb", baseArgs: [] });
 
@@ -160,18 +160,11 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
         },
       } as HostProcessExecutor;
       const realExecutorSpy = spyOn(adbHostProcessExecutor, "executeCommandWithChild");
-      const client = new AdbClient(
-        null,
-        null,
-        null,
-        defaultRetryExecutor,
-        new FakeTimer(),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        injectedExecutor,
-      );
+      const client = new AdbClient(null, null, {
+        retryExecutor: defaultRetryExecutor,
+        timer: new FakeTimer(),
+        hostProcessExecutor: injectedExecutor,
+      });
       expect(client["isTestMode"]).toBe(false);
 
       await expect(client["execWithSignal"]("adb", ["version"])).resolves.toMatchObject({
@@ -204,7 +197,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       }),
     });
 
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client["isTestMode"] = false;
 
     const result = client["execWithSignal"]("adb", ["shell", "getprop"], undefined, 5, undefined, {
@@ -229,7 +222,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       result: new Promise(() => {}),
     });
 
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client["isTestMode"] = false;
     let settled = false;
     const result = client["execWithSignal"]("adb", ["shell", "getprop"], undefined, 5, undefined, {
@@ -270,7 +263,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       result: new Promise(() => {}),
     });
 
-    const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+    const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client["isTestMode"] = false;
     const controller = new AbortController();
     let settled = false;
@@ -314,7 +307,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     });
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
+      const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
       client["isTestMode"] = false;
       const result = client["execWithSignal"](
         "adb",

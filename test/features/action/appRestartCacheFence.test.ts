@@ -121,7 +121,7 @@ function iosInstallHarness(device = simulator, downgrade = false) {
       events.push(args[1]);
       return execResult("");
     },
-    timer,
+    { timer },
   );
   const plist = {
     extractString: async () => appId,

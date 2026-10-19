@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import type { HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { highlightSchema, registerHighlightTools } from "../../src/server/highlightTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";

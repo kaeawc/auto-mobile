@@ -11,6 +11,12 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { clamp } from "../../utils/bounds";
+import {
+  boundsInsideImage,
+  opaquePixelTable,
+  reportedTextSizePx,
+  squareHasOpaquePixel,
+} from "./contrastImageGeometry";
 import type { ImageBackend, RawImage } from "../../utils/image/backend/ImageBackend";
 import { resolveImageBackend } from "../../utils/image/backend/resolveImageBackend";
 
@@ -54,67 +60,6 @@ const GLYPH_SHAPE_MAX_PIXELS = 65536;
 const GLYPH_PIXEL_MAX_DISTANCE = 30;
 /** How far from a sample point to look for the colour a stroke away. */
 const GLYPH_NEIGHBOUR_OFFSET = 12;
-
-/** The text size in px the capture reported for this element, or null when absent or unusable. */
-function reportedTextSizePx(element: Element): number | null {
-  const size: unknown = element.textSize;
-  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : null;
-}
-
-/** Whether the whole element rectangle lies inside the decoded image (hierarchy px == raster px on Android). */
-/** Summed-area table of opaque (alpha 255) pixels: `(width + 1) * (height + 1)` running counts. */
-const opaquePixelTables = new WeakMap<RawImage, Int32Array>();
-
-function opaquePixelTable(image: RawImage): Int32Array {
-  let table = opaquePixelTables.get(image);
-  if (!table) {
-    const stride = image.width + 1;
-    table = new Int32Array(stride * (image.height + 1));
-    for (let y = 0; y < image.height; y++) {
-      let row = 0;
-      for (let x = 0; x < image.width; x++) {
-        row += image.data[(image.width * y + x) * 4 + 3] === 255 ? 1 : 0;
-        table[(y + 1) * stride + x + 1] = table[y * stride + x + 1] + row;
-      }
-    }
-    opaquePixelTables.set(image, table);
-  }
-  return table;
-}
-
-/**
- * Whether the square of `radius` around (x, y), sampled the way `underlyingColorAtRadius`
- * samples it (round, then clamp to the image), holds any opaque pixel. Those samples are
- * exactly the pixels of one clamped rectangle, so the table answers in constant time.
- */
-function squareHasOpaquePixel(
-  image: RawImage,
-  table: Int32Array,
-  x: number,
-  y: number,
-  radius: number,
-): boolean {
-  const x0 = Math.round(clamp(x - radius, 0, image.width - 1));
-  const x1 = Math.round(clamp(x + radius, 0, image.width - 1));
-  const y0 = Math.round(clamp(y - radius, 0, image.height - 1));
-  const y1 = Math.round(clamp(y + radius, 0, image.height - 1));
-  const stride = image.width + 1;
-  const count =
-    table[(y1 + 1) * stride + x1 + 1] -
-    table[y0 * stride + x1 + 1] -
-    table[(y1 + 1) * stride + x0] +
-    table[y0 * stride + x0];
-  return count > 0;
-}
-
-function boundsInsideImage(image: RawImage, bounds: Element["bounds"]): boolean {
-  return (
-    bounds.left >= 0 &&
-    bounds.top >= 0 &&
-    bounds.right <= image.width &&
-    bounds.bottom <= image.height
-  );
-}
 
 interface RGB {
   r: number;
@@ -467,27 +412,10 @@ export class ContrastChecker {
           outsideImage.push(element);
           continue;
         }
-        try {
-          const cached = this.getBatchCachedContrast(
-            element,
-            wcagLevel,
-            screenshotFingerprint,
-            density,
-          );
-          if (cached) {
-            results.set(element, cached.result);
-            continue;
-          }
-
-          // Calculate contrast for this element
-          const result = await this.checkContrastWithImage(image, element, wcagLevel, density);
-          results.set(element, result);
-
-          this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, result, density);
-        } catch (error) {
-          logger.warn(`Error checking contrast for element: ${errorMessage(error)}`, error);
-          results.set(element, null);
-        }
+        results.set(
+          element,
+          await this.checkBatchElement(image, element, wcagLevel, screenshotFingerprint, density),
+        );
       }
 
       // Cleanup element cache if needed
@@ -504,6 +432,33 @@ export class ContrastChecker {
     }
 
     return { results, outsideImage };
+  }
+
+  /** One element of a batch check: served from the batch cache when possible, null on failure. */
+  private async checkBatchElement(
+    image: RawImage,
+    element: Element,
+    wcagLevel: WcagLevel,
+    screenshotFingerprint: string,
+    density?: number,
+  ): Promise<ContrastResult | null> {
+    try {
+      const cached = this.getBatchCachedContrast(
+        element,
+        wcagLevel,
+        screenshotFingerprint,
+        density,
+      );
+      if (cached) {
+        return cached.result;
+      }
+      const result = await this.checkContrastWithImage(image, element, wcagLevel, density);
+      this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, result, density);
+      return result;
+    } catch (error) {
+      logger.warn(`Error checking contrast for element: ${errorMessage(error)}`, error);
+      return null;
+    }
   }
 
   /**

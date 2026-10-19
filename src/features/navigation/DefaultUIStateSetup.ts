@@ -12,11 +12,12 @@ import { PressButton } from "../action/PressButton";
 import { throwIfAborted, awaitWhileRequestIsLive, getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
-import { ActionableError } from "../../models/ActionableError";
 import { isTruthy } from "../../models/Element";
 import { ElementResolver, matchedSourceNode } from "../utility/ElementResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import { UIStateSetupScreenChangedError } from "./UIStateSetupScreenChangedError";
+export { UIStateSetupScreenChangedError } from "./UIStateSetupScreenChangedError";
 
 // Setup taps need time to update the UI.
 const SETUP_TAP_SETTLE_MS = 100;
@@ -58,9 +59,6 @@ export function createDefaultObserveScreen(
 ): ObserveScreenLike {
   return create(device, { create: () => adb });
 }
-
-/** A setup gesture left the source screen; replay must stop, including fallback edges. */
-export class UIStateSetupScreenChangedError extends ActionableError {}
 
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;

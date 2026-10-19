@@ -325,15 +325,11 @@ describe("Android transport aliases (#10201)", () => {
         calls.push(args);
         return createExecResult("", "");
       },
-      null,
-      new DefaultRetryExecutor(h.timer),
-      h.timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      h.pool.getAndroidTransportRouting(),
+      {
+        retryExecutor: new DefaultRetryExecutor(h.timer),
+        timer: h.timer,
+        transportRouting: h.pool.getAndroidTransportRouting(),
+      },
     );
     await client.execute(["shell", "input", "tap", "1", "2"]);
     h.manager.setBootedDevices("android", [booted(alias)]);

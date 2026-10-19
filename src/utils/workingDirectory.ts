@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { tryOrElse } from "../models/tryOrElse";
 
 export const DAEMON_LAUNCH_CWD_ENV = "AUTOMOBILE_DAEMON_LAUNCH_CWD";
 
@@ -11,11 +12,10 @@ export const DAEMON_LAUNCH_CWD_ENV = "AUTOMOBILE_DAEMON_LAUNCH_CWD";
 export const CORESIMULATOR_DEVICE_SET_PATH_ENV = "CORESIMULATOR_DEVICE_SET_PATH";
 
 export function safeProcessCwd(fallback: string = "/"): string {
-  try {
-    return process.cwd();
-  } catch {
-    return fallback;
-  }
+  return tryOrElse(
+    () => process.cwd(),
+    () => fallback,
+  );
 }
 
 export function resolveStableDaemonWorkingDirectory(homeDirectory: string = homedir()): string {

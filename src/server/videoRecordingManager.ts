@@ -54,7 +54,7 @@ import {
 } from "../features/video/AndroidRecordingDisplay";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import type { VideoRecordingDisplayTransition, VideoRecordingPanel } from "../models";
-import { VisualHighlightClient } from "../features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
 // Per-platform single-recording caps chosen by resolveMaxDurationSeconds. Android >180s is

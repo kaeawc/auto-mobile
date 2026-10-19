@@ -12,7 +12,8 @@ import {
   Platform,
   ViewHierarchyResult,
 } from "../models";
-import { highlightShapeSchema, VisualHighlightClient } from "../features/debug/VisualHighlight";
+import { highlightShapeSchema } from "../features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../features/debug/VisualHighlightClient";
 import { generateHighlightId, recordVideoRecordingHighlightAdded } from "./videoRecordingManager";
 import type { HierarchyCapture, HierarchySnapshot } from "../features/observe/HierarchyCapture";
 import {

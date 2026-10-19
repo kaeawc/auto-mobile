@@ -372,9 +372,7 @@ describe("AvdSnapshotService (#6490)", () => {
         }
         return execResult("OK");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
     const adbFactory: AdbClientFactory = { create: () => client };
     const sut = new AvdSnapshotService(

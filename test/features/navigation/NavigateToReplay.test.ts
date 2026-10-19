@@ -78,17 +78,13 @@ describe("NavigateTo replay safety", () => {
     waiter: ScreenTransitionWaiter | null = { waitForScreen: async () => true },
     setup = noSetup,
   ): NavigateTo {
-    return new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      setup,
-      waiter,
-      graph,
+    return new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: setup,
+      screenWaiter: waiter,
+      navigationManager: graph,
       timer,
-      undefined,
-      undefined,
-      () => cleanForegroundObserver,
-    );
+      foregroundObserverProvider: () => cleanForegroundObserver,
+    });
   }
 
   test("replay routes on the current device after stripping stored routing metadata", async () => {
@@ -477,14 +473,12 @@ describe("NavigateTo replay safety", () => {
     const adb = new FakeAdbClientFactory();
     timer.enableAutoAdvance();
     try {
-      const nav = new NavigateTo(
-        { ...device, platform: "android" },
-        adb,
-        noSetup,
-        { waitForScreen: async () => true },
-        graph,
+      const nav = new NavigateTo({ ...device, platform: "android" }, adb, {
+        uiStateSetup: noSetup,
+        screenWaiter: { waitForScreen: async () => true },
+        navigationManager: graph,
         timer,
-      );
+      });
       await expect(
         nav.execute({ ...options, platform: "android" }, undefined, controller.signal),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);

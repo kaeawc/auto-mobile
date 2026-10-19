@@ -133,15 +133,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
     return createExecResult("", "");
   };
 
-  const simctl = new SimCtlClient(
-    null,
-    execAsync,
-    timer,
-    "darwin",
-    undefined,
-    undefined,
-    bootOptions,
-  );
+  const simctl = new SimCtlClient(null, execAsync, { timer, platform: "darwin", bootOptions });
 
   return {
     simctl,
@@ -321,9 +313,13 @@ function createConcurrentStartHarness(
     timer,
     lifecycleCalls,
     createClient: () =>
-      new SimCtlClient(null, execAsync, timer, "darwin", undefined, undefined, {
-        maxAttempts: 1,
-        retryBackoffMs: 0,
+      new SimCtlClient(null, execAsync, {
+        timer,
+        platform: "darwin",
+        bootOptions: {
+          maxAttempts: 1,
+          retryBackoffMs: 0,
+        },
       }),
     bootstatusInvocations: () => bootstatusCount,
     shutdownInvocations: () => shutdownCount,
@@ -370,8 +366,7 @@ describe("SimCtlClient boot self-verification", () => {
         }
         return createExecResult("", "");
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
     const controller = new AbortController();
     const start = runWithAbortSignal(controller.signal, () => simctl.startSimulator(UDID, 5_000));
@@ -418,8 +413,7 @@ describe("SimCtlClient boot self-verification", () => {
         }
         return createExecResult("", "");
       },
-      timer,
-      "darwin",
+      { timer, platform: "darwin" },
     );
     const start = runWithAbortSignal(requestController.signal, () =>
       simctl.startSimulator(UDID, 1_234),
@@ -507,7 +501,7 @@ describe("SimCtlClient boot self-verification", () => {
       return createExecResult("", "");
     };
     const timer = new FakeTimer();
-    const createClient = () => new SimCtlClient(null, execAsync, timer, "darwin");
+    const createClient = () => new SimCtlClient(null, execAsync, { timer, platform: "darwin" });
     const firstStart = runWithAbortSignal(firstController.signal, () =>
       createClient().startSimulator(UDID, 5_000),
     );
@@ -1448,11 +1442,11 @@ describe("SimCtlClient boot self-verification", () => {
         }
         return createExecResult("", "");
       },
-      new FakeTimer(),
-      "darwin",
-      undefined,
-      undefined,
-      { maxAttempts: 2, retryBackoffMs: 10 },
+      {
+        timer: new FakeTimer(),
+        platform: "darwin",
+        bootOptions: { maxAttempts: 2, retryBackoffMs: 10 },
+      },
     );
 
     await expect(simctl.startSimulator(craftedUdid, 5000)).rejects.toBe(error);

@@ -15,10 +15,10 @@ import {
 import {
   DEVICECTL_DISPLAYS_COMMAND,
   DevicectlDisplayScreenshotCapture,
-  DevicectlPanelScreenshotSource,
   findDevicectlDisplayUniqueId,
   type SimulatorPanelScreenshotSource,
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayScreenshot";
+import { DevicectlPanelScreenshotSource } from "../../../src/utils/ios-cmdline-tools/DevicectlPanelScreenshotSource";
 import { captureIosPanelScreenshotWith } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
 import {
   FakeDevicectlCommandInvoker,

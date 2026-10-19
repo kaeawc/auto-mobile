@@ -28,9 +28,7 @@ function emulatorClientWithMissingAdb(spawns: string[] = []): AndroidEmulatorCli
       spawns.push(String(command));
       throw Object.assign(new Error("spawn adb ENOENT"), { code: "ENOENT" });
     },
-    null,
-    undefined,
-    timer,
+    { timer },
   );
   const factory: AdbClientFactory = { create: () => adb };
   return new AndroidEmulatorClient({

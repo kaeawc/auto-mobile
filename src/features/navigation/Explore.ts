@@ -70,9 +70,14 @@ import {
   selectDepthFirst,
   selectWeighted,
   rankElementsForDryRun,
-  getElementTarget,
-  predictOutcomeForElement,
 } from "./ExploreElementScoring";
+import {
+  dryRunCoverage,
+  dryRunPackageWarnings,
+  dryRunScreenWarnings,
+  planDryRunInteractions,
+  unreadableDryRunResult,
+} from "./ExploreDryRunPlan";
 
 // Import blocker detection functions
 import {
@@ -448,10 +453,8 @@ export class Explore extends BaseVisualChange {
         markEdgeTraversed(
           this.graphTraversalState,
           edge,
-          null,
-          false,
+          { actualTo: null, success: false, error: "Back press failed" },
           this.timer,
-          "Back press failed",
         );
       }
       return false;
@@ -510,7 +513,6 @@ export class Explore extends BaseVisualChange {
       this.device,
       this.adb,
       this.elementParser,
-      (p) => this.handleDeadEnd(p, undefined, signal),
       progress,
       this.blockerHandlerDeps(),
     );
@@ -660,31 +662,12 @@ export class Explore extends BaseVisualChange {
     const viewHierarchy = observation.viewHierarchy;
     if (!viewHierarchy || viewHierarchy.hierarchy.error) {
       warnings.push("Unable to inspect view hierarchy for dry run planning.");
-      return {
-        success: true,
-        dryRun: true,
-        currentScreen: {
-          name: "unknown",
-          interactableElements: 0,
-        },
-        plannedInteractions: [],
-        estimatedCoverage: {
-          screensToVisit: [],
-          newScreensExpected: 0,
-          existingScreensToRevisit: 0,
-        },
-        warnings,
-        observation,
-        durationMs: this.timer.now() - startTime,
-      };
+      return unreadableDryRunResult(observation, warnings, this.timer.now() - startTime);
     }
 
-    const currentPackage = this.getObservationPackageName(observation);
-    if (this.targetPackageName && currentPackage && this.targetPackageName !== currentPackage) {
-      warnings.push(
-        `Foreground package '${currentPackage}' does not match target '${this.targetPackageName}'.`,
-      );
-    }
+    warnings.push(
+      ...dryRunPackageWarnings(this.targetPackageName, this.getObservationPackageName(observation)),
+    );
 
     const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
     const edges =
@@ -702,38 +685,16 @@ export class Explore extends BaseVisualChange {
       warnings.push("No interactable elements were detected on the current screen.");
     }
 
-    const scored = rankElementsForDryRun(safeCandidates, strategy, mode, this.exploredElements);
-    const plannedInteractions = scored.slice(0, maxInteractions).map((entry, index) => {
-      const target = getElementTarget(entry.element);
-      const predictedOutcome = predictOutcomeForElement(entry.element, edges);
-
-      return {
-        order: index + 1,
-        action: entry.action,
-        target,
-        reason: entry.reason,
-        predictedOutcome,
-        whitelistStatus: entry.whitelistStatus,
-      };
-    });
-
-    const predictedScreens = plannedInteractions
-      .map((interaction) => interaction.predictedOutcome.screen)
-      .filter((screen) => screen && screen !== "unknown");
-    const uniqueScreens = Array.from(new Set(predictedScreens));
-    const knownScreens = await this.navigationManager.getKnownScreens();
-    const knownScreenSet = new Set(knownScreens);
-
-    const newScreensExpected = uniqueScreens.filter((screen) => !knownScreenSet.has(screen)).length;
-    const existingScreensToRevisit = uniqueScreens.filter((screen) =>
-      knownScreenSet.has(screen),
-    ).length;
-
-    if (currentScreen === "unknown") {
-      warnings.push("Current screen is unknown; outcome predictions may be limited.");
-    } else if (edges.length === 0) {
-      warnings.push("No navigation edges recorded for the current screen.");
-    }
+    const plannedInteractions = planDryRunInteractions(
+      rankElementsForDryRun(safeCandidates, strategy, mode, this.exploredElements),
+      edges,
+      maxInteractions,
+    );
+    const { uniqueScreens, newScreensExpected, existingScreensToRevisit } = dryRunCoverage(
+      plannedInteractions,
+      await this.navigationManager.getKnownScreens(),
+    );
+    warnings.push(...dryRunScreenWarnings(currentScreen, edges.length));
 
     perf.end();
     return {
@@ -1010,10 +971,8 @@ export class Explore extends BaseVisualChange {
         markEdgeTraversed(
           state,
           targetEdge,
-          null,
-          false,
+          { actualTo: null, success: false, error: "Element not found on screen" },
           this.timer,
-          "Element not found on screen",
         );
         return null;
       }

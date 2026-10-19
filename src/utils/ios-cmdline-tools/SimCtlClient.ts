@@ -1,4 +1,8 @@
 import { buildSimctlArgs } from "./simctlArgs";
+import {
+  resolveSimCtlObservationSequence,
+  type SimCtlClientDependencies,
+} from "./SimCtlClientDependencies";
 import { parseSimctlDeviceList } from "./simctlDeviceList";
 import { parseSimctlRuntimes } from "./simctlRuntimes";
 import { detectImageMimeType } from "../screenshot/imageHeaderDimensions";
@@ -22,10 +26,7 @@ import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } fro
 import { DeviceAlreadyRunningError } from "../../models/DeviceAlreadyRunningError";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
-import {
-  defaultDiscoveryObservationSequence,
-  type DiscoveryObservationSequence,
-} from "../DiscoveryObservationSequence";
+import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
@@ -58,6 +59,12 @@ import {
   isTransitionalSimulatorState,
   type TransitionalSimulator,
 } from "../../models/TransitionalSimulator";
+import { SimctlUnavailableError } from "./SimctlUnavailableError";
+import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
+import { SimctlScreenshotError } from "./SimctlScreenshotError";
+export { SimctlScreenshotError } from "./SimctlScreenshotError";
+export { SimctlUnavailableError } from "./SimctlUnavailableError";
+export { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SCREENSHOT_CLEANUP_BOUND_MS = 1_000;
@@ -134,58 +141,6 @@ export type SimctlScreenshotFailureReason =
   | "aborted-by-caller"
   | "aborted-by-timeout"
   | "non-zero-exit";
-
-/**
- * `xcrun`/`simctl` is not installed on this host (ENOENT, no active developer directory, or xcrun
- * cannot find the utility). Distinct from a simctl that exists and failed: discovery reports this
- * one as not applicable rather than incomplete (#11605).
- */
-export class SimctlUnavailableError extends ActionableError {}
-
-export class SimulatorStillShuttingDownError extends ActionableError {
-  constructor(
-    readonly udid: string,
-    readonly deviceName: string,
-    readonly lastState: string | undefined,
-    readonly waitedMs: number,
-    readonly launchdSimPid?: number,
-  ) {
-    super(
-      `simctl shutdown returned but iOS simulator '${deviceName}' (${udid}) was still ${lastState ?? "unknown"} after ${waitedMs} ms.` +
-        " The shutdown may still complete; check with xcrun simctl list devices. Retrying is safe." +
-        (launchdSimPid === undefined
-          ? ""
-          : ` Its launchd_sim process is pid ${launchdSimPid}; this daemon did not signal it, CoreSimulator may respawn it.`) +
-        " An application displaying the device can also keep it booted.",
-    );
-    this.name = "SimulatorStillShuttingDownError";
-  }
-}
-
-export class SimctlScreenshotError extends Error {
-  readonly reason: SimctlScreenshotFailureReason;
-  readonly exitCode: number | null;
-  readonly stderrExcerpt: string;
-  readonly byteLength: number;
-
-  constructor(
-    reason: SimctlScreenshotFailureReason,
-    message: string,
-    options: {
-      exitCode?: number | null;
-      stderr?: string;
-      byteLength?: number;
-      cause?: unknown;
-    } = {},
-  ) {
-    super(message, options.cause === undefined ? undefined : { cause: options.cause });
-    this.name = "SimctlScreenshotError";
-    this.reason = reason;
-    this.exitCode = options.exitCode ?? null;
-    this.stderrExcerpt = (options.stderr ?? "").slice(0, 300);
-    this.byteLength = options.byteLength ?? 0;
-  }
-}
 
 const defaultSimCtlFileSystem: SimCtlFileSystem = {
   mkdtemp: (prefix) => fsPromises.mkdtemp(prefix),
@@ -751,6 +706,8 @@ export class SimCtlClient implements SimCtl {
   ) => Promise<ExecResult>;
   private timer: Timer;
   private platform: NodeJS.Platform;
+  private readonly plist: PlistReader;
+  private readonly observationSequence: DiscoveryObservationSequence;
   private readonly spawnProcess: (
     command: string,
     args: string[],
@@ -814,7 +771,7 @@ export class SimCtlClient implements SimCtl {
    * Create an IosUtils instance
    * @param device - Optional device
    * @param execAsyncFn - promisified exec function (for testing)
-   * @param timer - Timer for delays and time tracking
+   * @param dependencies - optional collaborators; see {@link SimCtlClientDependencies}
    */
   constructor(
     device: BootedDevice | null = null,
@@ -827,21 +784,20 @@ export class SimCtlClient implements SimCtl {
           env?: NodeJS.ProcessEnv,
         ) => Promise<ExecResult>)
       | null = null,
-    timer: Timer = defaultTimer,
-    platform: NodeJS.Platform = process.platform,
-    spawnProcess: (
-      command: string,
-      args: string[],
-      options?: SpawnOptions,
-    ) => ChildProcess = defaultSpawnProcess,
-    fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem,
-    bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
-    private readonly plist: PlistReader = new PlistClient(),
-    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    deviceTypeProfiles?: SimulatorDeviceTypeProfileSource,
-    simulatorAppPresenter?: SimulatorAppPresenter,
-    idGenerator?: IdGenerator,
+    dependencies: SimCtlClientDependencies = {},
   ) {
+    const {
+      timer = defaultTimer,
+      platform = process.platform,
+      spawnProcess = defaultSpawnProcess,
+      fileSystem = defaultSimCtlFileSystem,
+      bootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
+      deviceTypeProfiles,
+      simulatorAppPresenter,
+      idGenerator,
+    } = dependencies;
+    this.plist = dependencies.plist ?? new PlistClient();
+    this.observationSequence = resolveSimCtlObservationSequence(dependencies);
     this.device = device;
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;

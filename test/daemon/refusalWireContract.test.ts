@@ -19,7 +19,12 @@ import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import * as bindingRefusals from "../../src/daemon/sessionBroker/provisioning/refusal";
 import * as sessionConfig from "../../src/devices/sessionConfig";
-import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
+import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError.base";
+import * as androidDiscoveryRefusals from "../../src/models/AndroidBootedDeviceDiscoveryIncompleteError";
+import * as androidAvdIdentityConflict from "../../src/devices/AndroidAvdIdentityConflictError";
+import * as androidIdentityUnresolved from "../../src/devices/AndroidIdentityUnresolvedError";
+import * as androidDeviceIdentityUnresolved from "../../src/devices/AndroidDeviceIdentityUnresolvedError";
+import * as androidAvdIdentityUnresolved from "../../src/devices/AndroidAvdIdentityUnresolvedError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
 import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
 import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
@@ -36,6 +41,9 @@ import * as sessionManager from "../../src/daemon/sessionManager";
 import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
 import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
 import * as provisioning from "../../src/devices/exactDeviceProvisioning";
+import * as provisionDeviceError from "../../src/devices/ProvisionDeviceError";
+import * as provisionDeviceCreateRejected from "../../src/devices/ProvisionDeviceCreateRejectedError";
+import * as deviceBootTimeout from "../../src/devices/DeviceBootTimeoutError";
 import * as deviceBoot from "../../src/devices/deviceBootService";
 import { ActionableError } from "../../src/models/ActionableError";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
@@ -114,7 +122,12 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
   "daemon/sessionBroker/provisioning/refusal": bindingRefusals,
   "devices/sessionConfig": sessionConfig,
-  "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
+  "models/BootedDeviceDiscoveryIncompleteError.base": discoveryRefusals,
+  "models/AndroidBootedDeviceDiscoveryIncompleteError": androidDiscoveryRefusals,
+  "devices/AndroidAvdIdentityConflictError": androidAvdIdentityConflict,
+  "devices/AndroidIdentityUnresolvedError": androidIdentityUnresolved,
+  "devices/AndroidDeviceIdentityUnresolvedError": androidDeviceIdentityUnresolved,
+  "devices/AndroidAvdIdentityUnresolvedError": androidAvdIdentityUnresolved,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
   "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,
   "models/SessionRecoveryAssignmentError": recoveryAssignment,
@@ -131,7 +144,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
   "daemon/cli/runDaemonCommand": daemonCommand,
   "devices/exactDeviceProvisioning": provisioning,
+  "devices/ProvisionDeviceError": provisionDeviceError,
+  "devices/ProvisionDeviceCreateRejectedError": provisionDeviceCreateRejected,
   "devices/deviceBootService": deviceBoot,
+  "devices/DeviceBootTimeoutError": deviceBootTimeout,
   "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
   "daemon/inputDeviceOwnership": inputOwnership,
   "daemon/sessionBroker/connectionRefusal": brokerConnectionRefusals,
@@ -152,9 +168,33 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
+const INSTALLER_ERROR_EXEMPTION =
+  "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.";
+
 const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
-  "features/prototype/ios/iosPrototypeInstallerErrors":
-    "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.",
+  "features/prototype/ios/installerErrors/PrototypeInstallPhysicalDeviceError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/InvalidPrototypeIdError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/TemplateResolveError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/TemplateCopyError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PlistRewriteError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/IconRenderError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/SimctlInstallError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeListError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeUninstallError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/DataContainerError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/DataWriteError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/NotPrototypeBundleError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/CodesignError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerChecksumMismatchError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerDownloadError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerUnsupportedVersionError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerDownloadDisabledError":
+    INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerOverrideError": INSTALLER_ERROR_EXEMPTION,
+  "features/prototype/ios/installerErrors/PrototypeViewerExtractError": INSTALLER_ERROR_EXEMPTION,
 };
 
 interface CodedErrorModule {

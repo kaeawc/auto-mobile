@@ -123,11 +123,7 @@ async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanS
 
   const schema = JSON.parse(schemaContent);
   const ajv = new Ajv({ allErrors: true, verbose: true, strict: false });
-  // Bun installs ajv-formats' compatible Ajv v8 dependency separately from
-  // our direct v8 dependency. They share the runtime plugin contract, but
-  // TypeScript treats their class identities as distinct package instances.
-  // eslint-disable-next-line auto-mobile/no-unknown-cast -- ajv-formats bundles a second compatible Ajv v8 type identity.
-  addFormats(ajv as unknown as Parameters<typeof addFormats>[0]);
+  addFormats(ajv);
   ajv.addSchema(schema);
   return { schema, ajv };
 }

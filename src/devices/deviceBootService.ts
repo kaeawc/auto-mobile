@@ -1,4 +1,3 @@
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../daemon/deviceAcquisitionRefusals";
 import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -61,111 +60,25 @@ import {
   hydrateRequiredDisplayInventories,
   type DisplayInventoryProvider,
 } from "./DisplayInventoryProvider";
+import { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
+import { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+import { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
+export { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
+import { enrichBootedDevice } from "./bootedDeviceEnrichment";
+export { enrichBootedDevice } from "./bootedDeviceEnrichment";
+export { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
+export { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+export { AndroidDeviceIdentityUnresolvedError } from "./AndroidDeviceIdentityUnresolvedError";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 /** Bound on the iOS post-lease "did a sibling already boot this simulator" re-check (#9920). */
 const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
-
-/** A boot deadline failure, kept distinct from platform command failures. */
-export class DeviceBootTimeoutError extends ActionableError {
-  readonly code = "timeout";
-  /** A purely time-based failure, retryable like provisionDevice's `timeout` (#11548). */
-  readonly retryable = true;
-
-  constructor(
-    readonly operation: string,
-    readonly phase: string,
-    readonly elapsedMs: number,
-    readonly budgetMs: number,
-    /** The device being booted, when it was known at the time of the timeout. */
-    readonly device?: string,
-  ) {
-    super(
-      `${operation} timeout exhausted while ${phase}; ` +
-        (device ? `device=${device}; ` : "") +
-        `remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
-    );
-  }
-}
 
 // Defined beside the other typed models so the boot admission gates can throw it too (#11236).
 export {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
 } from "../models/BootedDeviceDiscoveryIncompleteError";
-/** More than one live emulator claims the requested stable AVD identity. */
-export class AndroidAvdIdentityConflictError extends ActionableError {
-  readonly code = "identity_conflict";
-
-  constructor(
-    readonly avdName: string,
-    readonly candidateSerials: readonly string[],
-  ) {
-    super(
-      `identity_conflict: Android AVD '${avdName}' is claimed by multiple running ` +
-        `emulators: ${candidateSerials.join(", ")}. Pass an explicit deviceId (ADB serial) to select one.`,
-    );
-  }
-}
-
-/** Shared retry evidence for an emulator whose AVD identity cannot be proved. */
-class AndroidIdentityUnresolvedError extends ActionableError {
-  readonly code = "target_identity_unresolved";
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-  readonly deviceId?: string;
-
-  constructor(
-    message: string,
-    readonly candidateSerials: readonly string[],
-  ) {
-    super(message);
-    if (candidateSerials.length === 1) {
-      this.deviceId = candidateSerials[0];
-    }
-  }
-
-  toPayload(): Record<string, unknown> {
-    return {
-      code: this.code,
-      retryable: this.retryable,
-      retryAfterMs: this.retryAfterMs,
-      candidateSerials: this.candidateSerials,
-      ...(this.deviceId !== undefined ? { deviceId: this.deviceId } : {}),
-    };
-  }
-}
-
-/** A live emulator with an unanswered AVD-name probe may be the requested image. */
-export class AndroidAvdIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
-  constructor(
-    readonly avdName: string,
-    candidateSerials: readonly string[],
-  ) {
-    super(
-      `target_identity_unresolved: Cannot prove whether Android AVD '${avdName}' is already running; ` +
-        `AVD name is unavailable for ${candidateSerials.join(", ")}. Retry after identity discovery recovers.`,
-      candidateSerials,
-    );
-  }
-
-  override toPayload(): Record<string, unknown> {
-    return { ...super.toPayload(), avdName: this.avdName };
-  }
-}
-
-/** adb lists the serial, but its unanswered probe prevents lifecycle identity resolution. */
-export class AndroidDeviceIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
-  constructor(deviceId: string) {
-    super(
-      `target_identity_unresolved: Android emulator '${deviceId}' is listed by adb but did not answer its AVD-name probe, ` +
-        "so it cannot be resolved for lifecycle coordination. Retry once it responds; " +
-        "if it stays unresponsive, call killDevice for it and then startDevice.",
-      [deviceId],
-    );
-  }
-}
-
 /**
  * Whether a request that names its device by `deviceId` also carries spec fields that device must
  * satisfy. `name` is a spec field like any other (#11648); an exact name (`matchExactName`) paired
@@ -1695,27 +1608,25 @@ export class DeviceBootService {
     try {
       await this.reportProgress(context, progress, 60, "Device started, waiting for readiness...");
       const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
-        waitForDeviceReadyOrCancel(
-          this.dependencies.deviceManager,
-          image,
-          handle,
-          this.remaining(context, "waiting for device boot readiness"),
-          context.signal,
-          this.timer,
-          async () => {
+        waitForDeviceReadyOrCancel(this.dependencies.deviceManager, image, handle, {
+          timeoutMs: this.remaining(context, "waiting for device boot readiness"),
+          signal: context.signal,
+          timer: this.timer,
+          cancelOwnedBoot: async () => {
             await awaitCleanup();
           },
-          () => this.timeoutError(context, "waiting for device boot readiness"),
+          createTimeoutError: () => this.timeoutError(context, "waiting for device boot readiness"),
           // A freshly-provisioned Android AVD's first boot is a genuine cold
           // boot; opt it into bounded ADB-offline recovery (#7054). Fresh state
           // arrives either from this call site (`provisioned`) or from the
           // request when a just-created device is booted by serial through
           // `bootKnownDevice` (`context.freshProvision`). A cold boot of a
           // pre-existing AVD keeps the wait-out behavior, as does any iOS boot.
-          image.platform === "android" && (provisioned || context.freshProvision === true)
-            ? { freshProvision: true }
-            : undefined,
-        ),
+          readinessOptions:
+            image.platform === "android" && (provisioned || context.freshProvision === true)
+              ? { freshProvision: true }
+              : undefined,
+        }),
       );
       await this.reportProgress(context, progress, 100, "Device is ready for use");
       return {
@@ -1921,26 +1832,6 @@ export class DeviceBootService {
       context.deviceLabel ?? context.request.name ?? context.request.deviceId,
     );
   }
-}
-
-// oxlint-disable-next-line complexity -- explicit per-field fallback keeps configured-image precedence auditable.
-export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
-  return {
-    ...device,
-    iosVersion: device.iosVersion ?? image.iosVersion,
-    apiLevel: device.apiLevel ?? image.apiLevel,
-    osVersion: device.osVersion ?? image.osVersion,
-    runtimeId: device.runtimeId ?? image.runtimeId,
-    runtime: device.runtime ?? image.runtime,
-    deviceType: device.deviceType ?? image.deviceType,
-    formFactor: device.formFactor ?? image.formFactor,
-    screenWidth: device.screenWidth ?? image.screenWidth,
-    screenHeight: device.screenHeight ?? image.screenHeight,
-    screenDensity: device.screenDensity ?? image.screenDensity,
-    model: device.model ?? image.model,
-    architecture: device.architecture ?? image.architecture,
-    capabilityInventory: device.capabilityInventory ?? image.capabilityInventory,
-  };
 }
 
 function findImageForBootedDevice(

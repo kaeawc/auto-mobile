@@ -2,6 +2,8 @@ import type { HostSpawnOptions } from "../HostCommandExecutor";
 import { StringDecoder } from "node:string_decoder";
 import type { Timer } from "../SystemTimer";
 import { appendBounded } from "./appendBounded";
+import { AndroidCommandTerminatedError } from "./AndroidCommandTerminatedError";
+export { AndroidCommandTerminatedError } from "./AndroidCommandTerminatedError";
 
 export interface AndroidCommandResult {
   stdout: string;
@@ -48,20 +50,6 @@ interface AndroidCommandRequest {
   forcedSettlementDelayMs?: number;
   onStart: () => void;
   onOutput?: (stream: "stdout" | "stderr", output: string) => void;
-}
-
-/**
- * The command was stopped by its timeout or caller cancellation rather than
- * exiting on its own, so whatever it was doing may be half done.
- */
-export class AndroidCommandTerminatedError extends Error {
-  constructor(
-    message: string,
-    public readonly reason: "timeout" | "cancelled",
-  ) {
-    super(message);
-    this.name = "AndroidCommandTerminatedError";
-  }
 }
 
 /** Orchestration over the existing injectable host spawn seam, not a new process seam. */

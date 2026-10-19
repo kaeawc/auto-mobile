@@ -1128,7 +1128,7 @@ describe("InputText", () => {
       // Key events (and anything else) succeed.
       return Promise.resolve(execResult(""));
     };
-    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     // Inject a FakeTimer into InputText too: createBudget reads THIS clock, so a
     // wall clock here would race the 5ms budget against the char-unmappable path
     // (repo rule: no real timers in unit tests). Never advanced, so the budget
@@ -1170,7 +1170,7 @@ describe("InputText", () => {
       }
       return Promise.resolve(execResult(""));
     };
-    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     // FakeTimer into InputText as well, so createBudget never reads the wall clock
     // (repo rule: no real timers). Never advanced, so the budget cannot expire and
     // the assertion is purely about the retry count, not timing.
@@ -1196,7 +1196,7 @@ describe("InputText", () => {
       }
       return Promise.resolve(execResult(""));
     };
-    const adb = new AdbClient(androidDevice, exec, null, undefined, new FakeTimer());
+    const adb = new AdbClient(androidDevice, exec, { timer: new FakeTimer() });
     const inputText = new InputText(androidDevice, adb, undefined, new FakeTimer());
 
     const result = await inputText.appendText("ab", 5000);

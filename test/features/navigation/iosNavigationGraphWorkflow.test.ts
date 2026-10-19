@@ -85,14 +85,11 @@ describe("iOS navigation-event graph workflow", () => {
     const screenWaiter: ScreenTransitionWaiter = {
       waitForScreen: async (screen) => screen === "Settings",
     };
-    const navigateTo = new NavigateTo(
-      iOSDevice,
-      new FakeAdbClientFactory(),
-      null,
+    const navigateTo = new NavigateTo(iOSDevice, new FakeAdbClientFactory(), {
       screenWaiter,
-      graph,
+      navigationManager: graph,
       timer,
-    );
+    });
 
     const replay = await navigateTo.execute({ targetScreen: "Settings", platform: "ios" });
 

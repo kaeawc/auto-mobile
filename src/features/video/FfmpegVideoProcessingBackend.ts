@@ -1,4 +1,9 @@
 import { toActionableError } from "../../models/ActionableError";
+import {
+  defaultLiveScreenPixels,
+  type FfmpegVideoProcessingBackendDependencies,
+  type LiveScreenPixels,
+} from "./FfmpegVideoProcessingBackendDependencies";
 import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
 import {
   forceStopHostRecorder,
@@ -17,7 +22,6 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { createVideoSimCtl, type VideoSimCtl } from "./VideoSimCtl";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
-import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { logger } from "../../utils/logger";
 import { getRequestContext } from "../../utils/AbortContext";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
@@ -53,6 +57,7 @@ import {
   type VideoCaptureTeardownDescriptor,
   type OrphanCaptureStopOptions,
 } from "./VideoRecorderService";
+import { PostProcessOutOfTimeError } from "./PostProcessOutOfTimeError";
 
 export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
 export type { ProcessTracker, StoppableProcess };
@@ -148,12 +153,6 @@ export function boundPostProcessBudgetToRequest(
   const availableMs = remainingMs - POST_PROCESS_RESPONSE_MARGIN_MS;
   return availableMs <= 0 ? undefined : Math.min(budgetMs, availableMs);
 }
-
-/**
- * ffmpeg ran out of its time (or the stop request had none left to give it), as opposed to
- * failing. The raw capture is returned for either, but the warning says which.
- */
-class PostProcessOutOfTimeError extends ActionableError {}
 
 /** What iOS post-processing produced: the processed output, or the raw capture kept instead. */
 type PostProcessOutcome = { kind: "processed" } | { kind: "kept-raw"; warning: string };
@@ -626,43 +625,43 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
   iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
 
+  private readonly simctlFactory: (device: BootedDevice) => VideoSimCtl;
+  private readonly ffmpegClient: FfmpegClient;
+  private readonly platformProvider: () => NodeJS.Platform;
+  private readonly codecProbe: RecordingCodecProbe;
+  private readonly timer: Timer;
+  private readonly captureFileRemover: RecordingFileRemover;
+  private readonly liveScreenPixels: LiveScreenPixels;
+  private readonly recordingFileProbe: RecordingFileProbe;
+  private readonly readHostStartToken: (pid: number) => string | undefined;
+  private readonly hostRecorderControl: HostRecorderProcessControl;
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly simctlFactory: (device: BootedDevice) => VideoSimCtl = createVideoSimCtl,
-    private readonly ffmpegClient: FfmpegClient = new DefaultFfmpegClient(),
-    // Injectable so hardware-accel detection can be tested for every OS branch on
-    // any CI host, rather than only the branch matching the runner's platform.
-    private readonly platformProvider: () => NodeJS.Platform = platform,
-    // Injectable so the codec label can be asserted from synthetic files without
-    // producing real recordings (#4965).
-    private readonly codecProbe: RecordingCodecProbe = defaultRecordingCodecProbe,
-    private readonly timer: Timer = defaultTimer,
-    // Injectable so the stale-capture cleanup between iOS start attempts can be
-    // asserted without touching the real filesystem.
-    private readonly captureFileRemover: RecordingFileRemover = defaultRecordingFileRemover,
-    private readonly liveScreenPixels: (
-      device: BootedDevice,
-      timeoutMs: number,
-    ) => Promise<{ width: number; height: number } | null> = async (device, timeoutMs) => {
-      const client = IOSCtrlProxyClient.getInstance(device);
-      if (!(await client.ensureConnected())) {
-        return null;
-      }
-      const hierarchy = await client.requestHierarchySyncWithoutObservationStreamPush(
-        undefined,
-        false,
-        undefined,
-        timeoutMs,
-      );
-      const metadata = hierarchy ? client.getScreenScaleMetadata() : null;
-      return metadata ? { width: metadata.pixelWidth, height: metadata.pixelHeight } : null;
-    },
-    private readonly recordingFileProbe: RecordingFileProbe = defaultRecordingFileProbe,
-    private readonly readHostStartToken: (
-      pid: number,
-    ) => string | undefined = readProcessGenerationTokenForPid,
-    private readonly hostRecorderControl: HostRecorderProcessControl = defaultHostRecorderProcessControl,
-  ) {}
+    dependencies: FfmpegVideoProcessingBackendDependencies = {},
+  ) {
+    this.simctlFactory = dependencies.simctlFactory ?? createVideoSimCtl;
+    this.ffmpegClient = dependencies.ffmpegClient ?? new DefaultFfmpegClient();
+    this.timer = dependencies.timer ?? defaultTimer;
+    this.liveScreenPixels = dependencies.liveScreenPixels ?? defaultLiveScreenPixels;
+    const host = FfmpegVideoProcessingBackend.resolveHostSeams(dependencies);
+    this.platformProvider = host.platformProvider;
+    this.codecProbe = host.codecProbe;
+    this.captureFileRemover = host.captureFileRemover;
+    this.recordingFileProbe = host.recordingFileProbe;
+    this.readHostStartToken = host.readHostStartToken;
+    this.hostRecorderControl = host.hostRecorderControl;
+  }
+
+  private static resolveHostSeams(dependencies: FfmpegVideoProcessingBackendDependencies) {
+    return {
+      platformProvider: dependencies.platformProvider ?? platform,
+      codecProbe: dependencies.codecProbe ?? defaultRecordingCodecProbe,
+      captureFileRemover: dependencies.captureFileRemover ?? defaultRecordingFileRemover,
+      recordingFileProbe: dependencies.recordingFileProbe ?? defaultRecordingFileProbe,
+      readHostStartToken: dependencies.readHostStartToken ?? readProcessGenerationTokenForPid,
+      hostRecorderControl: dependencies.hostRecorderControl ?? defaultHostRecorderProcessControl,
+    };
+  }
 
   describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
     const backendHandle = handle.backendHandle as FfmpegBackendHandle | undefined;

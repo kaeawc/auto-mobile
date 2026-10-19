@@ -7,7 +7,7 @@ import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamS
 import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { InitialObservationFrame } from "../../src/daemon/observationInitialFrame";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { createTestableUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { PerformancePushSocketServer } from "../../src/daemon/performancePushSocketServer";
 import { FailuresPushSocketServer } from "../../src/daemon/failuresPushSocketServer";
 import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
@@ -471,18 +471,11 @@ describe("Daemon stream wiring", () => {
           stream.subscribe(pane);
           const hierarchy = { hierarchy: { node: { $: { class: "Root", text: "unchanged" } } } };
           stream.pushHierarchyUpdate("emulator-5554", hierarchy, "static-context");
-          const inputServer = new UnixSocketServer(
+          const input = createTestableUnixSocketServer(
             "/fake/input.sock",
             createFakeDaemonState(),
             timer,
           );
-          const input = inputServer as unknown as {
-            requireCurrentFrameContext(
-              deviceId: string,
-              frameContext: string,
-              action: string,
-            ): void;
-          };
           installDeviceDataStreamSocketServerForTesting(stream);
           const coordinator = new DefaultObservationInitialFrameCoordinator(
             timer,
@@ -526,7 +519,7 @@ describe("Daemon stream wiring", () => {
           expect(stream.getLiveFrameGeneration("emulator-5554")).toBeGreaterThan(generation);
           if (event.generationOnly) {
             expect(() =>
-              input.requireCurrentFrameContext("emulator-5554", "static-context", "input/tap"),
+              input.requireFrameContextForTest("emulator-5554", "static-context", "input/tap"),
             ).not.toThrow();
           } else {
             expect(stream.getCurrentFrameContext("emulator-5554")).toBeUndefined();
@@ -574,7 +567,7 @@ describe("Daemon stream wiring", () => {
                 .at(-1)?.hierarchyDiff,
             ).toMatchObject({ hasBaseline: true, changed: 0 });
             expect(() =>
-              input.requireCurrentFrameContext("emulator-5554", "static-context", "input/tap"),
+              input.requireFrameContextForTest("emulator-5554", "static-context", "input/tap"),
             ).not.toThrow();
           } else {
             expect(

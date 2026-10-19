@@ -67,6 +67,10 @@ class ResultFramesGoldenTest {
   private val perfs = listOf(null, perf)
   private val gestureTimes = listOf(null, 5L)
 
+  private val frameContexts = requestIds.flatMap { id ->
+    errors.flatMap { err -> perfs.map { p -> Triple(id, err, p) } }
+  }
+
   @Test
   fun `swipe drag and pinch frames match the hand-built bytes`() {
     val builders =
@@ -75,8 +79,9 @@ class ResultFramesGoldenTest {
         Triple("drag_result", ::dragResultFrame, 0),
         Triple("pinch_result", ::pinchResultFrame, 0),
       )
-    for ((type, build, _) in builders) for (id in requestIds) for (err in errors) for (g in
-      gestureTimes) for (p in perfs) {
+    val requests = requestIds.flatMap { id -> errors.map { err -> id to err } }
+    for ((type, build, _) in builders) for ((id, err) in requests) for (g in gestureTimes) for (p in
+      perfs) {
       assertEquals(
         "$type id=$id err=$err g=$g perf=$p",
         legacyGesture(type, id, err == null, err, 10L, g, p),
@@ -120,27 +125,33 @@ class ResultFramesGoldenTest {
 
   @Test
   fun `insert text frame matches the hand-built content in every optional combination`() {
-    for (err in errors) for (warning in listOf(null, "w")) for (caret in
-      listOf(null, true, false)) {
-      for (len in listOf(null, 7)) for (partial in listOf(false, true)) {
-        for (p in perfs) {
-          val legacy =
-            legacyFrame("insert_text_result", "r", p) {
-              put("success", err == null)
-              put("totalTimeMs", 3L)
-              if (err != null) put("error", err)
-              if (warning != null) put("warning", warning)
-              if (caret != null) put("caretPlaced", caret)
-              if (len != null) put("resultingTextLength", len)
-              if (partial) put("partialApplication", true)
-            }
-          assertEquals(
-            legacy,
-            masked(
-              insertTextResultFrame("r", err == null, err, 3L, warning, caret, len, partial, p),
-            ),
-          )
-        }
+    val outcomes = errors.flatMap { err ->
+      listOf(null, "w").flatMap { warning ->
+        listOf(null, true, false).map { caret -> Triple(err, warning, caret) }
+      }
+    }
+    val applications =
+      listOf(null, 7).flatMap { len ->
+        listOf(false, true).flatMap { partial -> perfs.map { p -> Triple(len, partial, p) } }
+      }
+    for ((err, warning, caret) in outcomes) {
+      for ((len, partial, p) in applications) {
+        val legacy =
+          legacyFrame("insert_text_result", "r", p) {
+            put("success", err == null)
+            put("totalTimeMs", 3L)
+            if (err != null) put("error", err)
+            if (warning != null) put("warning", warning)
+            if (caret != null) put("caretPlaced", caret)
+            if (len != null) put("resultingTextLength", len)
+            if (partial) put("partialApplication", true)
+          }
+        assertEquals(
+          legacy,
+          masked(
+            insertTextResultFrame("r", err == null, err, 3L, warning, caret, len, partial, p),
+          ),
+        )
       }
     }
   }
@@ -176,35 +187,17 @@ class ResultFramesGoldenTest {
   @Test
   fun `commit text and cancel ime commit frames match the hand-built bytes`() {
     val traces = listOf(null, listOf("a", "b \"q\""), emptyList())
-    for (id in requestIds) for (err in errors) for (p in perfs) for (partial in
-      listOf(false, true)) for (units in listOf(0, 4)) for (inserted in listOf(null, "tx é")) {
+    val edits =
+      listOf(false, true).flatMap { partial ->
+        listOf(0, 4).flatMap { units ->
+          listOf(null, "tx é").map { inserted -> Triple(partial, units, inserted) }
+        }
+      }
+    for (context in frameContexts) for (edit in edits) {
+      val (id, _, p) = context
+      val (partial, units, _) = edit
       for (trace in traces) for (consumed in listOf(false, true)) {
-        assertEquals(
-          legacyFrame("commit_text_result", id, p) {
-            put("success", err == null)
-            put("totalTimeMs", 9L)
-            if (partial) put("partialApplication", true)
-            if (units > 0) put("committedUnits", units)
-            if (inserted != null) put("insertedText", inserted)
-            if (consumed) put("editorConsumed", true)
-            if (trace != null) put("trace", json.encodeToJsonElement(trace))
-            if (err != null) put("error", err)
-          },
-          masked(
-            commitTextResultFrame(
-              id,
-              err == null,
-              err,
-              9L,
-              partial,
-              units,
-              inserted,
-              trace,
-              consumed,
-              p,
-            ),
-          ),
-        )
+        assertCommitFrame(context, edit, trace, consumed)
       }
       assertEquals(
         legacyFrame("cancel_ime_commit_result", id, p) {
@@ -216,6 +209,42 @@ class ResultFramesGoldenTest {
         masked(cancelImeCommitResultFrame(id, "target", partial, units, p)),
       )
     }
+  }
+
+  private fun assertCommitFrame(
+    context: Triple<String?, String?, JsonElement?>,
+    edit: Triple<Boolean, Int, String?>,
+    trace: List<String>?,
+    consumed: Boolean,
+  ) {
+    val (id, err, p) = context
+    val (partial, units, inserted) = edit
+    assertEquals(
+      legacyFrame("commit_text_result", id, p) {
+        put("success", err == null)
+        put("totalTimeMs", 9L)
+        if (partial) put("partialApplication", true)
+        if (units > 0) put("committedUnits", units)
+        if (inserted != null) put("insertedText", inserted)
+        if (consumed) put("editorConsumed", true)
+        if (trace != null) put("trace", json.encodeToJsonElement(trace))
+        if (err != null) put("error", err)
+      },
+      masked(
+        commitTextResultFrame(
+          id,
+          err == null,
+          err,
+          9L,
+          partial,
+          units,
+          inserted,
+          trace,
+          consumed,
+          p,
+        ),
+      ),
+    )
   }
 
   @Test
@@ -232,7 +261,7 @@ class ResultFramesGoldenTest {
             KeyboardProfileBehaviorInfo(true, "KEY_EVENT", "KEY_EVENT", false, true, false),
         ),
       )
-    for (id in requestIds) for (err in errors) for (p in perfs) for (version in listOf(null, 1)) {
+    for ((id, err, p) in frameContexts) for (version in listOf(null, 1)) {
       for (active in listOf(null, "gboard")) {
         val success = err == null
         assertEquals(

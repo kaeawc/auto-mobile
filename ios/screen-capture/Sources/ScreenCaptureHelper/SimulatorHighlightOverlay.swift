@@ -68,10 +68,8 @@ enum SimulatorDisplayGeometry {
         var point = CGPoint.zero
         var dimensions = CGSize.zero
         // Core Foundation bridging requires a cast after the type-ID guards above.
-        // swiftlint:disable force_cast
-        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
-              AXValueGetValue(size as! AXValue, .cgSize, &dimensions) else { return nil }
-        // swiftlint:enable force_cast
+        guard AXValueGetValue(unsafeDowncast(position, to: AXValue.self), .cgPoint, &point),
+              AXValueGetValue(unsafeDowncast(size, to: AXValue.self), .cgSize, &dimensions) else { return nil }
         return CGRect(origin: point, size: dimensions)
     }
 

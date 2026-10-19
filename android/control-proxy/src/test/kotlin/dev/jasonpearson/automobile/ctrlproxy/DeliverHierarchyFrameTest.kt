@@ -176,7 +176,7 @@ class DeliverHierarchyFrameTest {
     try {
       runBlocking {
         deliverHierarchyFrame(
-          serialize = { throw RuntimeException("Infinity") },
+          serialize = { throw IllegalStateException("Infinity") },
           write = {},
           broadcast = {},
           releaseFrameContext = { frameContexts.remove(hierarchy) },

@@ -9,7 +9,7 @@ import {
   AppearanceSocketServer,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import { appearanceSocketResponseSchema } from "../helpers/wireMessageSchemas";
 import {
   ObserverAdmittingStreamAuthenticator,
   SessionScopedStreamAuthenticator,
@@ -134,7 +134,7 @@ describe("AppearanceSocketServer with per-session config", () => {
       await (
         this as unknown as { pendingBySocket: Map<unknown, Promise<void>> }
       ).pendingBySocket.get(socket);
-      return socket.getWrittenMessages<AppearanceSocketResponse>().at(-1)!;
+      return socket.getWrittenMessages(appearanceSocketResponseSchema).at(-1)!;
     }
   }
 

@@ -8,6 +8,7 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSocket } from "../../fakes/FakeNetServer";
 import type { Subscriber } from "../../../src/daemon/socketServer/SocketServerTypes";
+import { typedFrameSchema } from "../../helpers/wireMessageSchemas";
 
 interface TestFilter {
   deviceId: string | null;
@@ -269,7 +270,7 @@ describe("PushSubscriptionSocketServer", () => {
       timer.advanceTimersByTime(5_000);
       server.triggerKeepalive();
 
-      const messages = socket.getWrittenMessages<{ type: string }>();
+      const messages = socket.getWrittenMessages(typedFrameSchema);
       expect(messages.some((m) => m.type === "ping")).toBe(true);
     });
 

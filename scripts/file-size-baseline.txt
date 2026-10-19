@@ -15,7 +15,7 @@
 1344	src/daemon/sessionBroker/provisioning/executionRelease.ts
 1970	src/daemon/sessionBroker/provisioning/reconciler.ts
 1181	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
-2330	src/daemon/sessionDeviceStateRestore.ts
+1048	src/daemon/sessionDeviceStateRestore.ts
 9809	src/daemon/sessionManager.ts
 5794	src/daemon/socketServer.ts
 1180	src/daemon/videoStreamSocketServer.ts

@@ -246,7 +246,7 @@ describe("CtrlProxy prototype assets", () => {
       commands: ["full_command_set_v1", "show_prototype", "dismiss_prototype"],
     },
   ])("older device ($label) is never sent an asset request", async ({ commands }) => {
-    const { client, socket } = await harness(commands);
+    const { client, socket } = await harness([...commands]);
     const send = spyOn(socket, "send");
     await expect(client.requestPutPrototypeAsset(asset)).rejects.toBeInstanceOf(ActionableError);
     await expect(client.requestPutPrototypeAsset(asset)).rejects.toThrow(

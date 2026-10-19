@@ -16,7 +16,7 @@ import {
   createBootAdmissionGates,
   describeBootCapacity,
 } from "../../../src/features/bootAdmission/sharedBootAdmissionGates";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { testOverrides } from "../../../src/utils/testOverrides";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";

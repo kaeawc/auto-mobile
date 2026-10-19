@@ -1,4 +1,4 @@
-import { ActionableError } from "../../../models/ActionableError";
+import { ActionableError } from "./ActionableError";
 
 export class CtrlProxyForwardOwnershipUnreadableError extends ActionableError {
   constructor(deviceId: string, reason: string) {

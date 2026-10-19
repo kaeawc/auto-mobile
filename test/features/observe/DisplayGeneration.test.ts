@@ -455,6 +455,7 @@ test("action prepared at surfaced generation N is rejected after transition to N
     action.observedInteraction(
       async () => {
         dispatched = true;
+        return { success: true };
       },
       {
         changeExpected: false,
@@ -525,6 +526,7 @@ for (const platform of ["android", "ios"] as const) {
       action.observedInteraction(
         async () => {
           dispatched = true;
+          return { success: true };
         },
         { changeExpected: false, predictionContext: { toolName: "dragAndDrop", toolArgs: {} } },
       ),

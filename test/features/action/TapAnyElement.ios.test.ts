@@ -19,7 +19,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 
 // Regression coverage for #6248: the iOS branch of TapAnyElement previously called
 // tap/doubleTap/longPress on IOSCtrlProxyClient, none of which exist (TS2339,
-// tolerated in scripts/typecheck-baseline.txt) — every iOS tapAny action failed
+// once tolerated in the since-deleted src typecheck baseline) — every iOS tapAny action failed
 // in ~5ms with "D.tap is not a function". The real gesture API is
 // requestTapCoordinates, which TapOnElement already uses successfully.
 //

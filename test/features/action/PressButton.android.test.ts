@@ -702,12 +702,12 @@ describe("PressButton Android keycode dispatch", () => {
 });
 
 // Validate the actual fake-backed branch results before and after finalization.
-const executeForOutputSchema = PressButton.prototype.execute;
-let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+const pressForOutputSchema = PressButton.prototype.press;
+let pressOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
 beforeOutputSchema(() => {
-  executeOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "execute").mockImplementation(
-    async function (this: PressButton, ...args: Parameters<PressButton["execute"]>) {
-      const result = await executeForOutputSchema.apply(this, args);
+  pressOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "press").mockImplementation(
+    async function (this: PressButton, ...args: Parameters<PressButton["press"]>) {
+      const result = await pressForOutputSchema.apply(this, args);
       const payload = { message: "Result", ...result };
       expect(pressButtonResultSchema.parse(payload)).toBeDefined();
       const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
@@ -720,7 +720,7 @@ beforeOutputSchema(() => {
     },
   );
 });
-afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
+afterOutputSchema(() => pressOutputSchemaSpy.mockRestore());
 
 // Dispatch tests drive the transport seam through testHooks and still validate the result schema.
 async function dispatch(

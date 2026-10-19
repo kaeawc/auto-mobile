@@ -5,7 +5,8 @@ import {
   setDeviceCreationGate,
 } from "../../src/devices/deviceCreationGate";
 import { logger } from "../../src/utils/logger";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import type { DeviceClientSimctl } from "../../src/daemon/readiness/DeviceSessionManager";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -39,7 +40,7 @@ function newState(): SimState {
  * Shutdown one reports its current state, the same state-machine rule the real
  * client's boot 405 encodes.
  */
-function statefulSimctl(state: SimState): SimCtlClient {
+function statefulSimctl(state: SimState): DeviceClientSimctl {
   const listed = (): DeviceInfo[] =>
     [...state.sims].map(([deviceId, simState]) => ({
       name: "iPhone 17",
@@ -50,6 +51,7 @@ function statefulSimctl(state: SimState): SimCtlClient {
       isAvailable: true,
     }));
   return {
+    ...fakeDeviceManagerSimctl(),
     listSimulatorImages: async () => listed(),
     getBootedSimulators: async () => [],
     getBootedSimulatorsChecked: async () => [],
@@ -107,7 +109,7 @@ function statefulSimctl(state: SimState): SimCtlClient {
     getDeviceInfo: async () => {
       throw new Error("runner readiness failed");
     },
-  } as unknown as SimCtlClient;
+  };
 }
 
 function makeManager(state: SimState, runner: FakeIOSCtrlProxyManager, timer = new FakeTimer()) {

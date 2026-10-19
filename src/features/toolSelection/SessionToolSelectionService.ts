@@ -1,6 +1,7 @@
 import type { SessionToolSelectionRepository } from "../../db/sessionToolSelectionRepository";
 import { isAlwaysOnTool } from "./toolSelectionControl";
 import { logger } from "../../utils/logger";
+import { ENV, isRetiredToolsetVariable, readEnvRaw } from "../../config/env";
 
 export type ToolDefaultOverrides = ReadonlyMap<string, boolean>;
 
@@ -123,17 +124,15 @@ export function getEnvironmentToolDefaults(
   environment: Readonly<Record<string, string | undefined>>,
   knownToolNames: ReadonlySet<string>,
 ): ToolDefaultOverrides {
-  const retiredVariable = Object.keys(environment).find((name) =>
-    name.startsWith("AUTOMOBILE_TOOLSET_"),
-  );
+  const retiredVariable = Object.keys(environment).find((name) => isRetiredToolsetVariable(name));
   if (retiredVariable) {
     throw new Error(
       `${retiredVariable} is retired; use AUTOMOBILE_ENABLED_TOOLS or AUTOMOBILE_DISABLED_TOOLS with exact tool names.`,
     );
   }
 
-  const enabled = parseToolNames(environment.AUTOMOBILE_ENABLED_TOOLS);
-  const disabled = parseToolNames(environment.AUTOMOBILE_DISABLED_TOOLS);
+  const enabled = parseToolNames(readEnvRaw(ENV.ENABLED_TOOLS, environment));
+  const disabled = parseToolNames(readEnvRaw(ENV.DISABLED_TOOLS, environment));
   const configurable = getConfigurableToolNames(
     [...enabled, ...disabled],
     knownToolNames,

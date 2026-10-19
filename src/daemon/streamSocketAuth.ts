@@ -7,6 +7,7 @@ import { sessionForIngress } from "./sessionForIngress";
 import { ActionableError } from "../models";
 import { defaultDaemonContext } from "./daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { ENV } from "../config/env";
 
 /**
  * Authentication + session-scoping for the two live-screen daemon sockets
@@ -35,7 +36,7 @@ import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/s
  */
 
 /** Env flag that opts a daemon out of stream-socket authentication. */
-export const STREAM_SOCKET_AUTH_ENV = "AUTOMOBILE_DAEMON_STREAM_AUTH";
+export const STREAM_SOCKET_AUTH_ENV = ENV.DAEMON_STREAM_AUTH.name;
 
 /**
  * The narrow SessionManager surface the authenticator needs. Kept minimal

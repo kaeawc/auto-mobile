@@ -12,7 +12,6 @@ import {
   type ToolTransportRecovery,
 } from "./toolTransportRecovery";
 import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
-import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
 import { serverConfig } from "../utils/ServerConfig";
@@ -42,6 +41,7 @@ import {
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "../utils/deviceLossOutcome";
 import { nonBlankSessionUuid } from "./planCallerIdentity";
 import { executionTracker } from "./executionTracker";
+import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
   applyInheritedPlanRequestParams,
@@ -124,6 +124,7 @@ import {
   ToolRegistryPipelineOverrides,
   withItemsEnum,
 } from "./toolRegistryTypes";
+import { isAlwaysLoadToolsEnabled } from "../config/alwaysLoadTools";
 export type {
   ProgressCallback,
   DeviceAwareToolHandler,
@@ -789,9 +790,7 @@ export class ToolRegistryClass {
         {
           description: tool.description,
           inputSchema: erased<ToolRegistrySchema>(tool.schema),
-          ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
-            _meta: { "anthropic/alwaysLoad": true },
-          }),
+          ...(isAlwaysLoadToolsEnabled() && { _meta: { "anthropic/alwaysLoad": true } }),
         },
         shadowedSdkToolCallback,
       );
@@ -938,7 +937,7 @@ export class ToolRegistryClass {
 
   // Get tools in MCP format
   getToolDefinitions(options: ToolListingOptions = {}) {
-    const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
+    const alwaysLoad = isAlwaysLoadToolsEnabled();
     // When tool results are stripped of `structuredContent` (issue #2899), do not
     // advertise an `outputSchema` in `tools/list`: an MCP server that declares an
     // output schema is expected to return matching `structuredContent`, so keeping

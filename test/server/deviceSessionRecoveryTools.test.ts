@@ -46,7 +46,8 @@ describe("advertised device-session recovery tools", () => {
         !ToolRegistry.getRegisteredTool(name)?.hidden &&
         ToolRegistry.getRegisteredTool(name)?.defaultEnabled === true,
     );
-    expect([...DEVICE_SESSION_RECOVERY_TOOLS]).toEqual([...discoverable]);
+    const advertised: string[] = [...DEVICE_SESSION_RECOVERY_TOOLS];
+    expect(advertised).toEqual([...discoverable]);
   });
 
   test("excludes acquisition tools that are not enabled on a default connection", () => {

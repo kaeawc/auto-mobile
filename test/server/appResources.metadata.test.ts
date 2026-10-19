@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import {
   APP_RESOURCE_TEMPLATES,
   invalidateInstalledAppsCache,
@@ -54,7 +55,10 @@ describe("app metadata resource ADB fallback", () => {
 
   async function readMetadata(): Promise<string> {
     const template = ResourceRegistry.getTemplate(APP_RESOURCE_TEMPLATES.DEVICE_APP_METADATA)!;
-    const content = await template.handler!({ deviceId: device.deviceId, appId });
+    const content = await invokeResourceTemplate({
+      template,
+      params: { deviceId: device.deviceId, appId },
+    });
     expect(content.mimeType).toBe("application/json");
     expect(adb.getCommandCalls().map((call) => call.command)).toEqual([command]);
     return content.text!;

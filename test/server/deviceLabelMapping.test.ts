@@ -58,7 +58,7 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
     );
   }
 
-  function arrangedEach<T>(table: readonly T[]) {
+  function arrangedEach<T>(table: T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
       test.each(table)(
         name,

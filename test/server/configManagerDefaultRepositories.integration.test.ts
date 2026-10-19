@@ -46,7 +46,7 @@ describe("config manager default repositories", () => {
 
   async function seedConfig(
     tableName: KeyedJsonConfigTableName,
-    config: Record<string, unknown>,
+    config: AppearanceConfig | DeviceSnapshotConfig | VideoRecordingConfig,
   ): Promise<void> {
     await db
       .insertInto(tableName)

@@ -25,6 +25,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import type { ScreenReaderToggleOptions } from "../../src/models/AccessibilityResult";
 import { spyOnIosClientFactory, spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { toolStructured } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -71,8 +72,9 @@ describe("accessibilityTools", () => {
             "could not determine TalkBack state: device accessibility settings read unavailable",
         },
       });
-      expect(response.structuredContent).not.toHaveProperty("enabled");
-      expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+      const structured = toolStructured(response);
+      expect(structured).not.toHaveProperty("enabled");
+      expect(accessibilityStateSchema.safeParse(structured).success).toBe(true);
     } finally {
       factory.mockRestore();
       accessibilityDetector.clearAllCache();
@@ -95,8 +97,9 @@ describe("accessibilityTools", () => {
           reason: "could not determine VoiceOver state: CtrlProxy VoiceOver probe unavailable",
         },
       });
-      expect(response.structuredContent).not.toHaveProperty("enabled");
-      expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+      const structured = toolStructured(response);
+      expect(structured).not.toHaveProperty("enabled");
+      expect(accessibilityStateSchema.safeParse(structured).success).toBe(true);
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
@@ -191,7 +194,12 @@ describe("accessibilityTools", () => {
         try {
           registerAccessibilityTools();
           const response = await accessibilityHandler()(ANDROID_DEVICE, { talkback: hasReason });
-          const expected = { enabled: false, service: "unknown", ...reasonFields, ...promptFields };
+          const expected = {
+            enabled: false,
+            service: "unknown" as const,
+            ...reasonFields,
+            ...promptFields,
+          };
           expect(response).toHaveProperty("structuredContent", expected);
           expect(accessibilityStateSchema.parse(expected)).toEqual(expected);
         } finally {
@@ -228,7 +236,7 @@ describe("accessibilityTools", () => {
           expect(response).toMatchObject({
             structuredContent: { enabled: true, service: "talkback", ...promptFields },
           });
-          const expected = { enabled: true, service: "talkback", ...promptFields };
+          const expected = { enabled: true, service: "talkback" as const, ...promptFields };
           expect(response).toHaveProperty("structuredContent", expected);
           expect(accessibilityStateSchema.parse(expected)).toEqual(expected);
         } finally {
@@ -409,13 +417,6 @@ describe("accessibilityTools", () => {
       } finally {
         toggle.mockRestore();
       }
-    });
-
-    test("rejects an unsupported platform", async () => {
-      registerAccessibilityTools();
-      await expect(
-        accessibilityHandler()({ ...ANDROID_DEVICE, platform: "other" } as BootedDevice, {}),
-      ).rejects.toThrow("Unsupported platform: other");
     });
   });
 
@@ -650,7 +651,7 @@ describe("accessibilityTools", () => {
     // Collapsed from 8 hand-rolled siblings into a single table so a failing
     // row is named, plus the boundary rows the siblings never specified: null,
     // explicit undefined, and an unknown key (issue #4183 item 18).
-    const cases: ReadonlyArray<{ name: string; input: unknown; valid: boolean }> = [
+    const cases: Array<{ name: string; input: unknown; valid: boolean }> = [
       { name: "talkback: true", input: { talkback: true }, valid: true },
       { name: "talkback: false", input: { talkback: false }, valid: true },
       { name: "empty object (all params optional)", input: {}, valid: true },

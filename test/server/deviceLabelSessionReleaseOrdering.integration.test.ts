@@ -25,7 +25,6 @@ describe("releaseDeviceLabelSessions ordering", () => {
 
   test(
     "awaits the derived session release before freeing its device",
-    { timeout: 10_000 },
     async () => {
       const db = await createTestDatabase();
       // Constructing the Daemon initializes the global DaemonState; read the exact
@@ -45,9 +44,9 @@ describe("releaseDeviceLabelSessions ordering", () => {
         releaseSettled = true;
         return "emulator-5554";
       });
-      let releasedFirst: boolean | null = null;
+      const order: { releasedFirst: boolean | null } = { releasedFirst: null };
       const deviceSpy = spyOn(devicePool, "releaseDevice").mockImplementation(async () => {
-        releasedFirst = releaseSettled;
+        order.releasedFirst = releaseSettled;
       });
 
       try {
@@ -64,12 +63,13 @@ describe("releaseDeviceLabelSessions ordering", () => {
         expect(released).toEqual([derived]);
         expect(releaseSpy).toHaveBeenCalledWith(derived, PLAN_AUTO_RELEASE_REASON);
         // The device was freed only AFTER the session release fully settled.
-        expect(releasedFirst).toBe(true);
+        expect(order.releasedFirst).toBe(true);
       } finally {
         releaseSpy.mockRestore();
         deviceSpy.mockRestore();
         sessionManager.stopCleanupTimer();
       }
     },
+    { timeout: 10_000 },
   );
 });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { toolIsError, toolStructured, toolText } from "../helpers/toolResponse";
 import {
   appLifecycleSchema,
   appLifecycleResultSchema,
@@ -82,8 +83,8 @@ describe("appLifecycle registration and handler", () => {
       },
     });
     const response = await handler()(device, args, undefined, controller.signal);
-    expect(response.structuredContent).toMatchObject(successful);
-    expect(appLifecycleResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(toolStructured(response)).toMatchObject(successful);
+    expect(appLifecycleResultSchema.safeParse(toolStructured(response)).success).toBe(true);
     expect(refreshes).toEqual([device.deviceId]);
   });
   for (const failure of [
@@ -109,9 +110,9 @@ describe("appLifecycle registration and handler", () => {
         },
       });
       const response = await handler()(device, args);
-      expect(response.structuredContent).toMatchObject({ success: false, message: failure.error });
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toBe(JSON.stringify({ ...failure, message: failure.error }));
+      expect(toolStructured(response)).toMatchObject({ success: false, message: failure.error });
+      expect(toolIsError(response)).toBe(true);
+      expect(toolText(response)).toBe(JSON.stringify({ ...failure, message: failure.error }));
       expect(refreshes).toEqual([]);
     });
   }
@@ -146,7 +147,7 @@ describe("appLifecycle registration and handler", () => {
         }),
       },
     });
-    expect((await handler()(device, args)).structuredContent).toMatchObject({
+    expect(toolStructured(await handler()(device, args))).toMatchObject({
       message: "Process was not reclaimed",
       success: true,
     });
@@ -168,7 +169,7 @@ describe("appLifecycle registration and handler", () => {
         }),
       },
     });
-    expect((await handler()(device, args)).structuredContent).toMatchObject({
+    expect(toolStructured(await handler()(device, args))).toMatchObject({
       message: "kill failed",
       success: false,
     });

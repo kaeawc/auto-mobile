@@ -1,3 +1,4 @@
+import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
@@ -2073,11 +2074,9 @@ describe("InstallApp", () => {
       performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
       plist: fakePlist("com.example.app"),
       installedAppsRepository: repository,
-      cacheInvalidator: {
-        invalidate: () => {
-          calls.push("invalidate");
-        },
-      },
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
+        calls.push("invalidate");
+      }),
       iosInstallBackendResolver: () => ({
         kind: "simulator",
         listApps: async () => {
@@ -2174,11 +2173,9 @@ describe("InstallApp", () => {
             return bundleId;
           },
         },
-        cacheInvalidator: {
-          invalidate: () => {
-            calls.push("invalidate");
-          },
-        },
+        cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
+          calls.push("invalidate");
+        }),
         installedAppsRepository: Object.assign(new FakeInstalledAppsRepository(), {
           markDeviceStale: async () => {
             calls.push("stale");

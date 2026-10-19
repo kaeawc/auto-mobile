@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import { describe, expect, test } from "bun:test";
 import {
@@ -39,10 +40,10 @@ describe("ImeRestore", () => {
       "IME user was not pinned before an IME command.",
     );
     host.session.imeUserId = 10;
-    adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
-      stdout: "keyboard/.Ime\n",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings --user 10 get secure default_input_method",
+      createExecResult("keyboard/.Ime\n", ""),
+    );
     expect(await restoration.readDefaultIme()).toEqual({ success: true, imeId: "keyboard/.Ime" });
     host.session.imeUserId = 0;
     expect(restoration.imeUserFlag()).toBe("");
@@ -56,20 +57,20 @@ describe("ImeRestore", () => {
   test("does not report activation success until the default IME read-back matches", async () => {
     const { restoration, host, adb } = harness();
     host.session.imeUserId = 10;
-    adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
-      stdout: AUTO_MOBILE_IME_ID,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings --user 10 get secure default_input_method",
+      createExecResult(AUTO_MOBILE_IME_ID, ""),
+    );
     expect(await restoration.activateCommitIme(false)).toBe(true);
     expect(adb.getExecutedCommands()).toEqual([
       `shell ime enable --user 10 ${AUTO_MOBILE_IME_ID}`,
       `shell ime set --user 10 ${AUTO_MOBILE_IME_ID}`,
       "shell settings --user 10 get secure default_input_method",
     ]);
-    adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
-      stdout: "keyboard/.Ime",
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell settings --user 10 get secure default_input_method",
+      createExecResult("keyboard/.Ime", ""),
+    );
     expect(await restoration.activateCommitIme(true)).toBe(false);
   });
 
@@ -101,23 +102,23 @@ describe("ImeRestore", () => {
   test("recovery re-disables a commit IME left enabled by a failed restoration (#13158)", async () => {
     const { restoration, adb } = harness();
     const original = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME";
-    adb.setCommandResponse("shell ime list -a -s", {
-      stdout: `${original}\n${AUTO_MOBILE_IME_ID}\n`,
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "shell ime list -a -s",
+      createExecResult(`${original}\n${AUTO_MOBILE_IME_ID}\n`, ""),
+    );
     adb.setCommandResponseSequence("shell ime list -s", [
-      { stdout: `${original}\n${AUTO_MOBILE_IME_ID}\n`, stderr: "" },
-      { stdout: `${original}\n`, stderr: "" },
+      createExecResult(`${original}\n${AUTO_MOBILE_IME_ID}\n`, ""),
+      createExecResult(`${original}\n`, ""),
     ]);
-    adb.setCommandResponse("shell settings get secure default_input_method", {
-      stdout: `${original}\n`,
-      stderr: "",
-    });
-    adb.setCommandResponse("shell settings get secure default_input_method_subtype", {
-      stdout: "null\n",
-      stderr: "",
-    });
-    adb.setCommandResponse(`shell ime disable ${AUTO_MOBILE_IME_ID}`, { stdout: "", stderr: "" });
+    adb.setCommandResponse(
+      "shell settings get secure default_input_method",
+      createExecResult(`${original}\n`, ""),
+    );
+    adb.setCommandResponse(
+      "shell settings get secure default_input_method_subtype",
+      createExecResult("null\n", ""),
+    );
+    adb.setCommandResponse(`shell ime disable ${AUTO_MOBILE_IME_ID}`, createExecResult("", ""));
     const recovered = await restoration.verifySafeImeRecovery({
       imeId: original,
       subtypeId: null,

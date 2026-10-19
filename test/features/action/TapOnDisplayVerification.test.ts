@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
@@ -790,7 +791,9 @@ describe("tapOn display verification", () => {
     const before = { ...hierarchy(), displayId: undefined };
     h.capture.read = () => before;
     h.action.observedInteraction = async (run) => ({
-      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
+      ...(await run(
+        buildObserveResult({ screenSize: { width: 200, height: 200 }, viewHierarchy: before }),
+      )),
       observation: { viewHierarchy: before },
     });
     h.action.executeAndroidTap = async () => {};
@@ -1060,7 +1063,9 @@ describe("tapOn targeted display resolution", () => {
     const before = { ...hierarchy({ text: "Loading" }), displayId: undefined };
     h.capture.read = () => ({ ...hierarchy({ left: 120 }), displayId: undefined });
     h.action.observedInteraction = async (run) => ({
-      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
+      ...(await run(
+        buildObserveResult({ screenSize: { width: 200, height: 200 }, viewHierarchy: before }),
+      )),
       observation: { viewHierarchy: before },
     });
     const points: Array<{ x: number; y: number }> = [];
@@ -1091,7 +1096,9 @@ describe("tapOn targeted display resolution", () => {
     const before = { ...siblingHierarchy(), displayId: undefined };
     h.capture.read = () => ({ ...siblingHierarchy({ left: 140 }), displayId: undefined });
     h.action.observedInteraction = async (run) => ({
-      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
+      ...(await run(
+        buildObserveResult({ screenSize: { width: 200, height: 200 }, viewHierarchy: before }),
+      )),
       observation: { viewHierarchy: before },
     });
     const points: Array<{ x: number; y: number }> = [];

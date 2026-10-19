@@ -387,19 +387,7 @@ describe("DeviceAppManager", () => {
         if (command.includes("simctl get_app_container")) {
           throw new Error("No such file or directory");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -433,19 +421,7 @@ describe("DeviceAppManager", () => {
         if (command.includes("simctl get_app_container")) {
           throw new Error("Invalid device: simulator is not booted");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -479,19 +455,7 @@ describe("DeviceAppManager", () => {
         if (command.includes("devicectl device info apps")) {
           throw new Error("devicectl unavailable");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -517,33 +481,9 @@ describe("DeviceAppManager", () => {
       execute: async (_file, args) => {
         const command = [_file, ...args].join(" ");
         if (command.includes("simctl get_app_container")) {
-          return {
-            stdout: "/tmp/missing/ExistingApp.app\n",
-            stderr: "",
-            toString() {
-              return this.stdout;
-            },
-            trim() {
-              return this.stdout.trim();
-            },
-            includes(searchString: string) {
-              return this.stdout.includes(searchString);
-            },
-          };
+          return createExecResult("/tmp/missing/ExistingApp.app\n", "");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async (path) => fs.readFile(path, "utf-8"),
       mkdtemp: async (prefix) => fs.mkdtemp(prefix),
@@ -757,19 +697,7 @@ describe("DeviceAppManager", () => {
         if (file === "xcrun" && args.slice(0, 4).join(" ") === "devicectl device info apps") {
           throw new Error("bundle lookup failed");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString() {
-            return this.stdout;
-          },
-          trim() {
-            return this.stdout.trim();
-          },
-          includes(searchString: string) {
-            return this.stdout.includes(searchString);
-          },
-        };
+        return createExecResult("", "");
       },
       readFile: async () => {
         throw new Error("bundle lookup should fail before reading JSON");

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import {
   KeyEventSupport,
@@ -133,11 +134,11 @@ describe("KeyEventSupport", () => {
       options.push(config);
       return execute(args, config);
     };
-    adb.setCommandResponse("echo $$; exec", { stdout: "123\n", stderr: "" });
+    adb.setCommandResponse("echo $$; exec", createExecResult("123\n", ""));
     adb.setCommandError("echo $$; exec", failure);
     adb.setCommandResponseSequence("/proc/123/cmdline", [
-      { stdout: "alive", stderr: "" },
-      { stdout: "", stderr: "" },
+      createExecResult("alive", ""),
+      createExecResult("", ""),
     ]);
     host.getAndroidApiLevel = async () => 30;
     await expect(
@@ -161,9 +162,9 @@ describe("KeyEventSupport", () => {
     };
     host.getAndroidApiLevel = async () => null;
     host.session.typingPasswordField = true;
-    adb.setCommandResponse("echo $$; exec", { stdout: "123\n", stderr: "" });
+    adb.setCommandResponse("echo $$; exec", createExecResult("123\n", ""));
     adb.setCommandError("echo $$; exec", failure);
-    adb.setCommandResponse("/proc/123/cmdline", { stdout: "alive", stderr: "" });
+    adb.setCommandResponse("/proc/123/cmdline", createExecResult("alive", ""));
     await expect(
       support.executeKeyEventPlan({ commands: ["shell input text 'a'"], textLength: 9 }),
     ).rejects.toBe(failure);

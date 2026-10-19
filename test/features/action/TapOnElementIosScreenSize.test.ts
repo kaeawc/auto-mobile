@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ObserveScreen } from "../../../src/features/observe/ObserveScreen";
@@ -53,11 +54,11 @@ function createTap(
 }
 
 function replace(tap: TapOnElement, hierarchy: ViewHierarchyResult): ObserveResult {
-  const observation: ObserveResult = {
+  const observation: ObserveResult = buildObserveResult({
     observationId: "fixture-observation",
     updatedAt: 1,
     screenSize: { width: 669, height: 951 },
-  };
+  });
   tap["replaceObservationHierarchy"](observation, hierarchy, false);
   return observation;
 }

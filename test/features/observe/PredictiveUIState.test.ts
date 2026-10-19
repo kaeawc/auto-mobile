@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import {
   afterAll,
   afterEach,
@@ -23,7 +24,10 @@ import {
 } from "../../helpers/navigationTestHarness";
 
 type Interactable = InteractableElement;
-const observation: ObserveResult = { updatedAt: 1, viewHierarchy: { hierarchy: {} } };
+const observation: ObserveResult = buildObserveResult({
+  updatedAt: 1,
+  viewHierarchy: { hierarchy: {} },
+});
 const button: Element = { text: "Open", "resource-id": "open", clickable: true };
 
 function edge(toolName: string, args: Record<string, unknown> = {}): NavigationEdge {
@@ -74,7 +78,7 @@ describe("PredictiveUIState characterization", () => {
   });
 
   test("returns no predictions for missing hierarchy, screen, or a different foreground app", async () => {
-    expect(await state.generate({ updatedAt: 0 })).toBeUndefined();
+    expect(await state.generate(buildObserveResult({ updatedAt: 0 }))).toBeUndefined();
     currentScreen.mockReturnValue(null);
     expect(await state.generate(observation)).toBeUndefined();
     currentScreen.mockReturnValue("Home");

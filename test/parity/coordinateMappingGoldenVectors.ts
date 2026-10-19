@@ -185,9 +185,7 @@ const SECTION_NAMES = [
 ] as const;
 
 export function loadCoordinateMappingVectors(): CoordinateMappingGoldenVectors {
-  const parsed = JSON.parse(
-    readFileSync(COORDINATE_CANONICAL_JSON_PATH, "utf8"),
-  ) as CoordinateMappingGoldenVectors;
+  const parsed: unknown = JSON.parse(readFileSync(COORDINATE_CANONICAL_JSON_PATH, "utf8"));
   validateCoordinateMappingVectors(parsed, COORDINATE_CANONICAL_JSON_PATH);
   return parsed;
 }
@@ -205,17 +203,18 @@ export function loadCoordinateMappingVectors(): CoordinateMappingGoldenVectors {
  * is silently unmatched by a typo'd key: the canonical field list drives the check, not the row.
  */
 export function validateCoordinateMappingVectors(
-  parsed: CoordinateMappingGoldenVectors,
+  parsed: unknown,
   source: string = COORDINATE_CANONICAL_JSON_PATH,
-): void {
+): asserts parsed is CoordinateMappingGoldenVectors {
   for (const section of SECTION_NAMES) {
-    if (!Array.isArray(parsed[section]) || parsed[section].length === 0) {
+    const rows: unknown = isRecord(parsed) ? parsed[section] : undefined;
+    if (!Array.isArray(rows) || rows.length === 0) {
       throw new Error(`${source}: missing non-empty "${section}" array`);
     }
     const fields = SECTION_NUMERIC_FIELDS[section];
-    parsed[section].forEach((row, index) => {
+    rows.forEach((row: unknown, index) => {
       for (const field of fields) {
-        const value = (row as Record<string, unknown>)[field];
+        const value = isRecord(row) ? row[field] : undefined;
         if (typeof value !== "number" || !Number.isFinite(value)) {
           throw new Error(
             `${source}: section ${section} row ${index} field ${field}: ` +
@@ -225,6 +224,10 @@ export function validateCoordinateMappingVectors(
       }
     });
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 /** Chunk a flat number sequence into fixed-width rows, failing closed on misalignment. */
@@ -499,7 +502,7 @@ export function referenceScaleReporting(vector: ScaleReportingVector): {
  * array === identical). This is the drift detector for the Kotlin inline tables: feed it a table
  * with a one-sided edit and it reports exactly which row and field diverged.
  */
-export function diffNumericRows<T extends Record<string, number | boolean | undefined>>(
+export function diffNumericRows<T extends { [K in keyof T]: number | boolean | undefined }>(
   actual: T[],
   expected: T[],
   fields: ReadonlyArray<keyof T & string>,

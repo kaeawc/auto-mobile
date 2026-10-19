@@ -471,7 +471,7 @@ describe("Simctl", function () {
 
       const bootPromise = simctl.startSimulator("test-ios-device-id", 1234);
       await waitForCondition(() => capturedSignal !== undefined, "boot abort signal");
-      expect(capturedSignal.aborted).toBe(false);
+      expect(capturedSignal?.aborted).toBe(false);
 
       timer.advanceTime(1234);
 
@@ -479,7 +479,7 @@ describe("Simctl", function () {
         "Command timed out after 1234ms: xcrun simctl bootstatus test-ios-device-id -b",
       );
       // The timeout must abort the child rather than leave it running orphaned.
-      expect(capturedSignal.aborted).toBe(true);
+      expect(capturedSignal?.aborted).toBe(true);
     });
   });
 
@@ -869,7 +869,7 @@ describe("Simctl", function () {
 
       timer.advanceTime(10);
       await Promise.resolve();
-      expect(deleteSignal.aborted).toBe(true);
+      expect(deleteSignal?.aborted).toBe(true);
       expect(settled).toBe(false);
 
       settleDelete(createExecResult("", ""));
@@ -962,7 +962,7 @@ describe("Simctl", function () {
 
       timer.advanceTime(10);
       await Promise.resolve();
-      expect(shutdownSignal.aborted).toBe(true);
+      expect(shutdownSignal?.aborted).toBe(true);
       expect(settled).toBe(false);
 
       settleShutdown(createExecResult("", ""));

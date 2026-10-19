@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
@@ -128,7 +129,12 @@ for (const row of rows) {
           // Reuse the real capture for fresh lookup. After dispatch the fake
           // probe is unreadable, so retry cannot obscure the first dispatch.
           tap.observedInteraction = (action) =>
-            action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
+            action(
+              buildObserveResult({
+                viewHierarchy: capture,
+                screenSize: { width: 1080, height: 2400 },
+              }),
+            );
           let dispatched = false;
           tap.testHooks.setBeforeAndroidTap(() => {
             dispatched = true;

@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import type { FailureObservationSummary } from "../../src/models/FailureObservation";
 import type { AbortStrategy, Plan, PlanExecutionResult } from "../../src/models/Plan";
+import type { PlanDeviceFailure } from "../../src/models/ExecutePlanResult";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { selectParallelFailure } from "../../src/utils/plan/PlanExecutor";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
@@ -11,6 +12,14 @@ import { withTemporaryTool } from "../helpers/withTemporaryTool";
 
 const toolName = "parallelFailureSelectionTest";
 const toolSchema = z.object({ device: z.string() });
+
+function failedStepOf(result: PlanExecutionResult): PlanDeviceFailure {
+  const step = result.failedStep;
+  if (!step || step.device === undefined) {
+    throw new Error("expected a failed step that names its device");
+  }
+  return { ...step, device: step.device };
+}
 
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 30; i++) {
@@ -141,7 +150,7 @@ describe("parallel reported failure selection", () => {
         failureObservation: undefined,
       });
       expect(result.deviceFailures).toEqual([
-        result.failedStep,
+        failedStepOf(result),
         {
           device: "A",
           stepIndex: 1,
@@ -166,7 +175,7 @@ describe("parallel reported failure selection", () => {
           error: "failure on Z",
         });
         expect(result.deviceFailures?.map(({ device }) => device)).toEqual(["Z", "A"]);
-        expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
+        expect(result.deviceFailures?.[0]).toEqual(failedStepOf(result));
       } finally {
         partitionSpy.mockRestore();
       }
@@ -189,7 +198,7 @@ describe("parallel reported failure selection", () => {
         error: "track-level failure",
       });
       expect(result.deviceFailures).toEqual([
-        result.failedStep,
+        failedStepOf(result),
         { device: "A", stepIndex: -1, tool: "unknown", error: "track-level failure" },
       ]);
     });
@@ -206,7 +215,7 @@ describe("parallel reported failure selection", () => {
       failureObservation: undefined,
     });
     expect(result.deviceFailures?.map(({ device }) => device)).toEqual(["A", "Z"]);
-    expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
+    expect(result.deviceFailures?.[0]).toEqual(failedStepOf(result));
     const sibling = result.perDeviceResults!.get("Z")!.failedStep!;
     expect(result.deviceFailures?.[1]).toEqual({
       device: "Z",
@@ -225,7 +234,7 @@ describe("parallel reported failure selection", () => {
       tool: "unknown",
     });
     expect(result.deviceFailures?.map(({ device }) => device)).toEqual(["A", "Z"]);
-    expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
+    expect(result.deviceFailures?.[0]).toEqual(failedStepOf(result));
     expect(result.deviceFailures?.[1]).toMatchObject({
       device: "Z",
       stepIndex: -1,
@@ -238,7 +247,7 @@ describe("parallel reported failure selection", () => {
     expect(result.failedStep).toMatchObject({ device: "A", stepIndex: 1, error: "failure on A" });
     expect(result).toMatchObject({ success: false, executedSteps: 1, totalSteps: 2 });
     expect(result.perDeviceResults?.get("Z")?.success).toBe(true);
-    expect(result.deviceFailures).toEqual([result.failedStep]);
+    expect(result.deviceFailures).toEqual([failedStepOf(result)]);
   });
 
   test("sequential single-device failure omits deviceFailures", async () => {

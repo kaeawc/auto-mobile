@@ -1,3 +1,7 @@
+import {
+  deliverDaemonHeartbeat,
+  deliverDaemonHeartbeatIfKnown,
+} from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -181,7 +185,7 @@ describe("requests during device session release", () => {
   async function beginPhaseA(reason: string, cli = false) {
     const session = await manager.createSession(sessionId, deviceId, "android");
     if (reason === "heartbeat-timeout") {
-      manager.recordHeartbeat(sessionId);
+      await deliverDaemonHeartbeat(manager, sessionId);
     }
     if (cli) {
       manager.adoptCliLivenessPolicy(sessionId, 60000);
@@ -328,14 +332,14 @@ describe("requests during device session release", () => {
     }
   });
 
-  test("direct recordHeartbeat during Phase A does not mutate or persist activity", async () => {
+  test("a heartbeat delivered during Phase A does not mutate or persist activity", async () => {
     const { session, release } = await beginPhaseA("explicit-release");
     session.ownership = "awaiting-owner";
     session.awaitingOwnerSince = 0;
     const before = liveness(session);
     const writes = persistence.activityWrites;
     timer.advanceTime(1);
-    manager.recordHeartbeat(sessionId);
+    await deliverDaemonHeartbeatIfKnown(manager, sessionId);
     const after = liveness(session);
     finishRestore.resolve();
     await release;

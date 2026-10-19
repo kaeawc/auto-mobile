@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
@@ -225,6 +226,8 @@ describe.each([
   /** Runs where the request is to be cancelled; each hook is cleared once it fires. */
   let beforeBind: (() => void) | undefined;
   let afterBind: (() => void) | undefined;
+  /** The heartbeat a sibling acquisition delivers from the `afterBind` hook, then cancels. */
+  let siblingHeartbeat: Promise<void> | undefined;
 
   beforeEach(() => {
     resetDeviceToolsDependencies();
@@ -233,6 +236,7 @@ describe.each([
     resetProvisionedDeviceTransportFenceForTests();
     beforeBind = undefined;
     afterBind = undefined;
+    siblingHeartbeat = undefined;
     heldLeases = new Set();
     timer = new FakeTimer();
     devices = new FakeDeviceUtils();
@@ -594,11 +598,14 @@ describe.each([
     afterBind = () => {
       // A sibling acquisition on the connection reused the minted session and returned it, so
       // its keeper heartbeats the id the cancelled call never delivered.
-      sessions.recordHeartbeat(pool.getDevice(SIM_UDID)!.sessionId!);
-      controller.abort(new Error("client cancelled"));
+      siblingHeartbeat = deliverDaemonHeartbeat(
+        sessions,
+        pool.getDevice(SIM_UDID)!.sessionId!,
+      ).then(() => controller.abort(new Error("client cancelled")));
     };
 
     const sessionUuid = await deliveredSession("getApple", { udid: SIM_UDID }, controller.signal);
+    await siblingHeartbeat;
     await drain();
 
     expect(sessionUuid).toBeUndefined();

@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
@@ -66,10 +67,12 @@ describe("TapAnyElement", () => {
     tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     tapAny.observedInteraction = (action) =>
       action(
-        recordObservationRead({
-          viewHierarchy: { hierarchy: { node: {} } },
-          screenSize: { width: 500, height: 500 },
-        }),
+        recordObservationRead(
+          buildObserveResult({
+            viewHierarchy: { hierarchy: { node: {} } },
+            screenSize: { width: 500, height: 500 },
+          }),
+        ),
       );
 
     await tapAny.execute({ action: "longPress", duration: LONG_PRESS_HARD_MAX_MS });
@@ -237,7 +240,11 @@ describe("TapAnyElement", () => {
       );
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
       tapAny.observedInteraction = (action) =>
-        action(recordObservationRead({ viewHierarchy, screenSize: { width: 10, height: 10 } }));
+        action(
+          recordObservationRead(
+            buildObserveResult({ viewHierarchy, screenSize: { width: 10, height: 10 } }),
+          ),
+        );
       tapAny.testHooks.setRefreshViewHierarchy(async () => null);
 
       const result = await tapAny.execute({ action: "tap" });
@@ -676,10 +683,12 @@ describe("TapAnyElement node long press fallbacks", () => {
     );
     tapAny.observedInteraction = (action) =>
       action(
-        recordObservationRead({
-          viewHierarchy: { hierarchy: { node: {} } },
-          screenSize: { width: 500, height: 500 },
-        }),
+        recordObservationRead(
+          buildObserveResult({
+            viewHierarchy: { hierarchy: { node: {} } },
+            screenSize: { width: 500, height: 500 },
+          }),
+        ),
       );
     tapAny.testHooks.setRefreshViewHierarchy(async () => target?.fresh ?? null);
     return { proxy, adb, tapAny };

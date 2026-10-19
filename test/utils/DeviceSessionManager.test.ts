@@ -28,6 +28,7 @@ import {
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { XCTestHierarchy } from "../../src/features/observe/ios/types";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
@@ -77,6 +78,13 @@ function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrl
     ...overrides,
   } as unknown as AndroidCtrlProxy;
 }
+
+type PushUpdateListener = (hierarchy: XCTestHierarchy) => void;
+const pushedHierarchy: XCTestHierarchy = {
+  updatedAt: 0,
+  packageName: "com.example.app",
+  hierarchy: {},
+};
 
 function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
   return {
@@ -735,14 +743,14 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     iosManager.setRunning(true);
 
     // Capture the push-update callback so the test can fire it on demand.
-    let captured: (() => void) | null = null;
+    const captured: PushUpdateListener[] = [];
     const iosClient = stubIOSCtrlProxy({
       isConnected: () => true,
       verifyServiceReady: () => Promise.resolve(true),
-      onPushUpdate: (cb: () => void) => {
-        captured = cb;
+      onPushUpdate: (cb: PushUpdateListener) => {
+        captured.push(cb);
         return () => {
-          captured = null;
+          captured.length = 0;
         };
       },
     });
@@ -759,12 +767,10 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     await manager.verifyIosDevice("ios-push-1");
 
     // Listener registered; cache untouched until update fires.
-    if (!captured) {
-      throw new Error("onPushUpdate listener never registered");
-    }
+    expect(captured).toHaveLength(1);
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(false);
 
-    captured();
+    captured[0](pushedHierarchy);
 
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(true);
     expect(observeCache.getClearedDevices()).toEqual(["ios-push-1"]);
@@ -781,13 +787,13 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     });
     const iosManager = new FakeIOSCtrlProxyManager();
     iosManager.setRunning(true);
-    const callbacksA: Array<() => void> = [];
-    const callbacksB: Array<() => void> = [];
-    const makeClient = (callbacks: Array<() => void>) =>
+    const callbacksA: PushUpdateListener[] = [];
+    const callbacksB: PushUpdateListener[] = [];
+    const makeClient = (callbacks: PushUpdateListener[]) =>
       stubIOSCtrlProxy({
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(true),
-        onPushUpdate: (callback: () => void) => {
+        onPushUpdate: (callback: PushUpdateListener) => {
           callbacks.push(callback);
           return () => {};
         },
@@ -808,7 +814,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     await manager.verifyIosDevice(deviceId);
     await manager.verifyIosDevice(deviceId);
     expect(callbacksB).toHaveLength(1);
-    callbacksB[0]();
+    callbacksB[0](pushedHierarchy);
     expect(options.observeScreenCache.getClearedDevices()).toEqual([deviceId]);
   });
 
@@ -874,7 +880,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const fakeAdb = new FakeAdbExecutor();
     const fakeDeviceUtils = new FakeDeviceUtils();
     const fakeSimctl = new FakeSimctl();
-    fakeSimctl.setAvailableSimulators([iosDevice]);
+    fakeSimctl.setAvailableSimulators([{ ...iosDevice, isRunning: false }]);
     fakeSimctl.setBootedSimulators([iosDevice]);
     fakeSimctl.setDeviceInfo(iosDevice.deviceId, {
       udid: iosDevice.deviceId,
@@ -1006,7 +1012,9 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
       await bootStarted.promise;
       const createCall = fakeSimctl.getMethodCalls("createSimulator")[0];
       const createdName = createCall?.name;
-      expect(createdName).toBeString();
+      if (typeof createdName !== "string") {
+        throw new Error("createSimulator was not called with a simulator name");
+      }
       expect(lifecycleCoordinator.reservations[0]).toEqual({
         identity: { kind: "selector", platform: "ios", selector: createdName },
         operation: "start",
@@ -1183,7 +1191,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
   test("session auto-start presents after its own boot; reconnect to the booted device does not", async () => {
     const fakeSimctl = new FakeSimctl();
     const device = { deviceId: "ios-sim-1", name: "iPhone 15", platform: "ios" as const };
-    fakeSimctl.setAvailableSimulators([{ ...device, isAvailable: true }]);
+    fakeSimctl.setAvailableSimulators([{ ...device, isRunning: false, isAvailable: true }]);
     fakeSimctl.setDeviceInfo(device.deviceId, {
       udid: device.deviceId,
       name: device.name,
@@ -1500,7 +1508,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       deviceId: "mock-Pixel_9_Pro",
       platform: "android",
     };
-    fakeDeviceUtils.setDeviceImages("android", [{ name: "Pixel_9_Pro", platform: "android" }]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "Pixel_9_Pro", platform: "android", isRunning: false },
+    ]);
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
     fakeAdb.setDevices([startedDevice]);
 
@@ -1549,7 +1559,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       readinessStarted = resolve;
     });
     fakeAdb.setDevices([]);
-    fakeDeviceUtils.setDeviceImages("android", [{ name: "Pixel_9_Pro", platform: "android" }]);
+    fakeDeviceUtils.setDeviceImages("android", [
+      { name: "Pixel_9_Pro", platform: "android", isRunning: false },
+    ]);
     fakeDeviceUtils.setMockChildProcess("Pixel_9_Pro", childProcess);
     fakeDeviceUtils.waitForDeviceReady = async (_device, _timeoutMs, _childProcess, signal) => {
       readinessStarted();
@@ -1628,7 +1640,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       const timer = new FakeTimer();
       const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
       fakeAdb.setDevices([]);
-      fakeDeviceUtils.setDeviceImages("android", [{ name: AVD, platform: "android" }]);
+      fakeDeviceUtils.setDeviceImages("android", [
+        { name: AVD, platform: "android", isRunning: false },
+      ]);
       fakeDeviceUtils.startDevice = async () => {
         const signal = getAbortSignal();
         await new Promise<void>((resolve) => {

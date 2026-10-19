@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { OpenURL } from "../../../src/features/action/OpenURL";
@@ -24,13 +25,13 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device = { name: "foreground", deviceId: "foreground", platform: "android" } as const;
-const observation: ObserveResult = {
+const observation: ObserveResult = buildObserveResult({
   screenSize: { width: 1080, height: 2400 },
   systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
   viewHierarchy: { hierarchy: {} },
   freshness: { isFresh: true },
   settled: true,
-};
+});
 
 afterEach(() => resetObserveCacheStore());
 

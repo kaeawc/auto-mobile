@@ -9,10 +9,21 @@ const REPO_ROOT = path.join(import.meta.dir, "..", "..");
 const TEST_DIR = path.join(REPO_ROOT, "test");
 const BASELINE_FILE = path.join(import.meta.dir, "record-heartbeat-callers-baseline.txt");
 // Equals the baseline's line count; the UPDATE command below keeps it in sync.
-const BASELINE_CEILING = 14;
+const BASELINE_CEILING = 0;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 const HARNESS_FILE = "test/helpers/livenessScenarioHarness.ts";
+/**
+ * Files that unit-test `recordHeartbeat` itself, so the direct call IS the subject under test and
+ * delivering a `daemon/heartbeat` frame would test a different layer. A permanent, reasoned
+ * exemption, not baseline debt: an exempt file must still call it (else drop the entry).
+ */
+const EXEMPT_FILES: Readonly<Record<string, string>> = {
+  "test/daemon/sessionLivenessLease.test.ts":
+    "unit-tests SessionLivenessController.recordHeartbeat (lease state machine) directly",
+  "test/daemon/sessionManager.heartbeat.test.ts":
+    "unit-tests SessionManager.recordHeartbeat (its activity and lease effects) directly",
+};
 
 describe("scanRecordHeartbeatCalls", () => {
   test.each([
@@ -95,6 +106,7 @@ const UPDATE_COMMAND =
 describe("direct recordHeartbeat callers stay within the baseline", () => {
   let baseline: readonly string[] = [];
   let found: readonly string[] = [];
+  let exemptFound: readonly string[] = [];
   let callSites: readonly { file: string; line: number }[] = [];
 
   beforeAll(() => {
@@ -105,6 +117,10 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
         line: finding.line,
       }));
     });
+    exemptFound = [...new Set(callSites.map((finding) => finding.file))].filter(
+      (file) => file in EXEMPT_FILES,
+    );
+    callSites = callSites.filter((finding) => !(finding.file in EXEMPT_FILES));
     found = [...new Set(callSites.map((finding) => finding.file))].sort();
     if (process.env.UPDATE_RECORD_HEARTBEAT_BASELINE === "1") {
       // Regenerate exactly the still-offending files and sync the ceiling.
@@ -126,9 +142,9 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
     if (added.length > 0) {
       throw new Error(
         `New direct recordHeartbeat calls:\n  ${added.map(({ file, line }) => `${file}:${line}`).join("\n  ")}\n` +
-          `Drive heartbeats through test/helpers/livenessScenarioHarness.ts (daemon/heartbeat frames). ` +
-          `For a genuine recordHeartbeat unit test, update with: ${UPDATE_COMMAND}  (then commit ` +
-          `test/lint/record-heartbeat-callers-baseline.txt and this test file).`,
+          `Drive heartbeats through deliverDaemonHeartbeat in test/helpers/daemonHeartbeatHandler.ts ` +
+          `(daemon/heartbeat frames). A test that unit-tests recordHeartbeat itself belongs in ` +
+          `EXEMPT_FILES with a reason.`,
       );
     }
   });
@@ -142,6 +158,14 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
       );
     }
     expect(baseline.length).toBe(BASELINE_CEILING);
+  });
+
+  test("every exemption names a file that still calls recordHeartbeat directly", () => {
+    const unused = Object.keys(EXEMPT_FILES).filter((file) => !exemptFound.includes(file));
+    expect(unused).toEqual([]);
+    for (const reason of Object.values(EXEMPT_FILES)) {
+      expect(reason.length).toBeGreaterThan(0);
+    }
   });
 
   test("the baseline is sorted and free of duplicates", () => {

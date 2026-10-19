@@ -81,10 +81,10 @@ const plistValueToSigningValue = (value: PlistValue): unknown => {
   return value;
 };
 
-interface XcodeSigningDependencies {
+export interface XcodeSigningDependencies {
   platform: () => NodeJS.Platform;
   securityClient: SecurityClientApi;
-  xcodebuild: Xcodebuild;
+  xcodebuild: Pick<Xcodebuild, "executeCommand" | "isAvailable">;
   readDir: (path: string) => Promise<string[]>;
   readFile: (path: string) => Promise<string>;
   stat: (path: string) => Promise<{ isFile: () => boolean }>;

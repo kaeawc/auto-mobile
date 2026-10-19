@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -292,7 +293,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
         }),
       );
       sessionManager.setDeviceLabels(BASE, { A: BASE, B: DERIVED });
-      sessionManager.recordHeartbeat(BASE);
+      await deliverDaemonHeartbeat(sessionManager, BASE);
       (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
 
       const baseReadOnBaseDevice = startRead(BASE, OWNER_CONNECTION);
@@ -306,7 +307,7 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
       const stepMs = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
       const reapWithinMs = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 2 * stepMs;
       for (let waited = 0; waited < reapWithinMs && sessionManager.hasSession(DERIVED);) {
-        sessionManager.recordHeartbeat(BASE);
+        await deliverDaemonHeartbeat(sessionManager, BASE);
         await settle(stepMs);
         waited += stepMs;
       }

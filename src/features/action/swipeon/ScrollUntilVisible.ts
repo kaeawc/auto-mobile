@@ -1076,18 +1076,18 @@ export class ScrollUntilVisible {
                 "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
               );
             }
-            const result = await swipeRunner.executeSwipeGesture(
-              Math.floor(startX),
-              Math.floor(startY),
-              Math.floor(endX),
-              Math.floor(endY),
-              activeDirection,
+            const result = await swipeRunner.executeSwipeGesture({
+              x1: Math.floor(startX),
+              y1: Math.floor(startY),
+              x2: Math.floor(endX),
+              y2: Math.floor(endY),
+              direction: activeDirection,
               containerElement,
               gestureOptions,
               perf,
               boomerang,
               signal,
-            );
+            });
             // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
             if (
               this.deps.device.platform === "ios" &&

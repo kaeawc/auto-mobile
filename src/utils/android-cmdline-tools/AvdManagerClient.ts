@@ -4,11 +4,14 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { AndroidCommandTerminatedError, runAndroidCommand } from "./runAndroidCommand";
+import {
+  AndroidCommandTerminatedError,
+  runAndroidCommand,
+  type AndroidCommandChild,
+} from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
-  type HostChildProcess as ChildProcess,
   type HostProcessExecutor,
   type HostSpawnOptions as SpawnOptions,
 } from "../HostCommandExecutor";
@@ -29,8 +32,8 @@ export interface AvdManagerExecutionOptions {
 }
 
 export interface AvdManagerClientDependencies {
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-  existsSync: typeof existsSync;
+  spawn: (command: string, args: string[], options: SpawnOptions) => AndroidCommandChild;
+  existsSync: (path: string) => boolean;
   logger: Pick<typeof logger, "info" | "warn" | "error">;
   detectAndroidCommandLineTools: typeof detectAndroidCommandLineTools;
   getAndroidHomeWithSystemImages: typeof getAndroidHomeWithSystemImages;

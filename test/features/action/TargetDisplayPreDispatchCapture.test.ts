@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
@@ -121,11 +122,13 @@ function screen(key: string): ObserveResult {
 
 function adb(): FakeAdbExecutor {
   const result = new FakeAdbExecutor();
-  result.setCommandResponse("cmd display get-displays", {
-    stdout:
+  result.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 200 x 200}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   return result;
 }
 

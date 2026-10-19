@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { PortManager } from "../../../src/utils/PortManager";
@@ -27,7 +28,7 @@ function setup(platform: "android" | "ios") {
   const search = (duration = 1500, signal?: AbortSignal) =>
     command.searchForElement(
       { action: "tap", text: "missing", searchUntil: { duration } },
-      { viewHierarchy: hierarchy, screenSize: { width: 400, height: 800 } },
+      buildObserveResult({ viewHierarchy: hierarchy, screenSize: { width: 400, height: 800 } }),
       signal,
     );
   return { timer, selector, refresh, requests, search };

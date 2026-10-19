@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeatIfKnown } from "../helpers/daemonHeartbeatHandler";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { describe, expect, test } from "bun:test";
 import {
@@ -842,7 +843,7 @@ describe("SessionManager", () => {
       expect(manager.getSessionForNewExecution("s1")).toBeNull();
 
       const expiresAt = session.expiresAt;
-      manager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(manager, "s1");
       await Promise.resolve();
       expect(session.expiresAt).toBe(expiresAt);
       expect(activity).toEqual([]);
@@ -883,7 +884,7 @@ describe("SessionManager", () => {
       await keepAwake.started;
       expect(manager.getSession("s1")).toBeNull();
       expect(manager.getSessionForNewExecution("s1")).toBeNull();
-      manager.recordHeartbeat("s1");
+      await deliverDaemonHeartbeatIfKnown(manager, "s1");
       expect(session.expiresAt).toBe(1);
 
       keepAwake.finish();

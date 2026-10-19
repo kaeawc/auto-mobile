@@ -1,3 +1,7 @@
+import {
+  deliverDaemonHeartbeat,
+  deliverDaemonHeartbeatIfKnown,
+} from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   SessionManager,
@@ -121,7 +125,7 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
       w.manager.claimUnownedLivenessOwnership(LABEL, TOKEN),
     "CLI policy adoption": (w) => w.manager.adoptCliLivenessPolicy(LABEL),
     "liveness release": (w) => w.manager.releaseLivenessOwnership(LABEL, TOKEN),
-    "heartbeat recording": (w) => w.manager.recordHeartbeat(LABEL),
+    "heartbeat recording": (w) => deliverDaemonHeartbeatIfKnown(w.manager, LABEL),
     "heartbeat policy restoration": (w) => w.manager.restoreHeartbeatLivenessPolicy(LABEL),
   };
 
@@ -244,7 +248,7 @@ describe("a label whose base lost its owner's heartbeat lease, before the monito
   async function lapsedBaseLease(): Promise<World> {
     const w = await liveBaseAndLabel(LABEL_IDLE_MS);
     expect(await w.manager.claimLivenessOwnership(BASE, TOKEN)).toBe("claimed");
-    w.manager.recordHeartbeat(BASE);
+    await deliverDaemonHeartbeat(w.manager, BASE);
     w.timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS + 1);
     expect(w.manager.getSessionLeaseState(BASE)?.phase).toBe("lapsed");
     return w;

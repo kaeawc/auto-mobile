@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { afterEach, describe, expect, test } from "bun:test";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
@@ -78,11 +79,13 @@ function panelSetup(singleDisplay = false) {
     adb.setForegroundApp({ packageName: "com.example", userId: 0 }, { displayId });
   }
   AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory(adb));
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout:
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
       'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 300}\nDisplay id 2: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 150}',
-    stderr: "",
-  });
+      "",
+    ),
+  );
   const cacheStore = new FakeObserveCacheStore(timer);
   setObserveCacheStore(cacheStore);
   const viewHierarchy = new FakeViewHierarchy();

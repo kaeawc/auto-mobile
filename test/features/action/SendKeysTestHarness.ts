@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   DefaultSendKeysCommandExecutor,
@@ -188,8 +189,8 @@ export function createSendKeysHarness(
 ) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: priorImeId, stderr: "" },
-    { stdout: commitImeId, stderr: "" },
+    createExecResult(priorImeId, ""),
+    createExecResult(commitImeId, ""),
   ]);
   const inserted: string[] = [];
   const replaced: string[] = [];

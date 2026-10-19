@@ -53,7 +53,6 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { DeviceBootService } from "../../src/devices/deviceBootService";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
-import { getStructuredField, type StructuredToolResponse } from "../../src/utils/toolUtils";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -62,7 +61,8 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import * as os from "os";
-import { toolJson } from "../helpers/toolResponse";
+import { toolField, toolJson, toolStructured } from "../helpers/toolResponse";
+import type { ProgressCallback } from "../../src/features/action/BaseVisualChange";
 
 isolateToolRegistry();
 
@@ -166,10 +166,52 @@ describe("startDevice handler", () => {
   afterEach(cleanup);
   afterAll(cleanup);
 
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  function recordField(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+    const value = parent[key];
+    if (!isRecord(value)) {
+      throw new Error(`expected ${key} to be an object, got ${JSON.stringify(value)}`);
+    }
+    return value;
+  }
+
+  /** Typed, lazily-checked view of a tool payload's `runtime` block. */
+  function runtimeOf(payload: Record<string, unknown>) {
+    const runtime = recordField(payload, "runtime");
+    return {
+      deviceId: runtime.deviceId,
+      get readiness() {
+        return recordField(runtime, "readiness");
+      },
+      get session() {
+        return recordField(runtime, "session");
+      },
+    };
+  }
+
+  function sessionUuidOf(payload: Record<string, unknown>): string {
+    const { sessionUuid } = runtimeOf(payload).session;
+    if (typeof sessionUuid !== "string") {
+      throw new Error(`expected runtime.session.sessionUuid to be a string, got ${sessionUuid}`);
+    }
+    return sessionUuid;
+  }
+
+  function listedDevices(payload: Record<string, unknown>): Record<string, unknown>[] {
+    const { devices } = payload;
+    if (!Array.isArray(devices) || !devices.every(isRecord)) {
+      throw new Error(`expected devices to be an array of objects, got ${JSON.stringify(devices)}`);
+    }
+    return devices;
+  }
+
   async function callStartDevice(
     args: Record<string, unknown>,
     signal?: AbortSignal,
-    progress?: (current: number, total: number, message: string) => Promise<void>,
+    progress?: ProgressCallback,
   ): Promise<Record<string, unknown>> {
     const tool = ToolRegistry.getTool("startDevice");
     if (!tool) {
@@ -223,19 +265,17 @@ describe("startDevice handler", () => {
     recovered = false,
   ) {
     const tool = ToolRegistry.getTool("startDevice")!;
-    const response: StructuredToolResponse<Record<string, unknown>> = await tool.handler(args);
-    expect(getStructuredField(response, "readiness")).toEqual({
+    const response = await tool.handler(args);
+    expect(toolField(response, "readiness")).toEqual({
       level: "automationReady",
       checks: ["bootCompleted", "runnerReady", "sessionBound"],
       elapsedMs,
       recovered,
     });
-    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
+    expect(toolJson(response)).toEqual(toolStructured(response));
     expect(tool.outputSchema).toBeDefined();
-    expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(
-      response.structuredContent,
-    );
-    return response.structuredContent;
+    expect(tool.outputSchema!.parse(toolStructured(response))).toEqual(toolStructured(response));
+    return toolStructured(response);
   }
 
   it("passes cameraPosterPath through the boot service on a cold Android launch", async () => {
@@ -403,6 +443,7 @@ describe("startDevice handler", () => {
       },
     };
     const coordinator: VirtualDeviceLifecycleCoordinator = {
+      isReserved: () => false,
       reserve: async () => adopterLease,
     };
     const image = { ...androidImage, deviceId: androidDevice.deviceId };
@@ -424,6 +465,13 @@ describe("startDevice handler", () => {
       deviceManager: fakeDeviceUtils,
       deviceMatcher: fakeMatcher,
       timer: bootTimer,
+      deviceCreationGate: { isCreationAllowed: () => false, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          throw new Error("unexpected provision");
+        },
+      },
+      matchingStrategy: "LATEST",
       lifecycleCoordinator: coordinator,
       lifecycleLease: ownerLease,
       allowExternalLeaseAdoptionRecheck: true,
@@ -453,15 +501,15 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.runtime.deviceId).toBe("emulator-5554");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5554");
     expect(result.name).toBe("Pixel_7_API_34");
     expect(result.platform).toBe("android");
     expect(result.isReady).toBe(true);
     expect(result.acquisition).toBe("already-booted");
-    expect(result.runtime.readiness.state).toBe("ready");
+    expect(runtimeOf(result).readiness.state).toBe("ready");
     expect(result.osVersion).toBe("14");
-    expect(result.runtime.session.sessionUuid).toBeDefined();
-    expect(typeof result.runtime.session.sessionUuid).toBe("string");
+    expect(runtimeOf(result).session.sessionUuid).toBeDefined();
+    expect(typeof runtimeOf(result).session.sessionUuid).toBe("string");
   });
 
   it("returns the configured Android image link that listDevices reports", async () => {
@@ -482,8 +530,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(androidDevice);
 
     const acquisition = await callStartDevice({ platform: "android" });
-    const listed = (await callListDevices()).devices.find(
-      (device: Record<string, unknown>) => device.runtime.deviceId === androidDevice.deviceId,
+    const listed = listedDevices(await callListDevices()).find(
+      (device) => runtimeOf(device).deviceId === androidDevice.deviceId,
     );
 
     expect(acquisition.image).toEqual({
@@ -619,7 +667,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.runtime.session.sessionUuid).toBe("session-1");
+    expect(runtimeOf(result).session.sessionUuid).toBe("session-1");
     expect(resolveDirectSessionDevice("session-1")).toEqual({
       sessionUuid: "session-1",
       device: androidDevice,
@@ -668,7 +716,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android", timeoutMs: 42_000 });
 
-    expect(result.runtime.deviceId).toBe("emulator-5554");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5554");
     expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:Pixel_7_API_34:42000",
@@ -708,7 +756,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.runtime.deviceId).toBeDefined();
+    expect(runtimeOf(result).deviceId).toBeDefined();
     expect(result.acquisition).toBe("cold-boot");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(true);
   });
@@ -718,8 +766,8 @@ describe("startDevice handler", () => {
     const sibling = { ...androidDevice, name: "Pixel_9_Copy", deviceId: "emulator-5556" };
     fakeDeviceUtils.setBootedDevices("android", [sibling, exact]);
     fakeDeviceUtils.setDeviceImages("android", [
-      { ...androidImage, name: exact.name, apiLevel: "35", osVersion: "15.0" },
-      { ...androidImage, name: sibling.name, apiLevel: "35", osVersion: "15.0" },
+      { ...androidImage, name: exact.name, apiLevel: 35, osVersion: "15.0" },
+      { ...androidImage, name: sibling.name, apiLevel: 35, osVersion: "15.0" },
     ]);
     setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
     registerDeviceTools();
@@ -762,7 +810,7 @@ describe("startDevice handler", () => {
     const exact = {
       ...androidDevice,
       name: "Pixel_9_API_34",
-      apiLevel: "34",
+      apiLevel: 34,
       osVersion: "14.0",
     };
     fakeDeviceUtils.setBootedDevices("android", [exact]);
@@ -840,7 +888,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.name).toBe(availableImage.name);
-    expect(result.runtime.deviceId).toBe("emulator-5558");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5558");
     expect(fakeDeviceUtils.getExecutedOperations()).not.toContain(
       "startDevice:Pixel_10_API_35:180000",
     );
@@ -934,9 +982,9 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.acquisition).toBe("cold-boot");
-    expect(result.runtime.session.sessionUuid).toBeDefined();
+    expect(runtimeOf(result).session.sessionUuid).toBeDefined();
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
-      sessionId: result.runtime.session.sessionUuid,
+      sessionId: sessionUuidOf(result),
     });
     expect(childProcess.killed).toBe(false);
   });
@@ -977,7 +1025,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.acquisition).toBe("cold-boot");
-    const sessionUuid = result.runtime.session.sessionUuid as string;
+    const sessionUuid = sessionUuidOf(result);
     expect(sessionUuid).toBeDefined();
     expect(daemonSessionManager!.getDeviceReadiness(sessionUuid)).toBe("automationReady");
   });
@@ -1003,18 +1051,14 @@ describe("startDevice handler", () => {
     fakeMatcher.setImageResult(coldBootImage);
 
     const result = await callStartDevice({ platform: "android" });
-    expect(
-      daemonSessionManager.getSession(result.runtime.session.sessionUuid as string),
-    ).not.toBeNull();
+    expect(daemonSessionManager.getSession(sessionUuidOf(result))).not.toBeNull();
 
     childProcess.emit("exit", 1, null);
     childProcess.emit("close", 1, null);
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(
-      daemonSessionManager.getSession(result.runtime.session.sessionUuid as string),
-    ).toBeNull();
+    expect(daemonSessionManager.getSession(sessionUuidOf(result))).toBeNull();
     expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
   });
 
@@ -1070,7 +1114,7 @@ describe("startDevice handler", () => {
       expect(pool.getDevice("emulator-5554")?.status).toBe("busy");
       expect(pool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
       expect(daemonSessionManager.getSession("session-1")).not.toBeNull();
-      expect(result.runtime.session.sessionUuid).toBe("session-1");
+      expect(runtimeOf(result).session.sessionUuid).toBe("session-1");
     } finally {
       releaseResources();
       await start;
@@ -1129,7 +1173,7 @@ describe("startDevice handler", () => {
     expect(competing.sessionId).toBeNull();
 
     const result = await start;
-    expect(result.runtime.session.sessionUuid).toBe("session-1");
+    expect(runtimeOf(result).session.sessionUuid).toBe("session-1");
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");
   });
 
@@ -1190,8 +1234,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(androidDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let readinessAttempts = 0;
@@ -1298,8 +1342,8 @@ describe("startDevice handler", () => {
       fakeMatcher.setBootedResult(pooledAnrDevice);
       fakeMatcher.setImageResult(recoveryImage);
       const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-      fakeDeviceUtils.killDevice = async (device, options) => {
-        await originalKillDevice(device, options);
+      fakeDeviceUtils.killDevice = async (device) => {
+        await originalKillDevice(device);
         fakeDeviceUtils.setBootedDevices("android", []);
       };
       let readinessAttempts = 0;
@@ -1320,8 +1364,8 @@ describe("startDevice handler", () => {
         expect(recovery.abortController.signal.aborted).toBe(false);
         expect(sessionless.abortController.signal.aborted).toBe(false);
 
-        expect(result.runtime.deviceId).toBe("emulator-5556");
-        expect(result.runtime.session.sessionUuid).toBe("owner-session");
+        expect(runtimeOf(result).deviceId).toBe("emulator-5556");
+        expect(runtimeOf(result).session.sessionUuid).toBe("owner-session");
         expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Pixel_7_API_34");
         expect(fakeDeviceUtils.getExecutedOperations()).toContain(
           "startDevice:Pixel_7_API_34:359983",
@@ -1390,8 +1434,8 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setMockChildProcess(siblingImage.name, new FakeExitChildProcess());
     fakeDeviceUtils.setMockChildProcess(anrImage.name, new FakeExitChildProcess());
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let readinessAttempts = 0;
@@ -1460,8 +1504,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let readinessAttempts = 0;
@@ -1478,7 +1522,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.runtime.session.sessionUuid).toBe("owner-session");
+    expect(runtimeOf(result).session.sessionUuid).toBe("owner-session");
     expect(daemonSessionManager.getDeviceReadiness("owner-session")).toBe("automationReady");
   });
 
@@ -1521,8 +1565,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     const recordedReadinessSessions: string[] = [];
@@ -1548,9 +1592,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android", __mcpSessionId: "mcp-client" });
 
     expect(recordedReadinessSessions.length).toBeGreaterThan(0);
-    expect([...new Set(recordedReadinessSessions)]).toEqual([
-      result.runtime.session.sessionUuid as string,
-    ]);
+    expect([...new Set(recordedReadinessSessions)]).toEqual([sessionUuidOf(result)]);
   });
 
   it("binds an idle System UI recovery replacement through its own readiness reservation", async () => {
@@ -1579,8 +1621,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(unknownRuntimeDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let readinessAttempts = 0;
@@ -1598,8 +1640,8 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.runtime.deviceId).toBe("emulator-5556");
-    expect(result.runtime.session.sessionUuid).toBe("session-1");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5556");
+    expect(runtimeOf(result).session.sessionUuid).toBe("session-1");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "session-1",
       status: "busy",
@@ -1640,8 +1682,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     setDeviceToolsDependencies({
@@ -1702,8 +1744,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     setDeviceToolsDependencies({
@@ -1771,8 +1813,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     const reserveDeviceForReadiness = pool.reserveDeviceForReadiness.bind(pool);
@@ -1849,8 +1891,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let readinessAttempts = 0;
@@ -1911,8 +1953,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let beginSecondReadiness!: () => void;
@@ -1939,7 +1981,7 @@ describe("startDevice handler", () => {
 
     const start = callStartDevice({ platform: "android" });
     await secondReadinessStarted;
-    await daemonSessionManager.releaseSession("owner-session", "test released during readiness");
+    await daemonSessionManager.releaseSession("owner-session", "explicit-release");
     finishSecondReadiness();
 
     await expect(start).rejects.toThrow("was released while System UI recovery was becoming ready");
@@ -2029,11 +2071,12 @@ describe("startDevice handler", () => {
       DaemonState.getInstance().initialize(daemonSessionManager, pool);
       fakeMatcher.setBootedResult(androidDevice);
       const mark = pool.markIntentionalShutdown.bind(pool);
-      pool.markIntentionalShutdown = (serial) => {
-        mark(serial);
+      pool.markIntentionalShutdown = (...args) => {
+        const commit = mark(...args);
         if (abortAt === "before-call") {
           controller.abort(new Error("cancelled before emulator kill dispatch"));
         }
+        return commit;
       };
       const deadline = abortAt === "command-deadline" || abortAt === "accepted-deadline";
       const accepted = abortAt === "accepted-abort" || abortAt === "accepted-deadline";
@@ -2165,8 +2208,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(androidDevice);
     fakeMatcher.setImageResult(androidImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     const relaunch = Promise.withResolvers<void>();
@@ -2237,8 +2280,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     let readinessAttempts = 0;
@@ -2296,8 +2339,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(androidDevice);
     fakeMatcher.setImageResult(androidImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     fakeDeviceUtils.startDevice = async () => {
@@ -2345,8 +2388,8 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(androidDevice);
     fakeMatcher.setImageResult(androidImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
-    fakeDeviceUtils.killDevice = async (device, options) => {
-      await originalKillDevice(device, options);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
     fakeDeviceUtils.startDevice = async () => {
@@ -2668,7 +2711,7 @@ describe("startDevice handler", () => {
     });
     try {
       const settlement = cancelUnownedColdBootUnlessRetryable(
-        { device: iosDevice, source: "cold-boot", processHandle: child },
+        { device: iosDevice, source: "cold-boot", processHandle: child, provisioned: false },
         new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
         undefined,
       );
@@ -2949,11 +2992,9 @@ describe("startDevice handler", () => {
     const ownerResult = await ownerStart;
     await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
 
-    expect(ownerResult.runtime.session.sessionUuid).toBeDefined();
+    expect(runtimeOf(ownerResult).session.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(
-      ownerResult.runtime.session.sessionUuid,
-    );
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(sessionUuidOf(ownerResult));
   });
 
   // #11148: a one-shot `--cli` call is anonymous even though its socket forwards a per-connection
@@ -2988,7 +3029,7 @@ describe("startDevice handler", () => {
       __oneShotCli: true,
     });
 
-    expect(second.runtime.session.sessionUuid).toBe(first.runtime.session.sessionUuid);
+    expect(runtimeOf(second).session.sessionUuid).toBe(runtimeOf(first).session.sessionUuid);
     expect(pool.getDevice(pooledDevice.deviceId)?.autolockSessionId).toBeUndefined();
   });
 
@@ -3054,11 +3095,9 @@ describe("startDevice handler", () => {
     const ownerResult = await ownerStart;
     await expect(adopterStart).rejects.toThrow("already assigned to another session");
 
-    expect(ownerResult.runtime.session.sessionUuid).toBeDefined();
+    expect(runtimeOf(ownerResult).session.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(
-      ownerResult.runtime.session.sessionUuid,
-    );
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(sessionUuidOf(ownerResult));
   });
 
   it("passes timeout to the cold boot start operation", async () => {
@@ -3118,7 +3157,7 @@ describe("startDevice handler", () => {
       deviceId: "emulator-5554",
     });
 
-    expect(result.runtime.deviceId).toBe("emulator-5554");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5554");
     expect(result.acquisition).toBe("already-booted");
   });
 
@@ -3145,7 +3184,7 @@ describe("startDevice handler", () => {
       deviceId: physicalDevice.deviceId,
     });
 
-    expect(result.runtime.deviceId).toBe(physicalDevice.deviceId);
+    expect(runtimeOf(result).deviceId).toBe(physicalDevice.deviceId);
     expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
   });
@@ -3199,7 +3238,7 @@ describe("startDevice handler", () => {
       timeoutMs: 30_000,
     });
 
-    expect(result.runtime.deviceId).toBe("ABCD-1234");
+    expect(runtimeOf(result).deviceId).toBe("ABCD-1234");
     expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("waitForDeviceReady:iPhone 15:30000");
   });
@@ -3371,7 +3410,7 @@ describe("startDevice handler", () => {
       timeoutMs: 15_000,
     });
 
-    expect(result.runtime.deviceId).toBe("emulator-5554");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5554");
     expect(result.acquisition).toBe("already-booted");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:Pixel_7_API_34:15000",
@@ -3394,7 +3433,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "ios" });
 
-    expect(result.runtime.deviceId).toBe("ABCD-1234");
+    expect(runtimeOf(result).deviceId).toBe("ABCD-1234");
     expect(result.platform).toBe("ios");
     expect(result.osVersion).toBe("17.2");
   });
@@ -3424,7 +3463,7 @@ describe("startDevice handler", () => {
       },
     });
 
-    expect(result.runtime.deviceId).toBe("emulator-5554");
+    expect(runtimeOf(result).deviceId).toBe("emulator-5554");
     expect(result.acquisition).toBe("already-booted");
   });
 
@@ -3510,7 +3549,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "ios" });
 
-    expect(result.runtime.deviceId).toBe("UDID-17-2");
+    expect(runtimeOf(result).deviceId).toBe("UDID-17-2");
     expect(result.osVersion).toBe("17.2");
   });
 
@@ -3558,7 +3597,7 @@ describe("startDevice handler", () => {
       autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = initiallyEnabled ? "0" : "1";
       release.resolve();
       const first = await pending;
-      expect(first.runtime.session.sessionUuid).toBeDefined();
+      expect(runtimeOf(first).session.sessionUuid).toBeDefined();
       expect(Boolean(pool.getDevice(androidDevice.deviceId)?.autolockSessionId)).toBe(
         initiallyEnabled,
       );
@@ -3570,7 +3609,7 @@ describe("startDevice handler", () => {
         deviceId: secondDevice.deviceId,
         __mcpSessionId: "second",
       });
-      expect(second.runtime.session.sessionUuid).toBeDefined();
+      expect(runtimeOf(second).session.sessionUuid).toBeDefined();
       expect(Boolean(pool.getDevice(secondDevice.deviceId)?.autolockSessionId)).toBe(
         !initiallyEnabled,
       );
@@ -3601,9 +3640,9 @@ describe("startDevice handler", () => {
       __mcpSessionId: "mcp-session-1",
     });
 
-    expect(typeof result.runtime.session.sessionUuid).toBe("string");
+    expect(typeof runtimeOf(result).session.sessionUuid).toBe("string");
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(
-      result.runtime.session.sessionUuid,
+      sessionUuidOf(result),
     );
   });
 
@@ -3718,9 +3757,9 @@ describe("startDevice handler", () => {
       platform: "android",
       deviceId: androidDevice.deviceId,
     });
-    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(runtimeOf(result).deviceId).toBe(androidDevice.deviceId);
     expect(pool.getDevice(androidDevice.deviceId)?.name).toBe(androidDevice.name);
-    expect(result.runtime.session.sessionUuid).not.toBe("stale-session");
+    expect(runtimeOf(result).session.sessionUuid).not.toBe("stale-session");
     expect(daemonSessionManager.getSession("stale-session")).toBeNull();
   });
 
@@ -3767,11 +3806,11 @@ describe("startDevice handler", () => {
         platform: "android",
         deviceId: androidDevice.deviceId,
       });
-      expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+      expect(runtimeOf(result).deviceId).toBe(androidDevice.deviceId);
       expect(pool.getDevice(androidDevice.deviceId)).not.toBe(entry);
       expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
         name: androidDevice.name,
-        sessionId: result.runtime.session.sessionUuid,
+        sessionId: sessionUuidOf(result),
       });
     });
   }
@@ -3803,7 +3842,7 @@ describe("startDevice handler", () => {
       deviceId: androidDevice.deviceId,
     });
 
-    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(runtimeOf(result).deviceId).toBe(androidDevice.deviceId);
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
       name: androidDevice.name,
       incarnation,
@@ -3836,11 +3875,11 @@ describe("startDevice handler", () => {
       platform: "android",
       deviceId: androidDevice.deviceId,
     });
-    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(runtimeOf(result).deviceId).toBe(androidDevice.deviceId);
     expect(pool.getDevice(androidDevice.deviceId)?.name).toBe(androidDevice.name);
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
       name: androidDevice.name,
-      sessionId: result.runtime.session.sessionUuid,
+      sessionId: sessionUuidOf(result),
     });
   });
 
@@ -3885,7 +3924,7 @@ describe("startDevice handler", () => {
       deviceId: physicalIphone.deviceId,
     });
 
-    expect(result.runtime.deviceId).toBe(physicalIphone.deviceId);
+    expect(runtimeOf(result).deviceId).toBe(physicalIphone.deviceId);
     expect(pool.getDevice(physicalIphone.deviceId)?.sessionId).toBe("owner-session");
   });
 
@@ -3949,13 +3988,13 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "ios" });
     const repeated = await callStartDevice({ platform: "ios" });
 
-    expect(typeof result.runtime.session.sessionUuid).toBe("string");
-    expect(repeated.runtime.session.sessionUuid).toBe(result.runtime.session.sessionUuid);
-    const session = daemonSessionManager.getSession(result.runtime.session.sessionUuid as string);
+    expect(typeof runtimeOf(result).session.sessionUuid).toBe("string");
+    expect(runtimeOf(repeated).session.sessionUuid).toBe(sessionUuidOf(result));
+    const session = daemonSessionManager.getSession(sessionUuidOf(result));
     expect(session).not.toBeNull();
     expect(session!.assignedDevice).toBe(iosDevice.deviceId);
     expect(session!.platform).toBe("ios");
-    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.runtime.session.sessionUuid);
+    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(sessionUuidOf(result));
     expect(pool.getDevice(iosDevice.deviceId)?.status).toBe("busy");
   });
 
@@ -3982,6 +4021,6 @@ describe("startDevice handler", () => {
     );
 
     expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
-    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(owner.runtime.session.sessionUuid);
+    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(sessionUuidOf(owner));
   });
 });

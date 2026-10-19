@@ -475,7 +475,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     } as any as ChildProcess;
   }
 
-  async killDevice(device: BootedDevice): Promise<void> {
+  async killDevice(device: BootedDevice): Promise<BootedDevice | void> {
     this.executedOperations.push(`killDevice:${device.name}`);
     this.runningDeviceNames.delete(device.name);
   }

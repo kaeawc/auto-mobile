@@ -1,5 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
+import { readToolResponse, toolIsError, toolJson, toolStructured } from "../helpers/toolResponse";
 import { readFileSync } from "node:fs";
 import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
 import {
@@ -44,7 +45,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
-import type { BootedDevice, DeviceInfo, Platform } from "../../src/models";
+import type { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -124,7 +125,10 @@ class FailingKillDeviceManager extends FakeDeviceUtils {
     return this.childProcess;
   }
 
-  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
+  override async killDevice(
+    device: BootedDevice,
+    options?: DeviceShutdownOptions,
+  ): Promise<BootedDevice | void> {
     this.killedDeviceIds.push(device.deviceId);
     this.killedDeviceTargets.push(device);
     this.killedDeviceOptions.push(options);
@@ -205,7 +209,7 @@ class PlaceholderThenGoneKillDeviceManager extends FailingKillDeviceManager {
     options?: BootedDeviceDiscoveryOptions,
   ): Promise<BootedDeviceDiscovery> {
     const discovery = await super.getBootedDevicesDetailed(platform, options);
-    if (this.killedDeviceIds.length > 0) {
+    if (this.killedDeviceIds.length > 0 && platform !== "either") {
       this.setBootedDevices(platform, []);
     }
     return discovery;
@@ -312,8 +316,8 @@ class ReplacementBeforeShutdownWaitDeviceManager extends FailingKillDeviceManage
 }
 
 class AllocationRaceDevicePool extends DevicePool {
-  override async releaseDevice(deviceId: string): Promise<void> {
-    await super.releaseDevice(deviceId);
+  override async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
+    await super.releaseDevice(deviceId, expectedSessionId);
     await this.assignMultipleDevices(["racing-session"], 1_000, "android");
   }
 }
@@ -656,7 +660,9 @@ class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async getSession(): Promise<undefined> {
     return undefined;
   }
-  override async upsertActiveSession(): Promise<void> {}
+  override async upsertActiveSession(): Promise<number> {
+    return 0;
+  }
   override async replaceLivenessOwnership(): Promise<void> {}
   override async markReleased(): Promise<void> {}
   override async recordActivity(): Promise<void> {}
@@ -1114,8 +1120,8 @@ describe("killDevice handler", () => {
       runtimeAvdNames.set("emulator-5554", "Pixel_8_Old");
 
       const response = await killTool().handler({ device: unknownEmulator });
-      expect(response.structuredContent).toEqual(JSON.parse(response.content?.[0]?.text ?? "{}"));
-      expect(response.structuredContent).toMatchObject({
+      expect(toolStructured(response)).toEqual(toolJson(response));
+      expect(toolStructured(response)).toMatchObject({
         name: "Unknown (emulator-5554)",
         platform: "android",
         udid: "emulator-5554",
@@ -1571,7 +1577,7 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual([]);
       expect(stoppedRecordings).toEqual([]);
       expect(stoppedObserverDeviceIds).toEqual([]);
-      expect(AndroidCtrlProxyClient.getExistingInstance(unknownEmulator.deviceId)).toBe(
+      expect<unknown>(AndroidCtrlProxyClient.getExistingInstance(unknownEmulator.deviceId)).toBe(
         activeObserver,
       );
     });
@@ -1909,7 +1915,7 @@ describe("killDevice handler", () => {
       const response = await ToolRegistry.getTool("killDevice")!.handler({
         device: { name: image.name, platform: "android", deviceId: image.deviceId! },
       });
-      const outcome = JSON.parse(response.content[0].text);
+      const outcome = toolJson(response);
       delete outcome.timing;
       outcomes.push(outcome);
       expect(outcome.message).toBe("android 'Pixel 8' shutdown successfully");
@@ -2821,7 +2827,7 @@ describe("killDevice handler", () => {
     delayedManager.setBootedDevices("android", []);
     timer.advanceTime(1_000);
     const response = await result;
-    expect(response.isError).toBeUndefined();
+    expect(readToolResponse(response).isError).toBeUndefined();
     expect(pool.getDevice(image.deviceId!)).toBeNull();
     expect(sessionManager.getSessionForDevice(image.deviceId!)).toBeNull();
     expect(registry.getByUuid(deviceSession.deviceSessionUuid)).toBeUndefined();
@@ -2841,7 +2847,7 @@ describe("killDevice handler", () => {
     let allocationOutcome: "assigned" | "blocked" | undefined;
     const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
       const activePool = DaemonState.getInstance().getDevicePool();
-      await activePool.releaseDevice(image.deviceId!);
+      await activePool.releaseDevice(image.deviceId!, "session-1");
       allocationOutcome = await activePool
         .assignMultipleDevices(["racing-session"], 0, "android")
         .then(
@@ -2909,7 +2915,7 @@ describe("killDevice handler", () => {
     let bindingError: unknown;
     const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
       const activePool = DaemonState.getInstance().getDevicePool();
-      await activePool.releaseDevice(image.deviceId!);
+      await activePool.releaseDevice(image.deviceId!, "session-1");
       try {
         await activePool.bindOrReuseDeviceSession({
           sessionId: "racing-session",
@@ -3127,7 +3133,9 @@ describe("killDevice handler", () => {
       "Timed out waiting for android device 'Pixel 8' (emulator-5554) to disappear",
     );
     expect(retired).toBeDefined();
-    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(retired);
+    expect<unknown>(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(
+      retired,
+    );
   });
 
   test("retains the intentional-shutdown marker after confirmation times out", async () => {
@@ -3843,7 +3851,9 @@ describe("killDevice handler", () => {
       AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory()),
     );
     expect(await retired.ensureConnected()).toBe(false);
-    expect(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(retired);
+    expect<unknown>(AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory())).toBe(
+      retired,
+    );
   });
 
   test("resumes a never-observed Android CtrlProxy after platform kill failure", async () => {
@@ -4114,9 +4124,10 @@ describe("killDevice handler", () => {
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const mark = pool.markIntentionalShutdown.bind(pool);
-    pool.markIntentionalShutdown = (serial) => {
-      mark(serial);
+    pool.markIntentionalShutdown = (...args) => {
+      const commit = mark(...args);
       timer.advanceTime(30_000);
+      return commit;
     };
     setDeviceToolsDependencies({ timer });
 
@@ -4360,7 +4371,7 @@ describe("killDevice handler", () => {
       deviceId: image.deviceId!,
     };
     const deviceSessionRepository = new ReplacingDeviceSessionRepository(async () => {
-      await pool.releaseDevice(image.deviceId!);
+      await pool.releaseDevice(image.deviceId!, "session-1");
       await pool.removeDevice(image.deviceId!);
       await pool.initializeWithDevices([replacement]);
       const replacementPooled = pool.getDevice(image.deviceId!);
@@ -5050,7 +5061,7 @@ describe("killDevice handler", () => {
     expect(current?.name).toBe(replacement.name);
     expect(registry.getByUuid(originalSession.deviceSessionUuid)).toBeUndefined();
     expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBeDefined();
-    expect(stoppedDeviceIds).toEqual([image.deviceId]);
+    expect(stoppedDeviceIds).toEqual([image.deviceId!]);
   });
 
   test("stops performance monitoring after direct shutdown retirement", async () => {
@@ -5094,7 +5105,7 @@ describe("killDevice handler", () => {
       }),
     ).resolves.toBeDefined();
 
-    expect(stoppedDeviceIds).toEqual([image.deviceId]);
+    expect(stoppedDeviceIds).toEqual([image.deviceId!]);
   });
 
   test("keeps a replacement epoch created during shutdown cache cleanup", async () => {
@@ -5345,8 +5356,8 @@ describe("killDevice handler", () => {
       };
       const response = await tool.handler({ device });
 
-      expect(response.isError).toBe(true);
-      expect(JSON.parse(response.content[0].text)).toEqual({
+      expect(toolIsError(response)).toBe(true);
+      expect(toolJson(response)).toEqual({
         success: false,
         message: expect.stringContaining(message),
         error: {
@@ -5438,8 +5449,8 @@ describe("killDevice handler", () => {
 
     const response = await ToolRegistry.getTool("killDevice")!.handler({ device });
 
-    expect(response.isError).not.toBe(true);
-    expect(JSON.parse(response.content[0].text).message).toContain("shutdown successfully");
+    expect(toolIsError(response)).not.toBe(true);
+    expect(toolJson(response).message).toContain("shutdown successfully");
   });
 
   test("treats CoreSimulator 405 Shutdown as an idempotent iOS kill", async () => {
@@ -5451,8 +5462,8 @@ describe("killDevice handler", () => {
 
     const response = await ToolRegistry.getTool("killDevice")!.handler({ device });
 
-    expect(response.isError).not.toBe(true);
-    expect(JSON.parse(response.content[0].text).message).toContain("already shut down");
+    expect(toolIsError(response)).not.toBe(true);
+    expect(toolJson(response).message).toContain("already shut down");
   });
 
   test("kill followed by immediate getApple boots a simulator with suspended runner state", async () => {
@@ -5475,7 +5486,7 @@ describe("killDevice handler", () => {
     });
 
     const kill = await ToolRegistry.getTool("killDevice")!.handler({ device });
-    expect(kill.isError).not.toBe(true);
+    expect(toolIsError(kill)).not.toBe(true);
     const ctrlProxy = IOSCtrlProxyManager.getExistingInstance(device.deviceId);
     expect(ctrlProxy).toBeDefined();
     await ctrlProxy!.suspendForDeviceRemoval();
@@ -5486,8 +5497,8 @@ describe("killDevice handler", () => {
     }
     const response = await getApple.handler({ deviceId: device.deviceId });
 
-    expect(response.isError).not.toBe(true);
-    expect(JSON.parse(response.content[0].text).acquisition).toBe("cold-boot");
+    expect(toolIsError(response)).not.toBe(true);
+    expect(toolJson(response).acquisition).toBe("cold-boot");
     expect(runnerWasRearmed).toBe(true);
   });
 

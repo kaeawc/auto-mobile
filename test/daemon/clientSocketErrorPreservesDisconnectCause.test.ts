@@ -13,7 +13,7 @@ beforeEach(() => {
   createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
     createdSocket = new FakeSocket();
     queueMicrotask(onConnect!);
-    return createdSocket as unknown as net.Socket;
+    return createdSocket;
   });
 });
 

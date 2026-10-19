@@ -1,5 +1,5 @@
-import type { AccessibilityService } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
-import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import type { AccessibilityService } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { DefaultAccessibilityDetector } from "../../../src/ctrlProxy/accessibility/AccessibilityDetector";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   TalkBackToggle,

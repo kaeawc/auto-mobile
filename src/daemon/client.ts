@@ -58,11 +58,8 @@ import { annotateStaleSocketHint } from "./clientStaleSocketHint";
 import { openDaemonSocket, type DaemonSocketConnectorHost } from "./clientSocketConnector";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonOptions, DaemonStatus } from "./types";
-import {
-  DAEMON_CLIENT_MAX_FRAME_BYTES,
-  DaemonFrameTooLargeError,
-  LineFramer,
-} from "./socketServer/LineFramer";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
 
 import { DaemonUnavailableError, toDaemonTransportError } from "./DaemonUnavailableError";
 

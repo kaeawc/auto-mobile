@@ -8,7 +8,7 @@ import {
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
-} from "../accessibility/interfaces/AccessibilityDetector";
+} from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../observe/DeviceHierarchyCapture";
 import { resolveDisplayFence, type DisplayFenceOption } from "./BaseVisualChange";
 import {
@@ -32,7 +32,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
-import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
+import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { dispatchAndroidLongPress } from "./androidLongPress";

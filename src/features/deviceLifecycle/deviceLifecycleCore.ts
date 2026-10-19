@@ -5842,7 +5842,7 @@ export function androidLifecycleDiscoveryIncomplete(
 export async function resolveAndroidStartStableDeviceLifecycleTarget(
   deviceId: string,
   deadlineMs: number,
-  deviceUtils: PlatformDeviceManager,
+  deviceUtils: Pick<PlatformDeviceManager, "getBootedDevicesDetailed" | "getDeviceImagesDetailed">,
   timer: Timer,
   signal: AbortSignal | undefined,
 ): Promise<StableDeviceTarget | undefined> {

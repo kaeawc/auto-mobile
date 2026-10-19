@@ -38,7 +38,7 @@ import { resolveScrollableSwipeTarget } from "./scrollableAncestor";
 import type { ResolverSelector } from "../../../models/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { serverConfig } from "../../../utils/ServerConfig";

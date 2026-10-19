@@ -61,7 +61,14 @@ internal class DisplayController(private val host: Host) {
       } else {
         null
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get screen dimensions", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get screen dimensions", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to get screen dimensions", e)
       null
     }
@@ -97,7 +104,14 @@ internal class DisplayController(private val host: Host) {
       } else {
         host.windowManager()?.defaultDisplay?.rotation
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get rotation", e)
+      null
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get rotation", e)
+      null
+    } catch (e: SecurityException) {
       Log.w(TAG, "Failed to get rotation", e)
       null
     }
@@ -129,7 +143,32 @@ internal class DisplayController(private val host: Host) {
           displayCutoutInfo = DisplayCutoutInfo.unknown(),
         )
       }
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to get system insets", e)
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
+      Log.w(TAG, "Failed to get system insets", e)
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    } catch (e: SecurityException) {
+      Log.w(TAG, "Failed to get system insets", e)
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    } catch (e: android.content.res.Resources.NotFoundException) {
       Log.w(TAG, "Failed to get system insets", e)
       ObservationInsetsInfo(
         available = false,
@@ -144,7 +183,11 @@ internal class DisplayController(private val host: Host) {
   fun getDensity(): Int {
     return try {
       host.densityDpi()
-    } catch (e: Exception) {
+    } catch (e: android.content.res.Resources.NotFoundException) {
+      Log.w(TAG, "Failed to get density", e)
+      0
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.w(TAG, "Failed to get density", e)
       0
     }

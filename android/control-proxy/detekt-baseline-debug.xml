@@ -291,8 +291,6 @@
     <ID>SwallowedException:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$e: Exception</ID>
     <ID>SwallowedException:WebSocketServer.kt:WebSocketServer.Companion$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AndroidPinnedShortcutPlatform.kt:AndroidPinnedShortcutPlatform$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:CaCertificateController.kt:CaCertificateController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:ClipboardController.kt:ClipboardController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CommandReceivers.kt:CommandReceiver$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CorrelatedErrorReporter.kt:CorrelatedErrorReporter$e: Exception</ID>
     <ID>TooGenericExceptionCaught:CorrelatedErrorReporter.kt:CorrelatedErrorReporter$fallbackError: Exception</ID>
@@ -301,30 +299,8 @@
     <ID>TooGenericExceptionCaught:CtrlProxy.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceStateTransitions.kt:DeviceStateTransitions$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceStateTransitions.kt:DeviceStateTransitions.PostureFlowSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DisplayController.kt:DisplayController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DisplayIdentity.kt:PanelUniqueIdResolver$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:DisplayInsetsProvider.kt:WindowMetricsDisplayInsetsProvider$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DragStrokeSession.kt:DragStrokeSession$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:ElementBounds.kt:ElementBounds.Companion$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FailureReceivers.kt:CrashReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FailureReceivers.kt:HandledExceptionReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:FocusController.kt:FocusController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:GestureController.kt:GestureController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:GestureController.kt:GestureController.AccessibilityStrokeDispatcher$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:GestureStreamSession.kt:GestureStreamSession$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:HierarchyController.kt:HierarchyController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:HingeFallbackPostureSource.kt:HingeFallbackPostureSource$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:InputConnectionDriver.kt:InputConnectionDriver$failure: Exception</ID>
-    <ID>TooGenericExceptionCaught:InteractionEventController.kt:InteractionEventController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:KeystoreDiscovery.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:LogcatReader.kt:LogcatReader$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:MainActivity.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:NodeActionController.kt:NodeActionController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:NodeActionController.kt:NodeActionController$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:OverlayManager.kt:OverlayManager$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:OverlayManager.kt:OverlayManager$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:PackageController.kt:PackageController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:PermissionManager.kt:PermissionManager$e: Exception</ID>
     <ID>TooGenericExceptionCaught:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypeAppearance.kt:AndroidPrototypeDeviceAppearance$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypeAssetController.kt:PrototypeAssetController$error: Exception</ID>
@@ -336,31 +312,13 @@
     <ID>TooGenericExceptionCaught:PrototypeInsetFloor.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypePlatform.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypeRuntime.kt:PrototypeRuntime$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:RotationProvenanceTracker.kt:DisplayRotationChangeSignal$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeActivity.kt:SavedPrototypeActivity$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeActivityDependencies.kt:SavedPrototypeEvents$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeController.kt:SavedPrototypeController$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeController.kt:SavedPrototypeController$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeScreenState.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeShortcuts.kt:AndroidSavedPrototypeShortcuts$error: Exception</ID>
-    <ID>TooGenericExceptionCaught:ScreenshotController.kt:ScreenshotController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:AnrReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:EventBatchReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkCapabilitiesDiscovery.kt:error: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkControlController.kt:SdkControlController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:FrameMetricsSnapshotReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:NavigationEventReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:RecompositionSnapshotReceiver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SettingsController.kt:SettingsController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:StorageController.kt:StorageController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:StorageSubscriptionManager$rollbackError: Exception</ID>
-    <ID>TooGenericExceptionCaught:TextInputController.kt:TextInputController$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:ViewHierarchyExtractor.kt:ViewHierarchyExtractor$error: Exception</ID>
     <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer$stopError: Exception</ID>
-    <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer.Companion$e: Exception</ID>
     <ID>TooManyFunctions:CaCertificateController.kt:CaCertificateController</ID>
     <ID>TooManyFunctions:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy : TypingPolicy</ID>
     <ID>TooManyFunctions:CtrlProxy.kt:CtrlProxy : AccessibilityServiceCtrlProxyActions</ID>

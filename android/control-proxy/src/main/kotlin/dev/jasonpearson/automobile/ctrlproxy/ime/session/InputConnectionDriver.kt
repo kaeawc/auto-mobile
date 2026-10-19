@@ -6,6 +6,7 @@ class InputConnectionDriver(private val connection: ImeConnection) {
   fun execute(ops: List<ImeOp>): Boolean {
     var openBatches = 0
     val batchAccepted = ArrayDeque<Boolean>()
+    var completed = false
     try {
       for (op in ops) {
         val succeeded =
@@ -33,14 +34,13 @@ class InputConnectionDriver(private val connection: ImeConnection) {
             }
           }
         if (!succeeded) {
-          closeBatches(openBatches)
           return false
         }
       }
+      completed = true
       return true
-    } catch (failure: Exception) {
-      closeBatches(openBatches)
-      throw failure
+    } finally {
+      if (!completed) closeBatches(openBatches)
     }
   }
 

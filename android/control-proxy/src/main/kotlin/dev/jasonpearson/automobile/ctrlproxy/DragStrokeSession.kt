@@ -45,7 +45,13 @@ internal class DragStrokeSession<S>(
       return
     }
     val precedingLift = liftFrom
-    try {
+    withStrokeFailures(
+      onFailure = { e ->
+        logError(e)
+        liftFrom = precedingLift
+        fail(e.message ?: "Failed to build or dispatch drag stroke")
+      },
+    ) {
       val stroke =
         if (segment.isInitial) dispatcher.initialStroke(segment)
         else dispatcher.continueStroke(requireNotNull(previous), segment)
@@ -67,10 +73,6 @@ internal class DragStrokeSession<S>(
           fail(error)
         },
       )
-    } catch (e: Exception) {
-      logError(e)
-      liftFrom = precedingLift
-      fail(e.message ?: "Failed to build or dispatch drag stroke")
     }
   }
 
@@ -131,7 +133,12 @@ internal class DragStrokeSession<S>(
       finish(false, error)
       return
     }
-    try {
+    withStrokeFailures(
+      onFailure = { e ->
+        logError(e)
+        finish(false, "$error; pointer release failed: ${e.message ?: "dispatch exception"}")
+      },
+    ) {
       // continueStroke must begin at its predecessor's endpoint, even after cancellation. The
       // framework can reject this best-effort lift if it already cancelled the pointer itself.
       val release =
@@ -147,9 +154,6 @@ internal class DragStrokeSession<S>(
           finish(false, "$error; pointer release failed: $cleanupError")
         },
       )
-    } catch (e: Exception) {
-      logError(e)
-      finish(false, "$error; pointer release failed: ${e.message ?: "dispatch exception"}")
     }
   }
 
@@ -167,3 +171,20 @@ internal class DragStrokeSession<S>(
     private const val CALLBACK_GRACE_MS = 250L
   }
 }
+
+/**
+ * Handles the platform failure set shared by these operations. Failure handlers run outside the
+ * try.
+ */
+private inline fun <T> withStrokeFailures(onFailure: (Exception) -> T, block: () -> T): T =
+  try {
+    block()
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: IllegalArgumentException) {
+    onFailure(e)
+  } catch (e: IllegalStateException) {
+    onFailure(e)
+  } catch (e: SecurityException) {
+    onFailure(e)
+  }

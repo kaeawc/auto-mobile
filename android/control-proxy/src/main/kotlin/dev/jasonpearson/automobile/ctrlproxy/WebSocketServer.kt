@@ -111,7 +111,7 @@ class WebSocketServer(
         (lenientJson.parseToJsonElement(raw) as? JsonObject)?.get(field)?.let { element ->
           (element as? JsonPrimitive)?.takeIf { it.isString }?.content
         }
-      } catch (e: Exception) {
+      } catch (_: IllegalArgumentException) {
         // Expected for genuinely malformed payloads; correlation is best-effort by design.
         null
       }
@@ -572,7 +572,10 @@ class WebSocketServer(
           }
         } catch (e: CancellationException) {
           throw e
-        } catch (e: Exception) {
+        } catch (e: java.io.IOException) {
+          Log.w(TAG, "Client #$id send failed; disconnecting", e)
+          disconnectClient(client, "Outbound send failed")
+        } catch (e: IllegalStateException) {
           Log.w(TAG, "Client #$id send failed; disconnecting", e)
           disconnectClient(client, "Outbound send failed")
         }
@@ -632,7 +635,9 @@ class WebSocketServer(
         client.transport.close(CloseReason(code, reason))
       } catch (e: CancellationException) {
         throw e
-      } catch (e: Exception) {
+      } catch (e: java.io.IOException) {
+        Log.w(TAG, "Failed to close client #${client.id}", e)
+      } catch (e: IllegalStateException) {
         Log.w(TAG, "Failed to close client #${client.id}", e)
       }
     }
@@ -670,130 +675,154 @@ class WebSocketServer(
 
   private fun tryStart(): Boolean {
     var startedServer: EmbeddedServer<*, *>? = null
-    try {
-      // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
-      // Detect the common occupied-port case before starting that coroutine.
-      if (!portAvailable(port)) return false
+    val failure =
+      try {
+        // CIO binds on an internal coroutine and reports an occupied port as an uncaught failure.
+        // Detect the common occupied-port case before starting that coroutine.
+        if (!portAvailable(port)) return false
 
-      val candidate =
-        // CtrlProxy is reached exclusively through adb forward. Binding loopback
-        // prevents the accessibility-control endpoint from being exposed to the
-        // device LAN when the runner is installed on a physical device.
-        embeddedServer(CIO, host = "127.0.0.1", port = port) {
-            install(WebSockets) {
-              pingPeriod = 15.seconds
-              timeout = 60.seconds
-              maxFrameSize = MAX_FRAME_SIZE_BYTES
-              masking = false
-            }
-
-            install(ContentNegotiation) { json(json) }
-
-            routing {
-              webSocket("/ws") {
-                val connectionId = connectionCount.incrementAndGet()
-                Log.d(TAG, "Client #$connectionId connected")
-
-                try {
-                  // Send connection greeting before registering for broadcasts
-                  val greetingSent = sendWithDeadline {
-                    send(
-                      Frame.Text(
-                        responseJson.encodeToString(
-                          WebSocketResponse.serializer(),
-                          ConnectedResponse(
-                            id = connectionId,
-                            supportedCommands = supportedCommands(),
-                          ),
-                        ),
-                      ),
-                    )
-                  }
-                  if (!greetingSent) {
-                    Log.w(
-                      TAG,
-                      "Client #$connectionId greeting send timed out after ${sendTimeoutMs}ms; disconnecting",
-                    )
-                    // Abandon the unregistered session without another potentially blocked write.
-                    cancel("Outbound greeting send timed out")
-                    return@webSocket
-                  }
-
-                  val session = this
-                  val client =
-                    registerClient(
-                      connectionId,
-                      object : ClientTransport {
-                        override suspend fun send(message: String) {
-                          session.send(Frame.Text(message))
-                        }
-
-                        override suspend fun close(reason: CloseReason) {
-                          session.close(reason)
-                        }
-                      },
-                    )
-
-                  try {
-                    // Listen for incoming messages
-                    for (frame in incoming) {
-                      when (frame) {
-                        is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
-                        is Frame.Close -> {
-                          Log.d(TAG, "Client #$connectionId closed connection")
-                        }
-                        else -> {
-                          Log.d(TAG, "Received frame type: ${frame.frameType}")
-                        }
-                      }
-                    }
-                  } finally {
-                    unregisterClient(client)
-                  }
-                } catch (e: CancellationException) {
-                  // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
-                  // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
-                  // instead of logging a connection error and re-swallowing the rethrow
-                  // handleClientMessage already performs (#3130).
-                  throw e
-                } catch (e: Exception) {
-                  Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
-                } finally {
-                  Log.d(
-                    TAG,
-                    "Client #$connectionId disconnected. Active connections: ${connections.size}",
-                  )
-                }
+        val candidate =
+          // CtrlProxy is reached exclusively through adb forward. Binding loopback
+          // prevents the accessibility-control endpoint from being exposed to the
+          // device LAN when the runner is installed on a physical device.
+          embeddedServer(CIO, host = "127.0.0.1", port = port) {
+              install(WebSockets) {
+                pingPeriod = 15.seconds
+                timeout = 60.seconds
+                maxFrameSize = MAX_FRAME_SIZE_BYTES
+                masking = false
               }
 
-              // Health check endpoint
-              get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+              install(ContentNegotiation) { json(json) }
+
+              routing {
+                webSocket("/ws") {
+                  val connectionId = connectionCount.incrementAndGet()
+                  Log.d(TAG, "Client #$connectionId connected")
+
+                  try {
+                    // Send connection greeting before registering for broadcasts
+                    val greetingSent = sendWithDeadline {
+                      send(
+                        Frame.Text(
+                          responseJson.encodeToString(
+                            WebSocketResponse.serializer(),
+                            ConnectedResponse(
+                              id = connectionId,
+                              supportedCommands = supportedCommands(),
+                            ),
+                          ),
+                        ),
+                      )
+                    }
+                    if (!greetingSent) {
+                      Log.w(
+                        TAG,
+                        "Client #$connectionId greeting send timed out after ${sendTimeoutMs}ms; disconnecting",
+                      )
+                      // Abandon the unregistered session without another potentially blocked write.
+                      cancel("Outbound greeting send timed out")
+                      return@webSocket
+                    }
+
+                    val session = this
+                    val client =
+                      registerClient(
+                        connectionId,
+                        object : ClientTransport {
+                          override suspend fun send(message: String) {
+                            session.send(Frame.Text(message))
+                          }
+
+                          override suspend fun close(reason: CloseReason) {
+                            session.close(reason)
+                          }
+                        },
+                      )
+
+                    try {
+                      // Listen for incoming messages
+                      for (frame in incoming) {
+                        when (frame) {
+                          is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
+                          is Frame.Close -> {
+                            Log.d(TAG, "Client #$connectionId closed connection")
+                          }
+                          else -> {
+                            Log.d(TAG, "Received frame type: ${frame.frameType}")
+                          }
+                        }
+                      }
+                    } finally {
+                      unregisterClient(client)
+                    }
+                  } catch (e: CancellationException) {
+                    // Read loop is a coroutine: on scope shutdown, `incoming` / the inline
+                    // `handleClientMessage` throw cancellation. Let it unwind (after `finally`)
+                    // instead of logging a connection error and re-swallowing the rethrow
+                    // handleClientMessage already performs (#3130).
+                    throw e
+                  } catch (e: Exception) {
+                    Log.e(TAG, "Error in WebSocket connection #$connectionId", e)
+                  } finally {
+                    Log.d(
+                      TAG,
+                      "Client #$connectionId disconnected. Active connections: ${connections.size}",
+                    )
+                  }
+                }
+
+                // Health check endpoint
+                get("/health") { call.respond(HttpStatusCode.OK, "OK") }
+              }
             }
-          }
-          .start(wait = false)
-      startedServer = candidate
+            .start(wait = false)
+        startedServer = candidate
 
-      // CIO starts its accept loop asynchronously. Wait for the connector to resolve so a bind
-      // failure is caught here, before this instance reports that it is listening. This single
-      // bounded bridge preserves the start/stop lock's atomic publication of a live listener.
-      // start() launches on the injected scope (CtrlProxy's IO serviceScope), never inline in
-      // onServiceConnected on Main; tests inject their scheduler instead.
-      runBlocking {
-        withTimeout(CONNECTOR_RESOLVE_TIMEOUT_MS) { candidate.engine.resolvedConnectors() }
-      }
-      server = candidate
+        // CIO starts its accept loop asynchronously. Wait for the connector to resolve so a bind
+        // failure is caught here, before this instance reports that it is listening. This single
+        // bounded bridge preserves the start/stop lock's atomic publication of a live listener.
+        // start() launches on the injected scope (CtrlProxy's IO serviceScope), never inline in
+        // onServiceConnected on Main; tests inject their scheduler instead.
+        awaitConnector(candidate)
+        server = candidate
 
-      Log.i(TAG, "WebSocket server started on port $port")
-      return true
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to start WebSocket server", e)
-      try {
-        startedServer?.stop(0, 0)
-      } catch (stopError: Exception) {
-        Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
+        Log.i(TAG, "WebSocket server started on port $port")
+        return true
+      } catch (e: CancellationException) {
+        stopPartiallyStartedServer(startedServer)
+        server = null
+        throw e
+      } catch (e: java.io.IOException) {
+        e
+      } catch (e: IllegalStateException) {
+        e
+      } catch (e: IllegalArgumentException) {
+        e
+      } catch (e: SecurityException) {
+        e
       }
-      server = null
-      return false
+    Log.e(TAG, "Failed to start WebSocket server", failure)
+    stopPartiallyStartedServer(startedServer)
+    server = null
+    return false
+  }
+
+  private fun stopPartiallyStartedServer(startedServer: EmbeddedServer<*, *>?) {
+    try {
+      startedServer?.stop(0, 0)
+    } catch (stopError: java.io.IOException) {
+      Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
+    } catch (stopError: IllegalStateException) {
+      if (stopError is CancellationException) throw stopError
+      Log.e(TAG, "Failed to stop partially started WebSocket server", stopError)
+    }
+  }
+
+  private fun awaitConnector(candidate: EmbeddedServer<*, *>) {
+    runBlocking {
+      withTimeoutOrNull(CONNECTOR_RESOLVE_TIMEOUT_MS) { candidate.engine.resolvedConnectors() }
+        ?: throw java.io.IOException("Timed out resolving WebSocket connectors")
     }
   }
 
@@ -812,7 +841,10 @@ class WebSocketServer(
         server = null
       }
       Log.i(TAG, "WebSocket server stopped")
-    } catch (e: Exception) {
+    } catch (e: java.io.IOException) {
+      Log.e(TAG, "Error stopping WebSocket server", e)
+    } catch (e: IllegalStateException) {
+      if (e is kotlinx.coroutines.CancellationException) throw e
       Log.e(TAG, "Error stopping WebSocket server", e)
     }
   }
@@ -1190,7 +1222,7 @@ class WebSocketServer(
       engine.resolvedConnectors().firstOrNull()?.port ?: port
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalStateException) {
       Log.w(TAG, "Could not get actual port, returning configured port", e)
       port
     }
@@ -1256,7 +1288,7 @@ class WebSocketServer(
         // rethrow anyway so this fn stays compliant with the auto-discovered suspend-fn scan
         // (#3191) if this try ever grows a suspend call.
         throw e
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
         // Surface a structured error (correlated by best-effort requestId) rather than swallowing
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
         // #2985.

@@ -9,6 +9,8 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -48,12 +50,17 @@ class SdkBatchReceiversTest {
   }
 
   @Test
-  fun `a throwing batch handler is contained`() {
+  fun `batch handler failures propagate outside the parsing boundary`() {
     val handler = mockk<SdkEventBatchBroadcastHandler>()
-    every { handler.handle(any(), any(), any()) } throws IllegalStateException("boom")
+    val failure = IllegalStateException("boom")
+    every { handler.handle(any(), any(), any()) } throws failure
 
-    EventBatchReceiver(handler)
-      .onReceive(context, Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH))
+    val thrown =
+      assertThrows(IllegalStateException::class.java) {
+        EventBatchReceiver(handler)
+          .onReceive(context, Intent(SdkEventSerializer.ACTION_SDK_EVENT_BATCH))
+      }
+    assertSame(failure, thrown)
   }
 
   @Test
@@ -72,12 +79,17 @@ class SdkBatchReceiversTest {
   }
 
   @Test
-  fun `a throwing anr handler is contained and other actions are ignored`() {
+  fun `anr handler failures propagate and other actions are ignored`() {
     val handler = mockk<SdkAnrBroadcastHandler>()
-    every { handler.handle(any(), any(), any()) } throws IllegalStateException("boom")
+    val failure = IllegalStateException("boom")
+    every { handler.handle(any(), any(), any()) } throws failure
     val receiver = AnrReceiver(handler)
 
-    receiver.onReceive(context, Intent(AutoMobileAnr.ACTION_ANR))
+    val thrown =
+      assertThrows(IllegalStateException::class.java) {
+        receiver.onReceive(context, Intent(AutoMobileAnr.ACTION_ANR))
+      }
+    assertSame(failure, thrown)
     receiver.onReceive(context, Intent("other.action"))
   }
 }

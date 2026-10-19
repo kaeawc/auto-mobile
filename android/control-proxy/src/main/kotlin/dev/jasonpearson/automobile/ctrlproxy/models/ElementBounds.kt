@@ -66,7 +66,7 @@ data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom
 
         val (left, top, right, bottom) = matchResult.destructured
         ElementBounds(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
-      } catch (e: Exception) {
+      } catch (e: NumberFormatException) {
         null
       }
     }

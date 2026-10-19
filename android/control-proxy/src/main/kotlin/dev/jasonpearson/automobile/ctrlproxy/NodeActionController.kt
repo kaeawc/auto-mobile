@@ -122,7 +122,12 @@ internal class NodeActionController(
                     // contract; no coordinate, reflection, or whole-node fallback is permitted.
                     span.onClick(host.createView())
                     activated = true
-                  } catch (error: Exception) {
+                  } catch (error: IllegalArgumentException) {
+                    activationError = error.message ?: error.javaClass.simpleName
+                  } catch (error: IllegalStateException) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    activationError = error.message ?: error.javaClass.simpleName
+                  } catch (error: SecurityException) {
                     activationError = error.message ?: error.javaClass.simpleName
                   }
                 }
@@ -157,7 +162,30 @@ internal class NodeActionController(
           timeProvider.currentTimeMillis() - startTime,
         )
       }
-    } catch (error: Exception) {
+    } catch (error: IllegalArgumentException) {
+      Log.w(TAG, "Semantic accessibility link activation failed", error)
+      host.launchRequestScope(requestId) {
+        host.sendActionResult(
+          requestId,
+          "activate_accessibility_link",
+          false,
+          error.message ?: error.javaClass.simpleName,
+          timeProvider.currentTimeMillis() - startTime,
+        )
+      }
+    } catch (error: IllegalStateException) {
+      if (error is kotlinx.coroutines.CancellationException) throw error
+      Log.w(TAG, "Semantic accessibility link activation failed", error)
+      host.launchRequestScope(requestId) {
+        host.sendActionResult(
+          requestId,
+          "activate_accessibility_link",
+          false,
+          error.message ?: error.javaClass.simpleName,
+          timeProvider.currentTimeMillis() - startTime,
+        )
+      }
+    } catch (error: SecurityException) {
       Log.w(TAG, "Semantic accessibility link activation failed", error)
       host.launchRequestScope(requestId) {
         host.sendActionResult(
@@ -261,7 +289,17 @@ internal class NodeActionController(
       )
     } catch (e: CancellationException) {
       throw e
-    } catch (e: Exception) {
+    } catch (e: IllegalArgumentException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing action", e)
+      host.sendActionResult(requestId, action, false, e.message, errorTime - startTime)
+    } catch (e: IllegalStateException) {
+      perfProvider.end()
+      val errorTime = timeProvider.currentTimeMillis()
+      Log.e(TAG, "Error performing action", e)
+      host.sendActionResult(requestId, action, false, e.message, errorTime - startTime)
+    } catch (e: SecurityException) {
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)

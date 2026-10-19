@@ -82,8 +82,7 @@ class LaunchCancellationRethrowTest {
 
     // Four actions and two broadcast helpers; the bodyless sender declaration is skipped.
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+    assertFailureHelperRethrowsCancellation(source, "withCaPolicyFailures")
   }
 
   @Test
@@ -92,8 +91,7 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+    assertFailureHelperRethrowsCancellation(source, "withSettingsFailures")
   }
 
   @Test
@@ -102,8 +100,25 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    val withoutRethrow = source.replace("throw e", "Unit")
-    assertTrue(LaunchCancellationScanner.scan(withoutRethrow).violations.isNotEmpty())
+    assertFailureHelperRethrowsCancellation(source, "withPackageFailures")
+  }
+
+  private fun assertFailureHelperRethrowsCancellation(source: String, helperName: String) {
+    val declaration = source.indexOf("private inline fun <T> $helperName(")
+    check(declaration >= 0) { "$helperName not found" }
+    val expression = source.indexOf("=\n", declaration)
+    check(expression >= 0) { "$helperName expression body not found" }
+    // These final, inline helpers execute in their caller's coroutine. Exercise their actual catch
+    // clauses with the scanner's broad-catch model: IllegalStateException also includes
+    // cancellation.
+    val body = source.substring(expression + 1).replace("IllegalStateException", "Exception")
+    val coroutine = "scope.launch { $body }"
+    assertTrue(LaunchCancellationScanner.scan(coroutine).violations.isEmpty())
+    assertEquals(
+      "removing the helper's cancellation rethrow must expose a swallowing catch",
+      1,
+      LaunchCancellationScanner.scan(coroutine.replace("throw e", "Unit")).violations.size,
+    )
   }
 
   @Test

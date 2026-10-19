@@ -188,7 +188,13 @@ internal class ScreenshotController(
         // cancellation
         // into a null screenshot (#3191).
         throw e
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Error taking screenshot", e)
+        ScreenshotCaptureOutcome.Failure(null)
+      } catch (e: IllegalStateException) {
+        Log.e(TAG, "Error taking screenshot", e)
+        ScreenshotCaptureOutcome.Failure(null)
+      } catch (e: SecurityException) {
         Log.e(TAG, "Error taking screenshot", e)
         ScreenshotCaptureOutcome.Failure(null)
       }

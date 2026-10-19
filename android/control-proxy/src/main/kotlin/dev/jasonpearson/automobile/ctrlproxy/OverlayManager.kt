@@ -52,7 +52,20 @@ class OverlayManager(
       try {
         windowManager.addView(view, layoutParams)
         overlayAdded = true
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: IllegalStateException) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: SecurityException) {
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: WindowManager.BadTokenException) {
+        Log.e(TAG, "Failed to add overlay view", e)
+        return false
+      } catch (e: WindowManager.InvalidDisplayException) {
         Log.e(TAG, "Failed to add overlay view", e)
         return false
       }
@@ -75,7 +88,7 @@ class OverlayManager(
     if (view != null && overlayAdded) {
       try {
         windowManager.removeViewImmediate(view)
-      } catch (error: Exception) {
+      } catch (error: IllegalArgumentException) {
         Log.e(TAG, "Failed to restack highlight overlay", error)
         return false
       }
@@ -101,7 +114,7 @@ class OverlayManager(
     if (overlayAdded) {
       try {
         windowManager.removeViewImmediate(view)
-      } catch (e: Exception) {
+      } catch (e: IllegalArgumentException) {
         Log.e(TAG, "Failed to remove overlay view", e)
       }
     }

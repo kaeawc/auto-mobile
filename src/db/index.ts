@@ -2,7 +2,6 @@
 export {
   getDatabase,
   closeDatabase,
-  DatabaseClosedForShutdownError,
   refusedDatabaseAccessCountAfterShutdownClose,
   awaitInFlightMigrations,
   getDatabasePath,
@@ -10,6 +9,7 @@ export {
   getMigrationsError,
   DATABASE_STARTUP_MIGRATION_FAILURE,
 } from "./database";
+export { DatabaseClosedForShutdownError } from "./DatabaseClosedForShutdownError";
 export { runMigrations } from "./migrator";
 export {
   type DbWriteBarrier,

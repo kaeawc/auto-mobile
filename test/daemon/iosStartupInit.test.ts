@@ -3,7 +3,7 @@ import {
   initializeIosCtrlProxyAtStartup,
   selectIosStartupWarmupDevices,
 } from "../../src/daemon/iosStartupInit";
-import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/CtrlProxyStaleRunnerCacheError";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";

@@ -200,19 +200,22 @@ function unregisteredReads(files: Map<string, string>): string[] {
 describe("environment variable registry", () => {
   let found: string[];
   let rawReads: string[];
-  let allFiles: Map<string, string>;
+  let allowlistedReads: string[];
   // The AST scan of src/ runs in the hook so the per-test 100 ms budget is not spent on it.
   beforeAll(() => {
     const files = new Map(
       typeScriptFiles(SRC).map((file) => [relativePosix(ROOT, file), readFileSync(file, "utf8")]),
     );
-    allFiles = files;
     found = unregisteredReads(files);
     const registered = registeredNames();
     rawReads = [...files]
       .filter(([relative]) => relative !== REGISTRY_FILE)
       .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, registered))
       .sort();
+    const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
+    allowlistedReads = [...files]
+      .filter(([relative]) => relative !== REGISTRY_FILE)
+      .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, allowlisted));
   }, 60_000);
 
   test("every env read in src/ is registered or on the shrink-only baseline", () => {
@@ -268,10 +271,7 @@ describe("environment variable registry", () => {
   test("allowlisted non-env literals are never read from process.env or registered", () => {
     const allowlisted = new Set(Object.keys(NON_ENV_LITERALS));
     expect(registeredNames().intersection(allowlisted).size).toBe(0);
-    const reads = [...allFiles]
-      .filter(([relative]) => relative !== REGISTRY_FILE)
-      .flatMap(([relative, source]) => rawProcessEnvReads(relative, source, allowlisted));
-    expect(reads).toEqual([]);
+    expect(allowlistedReads).toEqual([]);
     for (const reason of Object.values(NON_ENV_LITERALS)) {
       expect(reason.length).toBeGreaterThan(0);
     }

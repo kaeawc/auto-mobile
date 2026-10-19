@@ -3,10 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { decodeCtrlProxyMessage } from "../../../../src/features/observe/ios/decodeCtrlProxyMessage";
-import type {
-  CtrlProxyTapDiagnostics,
-  WebSocketMessage,
-} from "../../../../src/features/observe/ios/types";
+import type { CtrlProxyTapDiagnostics } from "../../../../src/features/observe/ios/types";
 import { logger, LogLevel } from "../../../../src/utils/logger";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -236,10 +233,7 @@ describe("iOS opt-in tap diagnostics", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
-    const boundary = client as unknown as {
-      requestManager: RequestManager;
-      processMessage(message: WebSocketMessage): void;
-    };
+    const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -249,15 +243,16 @@ describe("iOS opt-in tap diagnostics", () => {
         error: "Tap timed out",
       }));
       // Model JSON from an untrusted runner, including a malformed optional value.
-      const message: WebSocketMessage = JSON.parse(
-        JSON.stringify({
-          type: "tap_coordinates_result",
-          requestId: "tap",
-          success: true,
-          tapDiagnostics: payload,
-        }),
-      );
-      boundary.processMessage(message);
+      const message = {
+        type: "tap_coordinates_result",
+        requestId: "tap",
+        success: true,
+        tapDiagnostics: payload,
+      };
+      const receiveMessage = (value: unknown): void => {
+        client.getSdkEventPollingTestHooks().receiveMessage(JSON.stringify(value));
+      };
+      receiveMessage(message);
       expect(await pending).toMatchObject({ success: true, tapDiagnostics: payload });
       const lines = debug.mock.calls
         .map(([line]) => line)

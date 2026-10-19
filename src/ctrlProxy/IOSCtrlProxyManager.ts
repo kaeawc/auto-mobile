@@ -453,7 +453,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // stop phase, even when the readiness caller times out before it settles.
   private forceRestartInFlight: Promise<void> | null = null;
   private removalCleanup: Promise<void> | null = null;
-  private removalGeneration = 0;
+  removalGeneration = 0;
   private rearmedRemovalGeneration = 0;
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
@@ -704,7 +704,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private supersededSinceRemoval(removalGeneration: number): boolean {
+  supersededSinceRemoval(removalGeneration: number): boolean {
     return (
       this.removalGeneration !== removalGeneration ||
       this.rearmedRemovalGeneration >= removalGeneration ||
@@ -924,7 +924,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     deviceId: string,
     timer: Timer = defaultTimer,
   ): Promise<void> {
-    const manager = IOSCtrlProxyManager.registry.peek(deviceId);
+    const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
     if (!manager) {
       return;
     }
@@ -937,7 +937,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // force-stop the live runner and release its port (#11141).
     if (
       resolveIosDeviceKind({ deviceId }) === "simulator" &&
-      IOSCtrlProxyManager.registry.peek(deviceId) === manager &&
+      IOSCtrlProxyManager.getExistingInstance(deviceId) === manager &&
       !manager.supersededSinceRemoval(removalGeneration)
     ) {
       await IOSCtrlProxyManager.evict(deviceId, timer);

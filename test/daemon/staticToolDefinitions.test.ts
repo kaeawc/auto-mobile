@@ -10,6 +10,7 @@ import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
 } from "../../src/daemon/staticToolDefinitions";
+import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
 import committedDefinitions from "../../schemas/tool-definitions.json";
 
 // Issue #5879 / review: the static cold-start surface mirrors the runtime
@@ -48,8 +49,8 @@ describe("getStaticToolDefinitions", () => {
 
   test("cold wire payload equals committed definitions with only the established omissions", () => {
     delete process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS;
-    const expected = committedDefinitions.map((tool) => {
-      const definition: Record<string, unknown> = { ...tool };
+    const expected = committedDefinitions.map((tool): ProxiedToolDefinition => {
+      const definition: ProxiedToolDefinition = { ...tool };
       delete definition.outputSchema;
       const meta: Record<string, unknown> = { ...tool._meta };
       delete meta["automobile/debugOnly"];

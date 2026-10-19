@@ -1,10 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
+import { DaemonBoundSessionLostError } from "../DaemonBoundSessionLostError";
 import { logger } from "../../utils/logger";
-import {
-  DaemonShuttingDownError,
-  DaemonBoundSessionLostError,
-  type DaemonClientLike,
-} from "../client";
+import { type DaemonClientLike } from "../client";
 import { DaemonUnavailableError } from "../client";
 import { isRecoverableDaemonReleaseReason } from "../../models/releaseReasons";
 import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";

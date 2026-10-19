@@ -37,12 +37,12 @@ class DeferredPersistence extends FakeDeviceSessionPersistence {
 
   override async upsertActiveSession(
     ...args: Parameters<FakeDeviceSessionPersistence["upsertActiveSession"]>
-  ) {
+  ): Promise<number> {
     if (this.deferUpsert) {
       this.upsertStarted.resolve();
       await this.finishUpsert.promise;
     }
-    await super.upsertActiveSession(...args);
+    return super.upsertActiveSession(...args);
   }
 }
 

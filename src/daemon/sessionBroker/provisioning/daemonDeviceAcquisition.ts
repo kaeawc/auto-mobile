@@ -43,11 +43,8 @@ import {
   type ManagedAndroidImageCatalog,
   type ManagedAndroidProfileCatalog,
 } from "./reconciler";
-import {
-  BindingJournalRedriveLoop,
-  type BindingJournal,
-  type BindingJournalInFlight,
-} from "../registry/bindingJournal";
+import { BindingJournalRedriveLoop } from "../registry/BindingJournalRedriveLoop";
+import { type BindingJournal, type BindingJournalInFlight } from "../registry/bindingJournal";
 import type {
   BindingJournalOwner,
   BindingProcessIdentity,

@@ -16,7 +16,6 @@ import { settleByFakeEvents } from "../../../helpers/fakeTimerStepping";
 const device: BootedDevice = {
   deviceId: "post-bind-retry",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 

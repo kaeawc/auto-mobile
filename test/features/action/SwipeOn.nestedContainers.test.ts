@@ -38,7 +38,9 @@ function observation(kind = "missing", top = 100): ObserveResult {
     panel.children.push(node("list"));
   }
   return {
-    timestamp: top,
+    updatedAt: top,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 500, height: 500 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     viewHierarchy: {

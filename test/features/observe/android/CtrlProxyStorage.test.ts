@@ -35,7 +35,6 @@ describe("CtrlProxyStorage (Android)", function () {
     testDevice = {
       deviceId: "test-device-storage",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 

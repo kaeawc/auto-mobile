@@ -48,7 +48,6 @@ describe("CtrlProxyCertificates (Android)", function () {
     testDevice = {
       deviceId: "test-device-certs",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 

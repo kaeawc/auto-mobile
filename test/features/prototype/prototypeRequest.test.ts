@@ -79,7 +79,7 @@ describe("request action validation", () => {
     expect(check({ type: "request", url: "https://example.com" }).success).toBe(true);
   });
 
-  test.each(PROTOTYPE_REQUEST_METHODS)("accepts method %s", (method) => {
+  test.each([...PROTOTYPE_REQUEST_METHODS])("accepts method %s", (method) => {
     const body = method === "GET" || method === "HEAD" ? {} : { body: { value: 1 } };
     expect(check(request({ method, ...body })).success).toBe(true);
   });

@@ -23,7 +23,6 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     testDevice = {
       deviceId: "test-device-capabilities",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
     AndroidCtrlProxyManager.resetInstances();

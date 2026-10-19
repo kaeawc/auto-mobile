@@ -35,7 +35,6 @@ describe("CaptureSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
 
     // Create fakes
@@ -307,7 +306,6 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
 
       const capturePhysical = new CaptureSnapshot(
@@ -406,7 +404,6 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false,
       };
       const capturePhysical = new CaptureSnapshot(
         physicalDevice,
@@ -1061,7 +1058,6 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true,
     };
     fakeAdb = new FakeAdbClient();
     fakeAdbFactory = { create: () => fakeAdb };

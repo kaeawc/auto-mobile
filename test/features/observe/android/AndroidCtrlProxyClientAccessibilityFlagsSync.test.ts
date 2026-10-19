@@ -34,7 +34,6 @@ describe("AndroidCtrlProxyClient - accessibility flags re-sync on ensureConnecte
     testDevice = {
       deviceId: "test-device-a11y-flags-sync",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 

@@ -16,14 +16,12 @@ import { FakeAccessibilityFocusService } from "../../fakes/FakeAccessibilityFocu
 const androidDevice: BootedDevice = {
   deviceId: "test-a11y-focus",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 
 const iosDevice: BootedDevice = {
   deviceId: "test-a11y-focus-ios",
   platform: "ios",
-  isEmulator: true,
   name: "Test Simulator",
 };
 

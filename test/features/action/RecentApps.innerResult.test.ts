@@ -118,7 +118,9 @@ describe("RecentApps inner result", () => {
 
   const recentsObservation = (): ObserveResult => ({
     ...capturedRecents,
-    timestamp: timer.now(),
+    updatedAt: timer.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize,
     systemInsets,
   });

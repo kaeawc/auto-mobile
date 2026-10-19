@@ -43,7 +43,6 @@ describe("CtrlProxyPackages (Android)", function () {
     testDevice = {
       deviceId: "test-device-packages",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 

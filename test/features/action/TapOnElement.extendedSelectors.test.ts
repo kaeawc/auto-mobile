@@ -7,6 +7,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
+import type { TapOnElementDependencies } from "../../../src/features/action/TapOnElement";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
@@ -29,7 +30,7 @@ const createTapOnElement = (selector: FakeElementSelector) => {
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
+    },
     new FakeAdbClient(),
     {
       timer: new FakeTimer(),
@@ -38,16 +39,20 @@ const createTapOnElement = (selector: FakeElementSelector) => {
   );
 };
 
-const createDefaultTapOnElement = () => {
+const createDefaultTapOnElement = (
+  adb: FakeAdbClient = new FakeAdbClient(),
+  extraOptions: Pick<TapOnElementDependencies, "tapStrategy" | "selectionStateTracker"> = {},
+) => {
   return new TapOnElement(
     {
       name: "test-device",
       platform: "android",
       deviceId: "emulator-5554",
-    } as any,
-    new FakeAdbClient(),
+    },
+    adb,
     {
       timer: new FakeTimer(),
+      ...extraOptions,
     },
   );
 };
@@ -59,23 +64,22 @@ const longClickResult = (success: boolean, error?: string) => ({
   error,
 });
 
-const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) =>
-  ({
-    bounds,
-    text: "Item",
-    clickable: "true",
-  }) as any;
+const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }): Element => ({
+  bounds,
+  text: "Item",
+  clickable: "true",
+});
 
 describe("TapOnElement extended selectors", () => {
   test("budgets both Android long-press swipe forms from the requested duration", async () => {
-    const tapOn = createDefaultTapOnElement();
-    const adb = (tapOn as any).adb as FakeAdbClient;
+    const adb = new FakeAdbClient();
+    const tapOn = createDefaultTapOnElement(adb);
     adb.setCommandError(
       "shell input touchscreen swipe 50 25 50 25 20000",
       new Error("touchscreen input unavailable"),
     );
 
-    await (tapOn as any).executeAndroidLongPress(50, 25, 20_000, makeElement(), undefined, true);
+    await tapOn.testHooks.executeAndroidLongPress(50, 25, 20_000, makeElement(), undefined, true);
 
     expect(
       adb
@@ -89,14 +93,14 @@ describe("TapOnElement extended selectors", () => {
     test("rejects when no selector provided", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({ action: "tap" });
+      const error = tapOn.testHooks.validateOptions({ action: "tap" });
       expect(error).toContain("requires exactly one");
     });
 
     test("rejects when both selectors provided", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         text: "Login",
         elementId: "com.app:id/btn",
@@ -107,7 +111,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts text as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         text: "Login",
       });
@@ -117,7 +121,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts elementId as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         elementId: "com.app:id/btn",
       });
@@ -127,7 +131,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts testTag as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         testTag: "message_row_42",
       });
@@ -137,7 +141,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts textAny as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         textAny: ["Done", "Add"],
       });
@@ -147,7 +151,7 @@ describe("TapOnElement extended selectors", () => {
     test("rejects empty textAny selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         textAny: [],
       });
@@ -157,7 +161,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts text with sibling flag", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         text: "Accept Terms",
         sibling: true,
@@ -168,7 +172,7 @@ describe("TapOnElement extended selectors", () => {
     test("accepts elementId with sibling flag", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
-      const error = (tapOn as any).validateOptions({
+      const error = tapOn.testHooks.validateOptions({
         action: "tap",
         elementId: "com.app:id/label",
         sibling: true,
@@ -375,26 +379,19 @@ describe("TapOnElement extended selectors", () => {
       actions: ["long_click"],
     };
 
-    function setup() {
+    function setup(extraOptions: Parameters<typeof createDefaultTapOnElement>[1] = {}) {
       const proxy = new FakeCtrlProxy();
       proxy.setHierarchyData({ updatedAt: 1, packageName: "com.android.systemui", hierarchy: {} });
       proxy.setViewHierarchyResult(notificationHierarchy);
       const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
+      const adb = new FakeAdbClient();
       let tapOn: TapOnElement;
       try {
-        tapOn = createDefaultTapOnElement();
+        tapOn = createDefaultTapOnElement(adb, extraOptions);
       } finally {
         clientSpy.mockRestore();
       }
-      const internals = tapOn as unknown as {
-        adb: FakeAdbClient;
-        executeAndroidLongPress(
-          x: number,
-          y: number,
-          duration: number,
-          element: Element,
-        ): Promise<void>;
-      };
+      const internals = { adb, executeAndroidLongPress: tapOn.testHooks.executeAndroidLongPress };
       return { proxy, internals, tapOn };
     }
 
@@ -406,7 +403,10 @@ describe("TapOnElement extended selectors", () => {
     const repeatedIdElement: Element = { ...notificationRows[1], actions: ["long_click"] };
     const coordinateCommand = "shell input touchscreen swipe 50 25 50 25 1000";
 
-    function expectCoordinateFallback({ proxy, internals }: ReturnType<typeof setup>) {
+    function expectCoordinateFallback({
+      proxy,
+      internals,
+    }: Pick<ReturnType<typeof setup>, "proxy" | "internals">) {
       expect(proxy.getActionHistory()).toEqual([]);
       expect(proxy.getNodeActionHistory()).toEqual([]);
       expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
@@ -543,17 +543,14 @@ describe("TapOnElement extended selectors", () => {
     ] satisfies [string, Element][])(
       "tapOn threads the hierarchy selected after the stability refresh (%s id)",
       async (kind, element) => {
-        const { tapOn, proxy, internals } = setup();
-        // The initial tree has one match; the refreshed capture may introduce another.
-        const initialHierarchy: ViewHierarchyResult = { hierarchy: { node: { $: element } } };
         const strategy = new FakeTapStrategy();
         strategy.setShouldRunPreTapStability(true);
-        const flow = tapOn as unknown as {
-          strategy: FakeTapStrategy;
-          selectionStateTracker: { prepare(): Promise<null>; finalize(): Promise<[]> };
-        };
-        flow.strategy = strategy;
-        flow.selectionStateTracker = { prepare: async () => null, finalize: async () => [] };
+        const { tapOn, proxy, internals } = setup({
+          tapStrategy: strategy,
+          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+        });
+        // The initial tree has one match; the refreshed capture may introduce another.
+        const initialHierarchy: ViewHierarchyResult = { hierarchy: { node: { $: element } } };
         tapOn.observedInteraction = (callback) =>
           callback(
             buildObserveResult({

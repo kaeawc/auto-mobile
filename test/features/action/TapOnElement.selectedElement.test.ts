@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Element, ElementSelectionResult, TapOnElementResult } from "../../../src/models";
+import type {
+  Element,
+  ElementSelectionResult,
+  TapOnElementResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -10,14 +16,28 @@ import {
   nestedClickableHierarchy,
 } from "../../fixtures/nestedClickableHierarchy";
 
+const rowNode = (row: Element): ViewHierarchyNode => ({ $: { ...row } });
+
+const hierarchyOf = (...rows: Element[]): ViewHierarchyResult => ({
+  hierarchy: { node: { node: rows.map(rowNode) } },
+});
+
+const metadataOf = (tap: TapOnElement, selection: ElementSelectionResult) => {
+  const metadata = tap.buildSelectedElementMetadata(selection);
+  if (!metadata) {
+    throw new Error("expected selected-element metadata");
+  }
+  return metadata;
+};
+
 const createTapOnElement = (platform: "android" | "ios" = "android"): TapOnElement => {
   return new TapOnElement(
     {
       name: "test-device",
       platform,
       deviceId: "emulator-5554",
-    } as any,
-    new FakeAdbClient() as any,
+    },
+    new FakeAdbClient(),
     {
       timer: new FakeTimer(),
     },
@@ -35,16 +55,9 @@ describe("TapOnElement selectedElement metadata", () => {
       text: "Account A",
       "resource-id": "com.example:id/account_row",
     });
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          { ...duplicateOwner, children: [] },
-          { ...owner, children: [] },
-        ],
-      },
-    };
+    const hierarchy = hierarchyOf(duplicateOwner, owner);
 
-    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
   });
 
   test("accepts a semantic-link owner with a unique resource ID", () => {
@@ -53,13 +66,9 @@ describe("TapOnElement selectedElement metadata", () => {
       text: "Account B",
       "resource-id": "com.example:id/account_row_b",
     });
-    const hierarchy = {
-      hierarchy: {
-        node: [{ ...owner, children: [] }],
-      },
-    };
+    const hierarchy = hierarchyOf(owner);
 
-    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
   test("accepts a Compose semantic-link owner identified only by test tag", () => {
@@ -68,13 +77,9 @@ describe("TapOnElement selectedElement metadata", () => {
       text: "Terms and privacy",
       "test-tag": "legal-copy",
     });
-    const hierarchy = {
-      hierarchy: {
-        node: [{ ...owner, children: [] }],
-      },
-    };
+    const hierarchy = hierarchyOf(owner);
 
-    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
   // Regression: the uniqueness count must span window subtrees, because the owner
@@ -91,18 +96,18 @@ describe("TapOnElement selectedElement metadata", () => {
       text: "Account A",
       "resource-id": "com.example:id/account_row",
     });
-    const hierarchy = {
-      hierarchy: { node: [{ ...owner, children: [] }] },
+    const hierarchy: ViewHierarchyResult = {
+      ...hierarchyOf(owner),
       windows: [
         {
           isActive: true,
           isFocused: true,
-          hierarchy: { node: [{ ...duplicateInWindow, children: [] }] },
+          hierarchy: { node: [rowNode(duplicateInWindow)] },
         },
       ],
     };
 
-    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
   });
 
   test("accepts a unique owner that lives inside a window subtree", () => {
@@ -111,18 +116,18 @@ describe("TapOnElement selectedElement metadata", () => {
       text: "Terms and privacy",
       "resource-id": "com.example:id/legal_row",
     });
-    const hierarchy = {
-      hierarchy: { node: [] },
+    const hierarchy: ViewHierarchyResult = {
+      ...hierarchyOf(),
       windows: [
         {
           isActive: true,
           isFocused: true,
-          hierarchy: { node: [{ ...owner, children: [] }] },
+          hierarchy: { node: [rowNode(owner)] },
         },
       ],
     };
 
-    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
   test("uses Android's complete stable selector for duplicate resource IDs", () => {
@@ -137,21 +142,14 @@ describe("TapOnElement selectedElement metadata", () => {
       "resource-id": "com.example:id/account_row",
       "unique-id": "account-row-a",
     });
-    const hierarchy = {
-      hierarchy: {
-        node: [
-          { ...duplicateOwner, children: [] },
-          { ...owner, children: [] },
-        ],
-      },
-    };
+    const hierarchy = hierarchyOf(duplicateOwner, owner);
 
-    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+    expect(tapOnElement.testHooks.hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
   test("reports the actionable dialog button in selected-element metadata", () => {
     const tapOnElement = createTapOnElement("ios");
-    const hierarchy = {
+    const hierarchy: ViewHierarchyResult = {
       hierarchy: {
         node: {
           $: {
@@ -175,23 +173,21 @@ describe("TapOnElement selectedElement metadata", () => {
           isActive: true,
           isFocused: true,
           hierarchy: {
-            node: {
-              $: {
-                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-                class: "XCUIElementTypeAlert",
-              },
-              node: [
-                {
-                  $: {
-                    bounds: { left: 10, top: 60, right: 90, bottom: 90 },
-                    class: "XCUIElementTypeButton",
-                    text: "Sign Out",
-                    "resource-id": "dialog-confirm",
-                    actions: ["click"],
-                  },
-                },
-              ],
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              class: "XCUIElementTypeAlert",
             },
+            node: [
+              {
+                $: {
+                  bounds: { left: 10, top: 60, right: 90, bottom: 90 },
+                  class: "XCUIElementTypeButton",
+                  text: "Sign Out",
+                  "resource-id": "dialog-confirm",
+                  actions: ["click"],
+                },
+              },
+            ],
           },
         },
       ],
@@ -199,18 +195,18 @@ describe("TapOnElement selectedElement metadata", () => {
       screenHeight: 100,
     };
 
-    const { selection } = (tapOnElement as any).findElementInHierarchy(
+    const { selection } = tapOnElement.findElementInHierarchy(
       { text: "Sign Out", action: "tap" },
       hierarchy,
     );
-    const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
+    const selectedElement = metadataOf(tapOnElement, selection);
 
     expect(selectedElement.resourceId).toBe("dialog-confirm");
     expect(selectedElement.bounds.centerY).toBe(75);
   });
 
   test("identifies a quick-settings toggle by content description in tap metadata (#6794)", () => {
-    const selected = (createTapOnElement() as any).buildSelectedElementMetadata({
+    const selected = metadataOf(createTapOnElement(), {
       element: {
         text: "Off",
         "content-desc": "Do Not Disturb.",
@@ -239,7 +235,7 @@ describe("TapOnElement selectedElement metadata", () => {
       strategy: "random",
     };
 
-    const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
+    const selectedElement = metadataOf(tapOnElement, selection);
 
     expect(selectedElement).toEqual({
       text: "Sarah's Channel",
@@ -274,7 +270,7 @@ describe("TapOnElement selectedElement metadata", () => {
       strategy: "first",
     };
 
-    const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
+    const selectedElement = metadataOf(tapOnElement, selection);
 
     expect(selectedElement.testTag).toBe("message_row_42");
     expect(selectedElement.text).toBe("");
@@ -321,7 +317,7 @@ describe("TapOnElement selectedElement metadata", () => {
         strategy: "first",
       };
 
-      const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
+      const selectedElement = metadataOf(tapOnElement, selection);
 
       expect(selectedElement.text).toBe(entry.element.text);
       expect(selectedElement.resourceId).toBe(entry.element["resource-id"]);
@@ -380,9 +376,9 @@ test("selection metadata separates the matched text child from the shared action
   const selector = new ResolverElementSelector();
   const tap = selector.selectByText(hierarchy, "Wi-Fi", { intentAction: "tap" });
   const highlight = selector.selectByText(hierarchy, "Wi-Fi", { intentAction: "highlight" });
-  const metadata = (createTapOnElement() as any).buildSelectedElementMetadata(tap);
+  const metadata = metadataOf(createTapOnElement(), tap);
   expect(tap.element?.bounds).toEqual(rowBounds);
-  expect(metadata.matchedElement.bounds).toEqual(childBounds);
+  expect(metadata.matchedElement?.bounds).toEqual(childBounds);
   expect(metadata.bounds).toMatchObject(rowBounds);
   expect(highlight.element?.bounds).toEqual(rowBounds);
   expect(highlight.matchedElement?.bounds).toEqual(childBounds);

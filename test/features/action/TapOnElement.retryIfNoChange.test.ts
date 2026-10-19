@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import type {
+  Element,
+  ObserveResult,
+  TapOnElementOptions,
+  ViewHierarchyResult,
+} from "../../../src/models";
+import type { TapOnElementDependencies } from "../../../src/features/action/TapOnElement";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { PortManager } from "../../../src/utils/PortManager";
 import type {
@@ -19,7 +25,7 @@ function makeElement(): Element {
 }
 
 function makeHierarchy(marker: string): ViewHierarchyResult {
-  return { hierarchy: { node: { marker } } } as unknown as ViewHierarchyResult;
+  return { hierarchy: { node: { text: marker } } };
 }
 
 function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
@@ -33,6 +39,7 @@ function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
 function createTapOnElement(
   platform: "android" | "ios" = "android",
   waitForCondition?: WaitForCondition,
+  extraOptions: Pick<TapOnElementDependencies, "selectionStateTracker"> = {},
 ): { tap: TapOnElement; timer: FakeTimer } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -41,9 +48,9 @@ function createTapOnElement(
       name: "test-device",
       platform,
       deviceId: "emulator-5554",
-    } as any,
+    },
     new FakeAdbClient(),
-    { timer, waitForCondition },
+    { timer, waitForCondition, ...extraOptions },
   );
   return { tap, timer };
 }
@@ -71,7 +78,7 @@ describe("retryTapIfNoChange", () => {
       tapCallCount++;
     };
 
-    const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
+    const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
     await tap.retryTapIfNoChange(
       preTapHash,
@@ -98,7 +105,7 @@ describe("retryTapIfNoChange", () => {
       tapCallCount++;
     };
 
-    const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
+    const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
     await tap.retryTapIfNoChange(
       preTapHash,
@@ -125,7 +132,7 @@ describe("retryTapIfNoChange", () => {
       tapCallCount++;
     };
 
-    const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
+    const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
     await tap.retryTapIfNoChange(
       preTapHash,
@@ -155,7 +162,7 @@ describe("retryTapIfNoChange", () => {
       return origSleep(ms);
     };
 
-    const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
+    const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
     await tap.retryTapIfNoChange(
       preTapHash,
@@ -194,7 +201,7 @@ describe("deriveTapEffect", () => {
       },
     });
 
-    expect((tap as any).deriveTapEffect(previous, current)).toEqual({
+    expect(tap.deriveTapEffect(previous, current)).toEqual({
       screenChanged: true,
       basis: "screenIdentity changed",
     });
@@ -210,7 +217,7 @@ describe("deriveTapEffect", () => {
     const previous = makeObservation({ activeWindow });
     const current = makeObservation({ activeWindow: { ...activeWindow } });
 
-    expect((tap as any).deriveTapEffect(previous, current)).toEqual({
+    expect(tap.deriveTapEffect(previous, current)).toEqual({
       screenChanged: false,
       basis: "activeWindow unchanged",
     });
@@ -219,14 +226,23 @@ describe("deriveTapEffect", () => {
   test("reports insufficient data without claiming a screen change", () => {
     const { tap } = createTapOnElement();
 
-    expect((tap as any).deriveTapEffect(makeObservation({}), makeObservation({}))).toEqual({
+    expect(tap.deriveTapEffect(makeObservation({}), makeObservation({}))).toEqual({
       screenChanged: false,
       basis: "insufficient observation data",
     });
   });
 
   test("captures terminal evidence after effect polling selects the destination observation", async () => {
-    const { tap } = createTapOnElement();
+    const finalizeEffects: unknown[] = [];
+    const { tap } = createTapOnElement("android", undefined, {
+      selectionStateTracker: {
+        prepare: async () => null,
+        finalize: async (request) => {
+          finalizeEffects.push(request.effect);
+          return [];
+        },
+      },
+    });
     const source = makeObservation({
       activeWindow: {
         appId: "com.example.app",
@@ -243,27 +259,20 @@ describe("deriveTapEffect", () => {
     });
     const captured: ObserveResult[] = [];
 
-    (tap as any).observedInteraction = async (_interaction: unknown, options: unknown) => {
-      expect((options as { deferPostActionScreenshot?: boolean }).deferPostActionScreenshot).toBe(
-        true,
-      );
+    tap.observedInteraction = async (_interaction, options) => {
+      expect(options.deferPostActionScreenshot).toBe(true);
       return { success: true, action: "tap", element: makeElement(), observation: source };
     };
     tap.deriveTapEffectAfterPostTapObservation = async () => ({
       effect: { screenChanged: true, basis: "activeWindow changed" },
       observation: destination,
     });
-    (tap as any).captureTerminalObservationScreenshot = async (observation: ObserveResult) => {
-      captured.push(observation);
-    };
-    (tap as any).recordDeferredPredictionOutcome = async () => {};
-    const finalizeEffects: unknown[] = [];
-    (tap as any).selectionStateTracker = {
-      finalize: async (request: { effect?: unknown }) => {
-        finalizeEffects.push(request.effect);
-        return [];
-      },
-    };
+    tap.testHooks.setTerminalScreenshotCapture(async (observation) => {
+      if (observation) {
+        captured.push(observation);
+      }
+    });
+    tap.testHooks.setDeferredPredictionRecorder(async () => {});
 
     const result = await tap.execute({ action: "tap", text: "Submit" });
 
@@ -449,7 +458,7 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
         capturedIsTalkBackEnabled = isTalkBack;
       };
 
-      const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
+      const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
       await tap.retryTapIfNoChange(
         preTapHash,
@@ -471,17 +480,17 @@ describe("ensureTap flag expansion", () => {
   test("ensureTap enables both preTapStability and retryIfNoChange", async () => {
     const { tap } = createTapOnElement();
 
-    let capturedOptions: Record<string, unknown> | undefined;
-    (tap as any).validateOptions = (opts: Record<string, unknown>) => {
+    let capturedOptions: TapOnElementOptions | undefined;
+    tap.testHooks.setValidateOptions((opts) => {
       capturedOptions = opts;
       return "abort-for-test";
-    };
+    });
 
     await tap.execute({
       text: "Submit",
       action: "tap",
       ensureTap: true,
-    } as any);
+    });
 
     expect(capturedOptions!.preTapStability).toBe(true);
     expect(capturedOptions!.retryIfNoChange).toBe(true);
@@ -490,11 +499,11 @@ describe("ensureTap flag expansion", () => {
   test("ensureTap sets flags even when not originally provided", async () => {
     const { tap } = createTapOnElement();
 
-    let capturedOptions: Record<string, unknown> | undefined;
-    (tap as any).validateOptions = (opts: Record<string, unknown>) => {
+    let capturedOptions: TapOnElementOptions | undefined;
+    tap.testHooks.setValidateOptions((opts) => {
       capturedOptions = opts;
       return "abort-for-test";
-    };
+    });
 
     await tap.execute({
       text: "Submit",
@@ -502,7 +511,7 @@ describe("ensureTap flag expansion", () => {
       ensureTap: true,
       preTapStability: undefined,
       retryIfNoChange: undefined,
-    } as any);
+    });
 
     expect(capturedOptions!.preTapStability).toBe(true);
     expect(capturedOptions!.retryIfNoChange).toBe(true);

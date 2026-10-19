@@ -35,7 +35,7 @@ function makeElement(bounds: Element["bounds"]): Element {
 }
 
 function makeHierarchy(): ViewHierarchyResult {
-  return { hierarchy: { node: {} } } as unknown as ViewHierarchyResult;
+  return { hierarchy: { node: {} } };
 }
 
 function makeSelection(
@@ -564,7 +564,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
         bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       },
     },
-  } as unknown as ViewHierarchyResult;
+  };
 
   // Stub that reveals the target only from `appearsOnCall` onward. Optional per-poll
   // `refreshDelayMs` simulates real device fetch latency (FakeTimer refresh is otherwise
@@ -994,7 +994,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
           indexInMatches: 0,
           totalMatches: 0,
           strategy: "first",
-        } as unknown as ElementSelectionResult;
+        };
 
         const rebuilt = selectedMetadata(
           tap.rebuildSelectedElementMetadataAfterStability(previous, emptySelection),

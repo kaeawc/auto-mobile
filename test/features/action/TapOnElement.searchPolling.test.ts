@@ -13,7 +13,7 @@ function setup(platform: "android" | "ios") {
   timer.enableAutoAdvance();
   const selector = new FakeElementSelector();
   const command = new TapOnElement(
-    { name: "test", platform, deviceId: "test" } as any,
+    { name: "test", platform, deviceId: "test" },
     new FakeAdbClient(),
     { timer, elementSelector: selector },
   );

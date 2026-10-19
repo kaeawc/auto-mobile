@@ -45,7 +45,6 @@
 1	src/daemon/sessionBroker/provisioning/reconciler.ts	eslint(max-classes-per-file)
 1	src/daemon/sessionBroker/provisioning/reconcilerPorts.ts	eslint(max-classes-per-file)
 1	src/daemon/sessionBroker/provisioning/refusal.ts	eslint(max-classes-per-file)
-1	src/daemon/sessionBroker/registry/bindingJournal.ts	auto-mobile(max-class-lines)
 1	src/daemon/sessionBroker/registry/bindingJournal.ts	eslint(max-classes-per-file)
 1	src/daemon/sessionBroker/registry/legacySlotDeviceRetirement.ts	eslint(max-classes-per-file)
 1	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts	eslint(max-classes-per-file)

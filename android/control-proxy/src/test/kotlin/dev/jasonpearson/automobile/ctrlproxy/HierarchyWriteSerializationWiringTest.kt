@@ -134,9 +134,8 @@ class HierarchyWriteSerializationWiringTest {
     val whenIdx = deliverBody.indexOf("when (result)")
     assertTrue("the hierarchy collector body must open a try block", tryIdx in 0 until whenIdx)
     assertTrue(
-      "the hierarchy collector must catch serialization failures so one bad frame cannot complete the flow",
-      Regex("""catch\s*\(\s*\w+\s*:\s*IllegalArgumentException\s*\)""")
-        .containsMatchIn(deliverBody),
+      "the hierarchy collector must catch exceptions so one bad frame cannot complete the flow",
+      Regex("""catch\s*\(\s*\w+\s*:\s*Exception\s*\)""").containsMatchIn(deliverBody),
     )
   }
 

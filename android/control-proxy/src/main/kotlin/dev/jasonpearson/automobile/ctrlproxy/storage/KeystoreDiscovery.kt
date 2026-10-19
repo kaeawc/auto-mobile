@@ -46,6 +46,8 @@ internal fun discoverKeystore(context: Context, packageName: String): KeystoreDi
       error
     } catch (error: android.os.BadParcelableException) {
       error
+    } catch (error: NullPointerException) {
+      error
     }
   Log.w("KeystoreDiscovery", "Keystore discovery unavailable", failure)
   return KeystoreDiscoveryState(

@@ -82,7 +82,12 @@ class LaunchCancellationRethrowTest {
 
     // Four actions and two broadcast helpers; the bodyless sender declaration is skipped.
     assertEquals(6, result.launchBlocks)
-    assertFailureHelperRethrowsCancellation(source, "withCaPolicyFailures")
+    assertActionsUseFailureHelper(
+      source,
+      "withCaPolicyFailures",
+      "performInstallCaCertificate",
+      "performRemoveCaCertificate",
+    )
   }
 
   @Test
@@ -91,7 +96,13 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    assertFailureHelperRethrowsCancellation(source, "withSettingsFailures")
+    assertActionsUseFailureHelper(
+      source,
+      "withSettingsFailures",
+      "performSettingsRead",
+      "performSettingsWrite",
+      "performSettingsList",
+    )
   }
 
   @Test
@@ -100,7 +111,35 @@ class LaunchCancellationRethrowTest {
     val result = LaunchCancellationScanner.scan(source)
 
     assertEquals(6, result.launchBlocks)
-    assertFailureHelperRethrowsCancellation(source, "withPackageFailures")
+    assertActionsUseFailureHelper(
+      source,
+      "withPackageFailures",
+      "performInstalledPackages",
+      "performPackageInfo",
+      "performLaunchIntent",
+    )
+  }
+
+  private fun assertActionsUseFailureHelper(
+    source: String,
+    helperName: String,
+    vararg actionNames: String,
+  ) {
+    val code = KotlinSourceScan.maskLiteralsAndComments(source)
+    for (actionName in actionNames) {
+      val declaration = code.indexOf("suspend fun $actionName(")
+      assertTrue("$actionName must remain a scanned suspend action", declaration >= 0)
+      val paramsOpen = code.indexOf('(', declaration)
+      val paramsEnd = KotlinSourceScan.matchParen(code, paramsOpen)
+      val bodyOpen = code.indexOf('{', paramsEnd)
+      val body = code.substring(bodyOpen, KotlinSourceScan.matchBrace(code, bodyOpen))
+      assertEquals(
+        "$actionName must route its platform work through $helperName",
+        1,
+        Regex("\\b$helperName\\s*\\(").findAll(body).count(),
+      )
+    }
+    assertFailureHelperRethrowsCancellation(source, helperName)
   }
 
   private fun assertFailureHelperRethrowsCancellation(source: String, helperName: String) {

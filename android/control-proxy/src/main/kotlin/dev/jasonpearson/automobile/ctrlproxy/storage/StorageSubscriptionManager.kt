@@ -1039,12 +1039,12 @@ class StorageSubscriptionManager(
       val subscriptionId = "$packageName:$fileName"
       val subState = subscriptions[subscriptionId] ?: continue
 
-      withProviderFailures(
-        onFailure = { e ->
-          Log.e(TAG, "Error fetching changes for $packageName:$fileName", e)
-        },
-      ) {
+      try {
         if (!fetchChangesForFile(packageName, fileName, uri, subState)) return
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error fetching changes for $packageName:$fileName", e)
       }
     }
   }
@@ -1266,5 +1266,7 @@ private inline fun <T> withProviderFailures(onFailure: (Exception) -> T, block: 
   } catch (e: UnsupportedOperationException) {
     onFailure(e)
   } catch (e: android.os.BadParcelableException) {
+    onFailure(e)
+  } catch (e: NullPointerException) {
     onFailure(e)
   }

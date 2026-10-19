@@ -64,10 +64,7 @@ internal class HandledExceptionReceiver(
     val report =
       try {
         parse(intent) ?: return
-      } catch (e: android.os.BadParcelableException) {
-        Log.e(TAG, "Error handling handled exception broadcast", e)
-        return
-      } catch (e: IllegalArgumentException) {
+      } catch (e: Exception) {
         Log.e(TAG, "Error handling handled exception broadcast", e)
         return
       }
@@ -138,10 +135,7 @@ internal class CrashReceiver(
     val report =
       try {
         parse(intent) ?: return
-      } catch (e: android.os.BadParcelableException) {
-        Log.e(TAG, "Error handling crash broadcast", e)
-        return
-      } catch (e: IllegalArgumentException) {
+      } catch (e: Exception) {
         Log.e(TAG, "Error handling crash broadcast", e)
         return
       }

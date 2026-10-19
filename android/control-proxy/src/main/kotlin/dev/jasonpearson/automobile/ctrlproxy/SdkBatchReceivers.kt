@@ -18,31 +18,23 @@ internal class EventBatchReceiver(private val handler: SdkEventBatchBroadcastHan
       return
     }
 
-    val eventJson: String?
-    val deliveryId: String?
     try {
-      eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-      deliveryId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID)
-    } catch (e: android.os.BadParcelableException) {
-      Log.e(TAG, "Error handling event batch broadcast", e)
-      return
-    } catch (e: IllegalArgumentException) {
-      Log.e(TAG, "Error handling event batch broadcast", e)
-      return
-    }
-    val ordered = isOrderedBroadcast
-    val setBroadcastResult = this::setResultCode
-    handler.handle(
-      eventJson,
-      object : SdkEventBatchBroadcastHandler.ResultSink {
-        override val isOrdered = ordered
+      val ordered = isOrderedBroadcast
+      val setBroadcastResult = this::setResultCode
+      handler.handle(
+        intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
+        object : SdkEventBatchBroadcastHandler.ResultSink {
+          override val isOrdered = ordered
 
-        override fun setResultCode(code: Int) {
-          setBroadcastResult(code)
-        }
-      },
-      batchId = deliveryId,
-    )
+          override fun setResultCode(code: Int) {
+            setBroadcastResult(code)
+          }
+        },
+        batchId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
+      )
+    } catch (e: Exception) {
+      Log.e(TAG, "Error handling event batch broadcast", e)
+    }
   }
 }
 
@@ -50,30 +42,22 @@ internal class EventBatchReceiver(private val handler: SdkEventBatchBroadcastHan
 internal class AnrReceiver(private val handler: SdkAnrBroadcastHandler) : BroadcastReceiver() {
   override fun onReceive(context: Context?, intent: Intent?) {
     if (intent == null || intent.action != AutoMobileAnr.ACTION_ANR) return
-    val eventJson: String?
-    val deliveryId: String?
     try {
-      eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-      deliveryId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID)
-    } catch (e: android.os.BadParcelableException) {
-      Log.e(TAG, "Error handling ANR broadcast", e)
-      return
-    } catch (e: IllegalArgumentException) {
-      Log.e(TAG, "Error handling ANR broadcast", e)
-      return
-    }
-    val ordered = isOrderedBroadcast
-    val setBroadcastResult = this::setResultCode
-    handler.handle(
-      eventJson,
-      object : SdkEventBatchBroadcastHandler.ResultSink {
-        override val isOrdered = ordered
+      val ordered = isOrderedBroadcast
+      val setBroadcastResult = this::setResultCode
+      handler.handle(
+        intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
+        object : SdkEventBatchBroadcastHandler.ResultSink {
+          override val isOrdered = ordered
 
-        override fun setResultCode(code: Int) {
-          setBroadcastResult(code)
-        }
-      },
-      deliveryId = deliveryId,
-    )
+          override fun setResultCode(code: Int) {
+            setBroadcastResult(code)
+          }
+        },
+        deliveryId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
+      )
+    } catch (e: Exception) {
+      Log.e(TAG, "Error handling ANR broadcast", e)
+    }
   }
 }

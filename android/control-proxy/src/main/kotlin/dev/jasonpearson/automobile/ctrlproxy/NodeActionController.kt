@@ -122,12 +122,10 @@ internal class NodeActionController(
                     // contract; no coordinate, reflection, or whole-node fallback is permitted.
                     span.onClick(host.createView())
                     activated = true
-                  } catch (error: IllegalArgumentException) {
-                    activationError = error.message ?: error.javaClass.simpleName
-                  } catch (error: IllegalStateException) {
-                    if (error is kotlinx.coroutines.CancellationException) throw error
-                    activationError = error.message ?: error.javaClass.simpleName
-                  } catch (error: SecurityException) {
+                  } catch (error: CancellationException) {
+                    throw error
+                  } catch (error: Exception) {
+                    Log.w(TAG, "Semantic accessibility span activation failed", error)
                     activationError = error.message ?: error.javaClass.simpleName
                   }
                 }

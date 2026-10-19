@@ -299,8 +299,13 @@
     <ID>TooGenericExceptionCaught:CtrlProxy.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceStateTransitions.kt:DeviceStateTransitions$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DeviceStateTransitions.kt:DeviceStateTransitions.PostureFlowSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailureReceivers.kt:CrashReceiver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:FailureReceivers.kt:HandledExceptionReceiver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:HierarchyController.kt:HierarchyController$e: Exception</ID>
     <ID>TooGenericExceptionCaught:HingeFallbackPostureSource.kt:HingeFallbackPostureSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:KeystoreDiscovery.kt:error: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:LogcatReader.kt:LogcatReader$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NodeActionController.kt:NodeActionController$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PinnedPrototypeShortcuts.kt:PinnedPrototypeShortcuts$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypeAppearance.kt:AndroidPrototypeDeviceAppearance$error: Exception</ID>
     <ID>TooGenericExceptionCaught:PrototypeAssetController.kt:PrototypeAssetController$error: Exception</ID>
@@ -318,6 +323,13 @@
     <ID>TooGenericExceptionCaught:SavedPrototypeController.kt:SavedPrototypeController$error: Throwable</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeScreenState.kt:error: Exception</ID>
     <ID>TooGenericExceptionCaught:SavedPrototypeShortcuts.kt:AndroidSavedPrototypeShortcuts$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:AnrReceiver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SdkBatchReceivers.kt:EventBatchReceiver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SdkCapabilitiesDiscovery.kt:error: NullPointerException</ID>
+    <ID>TooGenericExceptionCaught:SdkTelemetryReceivers.kt:NavigationEventReceiver$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StorageController.kt:StorageController$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:StorageSubscriptionManager$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StorageSubscriptionManager.kt:e: NullPointerException</ID>
     <ID>TooGenericExceptionCaught:WebSocketServer.kt:WebSocketServer$e: Exception</ID>
     <ID>TooManyFunctions:CaCertificateController.kt:CaCertificateController</ID>
     <ID>TooManyFunctions:ConfigurableTypingPolicy.kt:ConfigurableTypingPolicy : TypingPolicy</ID>

@@ -230,7 +230,7 @@ describe("Daemon startup device discovery", () => {
     const pool = daemon.testHooks.devicePool;
     const manager = new FakeIOSCtrlProxyManager(timer);
     const managerLookup = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(
-      manager as unknown as IOSCtrlProxyManager,
+      manager,
     );
     const device: BootedDevice = {
       deviceId: "00000000-0000-0000-0000-000000007676",

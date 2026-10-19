@@ -1,9 +1,7 @@
 import type { GestureStartRequest } from "../../src/features/observe/android/CtrlProxyGestures";
-import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
+import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
 import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   hasActiveSessionExecution,
@@ -68,15 +66,6 @@ export class FakeSocket extends EventEmitter {
   }
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  mcpForwardTails: Map<string, Promise<void>>;
-  liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
-  liftSessionlessStrokesOn(deviceId: string): void;
-}
-
 export interface DeviceClientFake {
   onRead?: () => void;
   ownershipGate?: () => Promise<void>;
@@ -129,7 +118,7 @@ export function createDirectFrameRig(
       await client.discovery?.();
       return discovered.getBootedDevicesDetailed(...args);
     },
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+  });
   spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
     const called = (what: string) => {
       deviceCalls.push(`${device.deviceId}:${what}`);
@@ -175,16 +164,13 @@ export function createDirectFrameRig(
   });
 
   const updateServiceSpy = client.updateService
-    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-        (device) =>
-          ({
-            ensureCompatibleVersion: async () => {
-              deviceCalls.push(`${device.deviceId}:updateService`);
-              await client.updateService?.();
-              return { status: "compatible" };
-            },
-          }) as unknown as AndroidCtrlProxyManager,
-      )
+    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation((device) => ({
+        ensureCompatibleVersion: async () => {
+          deviceCalls.push(`${device.deviceId}:updateService`);
+          await client.updateService?.();
+          return { status: "compatible" };
+        },
+      }))
     : undefined;
 
   const fakePool = {
@@ -193,13 +179,13 @@ export function createDirectFrameRig(
       await client.ownershipGate?.();
     },
   };
-  const server = createTestUnixSocketServer(
+  const server = createHarnessServer(
     "unused",
     {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => fakePool,
-    } as unknown as DaemonStateAccess,
+    },
     new FakeTimer(),
     {
       listFlags: async () => {
@@ -216,19 +202,18 @@ export function createDirectFrameRig(
     // The storage tools are enabled, so an `ide/*` storage frame reaches its ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
-  const internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  server.allowRequests();
   // daemon.ts: a session acquiring a device cancels the sessionless work admitted on it.
   sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
     executionTracker.cancelSessionlessDeviceUse(deviceId);
-    internals.liftSessionlessStrokesOn(deviceId);
+    server.liftSessionlessStrokesOn(deviceId);
   });
   // daemon.ts: queue holder strokes on the old device synchronously at unbind.
   sessionManager.onSessionDeviceUnbound((sessionId, deviceId) =>
     server.liftStrokesHeldByOn(sessionId, deviceId),
   );
   // socketServer.start(): a released session's strokes are lifted.
-  sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+  sessionManager.onSessionRelease((sessionId) => void server.liftStrokesHeldBy(sessionId));
 
   async function settle(): Promise<void> {
     // Negative assertions include queued no-ops and deliberately pending calls; drain their
@@ -240,11 +225,11 @@ export function createDirectFrameRig(
     sessionManager,
     deviceCalls,
     settle,
-    isDeviceWorkQueued: (deviceId) => internals.mcpForwardTails.has(`device:${deviceId}`),
+    isDeviceWorkQueued: (deviceId) => server.hasForwardTail(`device:${deviceId}`),
     connect() {
       const socket = new FakeSocket();
       sockets.push(socket);
-      internals.handleConnection(socket as unknown as Socket);
+      server.connect(socket);
       return socket;
     },
     async request(socket, request) {
@@ -257,7 +242,7 @@ export function createDirectFrameRig(
         socket.destroy();
       }
       await settle();
-      await Promise.allSettled([...internals.activeRequestHandlers]);
+      await server.settleActiveRequestHandlers();
       unsubscribeActivity();
       updateServiceSpy?.mockRestore();
       spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();

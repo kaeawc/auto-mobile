@@ -1170,15 +1170,25 @@ describe("TapOnElement screen-reader navigation result", () => {
         isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
       },
     });
-    command.refreshViewHierarchy = async () => observation.viewHierarchy;
+    command.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
     coordinate?.driver.setElements([targetElement], 0);
     spyOn(command, "observedInteraction").mockImplementation(async (block) => ({
       ...(await block(observation)),
       observation,
     }));
+    if (!observation.viewHierarchy) {
+      throw new Error("Expected target hierarchy");
+    }
+    const viewHierarchy = observation.viewHierarchy;
     command["searchForElement"] = mock(async () => ({
-      selection: { element: targetElement, indexInMatches: 0, totalMatches: 1, strategy: "first" },
-      viewHierarchy: observation.viewHierarchy,
+      selection: {
+        element: targetElement,
+        indexInMatches: 0,
+        totalMatches: 1,
+        strategy: "first" as const,
+      },
+      viewHierarchy,
+      refreshedFromDevice: true,
       containerFound: true,
       stats: { durationMs: 0, requestCount: 0, changeCount: 0 },
     }));

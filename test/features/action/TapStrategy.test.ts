@@ -123,7 +123,7 @@ describe("TapStrategy", () => {
             detector.setDetectionResult(
               androidDevice.deviceId,
               enabled,
-              enabled ? "talkback" : null,
+              enabled ? "talkback" : "unknown",
             ),
         };
       },

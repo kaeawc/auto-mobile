@@ -1,3 +1,4 @@
+import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { harness } from "./displaySwipeHarness";
 import { logger } from "../../../../src/utils/logger";
@@ -15,7 +16,8 @@ for (const unavailable of ["API 24", "metadata failure", "unsupported drag"] as 
         totalTimeMs: 0,
       });
     } else {
-      spyOn(h.ctrl, "requestDeviceInfo").mockResolvedValue(
+      const probe: Pick<AndroidCtrlProxyClient, "requestDeviceInfo"> = h.ctrl;
+      spyOn(probe, "requestDeviceInfo").mockResolvedValue(
         unavailable === "API 24"
           ? { success: true, sdkInt: 24, totalTimeMs: 0 }
           : { success: false, error: "not connected", totalTimeMs: 0 },

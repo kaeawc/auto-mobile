@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../../observe/flatHierarchyBuilders";
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import type {
   ObserveResult,
@@ -26,7 +27,14 @@ function tree({
     viewHierarchy: {
       ...observation.viewHierarchy,
       hierarchy: {
-        node: [observation.viewHierarchy?.hierarchy.node, ...nodes.map(($) => ({ $ }))],
+        node: createFlatNodeForTest({
+          node: [
+            ...(observation.viewHierarchy?.hierarchy.node
+              ? [createFlatNodeForTest({ ...observation.viewHierarchy.hierarchy.node })]
+              : []),
+            ...nodes.map(($) => ({ $ })),
+          ],
+        }),
       },
     },
   };
@@ -273,7 +281,11 @@ for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
 for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
   test(`a11y failure has no adb fallback, search=${!!lookFor}`, async () => {
     const h = optionsHarness();
-    h.ctrl.setSwipeResult({ success: false, error: "CtrlProxy display dispatch failed" });
+    h.ctrl.setSwipeResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "CtrlProxy display dispatch failed",
+    });
     h.ctrl.setDragResult({
       success: false,
       error: "CtrlProxy display dispatch failed",
@@ -358,7 +370,7 @@ test("no display retains legacy autoTarget and gesture dispatch", async () => {
   expect(result.success).toBe(true);
   expect(result.warning).toContain('elementId="decoy"');
   expect(h.cached).toHaveBeenCalled();
-  expect(h.gesture.getSwipeCalls()).toEqual([
+  expect<unknown>(h.gesture.getSwipeCalls()).toEqual([
     {
       x1: 40,
       y1: 82,

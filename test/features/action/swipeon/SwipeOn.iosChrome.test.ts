@@ -1,3 +1,4 @@
+import { observeResultFromFixture } from "../../../helpers/observeFixture";
 import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
@@ -6,7 +7,6 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import fixture from "../../../fixtures/observe/ios-reminders-xctest-noise-after.json";
-import type { ObserveResult } from "../../../../src/models";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeScreenshotCapturer } from "../../../fakes/FakeScreenshotCapturer";
@@ -37,7 +37,10 @@ afterEach(() => restoreHostWorkGuards());
 
 function harness() {
   const observation = {
-    ...(fixture as ObserveResult),
+    ...observeResultFromFixture({
+      ...fixture,
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    }),
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   };
   const observeScreen = new FakeObserveScreen();

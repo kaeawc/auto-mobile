@@ -28,7 +28,7 @@ function deviceObservation(
   hierarchy: ViewHierarchyResult,
   screenSize: ObserveResult["screenSize"],
 ): ObserveResult {
-  return { ...observationOf(hierarchy), timestamp: 0, freshness: { isFresh: true }, screenSize };
+  return { ...observationOf(hierarchy), updatedAt: 0, freshness: { isFresh: true }, screenSize };
 }
 
 /** The prototype captures are 1080x2400; the relabelled Recents capture keeps its own size. */

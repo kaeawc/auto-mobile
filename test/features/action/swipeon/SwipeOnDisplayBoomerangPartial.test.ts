@@ -15,7 +15,11 @@ test("display boomerang whose return leg fails reports a partial application (#9
   const h = harness();
   h.afterSwipe(() => {
     if (h.legs().length === 1) {
-      h.ctrl.setSwipeResult({ success: false, error: "Swipe timed out after 5000ms" });
+      h.ctrl.setSwipeResult({
+        success: false,
+        totalTimeMs: 0,
+        error: "Swipe timed out after 5000ms",
+      });
     }
   });
   const result = await h.action.execute(boomerang);
@@ -49,7 +53,7 @@ test("display boomerang return leg failing on the adb route is also partial", as
 
 test("a failed FORWARD display swipe is not reported as partially applied", async () => {
   const h = harness();
-  h.ctrl.setSwipeResult({ success: false, error: "forward dispatch failed" });
+  h.ctrl.setSwipeResult({ success: false, totalTimeMs: 0, error: "forward dispatch failed" });
   const result = await h.action.execute(boomerang);
 
   expect(h.legs()).toHaveLength(1);

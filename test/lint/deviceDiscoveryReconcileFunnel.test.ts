@@ -174,7 +174,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason: "listDevices reconciles discovery before publishing pool-derived labels and epochs.",
     },
-    "src/server/deviceToolsProvisioning.ts": {
+    "src/server/provisioning/provisioningBoot.ts": {
       calls: 2,
       reason:
         "provisionDevice exact-boot reconciles fresh Android or per-platform discovery into the " +
@@ -338,7 +338,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/features/deviceLifecycle/deviceLifecycleCore.ts",
       "src/server/deviceToolsStartupLease.ts",
       "src/server/deviceToolsListing.ts",
-      "src/server/deviceToolsProvisioning.ts",
+      "src/server/provisioning/provisioningBoot.ts",
       "src/server/utilityTools.ts",
       "src/daemon/streamDeviceResolver.ts",
       "src/daemon/deviceGestureRecordingSocketServer.ts",

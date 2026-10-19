@@ -12,8 +12,8 @@ import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
   type AccessibilityDetector,
-} from "../../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
+} from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../../ctrlProxy/accessibility/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
@@ -30,6 +30,12 @@ export class AndroidTapStrategy implements TapStrategy {
   readonly settlesPostTapChange = true;
   readonly verifiesRefreshedDisplay = true;
   readonly promotesClickableAncestor = true;
+  readonly settlesFocusChangeAfterTap = false;
+  readonly rethrowsKeyboardOcclusion = true;
+
+  applyRefreshedObservationRotation(): void {
+    // Android observations carry no hierarchy-derived rotation to restamp.
+  }
 
   constructor(
     private readonly device: BootedDevice,

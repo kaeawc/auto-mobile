@@ -1,3 +1,4 @@
+import type { CtrlProxyGestures } from "./CtrlProxyGestures";
 import type { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { CtrlProxyText } from "./CtrlProxyText";
@@ -12,6 +13,7 @@ export interface AndroidCtrlProxyClientTestHooks {
   readonly requestManager: RequestManager;
   readonly forcedRestartBudget: ForcedRestartBudget;
   text(): CtrlProxyText;
+  gestures(): CtrlProxyGestures;
   /** Own-property handler table keyed by wire message type. */
   webSocketMessageHandlers(): object;
   cachedHierarchy(): CachedHierarchy | null;

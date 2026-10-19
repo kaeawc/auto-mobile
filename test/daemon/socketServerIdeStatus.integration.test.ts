@@ -38,17 +38,26 @@ import {
 } from "../../src/daemon/daemonRestartAdmission";
 import { createDaemonLiveAcceptanceScopedCapability } from "../../src/daemon/liveAcceptanceCapability";
 import type { DaemonOptions } from "../../src/daemon/types";
+import type { DeviceLabelMap, Session } from "../../src/daemon/sessionManager";
+import { createFakeSession } from "./helpers/inputSocketHarness";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+function fakeSessionManager(sessions: Session[] = []) {
+  return {
+    hasSession: (sessionId: string) => sessions.some((session) => session.sessionId === sessionId),
+    getSession: (sessionId: string) =>
+      sessions.find((session) => session.sessionId === sessionId) ?? null,
+    getAllSessions: () => sessions,
+    getDeviceLabels: (_sessionId: string): DeviceLabelMap | undefined => undefined,
+    releaseSession: async () => null,
+  };
+}
 
 function createFakeDaemonState(isShutdownReserved: () => Promise<boolean> = async () => false) {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({
-      getSession: () => null,
-      getAllSessions: (): Array<{ sessionId: string }> => [],
-      releaseSession: async () => null,
-    }),
+    getSessionManager: () => fakeSessionManager(),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       isShutdownReserved,
@@ -68,12 +77,13 @@ function createFakeDaemonStateWithSessions(
 ) {
   return {
     ...createFakeDaemonState(),
-    getSessionManager: () => ({
-      getSession: (sessionId: string) =>
-        sessions.find((session) => session.sessionId === sessionId),
-      getAllSessions: () => sessions,
-      releaseSession: async () => null,
-    }),
+    getSessionManager: () =>
+      fakeSessionManager(
+        sessions.map((session) => ({
+          ...createFakeSession(session.sessionId, "emulator-5554", session.platform),
+          stableDeviceId: session.stableDeviceId,
+        })),
+      ),
   };
 }
 
@@ -324,11 +334,8 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
   test("maintenance admission is generation-bound, token-gated, and single-use", async () => {
     const state = createFakeDaemonState();
-    state.getSessionManager = () => ({
-      getSession: () => null,
-      getAllSessions: () => [{ sessionId: "active" }],
-      releaseSession: async () => null,
-    });
+    state.getSessionManager = () =>
+      fakeSessionManager([createFakeSession("active", "emulator-5554", "android")]);
     const activeSocketPath = join(tmpdir(), `t-maintenance-${randomUUID().slice(0, 8)}.sock`);
     const activeServer = new UnixSocketServer(activeSocketPath, state, new FakeTimer(), null);
     try {

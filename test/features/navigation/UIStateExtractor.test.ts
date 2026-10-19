@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { describe, expect, spyOn, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
@@ -12,7 +13,7 @@ describe("UIStateExtractor state characterization", () => {
   test("returns undefined for absent hierarchy and for a captured screen with no useful state", () => {
     const extractor = new UIStateExtractor();
     expect(extractor.extract(undefined)).toBeUndefined();
-    expect(extractor.extract(homeCapture.viewHierarchy as ViewHierarchyResult)).toBeUndefined();
+    expect(extractor.extract(wireCapture(homeCapture.viewHierarchy))).toBeUndefined();
   });
 
   test.each([
@@ -30,9 +31,9 @@ describe("UIStateExtractor state characterization", () => {
       );
       try {
         expect(
-          new UIStateExtractor(parser).extract(homeCapture.viewHierarchy as ViewHierarchyResult)
+          new UIStateExtractor(parser).extract(wireCapture(homeCapture.viewHierarchy))
             ?.selectedElements ?? [],
-        ).toEqual(expected);
+        ).toEqual([...expected]);
       } finally {
         traverse.mockRestore();
       }

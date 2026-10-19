@@ -12,11 +12,11 @@ interface TestFilter {
   packageName: string | null;
 }
 
-interface TestPushData {
+type TestPushData = {
   deviceId: string;
   packageName: string;
   value: number;
-}
+};
 
 interface TestPushMessage {
   type: "test_push";

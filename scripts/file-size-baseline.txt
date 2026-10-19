@@ -2,11 +2,11 @@
 2855	src/ctrlProxy/CtrlProxyManager.ts
 4134	src/ctrlProxy/IOSCtrlProxyManager.ts
 1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
-1749	src/ctrlProxy/RunnerReadinessService.ts
+1642	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1583	src/daemon/client.ts
 4049	src/daemon/daemon.ts
-6047	src/daemon/daemonMcpProxy.ts
+5658	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8400	src/daemon/devicePool.ts

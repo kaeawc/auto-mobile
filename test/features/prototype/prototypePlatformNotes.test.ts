@@ -23,7 +23,7 @@ const swift = readFileSync(
 const noCapabilities = () => false;
 const specFor = (root: PrototypeNode): PrototypeSpec => ({
   id: "panel",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   root,
 });
 const spec = specFor({
@@ -212,7 +212,12 @@ describe("prototype platform notes", () => {
       type: "column",
       id: "outer",
       children: [
-        { type: "scroll", id: "scroll", child: { type: "text", id: "inner", text: "Hi" } },
+        {
+          type: "scroll",
+          axis: "vertical",
+          id: "scroll",
+          child: { type: "text", id: "inner", text: "Hi" },
+        },
         { type: "text", id: "last", text: "Last" },
       ],
     });

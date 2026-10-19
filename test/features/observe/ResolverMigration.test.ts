@@ -1,13 +1,19 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 const snapshot = (nodes: object[]) => ({
   id: "capture",
-  nodes: new SearchableHierarchy().project({
-    hierarchy: {
-      node: nodes.map((node) => ({ bounds: { left: 0, top: 0, right: 20, bottom: 20 }, ...node })),
-    },
-  }),
+  nodes: new SearchableHierarchy().project(
+    wireCapture({
+      hierarchy: {
+        node: nodes.map((node) => ({
+          bounds: { left: 0, top: 0, right: 20, bottom: 20 },
+          ...node,
+        })),
+      },
+    }),
+  ),
 });
 test("description selectors exclude visible text-only matches", () => {
   const result = new ElementResolver().resolve(

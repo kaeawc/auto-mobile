@@ -1,4 +1,5 @@
-import { ActionableError } from "../models";
+import { StageSessionDownloadsRefusal } from "./StageSessionDownloadsRefusal";
+
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { resolveActiveSessionDevice, type ActiveSessionResolver } from "./activeSessionDevice";
 import {
@@ -7,26 +8,7 @@ import {
   type StageSharedStorageRequest,
 } from "./sharedStorageService";
 import type { SharedStorageFileInput } from "./sharedStorageContract";
-import type {
-  StageSessionDownloadsRefusalCode,
-  StageSessionDownloadsResult,
-} from "./downloadsFixtureContract";
-
-/**
- * Refuses a session-scoped Downloads-staging request before any device access.
- * Carries the same code vocabulary as the session-log resource family so a
- * caller that does not own a live session learns nothing about the device and
- * no device client is ever constructed on refusal.
- */
-export class StageSessionDownloadsRefusal extends ActionableError {
-  constructor(
-    readonly code: StageSessionDownloadsRefusalCode,
-    message: string,
-  ) {
-    super(`${code}: ${message}`);
-    this.name = "StageSessionDownloadsRefusal";
-  }
-}
+import type { StageSessionDownloadsResult } from "./downloadsFixtureContract";
 
 export interface StageSessionDownloadsRequest {
   sessionUuid: string | undefined;

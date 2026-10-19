@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import type { BootDurationHistory } from "./BootDurationHistory";
 import type { FleetHostSource, FleetReadOptions } from "./FleetHostSource";
-import { attributeSimulatorProcesses } from "./psSnapshot";
+import { attributeSimulatorProcesses } from "../../devices/bootAdmission/psSnapshot";
 import type {
   FleetCostReport,
   FleetCostTotals,

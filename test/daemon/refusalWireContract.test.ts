@@ -6,7 +6,8 @@ import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
+import { parseSync, Visitor, type Class } from "oxc-parser";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -14,6 +15,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
+import * as downloadsStageRefusal from "../../src/server/StageSessionDownloadsRefusal";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
@@ -31,6 +33,7 @@ import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentE
 import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
 import * as restartAdmission from "../../src/daemon/daemonRestartAdmission";
+import * as restartPending from "../../src/daemon/daemonRestartPending";
 import * as deviceSessionResolver from "../../src/daemon/deviceSessionResolver";
 import * as orphanRecorderRefusal from "../../src/server/orphanRecorderRefusal";
 import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
@@ -86,10 +89,8 @@ import {
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  DaemonRestartDeferredError,
-  DaemonRestartPendingError,
-} from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../../src/daemon/daemonRestartPending";
 import {
   EXTERNALLY_CAPTURED_SURFACE_FIXTURES,
   EXEMPT_REFUSAL_ERROR_CLASSES,
@@ -119,6 +120,7 @@ import {
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
   "server/downloadsFixtureService": downloadsRefusals,
+  "server/StageSessionDownloadsRefusal": downloadsStageRefusal,
   "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
   "models/DeviceLostError": deviceLost,
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
@@ -136,6 +138,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/streamSubscriptionPolicy": streamPolicy,
   "daemon/sharedNamespaceGuard": namespaceGuard,
   "daemon/daemonRestartAdmission": restartAdmission,
+  "daemon/daemonRestartPending": restartPending,
   "daemon/deviceSessionResolver": deviceSessionResolver,
   "daemon/deviceGestureRecordingStartAdmission": recordingAdmission,
   "server/orphanRecorderRefusal": orphanRecorderRefusal,
@@ -216,7 +219,7 @@ interface ScannedClass {
   exported: boolean;
 }
 
-type ScannedClassNode = ClassDeclaration | ClassExpression;
+type ScannedClassNode = Class;
 
 function declaresCode(node: ScannedClassNode): boolean {
   return node.body.body.some((member) => {
@@ -267,7 +270,9 @@ function scanClasses(module: string, source: string): ScannedClass[] {
       }
       if (!node.source && node.exportKind !== "type") {
         for (const specifier of node.specifiers) {
-          exportedNames.add(specifier.local.name);
+          exportedNames.add(
+            specifier.local.type === "Literal" ? specifier.local.value : specifier.local.name,
+          );
         }
       }
     },
@@ -371,7 +376,7 @@ beforeAll(() => {
   const root = join(import.meta.dir, "..", "..", "src");
   codedErrorInventory = Object.freeze(
     codedErrorModules(
-      readdirSync(root, { recursive: true })
+      readdirSync(root, { recursive: true, encoding: "utf8" })
         .filter((file) => file.endsWith(".ts"))
         .map((file) => ({
           module: file.split(sep).join("/").slice(0, -3),
@@ -409,10 +414,12 @@ function missingErrorClasses(
  */
 /** The codes a payload names on the wire, outermost first. */
 function wireCodes(payload: WirePayload): string[] {
-  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code];
+  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code].filter(
+    (code): code is string => code !== undefined,
+  );
   const nested =
     typeof payload.error === "object" ? payload.error.acquisitionFailure?.code : undefined;
-  return nested ? [...codes, nested] : codes.filter((code): code is string => code !== undefined);
+  return nested ? [...codes, nested] : codes;
 }
 
 const WAIT_CODES: ReadonlySet<string> = new Set([
@@ -614,12 +621,18 @@ const surfaceExpectations = readSurfaceExpectations(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
 );
 
+type ToolsCallHandler = (request: unknown, ctx: ServerContext) => Promise<unknown>;
+
+function isToolsCallHandler(value: unknown): value is ToolsCallHandler {
+  return typeof value === "function";
+}
+
 // Capture private production builders through their registered public handlers, using only fakes.
 const ownedSurfaceFixtures: RefusalSurfaceFixture[] = [];
 beforeAll(async () => {
   const registration = spyOn(Server.prototype, "setRequestHandler");
   let harness: ReturnType<typeof createProxyMcpServer>;
-  let registrations: typeof registration.mock.calls;
+  let registrations: ReadonlyArray<readonly unknown[]>;
   try {
     harness = createProxyMcpServer({
       proxyConfig: {
@@ -634,10 +647,10 @@ beforeAll(async () => {
   } finally {
     registration.mockRestore();
   }
-  const handler = registrations.findLast(([schema]) => schema === "tools/call")?.[1];
+  const handler = registrations.findLast(([method]) => method === "tools/call")?.[1];
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    if (!handler) {
+    if (!isToolsCallHandler(handler)) {
       throw new Error("Missing tools/call handler");
     }
     const cases = [

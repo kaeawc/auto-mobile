@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -43,7 +44,7 @@ function createPinch(hierarchy: ViewHierarchyResult) {
     capture: new FakeHierarchyCapture(() => hierarchy),
   });
   pinchOn.observeScreen = observeScreen;
-  pinchOn.observedInteraction = (action) => action(observation);
+  pinchOn.observedInteraction = runBlockWith(observation);
   return { pinchOn, service };
 }
 

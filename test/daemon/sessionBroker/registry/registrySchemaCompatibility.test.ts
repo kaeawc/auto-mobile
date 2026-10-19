@@ -3,7 +3,7 @@ import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { Migrator } from "kysely/migration";
 import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
-import { NoOpMigrationLock } from "../../../../src/db/migrationLock";
+import { NoOpMigrationLock } from "../../../../src/db/NoOpMigrationLock";
 import { BrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import * as refusals from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {

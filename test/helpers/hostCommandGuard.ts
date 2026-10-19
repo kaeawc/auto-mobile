@@ -42,7 +42,7 @@ export function guardHostCommands(): HostCommandGuard {
     };
   // The default export is the mutable CJS module object (the named namespace is frozen).
   const childProcess: Record<string, unknown> = childProcessModule;
-  const bun = Bun as unknown as Record<string, unknown>;
+  const bun: Pick<typeof Bun, "spawn" | "spawnSync"> = Bun;
   const saved: Array<[Record<string, unknown>, string, unknown]> = [
     ...CHILD_PROCESS_LAUNCHERS.map((name): [Record<string, unknown>, string, unknown] => [
       childProcess,

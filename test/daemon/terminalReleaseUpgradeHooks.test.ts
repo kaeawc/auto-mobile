@@ -1,3 +1,4 @@
+import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -85,7 +86,12 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
     return sessionA;
   }
 
-  for (const lateReason of ["device-killed", "explicit-release", "heartbeat-timeout"]) {
+  const lateReasons: SessionReleaseReason[] = [
+    "device-killed",
+    "explicit-release",
+    "heartbeat-timeout",
+  ];
+  for (const lateReason of lateReasons) {
     test(`a late ${lateReason} leaves B's route and sampling running`, async () => {
       const sessionA = await handOverToB();
 

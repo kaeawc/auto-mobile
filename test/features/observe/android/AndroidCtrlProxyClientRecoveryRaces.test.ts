@@ -39,7 +39,7 @@ function harness(manager: AndroidServiceRecoveryManager, failures = 0) {
       };
       if (sockets.length < failures) {
         const emit = socket.emit.bind(socket);
-        socket.emit = (event, ...args) => {
+        socket.emit = (event: string | symbol, ...args: unknown[]) => {
           if (event === "open") {
             socket.readyState = WebSocketState.CLOSED;
             return emit("error", new Error("dial failure"));

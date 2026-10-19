@@ -26,7 +26,12 @@ import { isDaemonResponse, parseWireFrameLine } from "./helpers/parseDaemonRespo
 function createFakeDaemonState() {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      hasSession: () => false,
+      getSession: () => null,
+      getDeviceLabels: () => undefined,
+      releaseSession: async () => null,
+    }),
     getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
@@ -174,7 +179,7 @@ describe("UnixSocketServer notification broadcast", () => {
     });
     // A short settle window: any stray frame for the bystander would have been
     // written in the same synchronous broadcast as the subscriber's frame.
-    await new Promise((resolve) => defaultTimer.setTimeout(resolve, 25));
+    await new Promise<void>((resolve) => defaultTimer.setTimeout(() => resolve(), 25));
     expect(bystander.frames).toEqual([]);
   });
 

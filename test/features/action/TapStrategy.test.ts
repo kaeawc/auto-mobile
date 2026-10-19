@@ -8,7 +8,8 @@ import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
-import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
 
@@ -327,7 +328,15 @@ test("platform tap refinements are Android-only capabilities of the strategy", (
     s.settlesPostTapChange,
     s.verifiesRefreshedDisplay,
     s.promotesClickableAncestor,
+    s.settlesFocusChangeAfterTap,
+    s.rethrowsKeyboardOcclusion,
   ];
-  expect(flags(android)).toEqual([true, true, true, true]);
-  expect(flags(ios)).toEqual([false, false, false, false]);
+  expect(flags(android)).toEqual([true, true, true, true, false, true]);
+  expect(flags(ios)).toEqual([false, false, false, false, true, false]);
+  const observation = { screenSize: { width: 100, height: 200 } } as ObserveResult;
+  ios.applyRefreshedObservationRotation(observation, 90);
+  expect(observation.rotation).toBe(resolveIosObserveRotation(90, observation.screenSize));
+  const untouched = { screenSize: { width: 100, height: 200 } } as ObserveResult;
+  android.applyRefreshedObservationRotation(untouched, 90);
+  expect(untouched.rotation).toBeUndefined();
 });

@@ -22,6 +22,7 @@ function createDaemonState(options?: { useLabeledSession?: boolean }) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
+      hasSession: () => false,
       getSession: () => null,
       getSessionForDevice: (deviceId: string) =>
         deviceId === device.deviceId
@@ -35,6 +36,7 @@ function createDaemonState(options?: { useLabeledSession?: boolean }) {
           : undefined,
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),

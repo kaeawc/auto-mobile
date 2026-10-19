@@ -11,7 +11,11 @@ describe("view hierarchy node accessors", () => {
   });
 
   test("reads flat Android and cleaned iOS attributes by reference", () => {
-    const node = { class: "android.view.View", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const node = {
+      $: undefined,
+      class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    };
 
     expect(nodeAttributes(node)).toBe(node);
     expect(nodeBounds(node)).toBe(node.bounds);

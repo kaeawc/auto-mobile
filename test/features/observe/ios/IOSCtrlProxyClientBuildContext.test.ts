@@ -560,7 +560,7 @@ describe("IOSCtrlProxyClient lazy build context", () => {
       if (resolved) {
         await settle();
       }
-      const managerLookup = spyOn(client, "getNavigationGraphManager").mockImplementation(() => {
+      const managerLookup = spyOn(NavigationGraphManager, "getInstance").mockImplementation(() => {
         throw new Error("manager unavailable");
       });
       try {

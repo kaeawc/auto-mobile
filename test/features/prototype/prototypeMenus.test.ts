@@ -1,3 +1,4 @@
+import { readToolEnvelopePayload } from "../../../src/utils/toolEnvelopePayload";
 import { beforeAll, expect, test } from "bun:test";
 import { prototypeSpecSchema } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
@@ -15,7 +16,7 @@ const menu = {
 const select = { type: "select", stateKey: "choice", label: "Choice", options };
 const spec = (root: unknown, state: unknown = { open: false, choice: "a" }) => ({
   id: "menus",
-  window: { placement: { type: "fullscreen" } },
+  window: { placement: { type: "fullscreen" }, opacity: 1 },
   state,
   root,
 });
@@ -208,10 +209,12 @@ test.each(["android", "ios"] as const)(
         spec: candidate,
         assets: [{ id: "unused", path: "/fake/unused.png" }],
       });
-      expect(prototypeOutputSchema.parse(response.structuredContent)).toMatchObject({
-        success: false,
-        error: new ActionableError(prototypeMenusUnsupportedMessage(["root"], platform)).message,
-      });
+      expect(prototypeOutputSchema.parse(readToolEnvelopePayload(response)?.payload)).toMatchObject(
+        {
+          success: false,
+          error: new ActionableError(prototypeMenusUnsupportedMessage(["root"], platform)).message,
+        },
+      );
     }
     expect(client.getPrototypeHistory()).toEqual([]);
     expect(client.getPrototypeAssetHistory()).toEqual([]);
@@ -221,7 +224,9 @@ test.each(["android", "ios"] as const)(
     agent.handshake.capabilities.push(PROTOTYPE_MENUS_CAPABILITY);
     for (const node of [menu, select]) {
       const response = await handler(device, { action: "show", spec: spec(node) });
-      expect(prototypeOutputSchema.parse(response.structuredContent).success).toBe(true);
+      expect(prototypeOutputSchema.parse(readToolEnvelopePayload(response)?.payload).success).toBe(
+        true,
+      );
     }
   },
 );
@@ -250,7 +255,7 @@ test.each(["android", "ios"] as const)(
       action: "show",
       spec: spec({ type: "column", children: [{ type: "column", id: "target", children: [] }] }),
     });
-    expect(prototypeOutputSchema.parse(shown.structuredContent).success).toBe(true);
+    expect(prototypeOutputSchema.parse(readToolEnvelopePayload(shown)?.payload).success).toBe(true);
     const requestsBefore = agent.requests.length;
     const ops = [
       {
@@ -275,7 +280,7 @@ test.each(["android", "ios"] as const)(
       },
     ];
     const refused = await handler(device, { action: "patch", id: "menus", ops });
-    expect(prototypeOutputSchema.parse(refused.structuredContent)).toMatchObject({
+    expect(prototypeOutputSchema.parse(readToolEnvelopePayload(refused)?.payload)).toMatchObject({
       success: false,
       error: new ActionableError(
         prototypeMenusUnsupportedMessage(
@@ -289,7 +294,9 @@ test.each(["android", "ios"] as const)(
     client.setSupportedCommands([PROTOTYPE_PATCH_CAPABILITY, PROTOTYPE_MENUS_CAPABILITY]);
     agent.handshake.capabilities.push(PROTOTYPE_MENUS_CAPABILITY);
     const accepted = await handler(device, { action: "patch", id: "menus", ops });
-    expect(prototypeOutputSchema.parse(accepted.structuredContent).success).toBe(true);
+    expect(prototypeOutputSchema.parse(readToolEnvelopePayload(accepted)?.payload).success).toBe(
+      true,
+    );
   },
 );
 test("only node positions require the menu capability", () => {

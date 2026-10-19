@@ -459,14 +459,16 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       sessionManager,
       devicePool,
       toolContextSessionOptions(state),
-      execution,
-      admittedSession,
-      // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
-      // above already partitions every state, so this flag rejects nothing
-      // admit does not already reject HERE. It exists so the pool-minting
-      // primitive itself refuses to mint a never-issued id.
-      true,
-      signal,
+      {
+        execution,
+        admittedSession,
+        // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
+        // above already partitions every state, so this flag rejects nothing
+        // admit does not already reject HERE. It exists so the pool-minting
+        // primitive itself refuses to mint a never-issued id.
+        requireIssuedSession: true,
+        signal,
+      },
     );
     assertSessionDeviceRouting(
       name,

@@ -1,8 +1,7 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class SdkContextTests: XCTestCase {
-
     // MARK: - SdkContext
 
     func testDefaultValuesAreNil() {
@@ -92,7 +91,7 @@ final class SdkContextTests: XCTestCase {
         let expectation = XCTestExpectation(description: "concurrent access")
         expectation.expectedFulfillmentCount = iterations * 2
 
-        for i in 0..<iterations {
+        for i in 0 ..< iterations {
             DispatchQueue.global().async {
                 context.sessionId = "session-\(i)"
                 context.setTag("key-\(i)", value: "val-\(i)")
@@ -113,11 +112,11 @@ final class SdkContextTests: XCTestCase {
     // MARK: - SdkContextSnapshot
 
     func testSnapshotEquatable() {
-        let a = SdkContextSnapshot(sessionId: "s", userId: "u", appVersion: "1.0", tags: ["k": "v"])
-        let b = SdkContextSnapshot(sessionId: "s", userId: "u", appVersion: "1.0", tags: ["k": "v"])
-        let c = SdkContextSnapshot(sessionId: "other", userId: "u", appVersion: "1.0", tags: ["k": "v"])
-        XCTAssertEqual(a, b)
-        XCTAssertNotEqual(a, c)
+        let snapshot = SdkContextSnapshot(sessionId: "s", userId: "u", appVersion: "1.0", tags: ["k": "v"])
+        let equalSnapshot = SdkContextSnapshot(sessionId: "s", userId: "u", appVersion: "1.0", tags: ["k": "v"])
+        let differentSnapshot = SdkContextSnapshot(sessionId: "other", userId: "u", appVersion: "1.0", tags: ["k": "v"])
+        XCTAssertEqual(snapshot, equalSnapshot)
+        XCTAssertNotEqual(snapshot, differentSnapshot)
     }
 
     func testSnapshotCodable() throws {

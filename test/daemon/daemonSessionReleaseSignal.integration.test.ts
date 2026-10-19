@@ -1,6 +1,7 @@
 import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
@@ -15,7 +16,7 @@ import {
   SUSPECT_GRACE_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -24,11 +25,6 @@ import { executionTracker } from "../../src/server/executionTracker";
 // observe-cache cleanup) that fans the released session key out to the
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
-
-interface DaemonHeartbeatMonitorInternals {
-  heartbeatMonitor: { stop(): void } | null;
-  startHeartbeatMonitor(): void;
-}
 
 interface DaemonSessionReleaseInternals {
   cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
@@ -89,9 +85,8 @@ describe("Daemon session-release signal wiring", () => {
     const db = await createTestDatabase();
     const timer = new FakeTimer();
     const repository = new DeviceSessionRepository(db);
-    const daemon = new Daemon({}, { timer, deviceSessionRepository: repository });
+    const daemon = new DaemonLifecycleHarness({}, { timer, deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
-    const internals = daemon as unknown as DaemonHeartbeatMonitorInternals;
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       emitted.push({ sessionId, reason });
@@ -103,7 +98,7 @@ describe("Daemon session-release signal wiring", () => {
         heartbeatTimeoutMs: leaseMs,
       });
       await deliverDaemonHeartbeat(sessionManager, "heartbeat-expired");
-      internals.startHeartbeatMonitor();
+      daemon.startMonitor();
 
       await timer.advanceTimeAsync(leaseMs + SUSPECT_GRACE_MS - 1);
 
@@ -125,7 +120,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([{ sessionId: "heartbeat-expired", reason: "heartbeat-timeout" }]);
     } finally {
       unsubscribe();
-      internals.heartbeatMonitor?.stop();
+      await daemon.stopMonitorAndWait();
       sessionManager.stopCleanupTimer();
     }
   });
@@ -194,8 +189,7 @@ describe("Daemon session-release signal wiring", () => {
       {},
       {
         timer,
-        deviceSessionRepository:
-          new FakeDeviceSessionPersistence() as unknown as DeviceSessionRepository,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
       },
     );
     const devicePool = daemon.getDevicePool();

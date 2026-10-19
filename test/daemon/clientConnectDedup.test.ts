@@ -73,13 +73,6 @@ async function connectAndReplace() {
   return { oldSocket, newSocket, closedCount: () => closedCount };
 }
 
-function connectionState() {
-  return client as unknown as {
-    readonly socket: net.Socket | null;
-    readonly connected: boolean;
-  };
-}
-
 function responseFrame(id: string, result: string): Buffer {
   return Buffer.from(JSON.stringify({ id, type: "mcp_response", success: true, result }) + "\n");
 }
@@ -194,7 +187,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     }
     expect(sockets[0].destroyed).toBe(true);
     sockets[0].completeConnect();
-    expect(connectionState().connected).toBe(false);
+    expect(client.testHooks.connection().connected).toBe(false);
     const retry = client.connect();
     sockets.at(-1)!.completeConnect();
     await retry;
@@ -211,8 +204,8 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
       const split = frame.indexOf(Buffer.from("日")) + 1;
       newSocket.emit("data", frame.subarray(0, split));
       oldSocket.emit(event, new Error("late ECONNRESET"));
-      expect(connectionState().socket).toBe(newSocket);
-      expect(connectionState().connected).toBe(true);
+      expect(client.testHooks.connection().socket).toBe(newSocket);
+      expect(client.testHooks.connection().connected).toBe(true);
       expect(newSocket.destroyed).toBe(false);
       expect(closedCount()).toBe(1);
       expect(client.testHooks.hasPendingRequest(id)).toBe(true);
@@ -243,8 +236,8 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     client.onConnectionClosed(() => closedCount++);
     sockets[0].emit("error", new Error("read ECONNRESET"));
     expect(closedCount).toBe(1);
-    expect(connectionState().socket).toBeNull();
-    expect(connectionState().connected).toBe(false);
+    expect(client.testHooks.connection().socket).toBeNull();
+    expect(client.testHooks.connection().connected).toBe(false);
   });
 
   test("a joiner's own deadline releases it without cancelling the shared attempt", async () => {
@@ -271,7 +264,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     sockets[0].completeConnect();
     expect(await initiating).toEqual({ status: "fulfilled", value: undefined });
     expect(sockets).toHaveLength(1);
-    expect(connectionState().connected).toBe(true);
+    expect(client.testHooks.connection().connected).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 

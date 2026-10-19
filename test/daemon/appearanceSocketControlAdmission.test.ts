@@ -1,4 +1,3 @@
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   AppearanceSocketServer,
@@ -25,7 +24,7 @@ import {
   FakeDeviceSettingDefaultsPersistence,
   FakeDeviceSettings,
 } from "../fakes/FakeDeviceSettingDefaults";
-import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -51,14 +50,9 @@ const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 class TestableAppearanceSocketServer extends AppearanceSocketServer {
   async request(line: Record<string, unknown>): Promise<AppearanceSocketResponse> {
     const socket = new FakeSocket();
-    const internals = this as unknown as {
-      server: unknown;
-      processLine(socket: Socket, line: string): Promise<void>;
-      pendingBySocket: Map<unknown, Promise<void>>;
-    };
-    internals.server = { listening: true };
-    await internals.processLine(socket, JSON.stringify(line));
-    await internals.pendingBySocket.get(socket);
+    this.server = new FakeListeningNetServer();
+    await this.processLine(socket, JSON.stringify(line));
+    await this.pendingBySocket.get(socket);
     const written = socket.getWrittenData();
     return JSON.parse(written[written.length - 1]!) as AppearanceSocketResponse;
   }

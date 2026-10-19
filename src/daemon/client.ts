@@ -512,6 +512,9 @@ export class DaemonClient {
         )?.[0],
       /** Checks whether a request remains pending. */
       hasPendingRequest: (requestId: string): boolean => this.pendingRequests.has(requestId),
+      connection: () => ({ connected: this.connected, socket: this.socket }),
+      declaredIdentity: () => this.clientIdentity,
+      socketPathObservable: () => this.socketPathObservable(),
     };
   }
 
@@ -863,9 +866,7 @@ export class DaemonClient {
     });
   }
 
-  /**
-   * Handle incoming data from daemon
-   */
+  /** Handle incoming data from daemon */
   private handleData(data: Buffer): void {
     if (!this.inboundClosed) {
       this.framer.push(data);
@@ -1183,10 +1184,8 @@ export class DaemonClient {
     );
   }
 
-  /**
-   * Handle a response from daemon
-   */
-  private handleResponse(response: DaemonResponse): void {
+  /** Handle a response from daemon */
+  protected handleResponse(response: DaemonResponse): void {
     if (response.id === null) {
       if (this.pendingRequests.size !== 1) {
         logger.warn(

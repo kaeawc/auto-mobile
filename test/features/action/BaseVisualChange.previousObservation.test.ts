@@ -281,9 +281,7 @@ let ctrlProxySpy: ReturnType<typeof spyOn>;
 let originalMode: string | undefined;
 let originalActionPolicy: string | undefined;
 function setUpEnvironment(): void {
-  ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    new FakeCtrlProxy() as AndroidCtrlProxyClient,
-  );
+  ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy());
   originalMode = process.env[OBSERVE_SETTLED_SCREENSHOT_ENV];
   originalActionPolicy = process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
   process.env[OBSERVE_SETTLED_SCREENSHOT_ENV] = "1";

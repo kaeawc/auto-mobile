@@ -1294,7 +1294,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.isConnectedState = false;
   }
 
-  setRecompositionTrackingEnabled(): never {
+  setRecompositionTrackingEnabled(
+    ..._args: Parameters<AndroidCtrlProxy["setRecompositionTrackingEnabled"]>
+  ): ReturnType<AndroidCtrlProxy["setRecompositionTrackingEnabled"]> {
     throw new Error("FakeCtrlProxy.setRecompositionTrackingEnabled is not scripted");
   }
 
@@ -1304,83 +1306,123 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     );
   }
 
-  requestInsertTextState(): never {
+  requestInsertTextState(
+    ..._args: Parameters<AndroidCtrlProxy["requestInsertTextState"]>
+  ): ReturnType<AndroidCtrlProxy["requestInsertTextState"]> {
     throw new Error("FakeCtrlProxy.requestInsertTextState is not scripted");
   }
 
-  commitViaIme(): never {
+  commitViaIme(
+    ..._args: Parameters<AndroidCtrlProxy["commitViaIme"]>
+  ): ReturnType<AndroidCtrlProxy["commitViaIme"]> {
     throw new Error("FakeCtrlProxy.commitViaIme is not scripted");
   }
 
-  setKeyboardProfile(): never {
+  setKeyboardProfile(
+    ..._args: Parameters<AndroidCtrlProxy["setKeyboardProfile"]>
+  ): ReturnType<AndroidCtrlProxy["setKeyboardProfile"]> {
     throw new Error("FakeCtrlProxy.setKeyboardProfile is not scripted");
   }
 
-  listKeyboardProfiles(): never {
+  listKeyboardProfiles(
+    ..._args: Parameters<AndroidCtrlProxy["listKeyboardProfiles"]>
+  ): ReturnType<AndroidCtrlProxy["listKeyboardProfiles"]> {
     throw new Error("FakeCtrlProxy.listKeyboardProfiles is not scripted");
   }
 
-  requestClipboard(): never {
+  requestClipboard(
+    ..._args: Parameters<AndroidCtrlProxy["requestClipboard"]>
+  ): ReturnType<AndroidCtrlProxy["requestClipboard"]> {
     throw new Error("FakeCtrlProxy.requestClipboard is not scripted");
   }
 
-  requestSettingsGet(): never {
+  requestSettingsGet(
+    ..._args: Parameters<AndroidCtrlProxy["requestSettingsGet"]>
+  ): ReturnType<AndroidCtrlProxy["requestSettingsGet"]> {
     throw new Error("FakeCtrlProxy.requestSettingsGet is not scripted");
   }
 
-  requestSettingsPut(): never {
+  requestSettingsPut(
+    ..._args: Parameters<AndroidCtrlProxy["requestSettingsPut"]>
+  ): ReturnType<AndroidCtrlProxy["requestSettingsPut"]> {
     throw new Error("FakeCtrlProxy.requestSettingsPut is not scripted");
   }
 
-  requestSettingsList(): never {
+  requestSettingsList(
+    ..._args: Parameters<AndroidCtrlProxy["requestSettingsList"]>
+  ): ReturnType<AndroidCtrlProxy["requestSettingsList"]> {
     throw new Error("FakeCtrlProxy.requestSettingsList is not scripted");
   }
 
-  requestInstallCaCertificate(): never {
+  requestInstallCaCertificate(
+    ..._args: Parameters<AndroidCtrlProxy["requestInstallCaCertificate"]>
+  ): ReturnType<AndroidCtrlProxy["requestInstallCaCertificate"]> {
     throw new Error("FakeCtrlProxy.requestInstallCaCertificate is not scripted");
   }
 
-  requestInstallCaCertificateFromFile(): never {
+  requestInstallCaCertificateFromFile(
+    ..._args: Parameters<AndroidCtrlProxy["requestInstallCaCertificateFromFile"]>
+  ): ReturnType<AndroidCtrlProxy["requestInstallCaCertificateFromFile"]> {
     throw new Error("FakeCtrlProxy.requestInstallCaCertificateFromFile is not scripted");
   }
 
-  requestRemoveCaCertificate(): never {
+  requestRemoveCaCertificate(
+    ..._args: Parameters<AndroidCtrlProxy["requestRemoveCaCertificate"]>
+  ): ReturnType<AndroidCtrlProxy["requestRemoveCaCertificate"]> {
     throw new Error("FakeCtrlProxy.requestRemoveCaCertificate is not scripted");
   }
 
-  requestDeviceOwnerStatus(): never {
+  requestDeviceOwnerStatus(
+    ..._args: Parameters<AndroidCtrlProxy["requestDeviceOwnerStatus"]>
+  ): ReturnType<AndroidCtrlProxy["requestDeviceOwnerStatus"]> {
     throw new Error("FakeCtrlProxy.requestDeviceOwnerStatus is not scripted");
   }
 
-  requestPermission(): never {
+  requestPermission(
+    ..._args: Parameters<AndroidCtrlProxy["requestPermission"]>
+  ): ReturnType<AndroidCtrlProxy["requestPermission"]> {
     throw new Error("FakeCtrlProxy.requestPermission is not scripted");
   }
 
-  requestScreenshotWithoutObservationStreamPush(): never {
+  requestScreenshotWithoutObservationStreamPush(
+    ..._args: Parameters<AndroidCtrlProxy["requestScreenshotWithoutObservationStreamPush"]>
+  ): ReturnType<AndroidCtrlProxy["requestScreenshotWithoutObservationStreamPush"]> {
     throw new Error("FakeCtrlProxy.requestScreenshotWithoutObservationStreamPush is not scripted");
   }
 
-  requestInstalledPackages(): never {
+  requestInstalledPackages(
+    ..._args: Parameters<AndroidCtrlProxy["requestInstalledPackages"]>
+  ): ReturnType<AndroidCtrlProxy["requestInstalledPackages"]> {
     throw new Error("FakeCtrlProxy.requestInstalledPackages is not scripted");
   }
 
-  requestPackageInfo(): never {
+  requestPackageInfo(
+    ..._args: Parameters<AndroidCtrlProxy["requestPackageInfo"]>
+  ): ReturnType<AndroidCtrlProxy["requestPackageInfo"]> {
     throw new Error("FakeCtrlProxy.requestPackageInfo is not scripted");
   }
 
-  requestLaunchIntent(): never {
+  requestLaunchIntent(
+    ..._args: Parameters<AndroidCtrlProxy["requestLaunchIntent"]>
+  ): ReturnType<AndroidCtrlProxy["requestLaunchIntent"]> {
     throw new Error("FakeCtrlProxy.requestLaunchIntent is not scripted");
   }
 
-  sendMessage(): never {
+  sendMessage(
+    ..._args: Parameters<AndroidCtrlProxy["sendMessage"]>
+  ): ReturnType<AndroidCtrlProxy["sendMessage"]> {
     throw new Error("FakeCtrlProxy.sendMessage is not scripted");
   }
 
-  getSupportedCommands(): never {
+  getSupportedCommands(
+    ..._args: Parameters<AndroidCtrlProxy["getSupportedCommands"]>
+  ): ReturnType<AndroidCtrlProxy["getSupportedCommands"]> {
     throw new Error("FakeCtrlProxy.getSupportedCommands is not scripted");
   }
 
-  waitForConnection(): never {
+  waitForConnection(
+    ..._args: Parameters<AndroidCtrlProxy["waitForConnection"]>
+  ): ReturnType<AndroidCtrlProxy["waitForConnection"]> {
     throw new Error("FakeCtrlProxy.waitForConnection is not scripted");
   }
 
@@ -1393,71 +1435,105 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return { success: false, totalTimeMs: 0, error: "double-tap command unsupported by the fake" };
   }
 
-  requestMultiFingerSwipe(): never {
+  requestMultiFingerSwipe(
+    ..._args: Parameters<AndroidCtrlProxy["requestMultiFingerSwipe"]>
+  ): ReturnType<AndroidCtrlProxy["requestMultiFingerSwipe"]> {
     throw new Error("FakeCtrlProxy.requestMultiFingerSwipe is not scripted");
   }
 
-  requestGestureStart(): never {
+  requestGestureStart(
+    ..._args: Parameters<AndroidCtrlProxy["requestGestureStart"]>
+  ): ReturnType<AndroidCtrlProxy["requestGestureStart"]> {
     throw new Error("FakeCtrlProxy.requestGestureStart is not scripted");
   }
 
-  requestGestureMove(): never {
+  requestGestureMove(
+    ..._args: Parameters<AndroidCtrlProxy["requestGestureMove"]>
+  ): ReturnType<AndroidCtrlProxy["requestGestureMove"]> {
     throw new Error("FakeCtrlProxy.requestGestureMove is not scripted");
   }
 
-  requestGestureEnd(): never {
+  requestGestureEnd(
+    ..._args: Parameters<AndroidCtrlProxy["requestGestureEnd"]>
+  ): ReturnType<AndroidCtrlProxy["requestGestureEnd"]> {
     throw new Error("FakeCtrlProxy.requestGestureEnd is not scripted");
   }
 
-  listPreferenceFiles(): never {
+  listPreferenceFiles(
+    ..._args: Parameters<AndroidCtrlProxy["listPreferenceFiles"]>
+  ): ReturnType<AndroidCtrlProxy["listPreferenceFiles"]> {
     throw new Error("FakeCtrlProxy.listPreferenceFiles is not scripted");
   }
 
-  getPreferenceEntries(): never {
+  getPreferenceEntries(
+    ..._args: Parameters<AndroidCtrlProxy["getPreferenceEntries"]>
+  ): ReturnType<AndroidCtrlProxy["getPreferenceEntries"]> {
     throw new Error("FakeCtrlProxy.getPreferenceEntries is not scripted");
   }
 
-  discoverKeystore(): never {
+  discoverKeystore(
+    ..._args: Parameters<AndroidCtrlProxy["discoverKeystore"]>
+  ): ReturnType<AndroidCtrlProxy["discoverKeystore"]> {
     throw new Error("FakeCtrlProxy.discoverKeystore is not scripted");
   }
 
-  getSdkCapabilities(): never {
+  getSdkCapabilities(
+    ..._args: Parameters<AndroidCtrlProxy["getSdkCapabilities"]>
+  ): ReturnType<AndroidCtrlProxy["getSdkCapabilities"]> {
     throw new Error("FakeCtrlProxy.getSdkCapabilities is not scripted");
   }
 
-  listDataStores(): never {
+  listDataStores(
+    ..._args: Parameters<AndroidCtrlProxy["listDataStores"]>
+  ): ReturnType<AndroidCtrlProxy["listDataStores"]> {
     throw new Error("FakeCtrlProxy.listDataStores is not scripted");
   }
 
-  getDataStore(): never {
+  getDataStore(
+    ..._args: Parameters<AndroidCtrlProxy["getDataStore"]>
+  ): ReturnType<AndroidCtrlProxy["getDataStore"]> {
     throw new Error("FakeCtrlProxy.getDataStore is not scripted");
   }
 
-  setPreference(): never {
+  setPreference(
+    ..._args: Parameters<AndroidCtrlProxy["setPreference"]>
+  ): ReturnType<AndroidCtrlProxy["setPreference"]> {
     throw new Error("FakeCtrlProxy.setPreference is not scripted");
   }
 
-  removePreference(): never {
+  removePreference(
+    ..._args: Parameters<AndroidCtrlProxy["removePreference"]>
+  ): ReturnType<AndroidCtrlProxy["removePreference"]> {
     throw new Error("FakeCtrlProxy.removePreference is not scripted");
   }
 
-  clearPreferenceStore(): never {
+  clearPreferenceStore(
+    ..._args: Parameters<AndroidCtrlProxy["clearPreferenceStore"]>
+  ): ReturnType<AndroidCtrlProxy["clearPreferenceStore"]> {
     throw new Error("FakeCtrlProxy.clearPreferenceStore is not scripted");
   }
 
-  clearAccessibilityFocus(): never {
+  clearAccessibilityFocus(
+    ..._args: Parameters<AndroidCtrlProxy["clearAccessibilityFocus"]>
+  ): ReturnType<AndroidCtrlProxy["clearAccessibilityFocus"]> {
     throw new Error("FakeCtrlProxy.clearAccessibilityFocus is not scripted");
   }
 
-  setAccessibilityFocus(): never {
+  setAccessibilityFocus(
+    ..._args: Parameters<AndroidCtrlProxy["setAccessibilityFocus"]>
+  ): ReturnType<AndroidCtrlProxy["setAccessibilityFocus"]> {
     throw new Error("FakeCtrlProxy.setAccessibilityFocus is not scripted");
   }
 
-  requestCurrentFocus(): never {
+  requestCurrentFocus(
+    ..._args: Parameters<AndroidCtrlProxy["requestCurrentFocus"]>
+  ): ReturnType<AndroidCtrlProxy["requestCurrentFocus"]> {
     throw new Error("FakeCtrlProxy.requestCurrentFocus is not scripted");
   }
 
-  requestTraversalOrder(): never {
+  requestTraversalOrder(
+    ..._args: Parameters<AndroidCtrlProxy["requestTraversalOrder"]>
+  ): ReturnType<AndroidCtrlProxy["requestTraversalOrder"]> {
     throw new Error("FakeCtrlProxy.requestTraversalOrder is not scripted");
   }
 
@@ -1469,59 +1545,87 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.prototypeRequestHost;
   }
 
-  invalidateForShutdownRecovery(): never {
+  invalidateForShutdownRecovery(
+    ..._args: Parameters<AndroidCtrlProxy["invalidateForShutdownRecovery"]>
+  ): ReturnType<AndroidCtrlProxy["invalidateForShutdownRecovery"]> {
     throw new Error("FakeCtrlProxy.invalidateForShutdownRecovery is not scripted");
   }
 
-  getSdkScreenIdentity(): never {
+  getSdkScreenIdentity(
+    ..._args: Parameters<AndroidCtrlProxy["getSdkScreenIdentity"]>
+  ): ReturnType<AndroidCtrlProxy["getSdkScreenIdentity"]> {
     throw new Error("FakeCtrlProxy.getSdkScreenIdentity is not scripted");
   }
 
-  getSdkScreenIdentityReceivedAtMs(): never {
+  getSdkScreenIdentityReceivedAtMs(
+    ..._args: Parameters<AndroidCtrlProxy["getSdkScreenIdentityReceivedAtMs"]>
+  ): ReturnType<AndroidCtrlProxy["getSdkScreenIdentityReceivedAtMs"]> {
     throw new Error("FakeCtrlProxy.getSdkScreenIdentityReceivedAtMs is not scripted");
   }
 
-  awaitSdkScreenIdentityAfter(): never {
+  awaitSdkScreenIdentityAfter(
+    ..._args: Parameters<AndroidCtrlProxy["awaitSdkScreenIdentityAfter"]>
+  ): ReturnType<AndroidCtrlProxy["awaitSdkScreenIdentityAfter"]> {
     throw new Error("FakeCtrlProxy.awaitSdkScreenIdentityAfter is not scripted");
   }
 
-  pushNetworkMockRules(): never {
+  pushNetworkMockRules(
+    ..._args: Parameters<AndroidCtrlProxy["pushNetworkMockRules"]>
+  ): ReturnType<AndroidCtrlProxy["pushNetworkMockRules"]> {
     throw new Error("FakeCtrlProxy.pushNetworkMockRules is not scripted");
   }
 
-  requestGlobalAction(): never {
+  requestGlobalAction(
+    ..._args: Parameters<AndroidCtrlProxy["requestGlobalAction"]>
+  ): ReturnType<AndroidCtrlProxy["requestGlobalAction"]> {
     throw new Error("FakeCtrlProxy.requestGlobalAction is not scripted");
   }
 
-  validateFrameContext(): never {
+  validateFrameContext(
+    ..._args: Parameters<AndroidCtrlProxy["validateFrameContext"]>
+  ): ReturnType<AndroidCtrlProxy["validateFrameContext"]> {
     throw new Error("FakeCtrlProxy.validateFrameContext is not scripted");
   }
 
-  requestDeviceInfo(): never {
+  requestDeviceInfo(
+    ..._args: Parameters<AndroidCtrlProxy["requestDeviceInfo"]>
+  ): ReturnType<AndroidCtrlProxy["requestDeviceInfo"]> {
     throw new Error("FakeCtrlProxy.requestDeviceInfo is not scripted");
   }
 
-  onInteraction(): never {
+  onInteraction(
+    ..._args: Parameters<AndroidCtrlProxy["onInteraction"]>
+  ): ReturnType<AndroidCtrlProxy["onInteraction"]> {
     throw new Error("FakeCtrlProxy.onInteraction is not scripted");
   }
 
-  notifyRecordingStarted(): never {
+  notifyRecordingStarted(
+    ..._args: Parameters<AndroidCtrlProxy["notifyRecordingStarted"]>
+  ): ReturnType<AndroidCtrlProxy["notifyRecordingStarted"]> {
     throw new Error("FakeCtrlProxy.notifyRecordingStarted is not scripted");
   }
 
-  notifyRecordingStopped(): never {
+  notifyRecordingStopped(
+    ..._args: Parameters<AndroidCtrlProxy["notifyRecordingStopped"]>
+  ): ReturnType<AndroidCtrlProxy["notifyRecordingStopped"]> {
     throw new Error("FakeCtrlProxy.notifyRecordingStopped is not scripted");
   }
 
-  recordInitialObservationStreamHierarchy(): never {
+  recordInitialObservationStreamHierarchy(
+    ..._args: Parameters<AndroidCtrlProxy["recordInitialObservationStreamHierarchy"]>
+  ): ReturnType<AndroidCtrlProxy["recordInitialObservationStreamHierarchy"]> {
     throw new Error("FakeCtrlProxy.recordInitialObservationStreamHierarchy is not scripted");
   }
 
-  getScreenScaleMetadata(): never {
+  getScreenScaleMetadata(
+    ..._args: Parameters<AndroidCtrlProxy["getScreenScaleMetadata"]>
+  ): ReturnType<AndroidCtrlProxy["getScreenScaleMetadata"]> {
     throw new Error("FakeCtrlProxy.getScreenScaleMetadata is not scripted");
   }
 
-  captureScreenshotForObservationStream(): never {
+  captureScreenshotForObservationStream(
+    ..._args: Parameters<AndroidCtrlProxy["captureScreenshotForObservationStream"]>
+  ): ReturnType<AndroidCtrlProxy["captureScreenshotForObservationStream"]> {
     throw new Error("FakeCtrlProxy.captureScreenshotForObservationStream is not scripted");
   }
 }

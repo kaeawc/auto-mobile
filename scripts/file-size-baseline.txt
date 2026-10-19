@@ -7,7 +7,7 @@
 4033	src/daemon/daemon.ts
 4532	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
-2064	src/daemon/deviceDataStreamSocketServer.ts
+1262	src/daemon/deviceDataStreamSocketServer.ts
 8320	src/daemon/devicePool.ts
 1186	src/daemon/executionTracker.ts
 3913	src/daemon/manager.ts

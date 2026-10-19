@@ -1,3 +1,4 @@
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -569,21 +570,21 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
     const connection = [...server["sessions"].keys()][0]!;
     const minted = Promise.withResolvers<string>();
     const answer = Promise.withResolvers<void>();
-    server.mcpClientFactory = async () => ({
-      callTool: async ({ arguments: args }) => {
-        const id = await h.pool.bindOrReuseDeviceSession({
-          sessionId: "socket-mint",
-          deviceId: DEVICE.deviceId,
-          platform: "android",
-          allowSessionRebind: false,
-          mcpSessionId: String(args?.__mcpSessionId),
-        });
-        minted.resolve(id);
-        await answer.promise;
-        return { content: [] };
-      },
-      close: async () => {},
-    });
+    server.mcpClientFactory = async () =>
+      new StubMcpClient({
+        callTool: async ({ arguments: args }) => {
+          const id = await h.pool.bindOrReuseDeviceSession({
+            sessionId: "socket-mint",
+            deviceId: DEVICE.deviceId,
+            platform: "android",
+            allowSessionRebind: false,
+            mcpSessionId: String(args?.__mcpSessionId),
+          });
+          minted.resolve(id);
+          await answer.promise;
+          return { content: [] };
+        },
+      });
     const request = server["processSocketRequestLine"](
       connection,
       socket,

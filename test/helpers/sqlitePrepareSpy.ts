@@ -21,11 +21,7 @@ export function spyOnDatabasePrepare(hooks: DatabasePrepareHooks = {}) {
   return spyOn(Database.prototype, "prepare").mockImplementation(function <
     ReturnType,
     ParamsType extends SQLQueryBindings | SQLQueryBindings[],
-  >(
-    this: Database,
-    sql: string,
-    params?: ParamsType,
-  ): Statement<ReturnType, ParamsType extends unknown[] ? ParamsType : [ParamsType]> {
+  >(this: Database, sql: string, params?: ParamsType) {
     hooks.beforePrepare?.(sql);
     const statement = prepare.bind(this)<ReturnType, ParamsType>(sql, params);
     hooks.afterPrepare?.(sql, statement);

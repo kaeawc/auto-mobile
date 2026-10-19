@@ -61,7 +61,6 @@
     <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: Exception</ID>
     <ID>SwallowedException:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: SQLiteReadOnlyDatabaseException</ID>
     <ID>SwallowedException:SharedPreferencesInspectorProvider.kt:SharedPreferencesInspectorProvider$e: IllegalArgumentException</ID>
-    <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$e: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$error: Exception</ID>
     <ID>TooGenericExceptionCaught:AutoMobileBiometrics.kt:AutoMobileBiometrics$e: Exception</ID>
@@ -88,8 +87,6 @@
     <ID>TooGenericExceptionCaught:KeystoreStateHandler.kt:KeystoreStateHandler$error: Exception</ID>
     <ID>TooGenericExceptionCaught:Navigation3Adapter.kt:Navigation3Adapter$e: Exception</ID>
     <ID>TooGenericExceptionCaught:NetworkMockRuleStore.kt:NetworkMockRuleStore$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:SQLiteDatabaseDriver.kt:SQLiteDatabaseDriver$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkEventAckCapability.kt:SdkEventAckCapability$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkEventBroadcaster.kt:SdkEventBroadcaster$error: Exception</ID>
     <ID>TooGenericExceptionCaught:SdkEventBroadcaster.kt:SdkEventBroadcaster$retryError: Exception</ID>

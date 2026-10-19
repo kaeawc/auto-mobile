@@ -18,6 +18,7 @@ import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVer
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 export { NoopDeviceBootRecovery } from "./NoopDeviceBootRecovery";
 
 const CI_SIMULATOR_NAME = "AutoMobile CI iPhone";
@@ -145,7 +146,10 @@ export interface CiIosBootConfigurationDependencies {
 
 /** True only in the CI environment where AutoMobile owns the simulator lifecycle. */
 export function isGitHubActionsCi(environment: NodeJS.ProcessEnv): boolean {
-  return environment.CI === "true" && environment.GITHUB_ACTIONS === "true";
+  return (
+    readEnvRaw(AMBIENT_ENV.CI, environment) === "true" &&
+    readEnvRaw(AMBIENT_ENV.GITHUB_ACTIONS, environment) === "true"
+  );
 }
 
 /** CI recovery owns only the un-targeted product boot used by the workflow. */

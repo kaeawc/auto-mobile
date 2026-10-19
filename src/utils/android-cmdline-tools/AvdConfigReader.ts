@@ -177,11 +177,13 @@ export function resolveAndroidAvdHome(
   environment: NodeJS.ProcessEnv,
   homeDirectory?: string,
 ): string {
-  const androidUserHome = nonEmptyEnvironmentValue(environment.ANDROID_USER_HOME);
-  const avdHome = nonEmptyEnvironmentValue(environment.ANDROID_AVD_HOME);
+  const androidUserHome = nonEmptyEnvironmentValue(
+    readEnvRaw(AMBIENT_ENV.ANDROID_USER_HOME, environment),
+  );
+  const avdHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_AVD_HOME, environment));
   const androidSdkHome = nonEmptyEnvironmentValue(environment.ANDROID_SDK_HOME);
   const configHome =
-    nonEmptyEnvironmentValue(environment.ANDROID_EMULATOR_HOME) ??
+    nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_EMULATOR_HOME, environment)) ??
     androidUserHome ??
     (androidSdkHome ? join(androidSdkHome, ".android") : undefined) ??
     (homeDirectory ? join(homeDirectory, ".android") : "");
@@ -207,8 +209,8 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     this.existsFn = existsFn ?? ((p: string) => fs.existsSync(p));
 
     const homeDir = readEnvRaw(AMBIENT_ENV.HOME) || readEnvRaw(AMBIENT_ENV.USERPROFILE);
-    const androidUserHome = nonEmptyEnvironmentValue(process.env.ANDROID_USER_HOME);
-    const avdHomeEnv = nonEmptyEnvironmentValue(process.env.ANDROID_AVD_HOME);
+    const androidUserHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_USER_HOME));
+    const avdHomeEnv = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_AVD_HOME));
     const androidSdkHome = nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_SDK_HOME));
     const configHome = this.resolveConfigHome(
       androidUserHome,
@@ -231,7 +233,7 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     fallback: string,
   ): string {
     return (
-      nonEmptyEnvironmentValue(process.env.ANDROID_EMULATOR_HOME) ||
+      nonEmptyEnvironmentValue(readEnvRaw(AMBIENT_ENV.ANDROID_EMULATOR_HOME)) ||
       androidUserHome ||
       (androidSdkHome ? join(androidSdkHome, ".android") : undefined) ||
       fallback

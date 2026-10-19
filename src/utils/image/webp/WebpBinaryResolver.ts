@@ -13,6 +13,7 @@ import { logger } from "../../logger";
 import { resolveAutoMobileBaseDir } from "../../tempDir";
 import { defaultTimer, type Timer } from "../../SystemTimer";
 import { raceWithDeadline } from "../../raceWithDeadline";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../../config/env";
 
 export const WEBP_CODEC_TIMEOUT_MS = 30_000;
 
@@ -119,21 +120,21 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   }
 
   async resolveCwebp(): Promise<string> {
-    return this.resolveBinary("cwebp", "AUTOMOBILE_CWEBP_PATH");
+    return this.resolveBinary("cwebp", ENV.CWEBP_PATH.name);
   }
 
   async resolveDwebp(): Promise<string> {
-    return this.resolveBinary("dwebp", "AUTOMOBILE_DWEBP_PATH");
+    return this.resolveBinary("dwebp", ENV.DWEBP_PATH.name);
   }
 
   async runCwebp(args: string[], input: Buffer): Promise<Buffer> {
     const command = await this.resolveCwebp();
-    return this.runCodecProcess("cwebp", command, args, input, "AUTOMOBILE_CWEBP_PATH");
+    return this.runCodecProcess("cwebp", command, args, input, ENV.CWEBP_PATH.name);
   }
 
   async runDwebp(args: string[], input: Buffer): Promise<Buffer> {
     const command = await this.resolveDwebp();
-    return this.runCodecProcess("dwebp", command, args, input, "AUTOMOBILE_DWEBP_PATH");
+    return this.runCodecProcess("dwebp", command, args, input, ENV.DWEBP_PATH.name);
   }
 
   private async runCodecProcess(
@@ -227,7 +228,10 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   }
 
   private async findOnPath(binary: WebpBinary): Promise<string | null> {
-    const pathValue = this.env.PATH ?? this.env.Path ?? "";
+    const pathValue =
+      readEnvRaw(AMBIENT_ENV.PATH, this.env) ??
+      readEnvRaw(AMBIENT_ENV.WINDOWS_PATH, this.env) ??
+      "";
     if (!pathValue) {
       return null;
     }
@@ -398,7 +402,7 @@ function archiveInfo(platformToken: string, sha256: string): WebpArchiveInfo {
 }
 
 function envVarFor(binary: WebpBinary): string {
-  return binary === "cwebp" ? "AUTOMOBILE_CWEBP_PATH" : "AUTOMOBILE_DWEBP_PATH";
+  return binary === "cwebp" ? ENV.CWEBP_PATH.name : ENV.DWEBP_PATH.name;
 }
 
 async function isExecutableFile(filePath: string, platform: NodeJS.Platform): Promise<boolean> {

@@ -13,6 +13,7 @@ import { raceWithDeadline } from "../raceWithDeadline";
 import { getAbortSignal } from "../AbortContext";
 import { getSharedAutoMobileDir } from "../tempDir";
 import { sortedReaddir } from "../io";
+import { ENV, readEnvRaw } from "../../config/env";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -565,7 +566,7 @@ export class XcodeSigningManager {
   }
 
   private readTeamIdPreferences(): string[] {
-    const raw = process.env.AUTOMOBILE_IOS_TEAM_IDS ?? process.env.AUTOMOBILE_IOS_TEAM_ID ?? "";
+    const raw = readEnvRaw(ENV.IOS_TEAM_IDS) ?? readEnvRaw(ENV.IOS_TEAM_ID) ?? "";
     if (!raw) {
       return [];
     }
@@ -577,14 +578,14 @@ export class XcodeSigningManager {
 
   private readProfilePreference(): string | null {
     const value =
-      process.env.AUTOMOBILE_IOS_PROFILE_UUID ??
-      process.env.AUTOMOBILE_IOS_PROFILE_NAME ??
-      process.env.AUTOMOBILE_IOS_PROFILE_SPECIFIER;
+      readEnvRaw(ENV.IOS_PROFILE_UUID) ??
+      readEnvRaw(ENV.IOS_PROFILE_NAME) ??
+      readEnvRaw(ENV.IOS_PROFILE_SPECIFIER);
     return value?.trim() || null;
   }
 
   private readIdentityPreference(): string | null {
-    const value = process.env.AUTOMOBILE_IOS_CODE_SIGN_IDENTITY ?? "";
+    const value = readEnvRaw(ENV.IOS_CODE_SIGN_IDENTITY) ?? "";
     return value.trim().length > 0 ? value.trim() : null;
   }
 
@@ -677,8 +678,9 @@ export class XcodeSigningManager {
     if (!hasEntitlements) {
       return undefined;
     }
-    if (process.env.AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH) {
-      return process.env.AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH;
+    const entitlementsOverride = readEnvRaw(ENV.IOS_CODE_SIGN_ENTITLEMENTS_PATH);
+    if (entitlementsOverride) {
+      return entitlementsOverride;
     }
     const filename = `${profile.uuid}.plist`;
     const entitlementsDir = this.entitlementsDirectory();

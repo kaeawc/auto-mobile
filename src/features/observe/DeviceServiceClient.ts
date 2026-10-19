@@ -28,10 +28,8 @@ import { toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import type { PerformanceTracker } from "../../utils/PerformanceTracker";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import type { Timer } from "../../utils/SystemTimer";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { getAbortSignal } from "../../utils/AbortContext";
 import { RequestManager, type TimedOutRequest } from "../../utils/RequestManager";
@@ -47,6 +45,7 @@ import {
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 import { RealCtrlProxyWebSocketInTestError } from "./RealCtrlProxyWebSocketInTestError";
 import { ObserverPendingRequestTimeoutError } from "./ObserverPendingRequestTimeoutError";
+import { ENV } from "../../config/env";
 
 /**
  * Factory function type for creating WebSocket instances.
@@ -60,7 +59,7 @@ export type WebSocketFactory = (url: string) => CtrlSocket;
  * `WebSocketFactory` instead; this exists for suites that must exercise the
  * default factory against a local fake server.
  */
-export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = "AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET";
+export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = ENV.ALLOW_REAL_CTRL_PROXY_WEBSOCKET.name;
 
 function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
   const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();

@@ -284,8 +284,7 @@ import {
   logSkippedObservationStreamDevice,
 } from "./daemonStreamRouting";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import type { InstalledAppsStore } from "../db/installedAppsRepository";
-import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
 import {
   BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
@@ -398,6 +397,7 @@ import {
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
 import type { DaemonStateWrites } from "./daemonContext";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 export type {
   DaemonDependencies,
@@ -1106,7 +1106,7 @@ export class Daemon {
           acquisition &&
           !this.sessionBrokerConfigPath &&
           !this.bindingRedrive &&
-          process.env.NODE_ENV !== "test"
+          readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test"
         ) {
           this.bindingRedrive = acquisition.startJournalRedrive(registry);
         }
@@ -1189,7 +1189,7 @@ export class Daemon {
     });
     this.daemonState.setSessionBrokerService(this.sessionBrokerService);
     // No generic journal work starts before the exclusive host lock and inventory checks.
-    if (!this.bindingRedrive && process.env.NODE_ENV !== "test") {
+    if (!this.bindingRedrive && readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test") {
       this.bindingRedrive = acquisition.startJournalRedrive(registry);
     }
   }

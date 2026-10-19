@@ -1,6 +1,7 @@
 import { promises as fs, statSync, openSync, readSync, closeSync } from "fs";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 import { logger } from "./logger";
+import { ENV, readEnvRaw } from "../config/env";
 
 /**
  * Reader for the local iOS CtrlProxy runner override
@@ -14,8 +15,8 @@ import { logger } from "./logger";
 
 /** The raw override string as set, IPA_PATH preferred, trimmed; null if unset. */
 export function getIosCtrlProxyOverrideRaw(env: NodeJS.ProcessEnv = process.env): string | null {
-  const ipaPath = env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
-  const bundlePath = env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
+  const ipaPath = readEnvRaw(ENV.CTRL_PROXY_IOS_IPA_PATH, env)?.trim();
+  const bundlePath = readEnvRaw(ENV.CTRL_PROXY_IOS_BUNDLE_PATH, env)?.trim();
   const value =
     (ipaPath && ipaPath.length > 0 ? ipaPath : undefined) ??
     (bundlePath && bundlePath.length > 0 ? bundlePath : undefined);

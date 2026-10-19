@@ -50,6 +50,7 @@ import {
 import type { SystemDetection } from "../system/SystemDetection";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 
 export { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 export { AdbUnavailableError } from "./AdbUnavailableError";
@@ -137,7 +138,7 @@ const execFileAsync: ExecFileAsync = async (
   maxBuffer?: number,
 ): Promise<ExecResult> => {
   // Debug: Log when real exec is called (helps trace daemon startup in tests)
-  if (process.env.DEBUG_ADB_EXEC) {
+  if (readEnvRaw(AMBIENT_ENV.DEBUG_ADB_EXEC)) {
     logger.debug(`[DEBUG_ADB_EXEC] Real execFileAsync called: ${file} ${args.join(" ")}`);
     logger.debug(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
   }
@@ -262,8 +263,7 @@ export class AdbClient implements AdbExecutor {
     this.hostProcessExecutor = hostProcessExecutor;
     // Test mode if: custom execAsync provided OR global test mode flag is set
     // Check for any truthy value (not just exactly "true") to handle different env var formats
-    const testModeEnv = process.env.AUTOMOBILE_TEST_MODE;
-    this.isTestMode = this.hasTestExecution(execAsyncFn, testModeEnv);
+    this.isTestMode = this.hasTestExecution(execAsyncFn, readEnvRaw(ENV.TEST_MODE));
     this.execAsync = this.resolveExecAsync(execAsyncFn);
     this.spawnFn = this.resolveSpawnFn(spawnFn);
     this.retryExecutor = retryExecutor;
@@ -273,7 +273,7 @@ export class AdbClient implements AdbExecutor {
     this.adbPath = this.getFallbackAdbPath();
 
     // Debug: Log when a real (non-test) AdbClient is created
-    if (process.env.DEBUG_ADB_EXEC && !this.isTestMode) {
+    if (readEnvRaw(AMBIENT_ENV.DEBUG_ADB_EXEC) && !this.isTestMode) {
       logger.debug(`[DEBUG_ADB_EXEC] Real AdbClient created (not test mode)`);
       logger.debug(`[DEBUG_ADB_EXEC] Stack trace:`, new Error().stack);
     }

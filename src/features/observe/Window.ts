@@ -14,7 +14,7 @@ import { resolveAutoMobileBaseDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { Window as WindowInterface } from "./interfaces/Window";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { ENV } from "../../config/env";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 
 // AdbExecutor extended with optional AdbClient-specific methods. Both the
 // deadline (timeoutMs) and the cancellation signal are forwarded so the
@@ -83,7 +83,7 @@ export class Window implements WindowInterface {
     const explicitDataDir =
       !!dataDirOverride && dataDirOverride !== env[UNIT_TEST_ISOLATED_DATA_DIR_ENV]?.trim();
     this.cacheDir =
-      env.NODE_ENV === "test" && !explicitDataDir
+      readEnvRaw(AMBIENT_ENV.NODE_ENV, env) === "test" && !explicitDataDir
         ? null
         : path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.WINDOW);
     this.adb = adbFactory.create(device);

@@ -276,7 +276,10 @@ describe("environment variable registry", () => {
     );
     expect(new Set(names).size).toBe(names.length);
     const docs = readFileSync(DOCS, "utf8");
-    const missing = names.filter((name) => !docs.includes(`\`${name}\``));
+    const documented = [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY]
+      .filter((spec) => !spec.internal)
+      .flatMap((spec) => (spec.legacyName ? [spec.name, spec.legacyName] : [spec.name]));
+    const missing = documented.filter((name) => !docs.includes(`\`${name}\``));
     expect(missing, `Add to ${path.relative(ROOT, DOCS)}`).toEqual([]);
     for (const spec of [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY]) {
       expect(spec.doc.length).toBeGreaterThan(0);

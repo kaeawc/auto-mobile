@@ -1,3 +1,4 @@
+import { KeepAwakeRestoreError } from "./KeepAwakeRestoreError";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { SCREEN_READER_RESTORE_TIMEOUT_MS } from "../features/accessibility/ScreenReaderRestore";
@@ -130,17 +131,6 @@ export interface IosAppNetworkRuleSessionState {
  */
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS = 2;
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS = 250;
-
-/** Preserve typed restore evidence through the existing bounded retry path. */
-class KeepAwakeRestoreError extends Error {
-  constructor(
-    message: string,
-    readonly report: KeepAwakeRestoreReport,
-  ) {
-    super(message);
-    this.name = "KeepAwakeRestoreError";
-  }
-}
 
 /** Keep-awake restore resolved before any await, like the biometric target below. */
 export interface KeepScreenAwakeRestoreTarget {

@@ -127,6 +127,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("tap_double_v1")).toBe(true);
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
@@ -221,6 +222,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_future_command")).toBe(false);
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_set_text",
     });
     expect(context.isCommandSupported?.("request_set_text")).toBe(false);
@@ -296,6 +298,7 @@ describe("CtrlProxy command support", () => {
     const context = client["createDelegateContext"]();
     client["webSocketMessageHandlers"].error({
       type: "error",
+      success: false,
       error: "Unknown command type: request_select_all",
     });
     expect(context.isCommandSupported?.("request_select_all")).toBe(false);
@@ -310,6 +313,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     client["processMessage"]({
       type: "error",
+      success: false,
       requestId: "unknown-command",
       error: "Unknown command type: request_select_all",
     });

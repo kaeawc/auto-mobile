@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
@@ -35,7 +36,7 @@ const openWithForeground = async (url: string, before: string, after: string[]) 
   const interactionSpy = spyOn(
     BaseVisualChange.prototype,
     "observedInteraction",
-  ).mockImplementation(async (block) => block(observation(before)));
+  ).mockImplementation(runBlockWith(() => observation(before)));
   const action = new OpenURL(simulator, new FakeAdbExecutor(), simctl, null, timer);
   action.observeScreen = observe;
   try {

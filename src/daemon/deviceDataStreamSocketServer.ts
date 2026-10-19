@@ -14,9 +14,9 @@ import type { StorageChangedEvent } from "../features/storage/storageTypes";
 import {
   type DeviceSessionResolver,
   nullDeviceSessionResolver,
-  SuspendedDeviceRoutingLog,
   deviceSessionErrorFields,
 } from "./deviceSessionResolver";
+import { SuspendedDeviceRoutingLog } from "./SuspendedDeviceRoutingLog";
 import type {
   DeviceSessionRecord,
   DeviceSessionEndOptions,

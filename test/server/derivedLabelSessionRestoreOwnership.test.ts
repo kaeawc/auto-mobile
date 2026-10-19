@@ -34,11 +34,6 @@ const BASE = "sess-a";
 const OWNER = "conn-1";
 const OTHER = "conn-2";
 
-/** The socket server's private restore step: where the owned-sessions selector is consumed. */
-interface RestoreSeam {
-  restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
-}
-
 function wire(result: { content?: unknown }): Record<string, unknown> {
   const content = result.content as { text: string }[];
   return JSON.parse(content[0].text) as Record<string, unknown>;
@@ -56,7 +51,7 @@ describe("restoring a derived label session through the owned-sessions selector"
 
   /** A socket `tools/call` from `connection` whose arguments carry the owned-sessions selector. */
   const socketRestore = (connection: string, args: Record<string, unknown>): Promise<void> =>
-    (socketServer as unknown as RestoreSeam).restoreSelectorSessions(
+    socketServer.testHooks.restoreSelectorSessions(
       { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: [labelSession] },
       connection,
     );
@@ -102,7 +97,8 @@ describe("restoring a derived label session through the owned-sessions selector"
       }),
     );
     await pool.initializeWithDevices([primary, labelled]);
-    DaemonState.getInstance().initialize(manager, pool, new DeviceSessionRegistry(timer));
+    const registry = new DeviceSessionRegistry(timer);
+    DaemonState.getInstance().initialize(manager, pool, registry);
     tools = new RealToolCallPath([primary, labelled]).install();
     await pool.bindOrReuseDeviceSession({
       sessionId: BASE,
@@ -119,7 +115,12 @@ describe("restoring a derived label session through the owned-sessions selector"
     );
     socketServer = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
+      {
+        isInitialized: () => true,
+        getSessionManager: () => manager,
+        getDevicePool: () => pool,
+        getDeviceSessionRegistry: () => registry,
+      } satisfies DaemonStateAccess,
       timer,
     );
     fixture = new McpTestFixture({ daemonMode: true });

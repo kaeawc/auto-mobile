@@ -34,7 +34,7 @@ import {
   requireMultiDeviceDaemon,
 } from "./deviceLabelMapping";
 import { executePlan, importPlanFromYaml } from "./planExecutorFactory";
-import { defaultDaemonContext } from "../daemon/daemonContext";
+import { defaultDaemonContext, type PlanEndDaemonContext } from "../daemon/daemonContext";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
   brokerConnectionPlanLabelRefusal,
@@ -72,12 +72,8 @@ import { typedRefusalFields } from "../models/typedRefusalFields";
 import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import {
-  healthSummaryField,
-  planHealthWriterFromEnv,
-  reportPlanHealth,
-  type PlanHealthWriter,
-} from "./planHealthSummary";
+import { healthSummaryField, planHealthWriterFromEnv, reportPlanHealth } from "./planHealthSummary";
+import { type PlanHealthWriter } from "./filePlanHealthWriter";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -291,12 +287,10 @@ export function planBaseEndFields(
   baseSessionUuid: string | undefined,
   planSucceeded: boolean,
   failedStep?: PlanExecutionResult["failedStep"],
+  daemon: PlanEndDaemonContext = defaultDaemonContext,
 ): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
-  if (planSucceeded || !baseSessionUuid || !failedStep) {
-    return {};
-  }
-  const manager = defaultDaemonContext.sessionManager();
-  if (!manager) {
+  const manager = daemon.sessionManager();
+  if (planSucceeded || !baseSessionUuid || !failedStep || !manager) {
     return {};
   }
   const ended = manager.peekTerminalAnswerForEndedSession(baseSessionUuid);

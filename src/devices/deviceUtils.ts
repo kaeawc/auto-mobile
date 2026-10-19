@@ -4,14 +4,13 @@ import {
   AdbCommandTimeoutError,
   AdbUnavailableError,
 } from "../utils/android-cmdline-tools/AdbClient";
-import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
-import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
+import { bootAdmissionServices, type AndroidColdBootAdmitter } from "./bootAdmissionServices";
+export type { AndroidColdBootAdmitter };
 import type {
   DeviceDiscoveryError,
   DeviceDiscoveryErrorCode,
 } from "../models/DeviceDiscoveryError";
-import type { BootAdmission } from "../models/BootAdmission";
-import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
+import type { IosBootInstrumentation } from "../models/IosBootInstrumentation";
 import type { SimulatorWorkloadProfile } from "../models/DeviceResourceReconciliation";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -455,16 +454,6 @@ function mergeIosDevices(simulators: BootedDevice[], physical: BootedDevice[]): 
   return [...simulators, ...physical.filter((device) => !seen.has(device.deviceId))];
 }
 
-/** Admits an Android emulator cold boot once the host has capacity for it (#11181). */
-export interface AndroidColdBootAdmitter {
-  /** Rejects with `BootCapacityExhaustedError` when no slot frees within `timeoutMs`. */
-  admit(request: {
-    timeoutMs: number;
-    signal?: AbortSignal;
-    avdName: string;
-  }): Promise<BootAdmission>;
-}
-
 /** The simctl operations the device manager drives; `getSimulatorListingChecked` stays optional. */
 export type DeviceManagerSimCtl = Pick<
   SimCtl,
@@ -548,12 +537,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     if (this.iosBootInstrumentationOverride) {
       return this.iosBootInstrumentationOverride;
     }
-    const gates = getSharedBootAdmissionGates();
-    this.defaultIosBootInstrumentation ??= createDefaultIosBootInstrumentation({
-      timer: defaultTimer,
-      history: gates.iosBootHistory,
-      gate: gates.ios,
-    });
+    this.defaultIosBootInstrumentation ??= bootAdmissionServices.iosBootInstrumentation();
     return this.defaultIosBootInstrumentation;
   }
 
@@ -562,7 +546,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     if (this.androidBootAdmitterOverride !== undefined) {
       return this.androidBootAdmitterOverride ?? undefined;
     }
-    return getSharedBootAdmissionGates().android;
+    return bootAdmissionServices.androidColdBootAdmitter();
   }
 
   private async canDiscoverIosLocally(signal?: AbortSignal): Promise<boolean> {

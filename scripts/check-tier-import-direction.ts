@@ -1,10 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { sourceFiles, relativeImportTargets, toPosixPath } from "./check-utils-import-direction";
 
 /**
  * Import-direction ratchet for the tiers below `features`/`server` (#11789), generalizing
- * check-utils-import-direction.ts. Each tier lists the `src/` tiers it may import; every other
- * edge must already be in that tier's committed baseline, which can only shrink. The
+ * check-utils-import-direction.ts. Each tier lists the `src/` tiers it may import. A tier with
+ * `baselined: true` still carries pre-existing edges in its committed baseline, which can only
+ * shrink; every other tier has no baseline and any violating edge fails outright. When a
+ * baselined tier reaches zero, drop the flag and delete its file. The
  * `models` tier is owned by test/lint/modelsLeaf.test.ts (#11853), so it is not listed here. The
  * `features` tier is gated on one forbidden target (`server`) instead of an allow-list.
  */
@@ -12,16 +14,22 @@ interface TierRule {
   readonly tier: string;
   readonly allowed?: readonly string[];
   readonly forbidden?: readonly string[];
+  /** Pre-existing edges live in `baselinePath(tier)`; absent means hard-fail. */
+  readonly baselined?: boolean;
 }
 
 const LEAF = ["constants", "config"];
 export const TIER_RULES: readonly TierRule[] = [
   { tier: "db", allowed: ["db", "models", "utils", ...LEAF] },
   { tier: "devices", allowed: ["devices", "ctrlProxy", "db", "models", "utils", ...LEAF] },
-  { tier: "ctrlProxy", allowed: ["ctrlProxy", "devices", "db", "models", "utils", ...LEAF] },
+  {
+    tier: "ctrlProxy",
+    allowed: ["ctrlProxy", "devices", "db", "models", "utils", ...LEAF],
+    baselined: true,
+  },
   { tier: "features", forbidden: ["server"] },
   // daemon must not reach up into the MCP server tier (#11790); sub-package rules follow the moves.
-  { tier: "daemon", forbidden: ["server"] },
+  { tier: "daemon", forbidden: ["server"], baselined: true },
 ];
 
 export function baselinePath(tier: string): string {
@@ -47,9 +55,12 @@ export function tierEdges(rule: TierRule): string[] {
   return [...edges].sort();
 }
 
-function readBaseline(tier: string): Set<string> {
-  const path = baselinePath(tier);
-  return new Set(existsSync(path) ? readFileSync(path, "utf8").split(/\r?\n/).filter(Boolean) : []);
+function readBaseline(rule: TierRule): Set<string> {
+  return new Set(
+    rule.baselined
+      ? readFileSync(baselinePath(rule.tier), "utf8").split(/\r?\n/).filter(Boolean)
+      : [],
+  );
 }
 
 if (import.meta.main) {
@@ -58,15 +69,17 @@ if (import.meta.main) {
   let failed = false;
   for (const rule of TIER_RULES) {
     const edges = tierEdges(rule);
-    const baseline = readBaseline(rule.tier);
+    const baseline = readBaseline(rule);
     const newEdges = edges.filter((edge) => !baseline.has(edge));
-    if (newEdges.length > 0 && !(update && allowGrow)) {
+    if (newEdges.length > 0 && !(update && allowGrow && rule.baselined)) {
       console.error(`error: new ${rule.tier} import direction violations:`);
       newEdges.forEach((edge) => console.error(edge));
       failed = true;
       continue;
     }
-    if (update) {
+    if (!rule.baselined) {
+      console.log(`tier-import-direction: ${rule.tier} has no upward imports.`);
+    } else if (update) {
       writeFileSync(baselinePath(rule.tier), edges.map((edge) => `${edge}\n`).join(""));
       console.log(`tier-import-direction: ${rule.tier} baseline updated (${edges.length} edges).`);
     } else {

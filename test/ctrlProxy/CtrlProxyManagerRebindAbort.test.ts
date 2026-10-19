@@ -1,3 +1,4 @@
+import { useFakeCtrlProxyManagerHost } from "../helpers/ctrlProxyManagerHost";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "fs";
 import * as path from "path";
@@ -88,6 +89,7 @@ const readdWrites = (executed: string[]) =>
   puts(executed).filter((command) => command.includes(component));
 
 describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
+  useFakeCtrlProxyManagerHost();
   beforeEach(() => {
     AndroidCtrlProxyManager.resetInstances();
   });

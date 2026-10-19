@@ -35,11 +35,6 @@ import {
  */
 const STOP_QUIET_TURNS = 2_000;
 
-interface ScenarioInternals {
-  createDaemonSide(): Promise<LivenessScenario["daemon"]>;
-  killDaemonSide(side: LivenessScenario["daemon"]): void;
-}
-
 /** How the first daemon instance ends. */
 export type ShutdownKind = "clean" | "crash";
 
@@ -157,7 +152,7 @@ export class RestartScenario {
     }
     await stopping;
     // The process exits: its remaining timers and connections are gone.
-    (this.scenario as unknown as ScenarioInternals).killDaemonSide(side);
+    this.scenario.killDaemonSide(side);
     if (!settled) {
       throw new Error("RestartScenario: Daemon.stop() did not settle within its virtual budget");
     }
@@ -168,12 +163,12 @@ export class RestartScenario {
 
   /** The first daemon dies with nothing written: rows stay live with their last stamps. */
   crash(): void {
-    (this.scenario as unknown as ScenarioInternals).killDaemonSide(this.scenario.daemon);
+    this.scenario.killDaemonSide(this.scenario.daemon);
   }
 
   /** A second daemon starts on the same database and journal directory. */
   async startSuccessor(): Promise<void> {
-    this.scenario.daemon = await (this.scenario as unknown as ScenarioInternals).createDaemonSide();
+    this.scenario.daemon = await this.scenario.createDaemonSide();
     this.gateDials();
     this.restartedAtMs = this.timer.now();
   }

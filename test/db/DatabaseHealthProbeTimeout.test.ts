@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
-import {
-  DatabaseHealthProbeTimeoutError,
-  DefaultDatabaseHealthProbe,
-} from "../../src/db/DatabaseHealthProbe";
+import { DefaultDatabaseHealthProbe } from "../../src/db/DatabaseHealthProbe";
+import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProbeTimeoutError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 test("deadline rejects with the typed timeout, duration and unchanged message", async () => {

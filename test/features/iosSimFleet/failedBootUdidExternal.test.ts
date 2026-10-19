@@ -7,7 +7,7 @@ import { IosSimCapacityGate } from "../../../src/features/iosSimFleet/CapacityGa
 import { IosSimFleetCostCollector } from "../../../src/features/iosSimFleet/FleetCostCollector";
 import { FleetBootInstrumentation } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../../src/features/iosSimFleet/capacityPolicy";
-import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { parseSimctlInventory } from "../../../src/features/iosSimFleet/simctlInventory";
 import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
 import { FakeTimer } from "../../fakes/FakeTimer";

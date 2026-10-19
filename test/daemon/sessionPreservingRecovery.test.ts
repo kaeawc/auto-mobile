@@ -4,7 +4,7 @@ import {
   type SessionPreservingRecoveryPoolPort,
 } from "../../src/daemon/sessionPreservingRecovery";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
-import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/androidRebootCoordinator";
+import { UnconfirmedRecoveryShutdownError } from "../../src/daemon/UnconfirmedRecoveryShutdownError";
 import type { SessionContinuityDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

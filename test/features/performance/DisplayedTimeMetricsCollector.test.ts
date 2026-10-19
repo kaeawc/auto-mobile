@@ -98,7 +98,7 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
     test.each(cases)("%s", async function (_name, apiLevel, expected) {
       const collector = collectorForApiLevel(apiLevel);
       const tag = await collector.getPreferredLogcatTag();
-      expect(tag).toBe(expected);
+      expect<unknown>(tag).toBe(expected);
     });
 
     test("falls back to ActivityManager when the executor cannot report an API level", async function () {

@@ -1,16 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { scanToolRegistryIsolation } from "./toolRegistryIsolation";
 import { typeScriptFiles, relativePosix } from "./astGuard";
 
 const ROOT = path.join(import.meta.dir, "../..");
-const BASELINE_FILE = path.join(import.meta.dir, "tool-registry-isolation-baseline.txt");
-const BASELINE_CEILING = 0;
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
-const UPDATE_COMMAND =
-  "UPDATE_TOOL_REGISTRY_ISOLATION_BASELINE=1 bun test test/lint/toolRegistryIsolation.test.ts";
 const FILE = "test/server/fixture.test.ts";
 const IMPORT = 'import { registerObserveTools } from "../../src/server/observeTools";';
 
@@ -91,9 +86,7 @@ describe("production tool registry isolation scanner", () => {
   });
 });
 
-describe("production registrations stay within the isolation baseline", () => {
-  let baseline: string[] = [];
-  let found: string[] = [];
+describe("production tool registrations are isolated in tests", () => {
   let callSites: { file: string; line: number }[] = [];
   beforeAll(() => {
     callSites = typeScriptFiles(path.join(ROOT, "test"))
@@ -105,48 +98,12 @@ describe("production registrations stay within the isolation baseline", () => {
           ...finding,
         }));
       });
-    found = [...new Set(callSites.map((call) => call.file))].sort();
-    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
-    if (process.env.UPDATE_TOOL_REGISTRY_ISOLATION_BASELINE === "1") {
-      if (found.length > BASELINE_CEILING || found.some((file) => !baseline.includes(file))) {
-        throw new Error(
-          "Baseline updates may only shrink. Fix new offenders: call isolateToolRegistry() from test/helpers/withTemporaryTool.ts",
-        );
-      }
-      writeFileSync(BASELINE_FILE, found.map((file) => `${file}\n`).join(""));
-      const self = fileURLToPath(import.meta.url);
-      writeFileSync(
-        self,
-        readFileSync(self, "utf8").replace(
-          /BASELINE_CEILING = \d+;/,
-          `BASELINE_CEILING = ${found.length};`,
-        ),
-      );
-    }
-    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
-  test("no new test registers production tools without isolation", () => {
-    const added = callSites.filter((call) => !baseline.includes(call.file));
-    if (added.length) {
+  test("no test registers production tools without isolation", () => {
+    if (callSites.length) {
       throw new Error(
-        `Unisolated production tool registrations:\n${added.map((call) => `${call.file}:${call.line}`).join("\n")}\nFix: call isolateToolRegistry() from test/helpers/withTemporaryTool.ts`,
+        `Unisolated production tool registrations:\n${callSites.map((call) => `${call.file}:${call.line}`).join("\n")}\nFix: call isolateToolRegistry() from test/helpers/withTemporaryTool.ts`,
       );
     }
-  });
-  test("the baseline only shrinks and lists still-offending files", () => {
-    const stale = baseline.filter((file) => !found.includes(file));
-    if (stale.length) {
-      throw new Error(`Stale isolation baseline:\n${stale.join("\n")}\nRun: ${UPDATE_COMMAND}`);
-    }
-    expect(baseline.length).toBe(BASELINE_CEILING);
-    expect(found.length).toBeLessThanOrEqual(BASELINE_CEILING);
-  });
-  test("the baseline is sorted, unique and uses repo-relative POSIX paths", () => {
-    expect(baseline).toEqual([...new Set(baseline)].sort());
-    expect(
-      baseline.filter(
-        (file) => !file.startsWith("test/") || file.includes("\\") || !file.endsWith(".test.ts"),
-      ),
-    ).toEqual([]);
   });
 });

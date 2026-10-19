@@ -82,7 +82,6 @@
 1	src/features/action/Rotate.ts	auto-mobile(max-class-lines)
 1	src/features/action/SetUIState.ts	auto-mobile(max-class-lines)
 1	src/features/action/SetUIState.ts	oxlint-disable(prefer-const)
-1	src/features/action/TapAnyElement.ts	auto-mobile(max-class-lines)
 1	src/features/action/TapAtCoordinate.ts	auto-mobile(max-class-lines)
 1	src/features/action/TapOnElement.ts	auto-mobile(max-class-lines)
 1	src/features/action/androidStableTapTarget.ts	eslint(complexity)

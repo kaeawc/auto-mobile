@@ -31,6 +31,7 @@ import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
 } from "../../src/daemon/types";
+import { z } from "zod/v4";
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
@@ -232,9 +233,15 @@ class ScriptedDaemonClient implements DaemonClientLike {
 
 describe("DaemonMcpProxy", () => {
   beforeEach(() => {
-    ToolRegistry.register("observe", "read-only observation", {}, async () => ({ content: [] }), {
-      transportRecovery: "replay",
-    });
+    ToolRegistry.register(
+      "observe",
+      "read-only observation",
+      z.object({}),
+      async () => ({ content: [] }),
+      {
+        transportRecovery: "replay",
+      },
+    );
   });
 
   afterEach(() => {
@@ -4450,7 +4457,7 @@ describe("DaemonMcpProxy", () => {
             content: refusal.content,
           });
           timer.advanceTime(5_000);
-          await drainMicrotasks();
+          await drainMicrotasks(32);
           await proxy.callTool("observe", {});
 
           expect(client.callToolCalls).toEqual([
@@ -7297,7 +7304,7 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "device-session-a" });
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([{ name: "setToolEnabled" }]);
 
         await proxy.callTool("setToolEnabled", {
           toolName: "openLink",
@@ -7305,7 +7312,10 @@ describe("DaemonMcpProxy", () => {
           sessionUuid: "device-session-a",
         });
 
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([
+          { name: "setToolEnabled" },
+          { name: "openLink" },
+        ]);
         expect(listChangedKinds).toEqual(["tools"]);
         expect(client.callDaemonMethodCalls.filter((call) => call.method === "tools/list")).toEqual(
           [
@@ -7361,7 +7371,10 @@ describe("DaemonMcpProxy", () => {
         firstClient.emitConnectionClosed();
         await Promise.resolve();
 
-        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(await proxy.listTools()).toEqual<unknown>([
+          { name: "setToolEnabled" },
+          { name: "openLink" },
+        ]);
         expect(replacementClient.callDaemonMethodCalls).toContainEqual({
           method: "tools/list",
           params: { sessionUuid: "device-session-a" },

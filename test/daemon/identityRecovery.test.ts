@@ -29,7 +29,15 @@ import {
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { ActionableError } from "../../src/models";
-import type { DaemonStatus, PidFileData, DaemonSocketPaths } from "../../src/daemon/types";
+import type { Session } from "../../src/daemon/sessionManager";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { createFakeSession } from "./helpers/inputSocketHarness";
+import type {
+  DaemonOptions,
+  DaemonStatus,
+  PidFileData,
+  DaemonSocketPaths,
+} from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent, parseLockContent } from "../../src/utils/fileLock";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -75,8 +83,20 @@ const complete: PidFileData = {
 };
 
 /** Spy on a private/protected method, which `spyOn`'s public-key typing excludes. */
-function spyOnPrivate(target: object, method: string) {
-  return spyOn(target as Record<string, (...args: never[]) => unknown>, method);
+function spyOnPrivate<Args extends unknown[] = unknown[], Result = Promise<void>>(
+  target: object,
+  method: string,
+) {
+  return spyOn(target as Record<string, (...args: Args) => Result>, method);
+}
+
+/** The replacement owner a status recovery names; the scenario must have produced one. */
+function replacementOwnerOf(status: DaemonStatus): DaemonStatus {
+  const owner = status.recovery?.replacementOwner;
+  if (!owner) {
+    throw new Error("expected the status recovery to name a replacement owner");
+  }
+  return owner;
 }
 
 function harness(
@@ -120,7 +140,7 @@ function harness(
       isProcessRunning: (pid) => pid === process.pid || (owner.running && pid === owner.pid),
     },
     processSignaler: {
-      kill: () => {
+      signal: () => {
         throw new Error("must not signal");
       },
     },
@@ -241,7 +261,7 @@ describe("provider-owned identity recovery", () => {
     expect(probe).not.toHaveBeenCalled();
   });
 
-  for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"]) {
+  for (const outcome of ["repaired", "deferred", "failed", "unauthenticated"] as const) {
     test(`fix 1: status ${outcome} records only status and republish RPCs`, async () => {
       const h = harness({ accepted: outcome !== "deferred" });
       const io = h.manager["identityRecoveryIO"];
@@ -308,7 +328,7 @@ describe("provider-owned identity recovery", () => {
         },
       } satisfies IdentityRecoveryIO,
     });
-    spyOnPrivate(peer.manager, "isProcessRunning").mockImplementation((pid) =>
+    spyOnPrivate<[number], boolean>(peer.manager, "isProcessRunning").mockImplementation((pid) =>
       h.manager["isProcessRunning"](pid),
     );
     const reachable = spyOn(peer.manager, "waitForReady").mockResolvedValue(true);
@@ -354,7 +374,7 @@ describe("provider-owned identity recovery", () => {
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
     const io = h.manager["identityRecoveryIO"];
     Object.assign(peer.manager, { identityRecoveryIO: io });
-    spyOnPrivate(peer.manager, "isProcessRunning").mockImplementation((pid) =>
+    spyOnPrivate<[number], boolean>(peer.manager, "isProcessRunning").mockImplementation((pid) =>
       h.manager["isProcessRunning"](pid),
     );
     const probe = io.probe;
@@ -697,7 +717,7 @@ describe("provider-owned identity recovery", () => {
         }
         return "restarted";
       });
-      const result = await h.manager["replaceRecoveryOwner"](evidence.recovery?.replacementOwner);
+      const result = await h.manager["replaceRecoveryOwner"](replacementOwnerOf(evidence));
       expect(result).toMatchObject({
         running: succeeds,
         recovery: { state: succeeds ? "replaced" : "failed" },
@@ -717,8 +737,7 @@ describe("provider-owned identity recovery", () => {
       return "joined";
     });
     expect(
-      (await h.manager["replaceRecoveryOwner"](evidence.recovery?.replacementOwner)).recovery
-        ?.state,
+      (await h.manager["replaceRecoveryOwner"](replacementOwnerOf(evidence))).recovery?.state,
     ).toBe("joined");
   });
 
@@ -774,7 +793,10 @@ describe("provider-owned identity recovery", () => {
     const restart = spyOn(h.manager, "restart");
     // Only the process stop/start boundaries are fake; exercise the real restart admission.
     const stop = spyOnPrivate(h.manager, "stopRunningDaemon").mockResolvedValue(undefined);
-    const start = spyOnPrivate(h.manager, "startUnlocked").mockImplementation(async (options) => {
+    const start = spyOnPrivate<[DaemonOptions], Promise<string>>(
+      h.manager,
+      "startUnlocked",
+    ).mockImplementation(async (options) => {
       expect(options).toEqual({ ...complete.options, strictPort: true });
       expect(h.manager["daemonLaunchEnvironment"](options).AUTOMOBILE_DB_PATH).toBe(
         complete.dbPath,
@@ -814,11 +836,8 @@ describe("provider-owned identity recovery", () => {
       h.results.set(PREPARE, { accepted: false, reason });
       const stop = spyOnPrivate(h.manager, "stopRunningDaemon");
       expect(
-        (
-          await h.manager["replaceRecoveryOwner"](
-            (await h.manager.status()).recovery?.replacementOwner,
-          )
-        ).recovery,
+        (await h.manager["replaceRecoveryOwner"](replacementOwnerOf(await h.manager.status())))
+          .recovery,
       ).toMatchObject({
         state: "deferred",
         reason: expect.stringContaining(reason),
@@ -901,7 +920,7 @@ describe("provider-owned identity recovery", () => {
 });
 
 function provider(
-  sessions: unknown[] = [],
+  sessions: Session[] = [],
   token = "provider-generation",
   claimed: Record<string, unknown> = { processGenerationToken: token },
 ) {
@@ -911,6 +930,8 @@ function provider(
     {
       isInitialized: () => true,
       getSessionManager: () => ({
+        hasSession: () => false,
+        getDeviceLabels: () => undefined,
         getAllSessions: () => sessions,
         getSession: () => null,
         releaseSession: async () => null,
@@ -920,6 +941,7 @@ function provider(
         getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
         releaseDevice: async () => {},
       }),
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     },
     new FakeTimer(),
     null,
@@ -940,7 +962,12 @@ function provider(
     ...getCurrentBuildIdentity(),
   };
   const request = (method: string, requestParams: Record<string, unknown> = {}) =>
-    server["handleLocalSocketRequest"]({ method, params: requestParams });
+    server["handleLocalSocketRequest"]({
+      id: "request",
+      type: "daemon_request",
+      method,
+      params: requestParams,
+    });
   const call = (overrides = {}) => request(REPUBLISH, { ...params, ...overrides });
   return {
     call,
@@ -954,9 +981,11 @@ function provider(
 describe("republish admin RPC admission", () => {
   test("provider coalesces concurrent cross-process requests into one publication", async () => {
     const p = provider();
-    expect(await Promise.all([p.call(), p.call(), p.call()])).toEqual(
-      Array(3).fill({ accepted: true }),
-    );
+    expect(await Promise.all([p.call(), p.call(), p.call()])).toEqual([
+      { accepted: true },
+      { accepted: true },
+      { accepted: true },
+    ]);
     expect(p.writes).toBe(1);
   });
   test("provider rejects a stale process generation even during a concurrent repair", async () => {
@@ -1002,7 +1031,7 @@ describe("republish admin RPC admission", () => {
     expect(p.writes).toBe(0);
   });
   test("fix 4: provider republishes with active sessions without maintenance admission", async () => {
-    const p = provider([{ sessionId: "active" }]);
+    const p = provider([createFakeSession("active", "emulator-5554", "android")]);
     expect(await p.call()).toEqual({ accepted: true });
     expect(p.writes).toBe(1);
   });
@@ -1044,11 +1073,11 @@ describe("incumbent-owned atomic publisher", () => {
     });
     await Promise.resolve();
     expect(acknowledged).toBe(false);
-    expect(record).toBeNull();
+    expect(io.readRecord()).toBeNull();
     finish();
     await first;
     expect(acknowledged).toBe(true);
-    expect(record).toEqual(complete);
+    expect(io.readRecord()).toEqual(complete);
     expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(true);
     expect(writes).toBe(1);
   });

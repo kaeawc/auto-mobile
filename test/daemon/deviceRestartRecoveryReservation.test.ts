@@ -172,7 +172,7 @@ describe("device restart reserves the entire recovery window", () => {
     );
   async function absent() {
     manager.bootedDevices = [];
-    await pool.removeDevice(SIM.deviceId, true, pool.getDevice(SIM.deviceId));
+    await pool.removeDevice(SIM.deviceId, true, pool.getDevice(SIM.deviceId) ?? undefined);
   }
   async function returned() {
     manager.bootedDevices = [SIM];
@@ -223,7 +223,7 @@ describe("device restart reserves the entire recovery window", () => {
       }),
     ).rejects.toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
     expect(pool.getDevice(SIM.deviceId)?.id).toBe(SIM.deviceId);
-    expect(pool.getDevicesByPlatform("ios")).toHaveLength(1);
+    expect(pool.getAllDevices().filter((device) => device.platform === "ios")).toHaveLength(1);
   });
   arranged("bindings win at reserve time and afterwards", async () => {
     await setup([SIM], true);

@@ -45,7 +45,7 @@ describe("heartbeat activity writes (#11079)", () => {
   let manager: SessionManager;
   let monitor: SessionHeartbeatMonitor;
   let released: string[];
-  let warn: ReturnType<typeof spyOn>;
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
 
   beforeEach(async () => {
     timer = new FakeTimer();

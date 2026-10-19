@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { connectionListenerOf } from "../helpers/netConnectionListener";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 class DeferredSocket extends FakeSocket {
@@ -23,8 +24,8 @@ let client: InstanceType<typeof DaemonClient>;
 let createConnectionSpy: ReturnType<typeof spyOn<typeof net, "createConnection">>;
 
 beforeEach(() => {
-  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((_path, onConnect) => {
-    const socket = new DeferredSocket(onConnect!);
+  createConnectionSpy = spyOn(net, "createConnection").mockImplementation((...args: unknown[]) => {
+    const socket = new DeferredSocket(connectionListenerOf(args)!);
     sockets.push(socket);
     return socket;
   });

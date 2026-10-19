@@ -20,7 +20,6 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 const device: BootedDevice = {
   deviceId: "talkback-probe-device",
   platform: "android",
-  isEmulator: true,
   name: "Probe Test Device",
 };
 

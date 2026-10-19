@@ -4,6 +4,7 @@ import {
   DeviceSnapshotStore,
   findReservedSnapshotNameReason,
   isReservedSnapshotName,
+  type ReservedSnapshotNameReason,
   SNAPSHOT_REPLACING_SUFFIX,
   SNAPSHOT_IOS_SCOPE_ROOT,
   SNAPSHOT_ANDROID_SCOPE_ROOT,
@@ -30,11 +31,12 @@ describe("reserved snapshot names", () => {
   ]) {
     it(`reserves ${snapshotName} case-insensitively`, () => {
       expect(isReservedSnapshotName(snapshotName)).toBe(true);
-      expect(findReservedSnapshotNameReason(snapshotName)).toEqual(
-        snapshotName.toLowerCase().endsWith(SNAPSHOT_REPLACING_SUFFIX)
-          ? { kind: "suffix", suffix: SNAPSHOT_REPLACING_SUFFIX }
-          : { kind: "scope-root", name: snapshotName.toLowerCase() },
-      );
+      const expected: ReservedSnapshotNameReason = snapshotName
+        .toLowerCase()
+        .endsWith(SNAPSHOT_REPLACING_SUFFIX)
+        ? { kind: "suffix", suffix: SNAPSHOT_REPLACING_SUFFIX }
+        : { kind: "scope-root", name: snapshotName.toLowerCase() };
+      expect(findReservedSnapshotNameReason(snapshotName)).toEqual(expected);
     });
   }
 

@@ -247,9 +247,16 @@ describe("AndroidCtrlProxyClient", function () {
     });
   };
 
-  const waitForSocket = async (
-    getSocket: () => FakeWebSocket | null,
-  ): Promise<FakeWebSocket | null> => {
+  const requireBinding = <T extends object>(binding: T | null): T => {
+    if (binding === null) {
+      throw new Error("expected the screen geometry to be bound");
+    }
+    return binding;
+  };
+
+  const waitForSocket = async <T extends FakeWebSocket>(
+    getSocket: () => T | null,
+  ): Promise<T | null> => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const socket = getSocket();
       if (socket) {
@@ -593,7 +600,7 @@ describe("AndroidCtrlProxyClient", function () {
   const hierarchyWithScreenSize = (width: number, height: number): any => ({
     packageName: "com.example.app",
     windows: [{ bounds: { left: 0, top: 0, right: width, bottom: height } }],
-    hierarchy: { node: { $: { class: "Root" } } },
+    hierarchy: { node: { className: "Root" } },
   });
 
   /**
@@ -669,7 +676,7 @@ describe("AndroidCtrlProxyClient", function () {
     const streamSocket = await startStreamServerWithScreenshotSubscriber();
 
     await accessibilityServiceClient.ensureConnected();
-    const ctrlProxySocket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+    const ctrlProxySocket = await waitForSocket(getSocket);
     await waitForSocketOpen(ctrlProxySocket);
     if (!ctrlProxySocket) {
       throw new Error("Expected capturing CtrlProxy socket");
@@ -916,7 +923,7 @@ describe("AndroidCtrlProxyClient", function () {
       setAdbPngScreenshotResponse();
 
       await accessibilityServiceClient.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -2493,7 +2500,7 @@ describe("AndroidCtrlProxyClient", function () {
       testClient.handleHierarchyUpdate({
         updatedAt: 1,
         packageName: "com.example.app",
-        hierarchy: { node: { $: { class: "Root" } } },
+        hierarchy: { node: { className: "Root" } },
       });
       expect(testClient.hasCachedHierarchy()).toBe(true);
 
@@ -3450,7 +3457,7 @@ describe("AndroidCtrlProxyClient", function () {
           h.push("newer live", "foreign-request", 200);
           h.push("older explicit", h.requestIds()[0]!, 100);
           expect((await pending)?.hierarchy.hierarchy.text).toBe("older explicit");
-          expect(h.client.cachedHierarchy?.hierarchy.hierarchy.text).toBe("newer live");
+          expect(h.client.testHooks.cachedHierarchy()?.hierarchy.hierarchy.text).toBe("newer live");
           expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
           expect(h.timer.getPendingTimeouts()).not.toContain(1000);
           expect(h.pushes).toHaveBeenCalledTimes(1);
@@ -6884,13 +6891,12 @@ describe("AndroidCtrlProxyClient", function () {
       const socket = await startStreamServerWithScreenshotSubscriber();
 
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
-      const boundToScreenA = accessibilityServiceClient.screenGeometry.bind();
-      expect(boundToScreenA).not.toBeNull();
+      const boundToScreenA = requireBinding(accessibilityServiceClient.screenGeometry.bind());
 
       // Screen B arrives and is forwarded while the frame is still in flight. Same resolution, so
       // the geometry cache is unchanged and the provenance stays valid — only the capture moves.
       accessibilityServiceClient.handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
-      const currentAfterB = accessibilityServiceClient.screenGeometry.bind();
+      const currentAfterB = requireBinding(accessibilityServiceClient.screenGeometry.bind());
       expect(currentAfterB.captureSequence).toBeGreaterThan(boundToScreenA.captureSequence);
 
       socket.resetWrittenData();
@@ -7001,7 +7007,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -7068,7 +7074,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(OPERATION_CANCELLED_MESSAGE);
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       expect(socket === null ? [] : screenshotFrames(socket)).toHaveLength(0);
       expect(fakeScheduler.noteCaptureStartedCalls).toBe(0);
 
@@ -7244,7 +7250,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
+      const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");

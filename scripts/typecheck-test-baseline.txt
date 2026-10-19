@@ -892,8 +892,8 @@ test/features/observe/ios/CtrlProxyClientRestartThreshold.test.ts TS2322 1
 test/features/observe/ios/CtrlProxyClientRestartThreshold.test.ts TS2345 9
 test/features/observe/ios/CtrlProxyStructure.test.ts TS2345 1
 test/features/observe/ios/CtrlProxyVoiceOver.test.ts TS2345 1
-test/features/observe/ios/IOSCtrlProxyClient.test.ts TS2345 6
-test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts TS2345 5
+test/features/observe/ios/IOSCtrlProxyClient.test.ts TS2345 5
+test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts TS2345 3
 test/features/observe/ios/gesturePhaseDiagnostics.test.ts TS2322 1
 test/features/observe/nodeCleaners.property.test.ts TS2367 1
 test/features/observe/nodeCleaners.property.test.ts TS2769 2

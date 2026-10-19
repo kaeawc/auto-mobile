@@ -41,9 +41,7 @@ function decodeFixture(name: string): DecodedEvent {
     createSuccessWebSocketFactory(timer),
     timer,
   );
-  const decoder = client as unknown as {
-    decodeSdkEventBatches(batches: FixtureBatch[], generation: number): DecodedEvent[];
-  };
+  const decoder = client.getSdkEventPollingTestHooks().polling;
   const events = decoder.decodeSdkEventBatches([batch], 0);
   expect(events).toHaveLength(1);
   expect(events[0].applicationId).toBe(batch.bundleId);

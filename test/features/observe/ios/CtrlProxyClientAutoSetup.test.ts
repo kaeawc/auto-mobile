@@ -77,7 +77,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     await client.ensureConnected();
@@ -104,7 +104,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       wsFactory,
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     const result = await client.ensureConnected();
@@ -134,7 +134,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       wsFactory,
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     const result = await client.ensureConnected();
@@ -169,7 +169,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       wsFactory,
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     expect(await client.ensureConnected()).toBe(true);
@@ -194,13 +194,9 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       sockets.push({ url, socket });
       return socket;
     };
-    const client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      wsFactory,
-      manualTimer,
-      createManagerFactory(),
-    );
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, wsFactory, manualTimer, {
+      serviceManagerFactory: createManagerFactory(),
+    });
     // Exercise the base-class connect directly so the assertion targets the
     // generation guard without the iOS auto-setup wrapper reacting to a failed
     // handshake.
@@ -272,7 +268,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
         return socket;
       },
       manualTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
     const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
       .connectWebSocket;
@@ -313,13 +309,9 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       sockets.push({ url, socket });
       return socket;
     };
-    const client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      wsFactory,
-      manualTimer,
-      createManagerFactory(),
-    );
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, wsFactory, manualTimer, {
+      serviceManagerFactory: createManagerFactory(),
+    });
     const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
       .connectWebSocket;
     const updatePort = (
@@ -375,13 +367,9 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       const mode: "none" | "instant" = url.includes(":8767") ? "none" : "instant";
       return new FakeWebSocket(url, mode, 0, manualTimer);
     };
-    const client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      wsFactory,
-      manualTimer,
-      createManagerFactory(),
-    );
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, wsFactory, manualTimer, {
+      serviceManagerFactory: createManagerFactory(),
+    });
     const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
       .connectWebSocket;
     const updatePort = (
@@ -415,7 +403,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createSuccessWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     const result = await client.ensureConnected();
@@ -441,7 +429,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
         return createSuccessWebSocketFactory(fakeTimer)(url);
       },
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     try {
@@ -470,7 +458,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
+      { serviceManagerFactory: createManagerFactory() },
     );
 
     const result = await client.ensureConnected();
@@ -500,7 +488,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      () => reentrantManager,
+      { serviceManagerFactory: () => reentrantManager },
     );
     clientRef.current = client;
 
@@ -521,8 +509,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
-      lister,
+      { serviceManagerFactory: createManagerFactory(), bootedDeviceLister: lister },
     );
 
     const result = await client.ensureConnected();
@@ -548,8 +535,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
-      lister,
+      { serviceManagerFactory: createManagerFactory(), bootedDeviceLister: lister },
     );
 
     const result = await client.ensureConnected();
@@ -569,8 +555,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
-      lister,
+      { serviceManagerFactory: createManagerFactory(), bootedDeviceLister: lister },
     );
 
     await client.ensureConnected();
@@ -592,8 +577,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
       fakeTimer,
-      createManagerFactory(),
-      lister,
+      { serviceManagerFactory: createManagerFactory(), bootedDeviceLister: lister },
     );
 
     await client.ensureConnected();

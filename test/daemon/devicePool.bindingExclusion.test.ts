@@ -1,3 +1,4 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BindingRegistryUpgradePendingError } from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
@@ -293,6 +294,7 @@ describe("DevicePool binding exclusion", () => {
           name: "slot-avd",
           platform: "android",
           source: "local",
+          isRunning: false,
         },
       })
       .catch((caught: unknown) => caught);
@@ -380,8 +382,8 @@ describe("DevicePool binding exclusion", () => {
     await sessions.createSession("existing", "SIM-HELD", "ios");
     // Seed control that predates registry discovery without taking a device through its gate.
     const held = pool.getDevice("SIM-HELD")!;
-    held.sessionId = "existing";
-    held.status = "assigned";
+    patchDeviceBinding(held, { sessionId: "existing" });
+    patchDeviceBinding(held, { status: "busy" });
     registry.snapshotManagedDevices = async () => {
       throw new Error("registry never readable");
     };
@@ -470,8 +472,8 @@ describe("DevicePool binding exclusion", () => {
     await assignBindingDevice(registry, "ios", "SIM-SLOT", "runner", "peer");
     await setUp([ios("SIM-SLOT")]);
     const held = pool.getDevice("SIM-SLOT")!;
-    held.sessionId = "local";
-    held.status = "assigned";
+    patchDeviceBinding(held, { sessionId: "local" });
+    patchDeviceBinding(held, { status: "busy" });
     await expect(
       pool.assertNotAssignedToBinding({
         action: "tapOn",

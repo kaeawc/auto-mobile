@@ -20,7 +20,7 @@ const ALLOWANCES: Readonly<Record<string, number>> = {
   // Hierarchy streaming path: deadline recompute, abort, preparation and cache shaping.
   "src/features/observe/ios/CtrlProxyHierarchy.ts": 2,
   // Mock-rules push uses sendMessage's disconnected warning and lastSendAt activity stamp.
-  "src/features/observe/ios/IOSCtrlProxyClient.ts": 1,
+  "src/features/observe/ios/CtrlProxyNetworkSync.ts": 1,
 };
 
 function memberName(expression: Expression): string | undefined {

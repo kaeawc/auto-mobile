@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { WebSocketMessage } from "../../src/features/observe/ios/types";
 
 /**
@@ -38,7 +38,7 @@ export interface ContractRequest {
 }
 
 export interface IosCtrlProxyHarness {
-  proxy: IOSCtrlProxy;
+  proxy: IosCtrlProxy;
   /** Requests that reached the runner (real: sent frames; fake: its call histories), in order. */
   requests(): ContractRequest[];
   close(): Promise<void>;
@@ -76,7 +76,7 @@ interface Scenario {
   name: string;
   /** Captured replies this scenario needs, by request type. */
   replies: IosCtrlProxyReplies;
-  run(proxy: IOSCtrlProxy): Promise<Observed[]>;
+  run(proxy: IosCtrlProxy): Promise<Observed[]>;
   expectedRequests: ContractRequest[];
   expected: Observed[];
 }

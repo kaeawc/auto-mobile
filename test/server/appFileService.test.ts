@@ -9,13 +9,15 @@ import {
   type AppFileFileSystem,
   type AppFileStats,
   createAppFileServiceForTesting,
-  executeAndroidAppFileCommand,
-  resolveAndroidTarget,
   type AppFileProvider,
   type AppFileWriteProvider,
-  IosSimulatorAppFileProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
+import { IosSimulatorAppFileProvider } from "../../src/server/IosSimulatorAppFileProvider";
+import {
+  executeAndroidAppFileCommand,
+  resolveAndroidTarget,
+} from "../../src/server/appFileSupport";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   APP_FILE_RESOURCE_TEMPLATES,

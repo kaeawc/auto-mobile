@@ -1,3 +1,5 @@
+import type { AppFileProviderCoverage } from "../features/storage/storageCapabilities";
+import { setDefaultAppFileProviderCoverageSource } from "../features/storage/defaultAppFileProviderCoverage";
 import { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -136,15 +138,7 @@ export interface AppFileProviderReadRequest extends AppFileReadRequest {
   userId?: number;
 }
 
-export interface AppFileProviderCoverage {
-  readonly platform: Platform;
-  readonly domain: StorageDomain;
-  readonly write: boolean;
-  readonly list: boolean;
-  readonly read: boolean;
-  readonly namespaceReset: boolean;
-  readonly mediaIndexing: boolean;
-}
+export type { AppFileProviderCoverage };
 
 export interface AppFileProviderCoverageReader {
   describeProviderCoverage(): readonly AppFileProviderCoverage[];
@@ -378,6 +372,7 @@ export function describeProviderCoverage(
 export function describeDefaultAppFileProviderCoverage(): readonly AppFileProviderCoverage[] {
   return describeProviderCoverage(createDefaultProviders(defaultDependencies));
 }
+setDefaultAppFileProviderCoverageSource(describeDefaultAppFileProviderCoverage);
 
 function providerKey(platform: Platform, domain: StorageDomain): string {
   return `${platform}:${domain}`;

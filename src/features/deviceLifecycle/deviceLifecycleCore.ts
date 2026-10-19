@@ -71,8 +71,6 @@ import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { createPerformanceTracker } from "../../utils/PerformanceTracker";
-import { listActiveVideoRecordings, stopVideoRecording } from "../../server/videoRecordingManager";
-import { stopSegmentedVideoRecordingsForDevice } from "../../server/videoRecordingTools";
 import { executionTracker } from "../../daemon/executionTracker";
 import { getToolSelectionContext } from "../toolSelection/toolSelectionContext";
 import { unregisterDirectSessionsForStableIdentity } from "../../utils/directSessionDeviceRegistry";
@@ -117,13 +115,7 @@ import {
 } from "../../models/DeviceResourceConfiguration";
 import { PlatformDeviceManagerFactory } from "../../utils/factories/PlatformDeviceManagerFactory";
 import { type DeviceMatchCriteria, type FormFactor } from "../../models/DeviceMatchCriteria";
-import { notifyBootedDeviceResourcesUpdated } from "../../server/bootedDeviceResources";
-import { notifyDeviceImageResourcesUpdated } from "../../server/deviceImageResources";
-import {
-  ANDROID_INVENTORY_RETRY_AFTER_MS,
-  BOOTED_DEVICE_RESOURCE_URIS,
-  DEVICE_IMAGE_RESOURCE_URIS,
-} from "../../constants/deviceResourceUris";
+import { ANDROID_INVENTORY_RETRY_AFTER_MS } from "../../constants/deviceResourceUris";
 import {
   configuredImageForBootedDevice,
   configuredImagesByStableId,
@@ -139,11 +131,9 @@ import {
   type TransitionalHold,
 } from "../../daemon/inventoryDeviceDescription";
 import {
+  deviceLifecycleServerHost,
   type AppResourceDependencies,
-  notifyInstalledAppResourceListChanged,
-  syncInstalledAppResourceRegistry,
-  syncInstalledAppResources,
-} from "../../server/appResources";
+} from "./deviceLifecycleServerHost";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { type BootCapacityReporter } from "../bootAdmission/BootAdmissionGate";
 import { getPerformanceMonitor } from "../performance/PerformanceMonitor";
@@ -181,7 +171,6 @@ import {
   AndroidAvdProvenanceCache,
   CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
 } from "../../utils/AndroidAvdProvenanceCache";
-import { ResourceRegistry } from "../../server/resourceRegistry";
 import {
   type RunnerReadinessRequest,
   RunnerReadinessError,
@@ -1272,10 +1261,10 @@ export async function defaultResolveRunningAndroidAvdName(
 export async function defaultNotifyDeviceInventoryResourcesChanged(
   installedAppResourcesChanged: boolean,
 ): Promise<void> {
-  await notifyBootedDeviceResourcesUpdated();
-  await notifyDeviceImageResourcesUpdated();
+  await deviceLifecycleServerHost.notifyBootedDeviceResourcesUpdated();
+  await deviceLifecycleServerHost.notifyDeviceImageResourcesUpdated();
   if (installedAppResourcesChanged) {
-    await notifyInstalledAppResourceListChanged();
+    await deviceLifecycleServerHost.notifyInstalledAppResourceListChanged();
   }
 }
 
@@ -1355,7 +1344,9 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       notifyDeviceInventoryResourcesChanged: defaultNotifyDeviceInventoryResourcesChanged,
       syncInstalledAppResourceRegistry: () =>
-        syncInstalledAppResourceRegistry(getDeviceToolsDependencies().appResourceDependencies),
+        deviceLifecycleServerHost.syncInstalledAppResourceRegistry(
+          getDeviceToolsDependencies().appResourceDependencies,
+        ),
       deviceCreationGateFactory: () => getDeviceCreationGate(),
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
@@ -1382,7 +1373,9 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
 
 export async function defaultNotifyResourcesChanged(): Promise<void> {
   await defaultNotifyDeviceInventoryResourcesChanged(false);
-  await syncInstalledAppResources(getDeviceToolsDependencies().appResourceDependencies);
+  await deviceLifecycleServerHost.syncInstalledAppResources(
+    getDeviceToolsDependencies().appResourceDependencies,
+  );
 }
 
 export async function notifyResourcesAfterShutdown(
@@ -2359,7 +2352,8 @@ export async function stopSegmentedVideoRecordingsBeforeDestroy(
     "segmented video recording teardown did not complete",
     {
       requestAbortSignal: context.requestAbortSignal,
-      operation: async () => await stopSegmentedVideoRecordingsForDevice(target.device),
+      operation: async () =>
+        await deviceLifecycleServerHost.stopSegmentedVideoRecordingsForDevice(target.device),
       timeoutMs: context.timeoutMs,
     },
   );
@@ -2625,7 +2619,7 @@ export async function stopVideoRecordingBeforeShutdown(
       "video recording teardown did not complete",
       {
         requestAbortSignal: context.requestAbortSignal,
-        operation: async () => await stopVideoRecording(recordingId),
+        operation: async () => await deviceLifecycleServerHost.stopVideoRecording(recordingId),
         timeoutMs: context.timeoutMs,
       },
     );
@@ -2650,7 +2644,8 @@ export async function stopVideoRecordingsBeforeShutdown(
       "segmented video recording teardown did not complete",
       {
         requestAbortSignal: context.requestAbortSignal,
-        operation: async () => await stopSegmentedVideoRecordingsForDevice(context.device),
+        operation: async () =>
+          await deviceLifecycleServerHost.stopSegmentedVideoRecordingsForDevice(context.device),
         timeoutMs: context.timeoutMs,
       },
     );
@@ -2662,7 +2657,7 @@ export async function stopVideoRecordingsBeforeShutdown(
       {
         requestAbortSignal: context.requestAbortSignal,
         operation: async () =>
-          await listActiveVideoRecordings({
+          await deviceLifecycleServerHost.listActiveVideoRecordings({
             deviceId: context.device.deviceId,
             platform: context.device.platform,
           }),
@@ -5935,31 +5930,6 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     throw new AndroidDeviceIdentityUnresolvedError(deviceId);
   }
   return { platform: "android", stableId: [...stableIds][0] };
-}
-
-export function availableDeviceResourceNote() {
-  const listedResourceUris = new Set(
-    ResourceRegistry.getResourceDefinitions().map((resource) => resource.uri),
-  );
-  const resourceUris = [
-    BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
-    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
-    `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
-    DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
-    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
-    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
-  ];
-  const availableResourceUris = resourceUris.filter((uri) => listedResourceUris.has(uri));
-  return {
-    message:
-      "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +
-      (availableResourceUris.length > 0
-        ? "For available images and richer per-device detail, read these MCP resources:"
-        : "Refresh resources/list to discover available images and richer per-device detail."),
-    resources: availableResourceUris,
-    uriPrefix:
-      "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
-  };
 }
 
 export async function androidProvenanceByAvdName(

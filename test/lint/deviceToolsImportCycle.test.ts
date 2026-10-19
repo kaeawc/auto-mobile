@@ -153,12 +153,7 @@ export function findCycleThrough(
  * search so a NEW cycle still fails, and each must still close a cycle (shrink-only): delete the
  * entry in the PR that breaks it. Found when the guard stopped filtering edges to in-scope nodes.
  */
-const KNOWN_CYCLE_EDGES: ReadonlyArray<readonly [string, string]> = [
-  [
-    "src/features/deviceLifecycle/deviceLifecycleCore.ts",
-    "src/server/videoRecordingTools.ts", // -> lifecycleDeviceOwnership -> deviceLifecycleCore
-  ],
-];
+const KNOWN_CYCLE_EDGES: ReadonlyArray<readonly [string, string]> = [];
 
 export function withoutEdges(
   edges: ReadonlyMap<string, string[]>,

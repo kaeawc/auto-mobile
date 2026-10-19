@@ -1,6 +1,7 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
+import type { AppResourceDependencies } from "../features/deviceLifecycle/deviceLifecycleServerHost";
 import { GetAppMetadata } from "../features/observe/GetAppMetadata";
 import { createIosMetadataSource } from "../utils/iosAppMetadataSource";
 import {
@@ -553,20 +554,11 @@ interface FetchedAppsCacheEntry {
   cacheable: boolean;
 }
 
-/** Narrow surface `fetchAppsForDevice` needs from `ListInstalledApps`, so tests can
- * inject a fake without driving the real adb/simctl/devicectl command chain. */
-type InstalledAppsLister = Pick<
-  ListInstalledApps,
-  "executeDetailedResult" | "executeIosDetailedResult"
->;
-type ListInstalledAppsFactory = (device: BootedDevice) => InstalledAppsLister;
+const defaultListInstalledAppsFactory: NonNullable<
+  AppResourceDependencies["listInstalledAppsFactory"]
+> = (device) => new ListInstalledApps(device);
 
-const defaultListInstalledAppsFactory: ListInstalledAppsFactory = (device) =>
-  new ListInstalledApps(device);
-
-export interface AppResourceDependencies {
-  listInstalledAppsFactory?: ListInstalledAppsFactory;
-}
+export type { AppResourceDependencies };
 
 // Dependency injection preserves this existing algorithm and its control flow.
 // oxlint-disable-next-line complexity

@@ -1,3 +1,13 @@
+import {
+  describeDefaultSharedStorageReadCoverage,
+  IOS_MEDIA_READ_UNSUPPORTED_REASON,
+  type SharedStorageReadCoverage,
+} from "../features/storage/sharedStorageReadCoverage";
+export {
+  describeDefaultSharedStorageReadCoverage,
+  IOS_MEDIA_READ_UNSUPPORTED_REASON,
+  type SharedStorageReadCoverage,
+};
 import { SimctlIosFilesFixtureContainer, nodeAppFileFileSystem } from "./appFileService";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
@@ -48,23 +58,6 @@ export interface ListSharedStorageRequest {
 
 export interface ReadSharedStorageRequest extends ListSharedStorageRequest {
   path: string;
-}
-
-export interface SharedStorageReadCoverage {
-  readonly list: boolean;
-  readonly read: boolean;
-}
-
-export const IOS_MEDIA_READ_UNSUPPORTED_REASON =
-  "simctl addmedia imports fixtures but exposes no supported bounded enumeration or read API for imported media.";
-
-/** Coverage of registered bounded namespace readers. */
-export function describeDefaultSharedStorageReadCoverage(
-  platform: Platform,
-  domain: "user_files" | "media_library" = "user_files",
-): SharedStorageReadCoverage {
-  const available = domain === "user_files" || platform === "android";
-  return { list: available, read: available };
 }
 
 export interface SharedStorageReadService {

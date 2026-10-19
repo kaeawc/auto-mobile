@@ -1,3 +1,4 @@
+import type { AndroidActivateAccessibilityLinkRequest } from "./AndroidActionDispatcher";
 import { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
 import type {
   InteractionEvent,
@@ -1941,18 +1942,12 @@ export class AndroidCtrlProxyClient
     return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
   }
 
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestActivateAccessibilityLink(
+    const { text, occurrence, selector, timeoutMs, perf, signal, onDispatch } = request;
+
+    return this.getActionDispatcher().requestActivateAccessibilityLink({
       text,
       occurrence,
       selector,
@@ -1960,7 +1955,7 @@ export class AndroidCtrlProxyClient
       perf,
       signal,
       onDispatch,
-    );
+    });
   }
 
   requestClipboard(

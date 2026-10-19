@@ -627,9 +627,9 @@ async function main() {
 
     if (daemonCommand) {
       const hasEnabledToolDefaults =
-        enabledTools.length > 0 || process.env.AUTOMOBILE_ENABLED_TOOLS !== undefined;
+        enabledTools.length > 0 || readEnvRaw(ENV.ENABLED_TOOLS) !== undefined;
       const hasDisabledToolDefaults =
-        disabledTools.length > 0 || process.env.AUTOMOBILE_DISABLED_TOOLS !== undefined;
+        disabledTools.length > 0 || readEnvRaw(ENV.DISABLED_TOOLS) !== undefined;
       const hasStartupToolDefaults = hasEnabledToolDefaults || hasDisabledToolDefaults;
       await runDaemonCommand(daemonCommand, daemonArgs, {
         namespaceEnv: process.env,
@@ -749,7 +749,7 @@ async function main() {
             const current = DeviceReadiness.getInstance().getCurrentDevice();
             return current?.platform === "android" ? [current] : [];
           },
-          isEnabled: () => isAppearanceSyncEnabled(process.env.AUTOMOBILE_APPEARANCE_SYNC),
+          isEnabled: () => isAppearanceSyncEnabled(readEnvRaw(ENV.APPEARANCE_SYNC)),
         });
       }
 

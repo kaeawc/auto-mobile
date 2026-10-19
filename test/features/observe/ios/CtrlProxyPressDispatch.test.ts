@@ -28,16 +28,14 @@ const cases: PressCase[] = [
   {
     name: "coordinate tap",
     request: (h, s, d) =>
-      new CtrlProxyGestures(h.context).requestTapCoordinates(
-        1,
-        2,
-        50,
-        50,
-        undefined,
-        undefined,
-        s,
-        d,
-      ),
+      new CtrlProxyGestures(h.context).requestTapCoordinates({
+        x: 1,
+        y: 2,
+        duration: 50,
+        timeoutMs: 50,
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "home",

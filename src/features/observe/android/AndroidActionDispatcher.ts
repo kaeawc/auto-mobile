@@ -21,6 +21,16 @@ import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { DelegateContext } from "../shared/types";
 
+export interface AndroidActivateAccessibilityLinkRequest {
+  text: string;
+  occurrence: number;
+  selector?: AccessibilityNodeSelector;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 /** Client-backed accessors resolve live state on every use, including after awaits. */
 export interface AndroidActionDispatcherContext {
   readonly timer: Timer;
@@ -305,17 +315,19 @@ export class AndroidActionDispatcher {
     return connected && this.context.isCommandSupported("request_activate_accessibility_link");
   }
 
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidActivateAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const {
+      text,
+      occurrence,
+      selector,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      onDispatch,
+    } = request;
+
     const startTime = this.context.timer.now();
     const action = "activate_accessibility_link";
     const combinedSignal = combineWithAmbientAbort(signal);

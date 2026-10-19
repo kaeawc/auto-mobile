@@ -149,7 +149,7 @@ describe("idle release while the holder's device call is in flight", () => {
       requestTapCoordinates: (
         ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
       ) => {
-        args[6]?.();
+        args[0].onDispatch?.();
         return deviceCall();
       },
       setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {

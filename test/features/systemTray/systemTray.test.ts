@@ -1,3 +1,4 @@
+import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { createExecResult } from "../../../src/utils/execResult";
 import { toolJson } from "../../helpers/toolResponse";
 import { warmedTests } from "../../helpers/warmedTests";
@@ -1045,7 +1046,9 @@ class FakeIosClient implements SystemTrayIosClient {
     return { success: this.swipeSuccess, error: this.swipeError };
   }
 
-  async requestTapCoordinates(x: number, y: number) {
+  async requestTapCoordinates(request: TapCoordinatesRequest) {
+    const { x, y } = request;
+
     this.tapCalls.push({ x, y });
     return { success: this.tapSuccess, error: this.tapError };
   }

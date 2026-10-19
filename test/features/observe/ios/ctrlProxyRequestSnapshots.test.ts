@@ -176,7 +176,11 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_activate_accessibility_link",
     builder: "CtrlProxyVoiceOver.requestActivateAccessibilityLink",
     invoke: (h) =>
-      new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink("Details", 2, "owner-42"),
+      new CtrlProxyVoiceOver(h.context).requestActivateAccessibilityLink({
+        text: "Details",
+        occurrence: 2,
+        ownerResourceId: "owner-42",
+      }),
   },
   {
     name: "request_magic_tap",
@@ -244,7 +248,8 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_tap_coordinates",
     builder:
       "SharedGestureDelegate.requestTapCoordinates (via CtrlProxyGestures, roundCoordinates=false)",
-    invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(120.5, 240.25, 35),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestTapCoordinates({ x: 120.5, y: 240.25, duration: 35 }),
   },
   {
     name: "request_tap_coordinates_double_tap",
@@ -778,7 +783,12 @@ describe("iOS integer millisecond request boundary", () => {
       {
         name: "tap",
         builder: "tap",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestTapCoordinates(1.5, 2.5, 250.5),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestTapCoordinates({
+            x: 1.5,
+            y: 2.5,
+            duration: 250.5,
+          }),
       },
       {
         name: "action",

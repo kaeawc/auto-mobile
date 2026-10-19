@@ -268,7 +268,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       beforeDeviceWork?.();
       return createAndroidTestClient(androidDevice, {
         getScreenScaleMetadata: () => screenGeometry,
-        requestTapCoordinates: record("tap", 6),
+        requestTapCoordinates: record("tap", 0),
         requestSwipe: record("swipe", 0),
         requestGestureStart: record("gestureStart"),
         requestGestureMove: record("gestureMove"),
@@ -283,7 +283,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation((device) =>
       createIosTestClient(device, {
         getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-        requestTapCoordinates: record("tap", 7),
+        requestTapCoordinates: record("tap", 0),
         requestDrag: record("swipe", 0),
         requestSetText: record("setText", 1),
         requestAppendText: record("appendText", 4),

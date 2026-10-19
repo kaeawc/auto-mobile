@@ -1,3 +1,5 @@
+import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
+import type { IosActivateAccessibilityLinkRequest } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import { IOSCtrlProxy } from "../../src/features/observe/ios";
 import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
@@ -793,15 +795,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestTapCoordinates(
-    x: number,
-    y: number,
-    duration: number = 0,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: TapCoordinatesRequest,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    const { x, y, duration = 0, signal, onDispatch } = request;
+
     // Mirrors `sendIOSPressCommand`: an already-expired caller deadline never reaches the
     // device and surfaces as the abort reason, not as a failed result.
     signal?.throwIfAborted();
@@ -1439,14 +1436,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosActivateAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
+    const { text, occurrence, ownerResourceId, signal, onDispatch } = request;
+
     signal?.throwIfAborted();
     await this.applyDelay("accessibilityLink");
     this.checkFailure("accessibilityLink");

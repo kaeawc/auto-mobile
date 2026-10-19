@@ -2,12 +2,9 @@ package dev.jasonpearson.automobile.junit
 
 import java.io.File
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -34,7 +31,7 @@ class HeldDeviceWaitingMCPClientTest {
   }
 
   private fun refusal(code: String): () -> String = {
-    throw RuntimeException(
+    throw IllegalStateException(
       "MCP tool observe returned an error: {\"code\":\"$code\",\"retryable\":false}",
     )
   }
@@ -63,7 +60,7 @@ class HeldDeviceWaitingMCPClientTest {
   }
 
   private fun fixtureRefusal(name: String): () -> String = {
-    throw RuntimeException("MCP tool tapOn returned an error: ${fixtureText(name)}")
+    throw IllegalStateException("MCP tool tapOn returned an error: ${fixtureText(name)}")
   }
 
   private val sleeps = mutableListOf<Long>()
@@ -106,12 +103,12 @@ class HeldDeviceWaitingMCPClientTest {
         ScriptedClient(
           mutableListOf(
             {
-              throw RuntimeException(
+              throw IllegalStateException(
                 """MCP tool tapOn returned an error: {"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}""",
               )
             },
             {
-              throw RuntimeException(
+              throw IllegalStateException(
                 """MCP tool tapOn returned an error: {"success":false,"error":"finalizing","code":"device_cleanup_in_progress","retryable":true,"retryAfterMs":125000}""",
               )
             },
@@ -194,27 +191,18 @@ class HeldDeviceWaitingMCPClientTest {
     val files =
       File(directory ?: error("fixture directory not found"), "test/fixtures/refusal-wire")
         .listFiles()!!
-    var hinted = false
-    var unbounded = false
-    var permanent = false
+    val coverage = RecoveryCorpusCoverage()
     for (file in files.filter { it.extension == "json" && it.name != "expectations.json" }) {
       val name = file.nameWithoutExtension
       val payload = Json.parseToJsonElement(fixtureText(name)).jsonObject
-      val envelope = payload["error"] as? JsonObject
-      val code = (envelope?.get("code") ?: payload["code"])?.jsonPrimitive?.content
-      if (code !in setOf("device_unhealthy", "session_held_by_recovery")) continue
-      val recovering = (envelope?.get("recovering") ?: payload["recovering"]) == JsonPrimitive(true)
-      val retryable = (envelope?.get("retryable") ?: payload["retryable"]) == JsonPrimitive(true)
-      val waits = retryable && (code == "session_held_by_recovery" || recovering)
-      val hint = (envelope?.get("retryAfterMs") ?: payload["retryAfterMs"])?.jsonPrimitive?.long
+      val (code, recovering, waits, hint) = recoveryFixtureEvidence(payload) ?: continue
       sleeps.clear()
       val delegate = ScriptedClient(mutableListOf(fixtureRefusal(name), { "ok" }))
       if (waits) {
         assertEquals(name, "ok", client(delegate).callTool("tapOn", emptyMap()))
         assertEquals(name, listOf(maxOf(500L, hint ?: 0L)), sleeps)
         if (code == "device_unhealthy") {
-          hinted = hinted || hint != null
-          unbounded = unbounded || hint == null
+          coverage.recordWait(hint)
         }
       } else {
         try {
@@ -223,10 +211,10 @@ class HeldDeviceWaitingMCPClientTest {
         } catch (_: RuntimeException) {}
         assertTrue(name, sleeps.isEmpty())
         assertEquals(name, 1, delegate.calls)
-        permanent = permanent || (code == "device_unhealthy" && !recovering)
+        if (code == "device_unhealthy") coverage.recordPermanent(recovering)
       }
     }
-    assertTrue(hinted && unbounded && permanent)
+    coverage.assertCovered()
   }
 
   @Test
@@ -255,7 +243,7 @@ class HeldDeviceWaitingMCPClientTest {
   fun `a busy code in prose without a typed payload is not waited on`() {
     val delegate =
       ScriptedClient(
-        mutableListOf({ throw RuntimeException("device_owned_by_other_session in prose") }),
+        mutableListOf({ throw IllegalStateException("device_owned_by_other_session in prose") }),
       )
 
     try {

@@ -17,11 +17,13 @@
 # it (test/scripts/integrationSafeTier.test.ts enforces this). Classify by READING
 # the file, never by running it; when in doubt, unsafe.
 # Last derived from origin/main on 2026-10-10.
+test/contracts/avdConfigReader.integration.test.ts | safe | fake versus real FileAvdConfigReader over a private mkdtemp AVD home removed afterwards
 test/contracts/daemonClient.integration.test.ts | safe | fake versus real DaemonClient over a unix socket in a private mkdtemp directory removed afterwards L11
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
 test/contracts/imageBackend.integration.test.ts | safe | fake versus real JimpBackend and SharpBackend decoding a repo PNG fixture, no writes L9
+test/contracts/lockFileSystem.integration.test.ts | safe | fake versus nodeLockFileSystem over a private mkdtemp directory removed afterwards
 test/contracts/mcpTaskStore.integration.test.ts | safe | fake versus real McpTaskRepository over createTestDatabase in-memory with FakeTimer L12
 test/contracts/nativeHelperRecordStore.integration.test.ts | safe | fake versus real FileNativeHelperRecordStore over a private mkdtemp AUTOMOBILE_DATA_DIR removed afterwards L10
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
@@ -30,6 +32,7 @@ test/contracts/prototypeAssetFileReader.integration.test.ts | safe | fake versus
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
 test/contracts/securePermissions.integration.test.ts | safe | fake versus real SecurePermissions over a private mkdtemp directory removed afterwards L9
+test/contracts/startupFailureTracker.integration.test.ts | safe | fake versus real DefaultStartupFailureTracker over a private mkdtemp file removed afterwards
 test/contracts/telemetryRepository.integration.test.ts | safe | fake versus real telemetry repositories over createTestDatabase in-memory L27
 test/contracts/terminalReleaseJournalDirectory.integration.test.ts | safe | fake versus real nodeTerminalReleaseJournalFileSystem over a private mkdtemp directory removed afterwards L10
 test/contracts/toolSelectionProfileProvenanceStore.integration.test.ts | safe | fake versus real provenance repository over createTestDatabase in-memory L10

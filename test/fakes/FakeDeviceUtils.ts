@@ -1,5 +1,5 @@
 import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../../src/utils/HostCommandExecutor";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
 import type { TransitionalSimulator } from "../../src/models/TransitionalSimulator";
 import {

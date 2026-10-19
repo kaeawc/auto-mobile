@@ -1,4 +1,5 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
@@ -245,14 +246,14 @@ describe("tapOn display verification", () => {
       const h = harness(true, { checked: false });
       if (extra.action === "focus") {
         const tree = hierarchy();
-        tree.hierarchy.node = {
+        tree.hierarchy.node = createFlatNodeForTest({
           text: "Wi-Fi",
           class: "android.widget.EditText",
           editable: true,
           clickable: true,
           focused: false,
           bounds: { left: 20, top: 30, right: 80, bottom: 90 },
-        };
+        });
         h.setCurrent(tree);
         h.capture.read = () => tree;
       }

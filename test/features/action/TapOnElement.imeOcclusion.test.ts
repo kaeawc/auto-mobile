@@ -1,4 +1,5 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
@@ -811,22 +812,22 @@ describe("captured iOS keyboard selected through a registered observe capture", 
     const app: ViewHierarchyNode[] = withAppQ
       ? [
           ...children,
-          {
+          createFlatNodeForTest({
             className: "UIButton",
             clickable: "true",
             text: "q",
             "view-id": appQ,
             bounds: { left: 4, top: 597, right: 43, bottom: 651 },
-          },
+          }),
         ]
       : children;
     root.node = prototype
       ? [
-          {
+          createFlatNodeForTest({
             className: "UIWindow",
             bounds: { left: 0, top: 0, right: 402, bottom: 874 },
             node: app,
-          },
+          }),
           {
             className: "UIWindow",
             bounds: { left: 300, top: 20, right: 390, bottom: 56 },

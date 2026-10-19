@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import {
   createDeviceHierarchyCapture,
   type AndroidHierarchyClients,
@@ -88,11 +89,11 @@ function fixture(elapsed: number, incomplete = true, updatedAt?: number, autoAdv
     ctrlProxyIncomplete: incomplete,
     updatedAt,
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         package: "com.test",
         "resource-id": "com.test:id/source",
         bounds: { left: 0, top: 0, right: 50, bottom: 50 },
-      },
+      }),
     },
   };
   const replies: (ViewHierarchyResult | null | Error)[] = [raw];

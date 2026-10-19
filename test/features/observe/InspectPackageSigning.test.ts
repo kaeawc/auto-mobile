@@ -25,7 +25,7 @@ const dump = (name: string) =>
     "utf8",
   );
 
-function setup(apk: string | Error, apiLevel = "36") {
+function setup(apk: Parameters<typeof loadSignedApk>[0] | Error, apiLevel = "36") {
   const adb = new FakeAdbClient();
   adb.setCommandResult("shell getprop ro.build.version.sdk", `${apiLevel}\n`);
   adb.setCommandResult(`shell pm path --user 0 '${PACKAGE}'`, `package:${APK_PATH}\n`);

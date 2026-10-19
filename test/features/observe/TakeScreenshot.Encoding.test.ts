@@ -95,7 +95,7 @@ describe("screenshot encoding and truthful metadata", () => {
       });
       const directResult = await direct.execute({});
       expect(directResult.path).toEndWith(".png");
-      expect(directResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
+      expect<unknown>(directResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(directResult.screenshotFormat).toBe("png");
       expect(directResult.screenshotMimeType).toBe("image/png");
       expect(directWriter.files.get(directResult.path ?? "")).toEqual(png);
@@ -136,7 +136,7 @@ describe("screenshot encoding and truthful metadata", () => {
       fileSystem.setBinaryFile(`${expectedPath}.temp`, png);
       const pullResult = await pull.execute({});
       expect(pullResult.path).toBe(expectedPath);
-      expect(pullResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
+      expect<unknown>(pullResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(pullResult.screenshotFormat).toBe("png");
       expect(pullResult.screenshotMimeType).toBe("image/png");
       expect(pullWriter.files.get(expectedPath)).toEqual(png);
@@ -149,10 +149,11 @@ describe("screenshot encoding and truthful metadata", () => {
   test("no options preserve raw iOS CtrlProxy PNG bytes", async () => {
     const writer = new RecordingWriter();
     const original = IOSCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
+      });
     try {
       const shot = new TakeScreenshot(iosDevice("ios-raw"), {
         adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
@@ -164,7 +165,7 @@ describe("screenshot encoding and truthful metadata", () => {
       for (const options of [undefined, {}]) {
         const result = await shot.execute(options);
         expect(result.path).toEndWith(".png");
-        expect(result.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
+        expect<unknown>(result.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
         expect(result.screenshotFormat).toBe("png");
         expect(result.screenshotMimeType).toBe("image/png");
         expect(writer.files.get(result.path ?? "")).toEqual(png);
@@ -204,7 +205,7 @@ describe("screenshot encoding and truthful metadata", () => {
       const result = await shot.execute({ format: "jpeg", quality: 70 });
       expect(result.success).toBe(true);
       expect(result.path).toEndWith(".jpg");
-      expect(result.screenshotImageSize).toEqual(
+      expect<unknown>(result.screenshotImageSize).toEqual(
         readImageHeaderDimensions(writer.files.get(result.path!)!),
       );
       expect(result.screenshotFormat).toBe("jpeg");
@@ -248,10 +249,11 @@ describe("screenshot encoding and truthful metadata", () => {
   test("iOS converts captured PNG to requested WebP and reports the saved format", async () => {
     const writer = new RecordingWriter();
     const original = IOSCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => ({ success: true, data: png.toString("base64") }),
+      });
     try {
       const shot = new TakeScreenshot(iosDevice("ios-encoding"), {
         adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
@@ -263,7 +265,7 @@ describe("screenshot encoding and truthful metadata", () => {
       const result = await shot.execute({ format: "webp", lossless: true });
       expect(result.success).toBe(true);
       expect(result.path).toEndWith(".webp");
-      expect(result.screenshotImageSize).toEqual(
+      expect<unknown>(result.screenshotImageSize).toEqual(
         readImageHeaderDimensions(writer.files.get(result.path!)!),
       );
       expect(result.screenshotFormat).toBe("webp");
@@ -276,3 +278,19 @@ describe("screenshot encoding and truthful metadata", () => {
     }
   });
 });
+
+function screenshotClient(
+  stub: Pick<IOSCtrlProxyClient, "ensureConnected" | "requestScreenshot">,
+): IOSCtrlProxyClient {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
+    8765,
+    () => {
+      throw new Error("Unexpected socket connection");
+    },
+    new FakeTimer(),
+  );
+  spyOn(client, "ensureConnected").mockImplementation(stub.ensureConnected);
+  spyOn(client, "requestScreenshot").mockImplementation(stub.requestScreenshot);
+  return client;
+}

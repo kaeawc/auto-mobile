@@ -448,7 +448,11 @@ describe("setDeviceState location", () => {
     const calls = simctl.getMethodCalls("executeCommandArgs");
     expect(calls).toHaveLength(firstCount + 2);
     expect(calls[firstCount].args).toEqual(["location", ios.deviceId, "set", "0,0.001"]);
-    expect(Number(calls[firstCount + 1].args[3].split(",")[1])).toBeCloseTo(0.0005, 8);
+    const args = calls[firstCount + 1].args;
+    if (!Array.isArray(args)) {
+      throw new Error("Expected simctl argument list");
+    }
+    expect(Number(String(args[3]).split(",")[1])).toBeCloseTo(0.0005, 8);
     routeRegistry.stop(ios.deviceId);
     expect(routeRegistry.isActive(ios.deviceId)).toBe(false);
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -482,7 +486,7 @@ describe("setDeviceState location", () => {
       heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
     };
     for (const teardown of [
-      () => release!("session", ios.deviceId, "test", snapshot),
+      () => release!("session", ios.deviceId, "test", snapshot, {}),
       () => unbound!("session", ios.deviceId),
       () => stopLocationRouteForRemovedDevice(ios.deviceId, routeRegistry),
     ]) {

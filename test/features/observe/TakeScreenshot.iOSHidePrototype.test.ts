@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import {
@@ -43,16 +43,17 @@ describe("iOS screenshot with the prototype hidden (#9305)", () => {
   beforeEach(() => {
     captures = [];
     captureFails = false;
-    IOSCtrlProxyClient.getInstance = (() => ({
-      ensureConnected: async () => true,
-      requestScreenshot: async () => {
-        captures.push("capture");
-        if (captureFails) {
-          throw new Error("simctl screenshot failed");
-        }
-        return { success: true, data: PNG.toString("base64") };
-      },
-    })) as typeof IOSCtrlProxyClient.getInstance;
+    IOSCtrlProxyClient.getInstance = () =>
+      screenshotClient({
+        ensureConnected: async () => true,
+        requestScreenshot: async () => {
+          captures.push("capture");
+          if (captureFails) {
+            throw new Error("simctl screenshot failed");
+          }
+          return { success: true, data: PNG.toString("base64") };
+        },
+      });
   });
 
   afterEach(() => {
@@ -184,3 +185,19 @@ describe("iosAgentHidesPrototypeForCapture (#9305)", () => {
     expect(iosAgentHidesPrototypeForCapture(DEVICE_ID, resolverFor(undefined))).toBe(false);
   });
 });
+
+function screenshotClient(
+  stub: Pick<IOSCtrlProxyClient, "ensureConnected" | "requestScreenshot">,
+): IOSCtrlProxyClient {
+  const client = IOSCtrlProxyClient.createForTesting(
+    { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
+    8765,
+    () => {
+      throw new Error("Unexpected socket connection");
+    },
+    new FakeTimer(),
+  );
+  spyOn(client, "ensureConnected").mockImplementation(stub.ensureConnected);
+  spyOn(client, "requestScreenshot").mockImplementation(stub.requestScreenshot);
+  return client;
+}

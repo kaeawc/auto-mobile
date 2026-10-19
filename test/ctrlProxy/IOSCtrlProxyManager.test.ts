@@ -18,7 +18,10 @@ import {
   installIosManagerSuiteHooks,
   tunnel,
 } from "../helpers/iosCtrlProxyManagerHarness";
-import { asIosCtrlProxyBuilder, createStartableBuilder } from "../helpers/iosCtrlProxyBuilderFake";
+import {
+  fakeIosCtrlProxyBuilder,
+  createStartableBuilder,
+} from "../helpers/iosCtrlProxyBuilderFake";
 
 describe("IOSCtrlProxyManager", function () {
   let testDevice: BootedDevice;
@@ -117,7 +120,7 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   test("returns the persisted runner bundle identity from its builder", async function () {
-    const builder = asIosCtrlProxyBuilder({
+    const builder = fakeIosCtrlProxyBuilder({
       getInstalledBundleVersion: async () => "2026.9.13",
     });
     const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer, builder);
@@ -805,7 +808,7 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        asIosCtrlProxyBuilder({
+        fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
@@ -849,7 +852,7 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        asIosCtrlProxyBuilder({
+        fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),
@@ -882,7 +885,7 @@ describe("IOSCtrlProxyManager", function () {
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
-        asIosCtrlProxyBuilder({
+        fakeIosCtrlProxyBuilder({
           ...createFakeBuilder(),
           needsRebuild: async () => true,
           build: async () => ({ success: false, message: "fake rebuild unavailable" }),

@@ -34,7 +34,7 @@ import {
   installListeningProcessFakes,
 } from "../helpers/iosCtrlProxyManagerHarness";
 import {
-  asIosCtrlProxyBuilder,
+  fakeIosCtrlProxyBuilder,
   createReusedRunnerBuilder,
   createStartableBuilder,
   fakeWriteRunnerEnvironment,
@@ -240,11 +240,10 @@ describe("IOSCtrlProxyManager simulator start", function () {
       };
       installListeningProcessFakes(fakeExecutor, [runnerProcess, simulatorProcess]);
       fakeExecutor.setCommandHandler("lsof -nP -iTCP:", () => createExecResult("", ""));
-      const fakeBuilder = asIosCtrlProxyBuilder({
+      const fakeBuilder = fakeIosCtrlProxyBuilder({
         getXctestrunPath: async () => {
           throw new Error("should not build when a healthy direct runner is reused");
         },
-        getRunnerBinaryPath: async () => null,
         verifyRunnerBinaryBeforeLaunch: async () => {},
         writeRunnerEnvironment: fakeWriteRunnerEnvironment,
       });
@@ -662,9 +661,8 @@ describe("IOSCtrlProxyManager simulator start", function () {
           env: Record<string, string>;
           deviceId: string;
         }[] = [];
-        const fakeBuilder = asIosCtrlProxyBuilder({
+        const fakeBuilder = fakeIosCtrlProxyBuilder({
           getXctestrunPath: async () => "/tmp/test.xctestrun",
-          getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: async (
             xctestrunPath: string,
@@ -823,9 +821,8 @@ describe("IOSCtrlProxyManager simulator start", function () {
         isPortAvailable: (port: number) => port !== 8765,
       });
       try {
-        const fakeBuilder = asIosCtrlProxyBuilder({
+        const fakeBuilder = fakeIosCtrlProxyBuilder({
           getXctestrunPath: async () => sourceXctestrun,
-          getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: (p: string, env: Record<string, string>, id: string) =>
             realBuilder.writeRunnerEnvironment(p, env, id),
@@ -926,9 +923,8 @@ describe("IOSCtrlProxyManager simulator start", function () {
       });
       try {
         const writeCalls: { env: Record<string, string>; deviceId: string }[] = [];
-        const fakeBuilder = asIosCtrlProxyBuilder({
+        const fakeBuilder = fakeIosCtrlProxyBuilder({
           getXctestrunPath: async () => "/tmp/device.xctestrun",
-          getRunnerBinaryPath: async () => null,
           getExpectedAppHash: () => "",
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: async (
@@ -1116,11 +1112,10 @@ describe("IOSCtrlProxyManager simulator start", function () {
         fakeExecutor.setCommandResponse("http://127.0.0.1:8766/health", createExecResult("", ""));
         fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
         fakeTimer.enableAutoAdvance();
-        const fakeBuilder = asIosCtrlProxyBuilder({
+        const fakeBuilder = fakeIosCtrlProxyBuilder({
           getXctestrunPath: async () => {
             throw new Error("should not build when an external direct runner is reused");
           },
-          getRunnerBinaryPath: async () => null,
           verifyRunnerBinaryBeforeLaunch: async () => {},
           writeRunnerEnvironment: fakeWriteRunnerEnvironment,
         });

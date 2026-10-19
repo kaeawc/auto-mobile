@@ -9,7 +9,8 @@ export {
   IOS_MEDIA_READ_UNSUPPORTED_REASON,
   type SharedStorageReadCoverage,
 };
-import { SimctlIosFilesFixtureContainer, nodeAppFileFileSystem } from "./appFileService";
+import { SimctlIosFilesFixtureContainer } from "./SimctlIosFilesFixtureContainer";
+import { nodeAppFileFileSystem } from "./appFileSupport";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { createHash } from "node:crypto";

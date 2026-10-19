@@ -14,7 +14,7 @@ import {
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
 import { isDeviceInventoryTool } from "../daemonMcpProxy";
 import type { SessionReleaseSnapshot } from "../sessionManager";
-import { DaemonBoundSessionExpiredError } from "./daemonErrors";
+import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
 import type { ProxySessionState } from "./ProxySessionState";
 
 /**

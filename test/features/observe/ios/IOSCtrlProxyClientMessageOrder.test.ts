@@ -1,4 +1,4 @@
-import { createIosHierarchyConverter } from "../../../helpers/iosHierarchyConverter";
+import { convertIosHierarchy } from "../../../helpers/iosHierarchyConverter";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -45,7 +45,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         },
         convert: () => {
           calls.push("convert");
-          return createIosHierarchyConverter().convertToViewHierarchyResult(captured);
+          return convertIosHierarchy(captured);
         },
         recordLayoutTelemetry: () => {
           calls.push("layout");
@@ -73,12 +73,7 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         8765,
         createSuccessWebSocketFactory(timer),
         timer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        options,
+        { options },
       );
       void client.connectionTestHooks.deliverMessage(
         JSON.stringify({

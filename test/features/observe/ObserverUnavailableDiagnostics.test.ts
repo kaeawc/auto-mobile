@@ -131,12 +131,14 @@ test.each([
       8765,
       createInstantFailureWebSocketFactory(timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
+      {
+        serviceManagerFactory: undefined,
+        bootedDeviceLister: undefined,
+        deviceConnectionLostNotifier: undefined,
+        sdkEventIngestor: undefined,
+        retryExecutor: undefined,
+        options: true,
+      },
     );
     const connect = spyOn(client, "connectForObservationRead").mockResolvedValue(false);
     const close = spyOn(client, "close");

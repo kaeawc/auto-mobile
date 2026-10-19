@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import { ActionableError } from "../../../../src/models/ActionableError";
-import type { CtrlProxyActionResult, IOSCtrlProxy } from "../../../../src/features/observe/ios";
+import type { CtrlProxyActionResult, IosCtrlProxy } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
   FakeWebSocket,
@@ -572,8 +572,8 @@ describe("CtrlProxyVoiceOver", function () {
     // `CtrlProxyVoiceOverActionResult`, these mutual assignments stop compiling
     // and the typecheck gate fails.
     test("returns the same CtrlProxyActionResult type as requestAction (compile-time guard)", function () {
-      type ActivateResult = Awaited<ReturnType<IOSCtrlProxy["requestVoiceOverActivate"]>>;
-      type ActionResult = Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
+      type ActivateResult = Awaited<ReturnType<IosCtrlProxy["requestVoiceOverActivate"]>>;
+      type ActionResult = Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
 
       // Both directions must hold → the two shapes are identical.
       const fromAction: ActivateResult = {} as ActionResult;

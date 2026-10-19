@@ -1,5 +1,4 @@
 # AutoMobile test unknown-cast ratchet baseline -- see scripts/test-as-any-baseline.sh
-2	test/daemon/daemonDevicePoolStartup.test.ts
 3	test/daemon/daemonForeignForwardWiring.test.ts
 4	test/daemon/daemonShutdownSessionRelease.test.ts
 3	test/daemon/hierarchyStreamDiff.test.ts
@@ -24,7 +23,6 @@
 1	test/features/observe/ios/tapDiagnostics.test.ts
 1	test/fixtures/observe/observeFixture.ts
 4	test/helpers/devicePoolSuite.ts
-5	test/helpers/directFrameRig.ts
 7	test/helpers/inMemoryDaemonWire.ts
 1	test/helpers/livenessScenarioHarness.test.ts
 1	test/lint/deviceToolsKillDeviceImportCasing.test.ts

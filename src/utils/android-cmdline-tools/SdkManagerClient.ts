@@ -20,6 +20,7 @@ import {
   validateRequiredTools,
   type AndroidToolsLocation,
 } from "./detection";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 const SDK_ROOT_MARKERS = ["system-images", "platforms", "platform-tools", "build-tools"];
 const DEFAULT_MAX_OUTPUT_CHARS = 16_384;
@@ -358,7 +359,7 @@ export class SdkManagerClient {
     }
     const command = `"${[quoteForWindowsCmd(path), ...args.map(quoteForWindowsCmd)].join(" ")}"`;
     return {
-      command: environment.ComSpec ?? environment.COMSPEC ?? "cmd.exe",
+      command: readEnvRaw(AMBIENT_ENV.COMSPEC, environment) ?? "cmd.exe",
       args: ["/d", "/v:off", "/s", "/c", command],
     };
   }

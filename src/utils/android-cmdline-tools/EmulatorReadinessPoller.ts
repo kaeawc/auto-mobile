@@ -38,6 +38,7 @@ import type {
   ReadinessPollOutcome,
   ReadinessPollingState,
 } from "./EmulatorReadinessTypes";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 export const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
@@ -290,7 +291,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
     // Read polling interval from environment variable (default: 500ms, minimum: 100ms)
     const pollingIntervalMs = resolveEmulatorPollingInterval(
-      process.env.EMULATOR_POLLING_INTERVAL_MS,
+      readEnvRaw(AMBIENT_ENV.EMULATOR_POLLING_INTERVAL_MS),
     );
     logger.info(
       `Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`,

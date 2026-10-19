@@ -1,6 +1,7 @@
 import { DeviceLostError } from "../models/DeviceLostError";
 import { ActionableError } from "../models/ActionableError";
 import { InMemoryProvisionedDeviceTransportFence } from "./InMemoryProvisionedDeviceTransportFence";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 export { InMemoryProvisionedDeviceTransportFence } from "./InMemoryProvisionedDeviceTransportFence";
 export { DurableProvisionedDeviceTransportFence } from "./DurableProvisionedDeviceTransportFence";
 
@@ -24,7 +25,9 @@ export interface ProvisionedDeviceTransportFence {
 }
 
 let defaultFence: ProvisionedDeviceTransportFence | undefined =
-  process.env.NODE_ENV === "test" ? new InMemoryProvisionedDeviceTransportFence() : undefined;
+  readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test"
+    ? new InMemoryProvisionedDeviceTransportFence()
+    : undefined;
 
 /** Startup owns construction; repeated registration must preserve the process-wide fence. */
 export function initializeProvisionedDeviceTransportFence(

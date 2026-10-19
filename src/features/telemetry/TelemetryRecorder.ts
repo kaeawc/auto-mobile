@@ -15,6 +15,7 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
 import { testOverrides } from "../../utils/testOverrides";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 
 export type TelemetryCategory =
   | "network"
@@ -111,7 +112,7 @@ export class TelemetryRecorder {
 
   constructor(
     repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride === undefined
-      ? process.env.NODE_ENV === "test" && testOverrides.telemetryNoOpDefault
+      ? readEnvRaw(AMBIENT_ENV.NODE_ENV) === "test" && testOverrides.telemetryNoOpDefault
         ? noOpRepository
         : defaultRepository
       : (TelemetryRecorder.defaultRepositoryOverride ?? defaultRepository),

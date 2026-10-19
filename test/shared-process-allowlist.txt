@@ -29,6 +29,7 @@ test/contracts/displayInventoryProvider.test.ts
 test/contracts/displayTransitionReader.test.ts
 test/contracts/elementParser.test.ts
 test/contracts/elementSelector.test.ts
+test/contracts/emulatorConsoleBusyRegistry.test.ts
 test/contracts/gestureExecutor.test.ts
 test/contracts/hierarchyCapture.test.ts
 test/contracts/highlightClient.test.ts
@@ -120,6 +121,7 @@ test/daemon/devicePool.androidTransportAliases.control.test.ts
 test/daemon/devicePool.assignDevice.restartRecovery.test.ts
 test/daemon/devicePool.assignDevice.test.ts
 test/daemon/devicePool.assignMultipleDevices.recovery.test.ts
+test/daemon/devicePool.bindDevice.callerSignal.test.ts
 test/daemon/devicePool.bindingAgreement.test.ts
 test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
@@ -171,6 +173,7 @@ test/daemon/explicitReleaseOfUnrecoveredRestartRow.test.ts
 test/daemon/extractionRoot.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/fakeDaemonClientContract.test.ts
+test/daemon/fakeDaemonClientSemantics.test.ts
 test/daemon/finalizeWaitBudgetContract.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
@@ -239,8 +242,14 @@ test/daemon/privateDaemonOrphanWatchdog.test.ts
 test/daemon/processGeneration.test.ts
 test/daemon/processGenerationFields.test.ts
 test/daemon/proxy/BoundSessionFenceGate.test.ts
+test/daemon/proxy/BrokerSessions.test.ts
+test/daemon/proxy/ConnectionPresentationProfile.test.ts
 test/daemon/proxy/ConnectionRecovery.test.ts
 test/daemon/proxy/DaemonErrorClassifier.test.ts
+test/daemon/proxy/DaemonShutdownBarrier.test.ts
+test/daemon/proxy/DeviceCleanupWait.test.ts
+test/daemon/proxy/DiscoveryListCache.test.ts
+test/daemon/proxy/FinalizedRecordingOwners.test.ts
 test/daemon/proxy/ForwardedResultApplier.test.ts
 test/daemon/proxy/HandoverResolution.test.ts
 test/daemon/proxy/HeartbeatKeeper.test.ts
@@ -391,6 +400,7 @@ test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/toolCallDeviceIdentity.test.ts
 test/daemon/toolListPoller.test.ts
+test/daemon/toolRegistryPort.test.ts
 test/daemon/undeliveredRebindRevertsOverrides.test.ts
 test/daemon/undeliveredRebindStrandedByOwnRestore.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
@@ -448,6 +458,7 @@ test/fakes/FakeAdbClient.test.ts
 test/fakes/FakeAdbClientFactory.test.ts
 test/fakes/FakeBindingRegistry.test.ts
 test/fakes/FakeCtrlProxy.test.ts
+test/fakes/FakeDeviceSessionPersistence.test.ts
 test/fakes/FakeFailureRecorder.test.ts
 test/fakes/FakeGuestInputAdb.test.ts
 test/fakes/FakeIOSCtrlProxy.test.ts
@@ -594,7 +605,9 @@ test/features/action/swipeon/swipeNavigation.test.ts
 test/features/action/swipeon/swipeOnUtils.property.test.ts
 test/features/action/swipeon/swipeOnUtils.test.ts
 test/features/action/swipeon/swipeSelectorScopes.test.ts
+test/features/action/tapEnsureCheckedPhase.test.ts
 test/features/action/tapFocusVerifier.test.ts
+test/features/action/tapPostTapEffectPhase.test.ts
 test/features/action/tapSharedHelpers.test.ts
 test/features/action/textTransportTimeout.test.ts
 test/features/action/touchscreenInput.test.ts
@@ -705,7 +718,6 @@ test/features/observe/SingleDisplayStages.test.ts
 test/features/observe/TakeScreenshot.AndroidAdbFilePull.test.ts
 test/features/observe/TakeScreenshot.AndroidPhysicalDisplayId.test.ts
 test/features/observe/TakeScreenshot.PathGeneration.test.ts
-test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts
 test/features/observe/TrackedScreenGeometry.property.test.ts
 test/features/observe/TrackedScreenGeometry.test.ts
 test/features/observe/ViewHierarchy.filter.test.ts
@@ -964,7 +976,6 @@ test/features/utility/ElementResolver.iosStaleSdkContainer.test.ts
 test/features/utility/ElementTraitQueries.test.ts
 test/features/utility/LocationRoutePlayer.test.ts
 test/features/utility/ResolverElementSelectorContainerMatch.test.ts
-test/features/utility/ResolverElementSelectorIosScreenSize.test.ts
 test/features/utility/ScopedSelection.test.ts
 test/features/utility/TextMatcher.property.test.ts
 test/features/utility/TextMatcher.test.ts
@@ -1316,6 +1327,7 @@ test/server/executionTracker.test.ts
 test/server/failuresResources.test.ts
 test/server/failuresTimelineMalformedUri.test.ts
 test/server/featureFlagResources.test.ts
+test/server/finalizeToolResponse.structuredParity.test.ts
 test/server/flattenTopLevelUnion.test.ts
 test/server/formToolsSchemaErrors.test.ts
 test/server/forwardingLeaseConflictOutcome.test.ts
@@ -1337,7 +1349,6 @@ test/server/interactionTools.clipboard.test.ts
 test/server/interactionTools.image.test.ts
 test/server/interactionTools.pinchOn.test.ts
 test/server/interactionTools.swipeOn.test.ts
-test/server/interactionTools.tapOnMessage.test.ts
 test/server/internalToolCall.property.test.ts
 test/server/internalToolCall.test.ts
 test/server/internalToolPayloads.property.test.ts
@@ -1466,6 +1477,7 @@ test/server/toolParamErrorHint.test.ts
 test/server/toolParams.test.ts
 test/server/toolRegistry.reachability.test.ts
 test/server/toolRegistry.registerWithServer.test.ts
+test/server/toolRegistry.toolCallStatus.test.ts
 test/server/toolRegistryNotifyToolListChanged.test.ts
 test/server/toolResponseShapes.test.ts
 test/server/toolResultLog.property.test.ts

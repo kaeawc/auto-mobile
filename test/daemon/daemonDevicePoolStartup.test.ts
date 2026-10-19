@@ -77,7 +77,7 @@ describe("Daemon startup device discovery", () => {
     const daemon = buildDaemon(new FakeTimer());
     const internals = daemon;
     const manager = new FakeDeviceManager();
-    Object.assign(internals.testHooks.devicePool, { deviceManager: manager });
+    internals.testHooks.devicePool.testHooks.setDeviceManager(manager);
     const discovery = spyOn(manager, "getBootedDevicesDetailed").mockRejectedValue(
       new Error("startup discovery failed"),
     );
@@ -112,7 +112,7 @@ describe("Daemon startup device discovery", () => {
       manager.bootedDevices = populated
         ? [{ deviceId: "startup-device", name: "Physical Android", platform: "android" }]
         : [];
-      Object.assign(internals.testHooks.devicePool, { deviceManager: manager });
+      internals.testHooks.devicePool.testHooks.setDeviceManager(manager);
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
@@ -267,11 +267,7 @@ describe("Daemon startup device discovery", () => {
       platform: "android",
     };
     manager.bootedDevices = [device, lateDevice];
-    (
-      internals.testHooks.devicePool as unknown as {
-        deviceManager: DeferredDiscoveryDeviceManager;
-      }
-    ).deviceManager = manager;
+    internals.testHooks.devicePool.testHooks.setDeviceManager(manager);
     const refreshCompleted = Promise.withResolvers<void>();
     const originalInitialize = internals.initializeDevicePool.bind(internals);
     internals.initializeDevicePool = async () => {

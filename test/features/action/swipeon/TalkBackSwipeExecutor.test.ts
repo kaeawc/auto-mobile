@@ -93,7 +93,7 @@ describe("TalkBackSwipeExecutor", () => {
       perf,
     });
     expect(fakeCtrlProxy.getActionHistory()).toEqual([]);
-    expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toEqual([
+    expect<unknown>(fakeCtrlProxy.getTwoFingerSwipeHistory()).toEqual([
       {
         x1: x,
         y1: bounds.bottom - 10,
@@ -649,7 +649,7 @@ describe("TalkBackSwipeExecutor", () => {
       (fingerDirection, expectedAction) => {
         // The non-TalkBack path moves the finger in `fingerDirection`; the
         // TalkBack ACTION_SCROLL must move the content the same way.
-        expect(scrollActionForFingerDirection(fingerDirection)).toBe(expectedAction);
+        expect<unknown>(scrollActionForFingerDirection(fingerDirection)).toBe(expectedAction);
       },
     );
 

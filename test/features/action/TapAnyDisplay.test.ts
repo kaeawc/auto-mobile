@@ -105,7 +105,7 @@ function harness(
     args[0].beforeSend?.();
     dispatches.push(args[0].displayId);
     onDispatch();
-    return { success: true };
+    return { success: true, totalTimeMs: 0 };
   });
   restores.push(
     () => capability.mockRestore(),

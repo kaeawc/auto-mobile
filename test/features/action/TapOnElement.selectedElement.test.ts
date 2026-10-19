@@ -1,3 +1,4 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { describe, expect, test } from "bun:test";
 import type {
   Element,
@@ -19,7 +20,7 @@ import {
 const rowNode = (row: Element): ViewHierarchyNode => ({ $: { ...row } });
 
 const hierarchyOf = (...rows: Element[]): ViewHierarchyResult => ({
-  hierarchy: { node: { node: rows.map(rowNode) } },
+  hierarchy: { node: createFlatNodeForTest({ node: rows.map(rowNode) }) },
 });
 
 const metadataOf = (tap: TapOnElement, selection: ElementSelectionResult) => {
@@ -151,7 +152,7 @@ describe("TapOnElement selectedElement metadata", () => {
     const tapOnElement = createTapOnElement("ios");
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: {
+        node: createFlatNodeForTest({
           $: {
             bounds: { left: 0, top: 0, right: 100, bottom: 100 },
             class: "XCUIElementTypeWindow",
@@ -166,7 +167,7 @@ describe("TapOnElement selectedElement metadata", () => {
               },
             },
           ],
-        },
+        }),
       },
       windows: [
         {
@@ -319,8 +320,8 @@ describe("TapOnElement selectedElement metadata", () => {
 
       const selectedElement = metadataOf(tapOnElement, selection);
 
-      expect(selectedElement.text).toBe(entry.element.text);
-      expect(selectedElement.resourceId).toBe(entry.element["resource-id"]);
+      expect<unknown>(selectedElement.text).toBe(entry.element.text);
+      expect<unknown>(selectedElement.resourceId).toBe(entry.element["resource-id"]);
       expect(selectedElement.selectionStrategy).toBe("first");
       expect(selectedElement.totalMatches).toBe(1);
       expect(selectedElement.indexInMatches).toBe(0);
@@ -365,12 +366,12 @@ test("selection metadata separates the matched text child from the shared action
   const childBounds = { left: 10, top: 10, right: 100, bottom: 40 };
   const hierarchy = {
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         "resource-id": "app:id/row",
         bounds: rowBounds,
         clickable: true,
-        node: { text: "Wi-Fi", bounds: childBounds },
-      },
+        node: [createFlatNodeForTest({ text: "Wi-Fi", bounds: childBounds })],
+      }),
     },
   };
   const selector = new ResolverElementSelector();
@@ -420,17 +421,19 @@ test("nested promotion chooses the nearest eligible ancestor and honors resource
     await import("../../../src/features/utility/ResolverElementSelector");
   const hierarchy = {
     hierarchy: {
-      node: {
+      node: createFlatNodeForTest({
         "resource-id": "app:id/outer",
         "long-clickable": true,
         clickable: true,
         bounds: { left: 0, top: 0, right: 300, bottom: 100 },
-        node: {
-          clickable: true,
-          bounds: innerBounds,
-          node: { text: "Wi-Fi", bounds: labelBounds },
-        },
-      },
+        node: [
+          createFlatNodeForTest({
+            clickable: true,
+            bounds: innerBounds,
+            node: [createFlatNodeForTest({ text: "Wi-Fi", bounds: labelBounds })],
+          }),
+        ],
+      }),
     },
   };
   const matched: Element = { text: "Wi-Fi", bounds: labelBounds };

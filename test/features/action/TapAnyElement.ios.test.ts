@@ -241,7 +241,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "activate",
@@ -273,7 +273,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "tap" });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "activate",
@@ -290,7 +290,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 1500 });
 
     expect(result.success).toBe(true);
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "long_press",
@@ -313,7 +313,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("no such label");
-    expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+    expect<unknown>(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
       {
         label: "Target Button",
         action: "activate",

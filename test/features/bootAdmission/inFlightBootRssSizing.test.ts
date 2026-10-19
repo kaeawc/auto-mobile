@@ -159,7 +159,7 @@ test.each([
   const { source, gate } = setup();
   const boot = await gate.admit(request);
   boot.handOff("emulator-5554", handedOffPid);
-  source.emulatorProcessPids = sampledPids;
+  source.emulatorProcessPids = sampledPids ? [...sampledPids] : undefined;
   source.emulatorProcessRssBytes = [150 * MIB];
   expect((await gate.describeCapacity()).limit).toBe(2);
   await expect(gate.admit(request)).rejects.toBeInstanceOf(BootCapacityExhaustedError);

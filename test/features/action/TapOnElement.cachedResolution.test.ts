@@ -23,7 +23,12 @@ import {
   TapOnElement,
   type TapOnElementDependencies,
 } from "../../../src/features/action/TapOnElement";
-import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import type {
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+  TapOnElementOptions,
+} from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -36,7 +41,7 @@ import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapS
 import { HierarchyTalkBackDriver } from "../talkback/HierarchyTalkBackDriver";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 
-import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import { TapAnyElement as RealTapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 
@@ -109,8 +114,8 @@ function harness(
       effect: { screenChanged: false, basis: "viewHierarchy unchanged" },
     };
   };
-  tap.captureTerminalObservationScreenshot = async () => {};
-  tap.recordDeferredPredictionOutcome = async () => {};
+  tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  tap.testHooks.setDeferredPredictionRecorder(async () => {});
   return { tap, observe, points, timer, adb, strategy };
 }
 
@@ -687,7 +692,12 @@ describe("tapAny TalkBack retry freshness", () => {
     const detector = new FakeAccessibilityDetector();
     detector.setTalkBackEnabled(true);
     const driver = new HierarchyTalkBackDriver();
-    driver.setActionResult({ success: false, action: "click", error: "unsupported" });
+    driver.setActionResult({
+      success: false,
+      action: "click",
+      totalTimeMs: 0,
+      error: "unsupported",
+    });
     const before = page([row("Current", 300)], "Main");
     const after = page([row("Current", 500)], "Main");
     driver.hierarchy = before.viewHierarchy;
@@ -802,8 +812,8 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       tap.observeScreen = screen;
       tap.awaitIdle = new FakeAwaitIdle();
       tap.window = new FakeWindow();
-      tap.captureTerminalObservationScreenshot = async () => {};
-      tap.recordDeferredPredictionOutcome = async () => {};
+      tap.testHooks.setTerminalScreenshotCapture(async () => {});
+      tap.testHooks.setDeferredPredictionRecorder(async () => {});
       if (tap instanceof TapOnElement) {
         const dispatch = tap.executeAndroidTap.bind(tap);
         tap.executeAndroidTap = async (...args) => {
@@ -821,12 +831,15 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         });
       }
       const guardReads = spyOn(driver, "getAccessibilityHierarchy");
-      const result = await tap.execute({
+      const tapRequest = {
         text: "Apps",
         action: "tap",
         retryIfNoChange: false,
         selectionStrategy: "first",
-      });
+      } satisfies TapOnElementOptions;
+      const result = await (tap instanceof TapOnElement
+        ? tap.execute(tapRequest)
+        : tap.execute(tapRequest));
       expect(result.success).toBe(true);
       expect(result.element?.bounds).toEqual(row("Apps", 300).bounds);
       const reads = captures.requests.length - setupReads;
@@ -1082,19 +1095,22 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     tap.observeScreen = screen;
     tap.awaitIdle = new FakeAwaitIdle();
     tap.window = new FakeWindow();
-    tap.captureTerminalObservationScreenshot = async () => {};
-    tap.recordDeferredPredictionOutcome = async () => {};
+    tap.testHooks.setTerminalScreenshotCapture(async () => {});
+    tap.testHooks.setDeferredPredictionRecorder(async () => {});
     if (tap instanceof TapOnElement) {
       tap.executeAndroidTap = h.tap.executeAndroidTap;
       tap.deriveTapEffectAfterPostTapObservation = h.tap.deriveTapEffectAfterPostTapObservation;
     }
-    const result = await tap.execute({
+    const tapRequest = {
       text: "Apps",
       action: "longPress",
       duration: 100,
       retryIfNoChange: false,
       selectionStrategy: "first",
-    });
+    } satisfies TapOnElementOptions;
+    const result = await (tap instanceof TapOnElement
+      ? tap.execute(tapRequest)
+      : tap.execute(tapRequest));
     expect(result.success).toBe(true);
     expect(result.element?.bounds).toEqual(row("Apps", 300).bounds);
     expect(captures.requests.slice(0, 2).map((request) => request.freshness)).toEqual([
@@ -1109,4 +1125,23 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       );
     }
   });
+}
+
+/** Exposes the inherited protected bookkeeping seams to this test harness. */
+class TapAnyElement extends RealTapAnyElement {
+  override get testHooks() {
+    return {
+      ...super.testHooks,
+      setTerminalScreenshotCapture: (
+        capture: (observation: ObserveResult | undefined) => Promise<void>,
+      ) => {
+        this.captureTerminalObservationScreenshot = capture;
+      },
+      setDeferredPredictionRecorder: (
+        record: (result: unknown, observation: ObserveResult) => Promise<void>,
+      ) => {
+        this.recordDeferredPredictionOutcome = record;
+      },
+    };
+  }
 }

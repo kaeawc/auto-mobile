@@ -46,7 +46,7 @@ import { isCliToolFailure } from "../src/cli/index";
 import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
 import { getDeviceSessionIdFromResult } from "../src/server/deviceSessionResult";
 import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
-import { withV1ClientErrors } from "../src/server/mcpError";
+import { withV1ClientErrors } from "../src/daemon/mcpError";
 
 export interface DriveStep {
   tool: string;

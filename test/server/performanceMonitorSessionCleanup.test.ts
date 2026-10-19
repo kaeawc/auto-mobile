@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
-import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "../../src/daemon/performanceMonitorSessionCleanup";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";

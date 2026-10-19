@@ -76,7 +76,7 @@ import {
   type PrototypeAgentRegistry,
   type PreparedPrototypeLaunch,
 } from "../features/prototype/ios/prototypeAgentInjection";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";

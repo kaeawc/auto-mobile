@@ -3,7 +3,7 @@ import {
   type Resource,
   type ResourceTemplateType as ResourceTemplate,
 } from "@modelcontextprotocol/server";
-import { McpError } from "./mcpError";
+import { McpError } from "../daemon/mcpError";
 import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
 import { setDefaultResourceNotifier } from "../utils/NetworkState";

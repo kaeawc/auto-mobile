@@ -10,7 +10,7 @@ import {
 import {
   foreignOwnedSessionUuidFromResult,
   routedSessionUuidFromResult,
-} from "../../server/routedSessionMeta";
+} from "../routedSessionMeta";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSelectionControl";
 import { isDeviceInventoryTool } from "../daemonMcpProxy";
 import type { SessionReleaseSnapshot } from "../sessionManager";

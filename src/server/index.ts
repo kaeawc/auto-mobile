@@ -16,17 +16,17 @@ import {
   createReleaseSubscribedBindingStore,
   daemonSessionToolBindingStore,
 } from "./daemonSessionToolBindingStore";
-import { dropToolCallRecording } from "./toolCallRecordingManager";
+import { dropToolCallRecording } from "../daemon/toolCallRecordingManager";
 
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
-import { daemonTaskManager } from "./tasks/daemonTaskManager";
+import { daemonTaskManager } from "../daemon/tasks/daemonTaskManager";
 import { installTasksProtocol } from "./tasks/installTasksProtocol";
-import type { TaskManager } from "./tasks/TaskManager";
-import type { TaskLeaseKeepalive } from "./tasks/taskLeaseKeepalive";
+import type { TaskManager } from "../daemon/tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "../daemon/tasks/taskLeaseKeepalive";
 import { createTaskAwareToolCallExecutor, TASK_ELIGIBLE_TOOLS } from "./tasks/toolCallTasks";
 import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 

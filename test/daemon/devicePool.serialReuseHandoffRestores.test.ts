@@ -14,7 +14,7 @@ import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/De
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { registerNetworkStateSessionCleanup } from "../../src/daemon/networkStateSessionCleanup";
 import { NetworkState } from "../../src/utils/NetworkState";
 import {
   registerLocationRouteSessionCleanup,

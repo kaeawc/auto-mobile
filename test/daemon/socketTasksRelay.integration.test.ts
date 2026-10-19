@@ -37,12 +37,12 @@ import type {
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
-import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";
+import { TASKS_EXTENSION_ID } from "../../src/daemon/tasks/mcpTasksExtension";
 import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
   type TaskManager,
-} from "../../src/server/tasks/TaskManager";
+} from "../../src/daemon/tasks/TaskManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";

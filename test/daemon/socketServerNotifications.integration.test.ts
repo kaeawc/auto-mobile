@@ -9,7 +9,7 @@ import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 import {
   SessionReleaseBroadcaster,
   SESSION_RELEASED_NOTIFICATION_METHOD,
-} from "../../src/server/sessionReleaseBroadcast";
+} from "../../src/daemon/sessionReleaseBroadcast";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";

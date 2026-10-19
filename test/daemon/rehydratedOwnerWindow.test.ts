@@ -8,7 +8,7 @@ import {
 } from "../../src/daemon/sessionLivenessWindows";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonLifecycleHarness } from "./helpers/DaemonLifecycleHarness";

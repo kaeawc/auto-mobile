@@ -1,4 +1,4 @@
-import type { DevicePool } from "../daemon/devicePool";
+import type { DevicePool } from "./devicePool";
 import type { DeviceDiscoveryError, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice } from "../models";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";

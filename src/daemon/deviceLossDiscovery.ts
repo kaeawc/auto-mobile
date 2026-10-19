@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../models";
 import type { BootedDeviceDiscovery, MultiPlatformDeviceManager } from "../devices/deviceUtils";
-import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
+import { transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import type { Session } from "./sessionManager";
 import {
   interruptVideoRecording,

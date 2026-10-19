@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { DaemonNotification } from "../../src/daemon/types";
-import { ROUTED_SESSION_META_KEY } from "../../src/server/routedSessionMeta";
+import { ROUTED_SESSION_META_KEY } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { KEEPER_INTERVAL_MS, LivenessScenario } from "../helpers/livenessScenarioHarness";
 import { warmedTests } from "../helpers/warmedTests";

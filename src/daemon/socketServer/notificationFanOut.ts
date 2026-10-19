@@ -11,7 +11,7 @@ import {
   type ListChangedKind,
   type ResourceUpdateTargets,
 } from "../../server/listChangedBroadcast";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../sessionReleaseBroadcast";
 import { idleReleaseField } from "../releaseReasons";
 
 /**

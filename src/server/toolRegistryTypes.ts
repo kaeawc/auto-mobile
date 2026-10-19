@@ -1,8 +1,8 @@
 import type { ZodType } from "zod/v4";
 import type { McpToolCallResult } from "./toolCallDispatch";
-import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
+import type { DeviceReadOnlyArgShape } from "../daemon/deviceReadOnlyArgShapes";
 
-import { type ToolTransportRecovery } from "./toolTransportRecovery";
+import { type ToolTransportRecovery } from "../daemon/toolTransportRecovery";
 
 import { DeviceSessionManager, type DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";

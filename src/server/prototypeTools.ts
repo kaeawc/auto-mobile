@@ -20,7 +20,7 @@ import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import * as requestWiring from "../features/prototype/prototypeRequestWiring";
 import { PrototypeEventCoordinator } from "../features/prototype/PrototypeEventCoordinator";

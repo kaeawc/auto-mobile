@@ -92,7 +92,7 @@ export {
   startupOptionDeficits,
   mergeDaemonOptions,
 } from "./proxy/startupOptions";
-import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgShapes";
+import { anyDeviceReadOnlyArgShapeMatches } from "./deviceReadOnlyArgShapes";
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
@@ -151,7 +151,7 @@ import {
   RESOURCE_UPDATED_NOTIFICATION_METHOD,
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
-import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "./sessionReleaseBroadcast";
 import { SESSION_OWNERSHIP_LOST_CODE } from "./sessionReleasedDuringCall";
 import {
   declaresDeviceSessionSuspect,
@@ -163,15 +163,15 @@ import {
   readDeviceCleanupInProgressRefusal,
   readTerminalSessionRefusal,
 } from "../server/deviceSessionResult";
-import { routedSessionUuidFromResult } from "../server/routedSessionMeta";
+import { routedSessionUuidFromResult } from "./routedSessionMeta";
 import {
   toolSelectionProfileUuidFromResponse,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../features/toolSelection/toolSelectionControl";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { isCreateTaskResult } from "../server/tasks/mcpTasksExtension";
-import type { TaskRelayFrame, TaskRelayMethod } from "../server/tasks/taskRelay";
+import { isCreateTaskResult } from "./tasks/mcpTasksExtension";
+import type { TaskRelayFrame, TaskRelayMethod } from "./tasks/taskRelay";
 import { TaskSessionBindings } from "./proxy/TaskSessionBindings";
 import {
   ToolCallForwarder,
@@ -189,7 +189,7 @@ const { DaemonPreflightConnectionError, HeldSessionNotFoundError } = daemonInter
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
 import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "../models/deviceAcquisitionRefusals";
-import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../utils/toolEnvelopePayload";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,

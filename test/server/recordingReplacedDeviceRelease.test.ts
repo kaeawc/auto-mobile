@@ -3,7 +3,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { promises as fsPromises } from "node:fs";
 import * as segmentedTools from "../../src/server/videoRecordingTools";
-import * as gestures from "../../src/server/deviceGestureRecordingManager";
+import * as gestures from "../../src/daemon/deviceGestureRecordingManager";
 import * as manager from "../../src/server/videoRecordingManager";
 import {
   defaultRecordingSessionCleanupDeps,
@@ -21,7 +21,7 @@ import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
-import { resetStoppedDeviceGestureRecordings } from "../../src/server/deviceGestureRecordingManager";
+import { resetStoppedDeviceGestureRecordings } from "../../src/daemon/deviceGestureRecordingManager";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { logger } from "../../src/utils/logger";
 import { createVideoRecordingToolsHarness } from "../helpers/videoRecordingToolsHarness";

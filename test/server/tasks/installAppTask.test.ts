@@ -6,7 +6,7 @@ import {
   setInstalledAppResourceRefresh,
 } from "../../../src/server/appTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import type { TaskLeaseHoldRequest } from "../../../src/server/tasks/taskLeaseKeepalive";
+import type { TaskLeaseHoldRequest } from "../../../src/daemon/tasks/taskLeaseKeepalive";
 import { TASK_ELIGIBLE_TOOLS } from "../../../src/server/tasks/toolCallTasks";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 import { FakeTimer } from "../../fakes/FakeTimer";

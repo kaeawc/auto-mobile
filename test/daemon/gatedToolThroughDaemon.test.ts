@@ -1,5 +1,5 @@
 import type { ForwardMcpClient } from "../../src/daemon/socketServer/forwardSessionKey";
-import { ErrorCode, McpError } from "../../src/server/mcpError";
+import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import {
   createConnectableServer,

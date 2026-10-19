@@ -26,7 +26,7 @@ spike's go/no-go has since been replaced by owner decisions, summarised here.
 Covered by the [split-packages decision record](../../decisions/mcp-sdk-v2-split-packages.md).
 Facts worth knowing here: request handlers are registered by method string; four
 v2 behaviour differences are bridged so the wire is unchanged
-(`src/server/mcpError.ts`, `src/server/sdkMcpServer.ts`,
+(`src/daemon/mcpError.ts`, `src/server/sdkMcpServer.ts`,
 `src/server/stdioServerTransport.ts`, `src/daemon/socketServer/loopbackMcpClient.ts`);
 the test helper is `test/helpers/fakeServerContext.ts`. Tests drive our servers with the
 plain v2 `Client` (the v1-error-shape test client was retired; the boundary checker
@@ -133,7 +133,7 @@ request id when exactly one in-flight request has it.
 
 ## The one session key
 
-`src/server/mcpSessionKey.ts` exports `MCP_SESSION_KEY_HEADER`
+`src/daemon/mcpSessionKey.ts` exports `MCP_SESSION_KEY_HEADER`
 (`x-auto-mobile-mcp-session-id`) and `readMcpSessionKey(headers)`. This is the only key for
 per-session tool binding and `tools/list` filtering in daemon mode.
 

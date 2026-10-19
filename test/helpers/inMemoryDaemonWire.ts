@@ -1,5 +1,5 @@
 import type { Client } from "@modelcontextprotocol/client";
-import { ErrorCode, McpError } from "../../src/server/mcpError";
+import { ErrorCode, McpError } from "../../src/daemon/mcpError";
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";

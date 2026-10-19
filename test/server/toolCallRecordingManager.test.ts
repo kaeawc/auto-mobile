@@ -6,7 +6,7 @@ import {
   getToolCallRecorder,
   resetToolCallRecordingState,
   dropToolCallRecording,
-} from "../../src/server/toolCallRecordingManager";
+} from "../../src/daemon/toolCallRecordingManager";
 import { PlanValidator } from "../../src/utils/plan/PlanValidator";
 import { FakeTimer } from "../fakes/FakeTimer";
 

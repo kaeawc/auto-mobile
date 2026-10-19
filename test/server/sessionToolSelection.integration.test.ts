@@ -13,7 +13,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../../src/daemon/sessionReleaseBroadcast";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";

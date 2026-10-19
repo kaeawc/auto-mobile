@@ -114,7 +114,9 @@ private fun isHoverAction(actionMasked: Int): Boolean =
  * The probe's event log: a running total and the newest [POINTER_PROBE_MAX_EVENTS] lines.
  *
  * Hover can reach both the View and the Compose fallback; each MotionEvent is logged once. The two
- * copies differ in coordinate space, so they are matched by device, action and event time.
+ * copies differ in coordinate space, so they are matched by device, action and event time, and a
+ * match is dropped only when it arrives through the other callback: two events with the same
+ * millisecond timestamp through one callback are distinct and both logged.
  */
 private class PointerProbeLog {
   val events = mutableStateListOf<String>()
@@ -122,12 +124,14 @@ private class PointerProbeLog {
     private set
 
   private var lastHover: Triple<Int, Int, Long>? = null
+  private var lastHoverVia: String? = null
 
   fun record(probeEvent: ProbeEvent) {
     if (isHoverAction(probeEvent.action and MotionEvent.ACTION_MASK)) {
       val key = Triple(probeEvent.deviceId, probeEvent.action, probeEvent.eventTimeMs)
-      if (key == lastHover) return
+      if (key == lastHover && probeEvent.via != lastHoverVia) return
       lastHover = key
+      lastHoverVia = probeEvent.via
     }
     totalCount += 1
     events.add(0, PointerProbeFormatter.format(totalCount, probeEvent))
@@ -139,6 +143,8 @@ private class PointerProbeLog {
   fun clear() {
     events.clear()
     totalCount = 0
+    lastHover = null
+    lastHoverVia = null
   }
 }
 

@@ -15,7 +15,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
-  DefaultDeviceClientProvider,
+  createDefaultDeviceClientProvider,
   DeviceSessionManager,
 } from "../../src/devices/DeviceSessionManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -75,7 +75,7 @@ describe("device-client admission seam", () => {
     async (identity) => {
       const adb = new FakeAdbExecutor();
       adb.setDevices([{ ...DEVICE, name: SERIAL }]);
-      const provider = new DefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
+      const provider = createDefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
       const cached = provider.getWindow(DEVICE);
       const active = spyOn(cached, "getActive").mockResolvedValue({
         appId: "com.example.app",

@@ -29,7 +29,6 @@ import {
   assertAndroidImageRunningStateKnown,
   type BootedDeviceDiscoveryOptions,
   type DeviceManagerSimCtl,
-  MultiPlatformDeviceManager,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
@@ -37,18 +36,15 @@ import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient, type SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
+import type { SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
-import {
-  getSharedDevicectlDeviceLister,
-  type IosPhysicalDeviceLister,
-} from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import type { IosPhysicalDeviceLister } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { type DiscoverySource, discoverySourceFor } from "../utils/discoverySource";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { Window as WindowImpl } from "../features/observe/Window";
 import type { Window } from "../features/observe/interfaces/Window";
 import { logger } from "../utils/logger";
-import { AndroidCtrlProxyManager, CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
+import type { CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AdbUnavailableError } from "../utils/android-cmdline-tools/AdbClient";
 import {
@@ -103,16 +99,16 @@ import {
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
-import {
-  compareIdentityEvidence,
-  deriveEvidenceFromBootedDevice,
-  type IdentityEvidence,
-  isUnresolvedAndroidEmulatorName,
-} from "./deviceIdentityEvidence";
+import { isUnresolvedAndroidEmulatorName } from "./deviceIdentityEvidence";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
+import {
+  DefaultDeviceClientProvider,
+  type ObserveClientFactories,
+} from "./DefaultDeviceClientProvider";
+import { AndroidForwardReadinessConflictError } from "./AndroidForwardReadinessConflictError";
 
 function lifecycleIdentityForDevice(
   device: BootedDevice,
@@ -155,123 +151,20 @@ export interface DeviceClientProvider {
   getObserveScreenCache(): ObserveScreenCache;
 }
 
-/**
- * Default provider that lazily creates real clients
- */
-export class DefaultDeviceClientProvider implements DeviceClientProvider {
-  private _adb: AdbExecutor | undefined;
-  private _adbFactory: AdbClientFactory;
-  private _simctl: SimCtlClient | undefined;
-  private _androidEmulator: AndroidEmulatorClient | undefined;
-  private _deviceUtils: PlatformDeviceManager | undefined;
-  // Keyed by serial plus the most recent resolved runtime identity. An
-  // unresolved/raw-serial listing cannot evict a known-good client, while a
-  // different resolved AVD name must not retain clients bound to its predecessor.
-  private readonly _windows: Map<string, { window: Window; evidence: IdentityEvidence }> =
-    new Map();
+/** Observe-layer clients wired at the composition root, so the provider imports none of them. */
+const defaultObserveClientFactories: ObserveClientFactories = {
+  androidCtrlProxyClient: (device) => AndroidCtrlProxyClient.getInstance(device),
+  iosCtrlProxyClient: (device, port) => IOSCtrlProxyClient.getInstance(device, port),
+  createWindow: (device, adbFactory) => new WindowImpl(device, adbFactory),
+  observeScreenCache: () => RealObserveScreen.defaultObserveScreenCache,
+};
 
-  constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
-    this._adbFactory = adbFactory;
-  }
-
-  getAdb(): AdbExecutor {
-    if (!this._adb) {
-      this._adb = this._adbFactory.create(null);
-    }
-    return this._adb;
-  }
-
-  getSimctl(): DeviceClientSimctl | undefined {
-    if (!this._simctl) {
-      this._simctl = new SimCtlClient(null);
-    }
-    return this._simctl;
-  }
-
-  getAndroidEmulator(): AndroidEmulatorClient | undefined {
-    if (!this._androidEmulator) {
-      this._androidEmulator = new AndroidEmulatorClient();
-    }
-    return this._androidEmulator;
-  }
-
-  getDeviceUtils(): PlatformDeviceManager {
-    if (!this._deviceUtils) {
-      this._deviceUtils = new MultiPlatformDeviceManager(
-        this.getAdb(),
-        this.getSimctl()!,
-        this.getAndroidEmulator()!,
-      );
-    }
-    return this._deviceUtils;
-  }
-
-  getIosPhysicalDeviceLister(): IosPhysicalDeviceLister {
-    // Shared with every MultiPlatformDeviceManager so readiness scans reuse the
-    // devicectl cache and last-good retention instead of spawning their own.
-    return getSharedDevicectlDeviceLister();
-  }
-
-  getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager {
-    return AndroidCtrlProxyManager.getInstance(device);
-  }
-
-  getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy {
-    return AndroidCtrlProxyClient.getInstance(device);
-  }
-
-  getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager {
-    return IOSCtrlProxyManager.getInstance(device);
-  }
-
-  getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy {
-    return IOSCtrlProxyClient.getInstance(device, port);
-  }
-
-  getWindow(device: BootedDevice): Window {
-    const key = device.deviceId;
-    const incoming = deriveEvidenceFromBootedDevice(
-      device,
-      isUnresolvedAndroidEmulatorName(device),
-    );
-    const cached = this._windows.get(key);
-    if (!cached) {
-      return this.cacheWindow(key, device, incoming);
-    }
-    // Raw-serial evidence cannot name an AVD, so it never replaces (or
-    // re-stamps) a cached Window.
-    if (incoming.unresolved) {
-      return cached.window;
-    }
-    const comparison = compareIdentityEvidence(cached.evidence, incoming);
-    if (incoming.stableId === cached.evidence.stableId) {
-      if (comparison === "newer") {
-        cached.evidence = incoming;
-      }
-      return cached.window;
-    }
-    // Overlapping readiness calls for two AVDs on a reused serial complete out
-    // of order: an older resolved observation must not evict the Window the
-    // newer AVD already cached (#7031). Unstamped observations stay
-    // permissive, matching the pool.
-    if (comparison !== "newer") {
-      return cached.window;
-    }
-    return this.cacheWindow(key, device, incoming);
-  }
-
-  private cacheWindow(key: string, device: BootedDevice, evidence: IdentityEvidence): Window {
-    const window = new WindowImpl(device, this._adbFactory);
-    this._windows.set(key, { window, evidence });
-    return window;
-  }
-
-  getObserveScreenCache(): ObserveScreenCache {
-    return RealObserveScreen.defaultObserveScreenCache;
-  }
+/** The production provider, with the observe-layer clients injected. */
+export function createDefaultDeviceClientProvider(
+  adbFactory?: AdbClientFactory,
+): DefaultDeviceClientProvider {
+  return new DefaultDeviceClientProvider(defaultObserveClientFactories, adbFactory);
 }
-
-class AndroidForwardReadinessConflictError extends ActionableError {}
 
 /**
  * Interface for device session management
@@ -585,7 +478,7 @@ export class DeviceReadiness implements DeviceReadiness {
   public static getInstance(): DeviceReadiness {
     if (!DeviceReadiness.instance) {
       if (!DeviceReadiness.defaultProvider) {
-        DeviceReadiness.defaultProvider = new DefaultDeviceClientProvider();
+        DeviceReadiness.defaultProvider = createDefaultDeviceClientProvider();
       }
       DeviceReadiness.instance = new DeviceReadiness(DeviceReadiness.defaultProvider);
     }
@@ -2339,16 +2232,17 @@ export class DeviceReadiness implements DeviceReadiness {
           this.deviceUtils,
           deviceImage,
           childProcess,
-          undefined,
-          signal,
-          this.runnerReadinessTimer,
-          processTracker
-            ? async () =>
-                await waitForExit(processTracker.process, processTracker.exitPromise, {
-                  signal: "SIGTERM",
-                  timer: this.runnerReadinessTimer,
-                })
-            : undefined,
+          {
+            signal,
+            timer: this.runnerReadinessTimer,
+            cancelOwnedBoot: processTracker
+              ? async () =>
+                  await waitForExit(processTracker.process, processTracker.exitPromise, {
+                    signal: "SIGTERM",
+                    timer: this.runnerReadinessTimer,
+                  })
+              : undefined,
+          },
         );
         perf.endOperation("waitForReady");
 

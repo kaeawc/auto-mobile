@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerHighlightTools } from "../../src/server/highlightTools";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../src/models";

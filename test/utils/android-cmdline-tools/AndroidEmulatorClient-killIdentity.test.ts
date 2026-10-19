@@ -281,9 +281,7 @@ function recordingFactory(attached: string[]): {
             includes: (part: string) => stdout.includes(part),
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };
@@ -503,9 +501,7 @@ function wedgedConsoleFactory(attached: string[]): {
             includes: () => false,
           };
         },
-        null,
-        undefined,
-        timer,
+        { timer },
       ),
   };
   return { factory, commands, timer };

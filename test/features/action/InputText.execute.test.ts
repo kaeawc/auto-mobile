@@ -197,18 +197,11 @@ describe("InputText.execute", () => {
         // Real (non-test-mode) process path: isTestMode is fixed at construction from this env flag.
         const priorTestMode = process.env.AUTOMOBILE_TEST_MODE;
         process.env.AUTOMOBILE_TEST_MODE = "false";
-        const adb = new AdbClient(
-          androidDevice,
-          null,
-          null,
-          new DefaultRetryExecutor(fakeTimer),
-          fakeTimer,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          host,
-        );
+        const adb = new AdbClient(androidDevice, null, {
+          retryExecutor: new DefaultRetryExecutor(fakeTimer),
+          timer: fakeTimer,
+          hostProcessExecutor: host,
+        });
         if (priorTestMode === undefined) {
           delete process.env.AUTOMOBILE_TEST_MODE;
         } else {

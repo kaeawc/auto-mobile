@@ -126,22 +126,18 @@ describe("UI-state setup only taps exact selectable controls", () => {
     let observations = 0;
     const findPath = spyOn(graph, "findPath");
     try {
-      const nav = new NavigateTo(
-        device,
-        new FakeAdbClientFactory(),
-        setup(settings),
-        { waitForScreen: async () => true },
-        graph,
-        new FakeTimer(),
-        undefined,
-        undefined,
-        () => ({
+      const nav = new NavigateTo(device, new FakeAdbClientFactory(), {
+        uiStateSetup: setup(settings),
+        screenWaiter: { waitForScreen: async () => true },
+        navigationManager: graph,
+        timer: new FakeTimer(),
+        foregroundObserverProvider: () => ({
           execute: async () => {
             observations++;
             return {};
           },
         }),
-      );
+      });
       const result = await nav.execute({ targetScreen: "Startup", platform: "ios" });
       expect(result.success).toBe(false);
       expect(result.error).toContain("changed screen");

@@ -7,6 +7,13 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { BackStackInfo } from "../../models";
 import { NavigationRepository } from "../../db/navigationRepository";
+import {
+  recordEdgeProvenance,
+  recordNodeProvenance,
+  storeScrollPosition,
+  storeUIElements,
+  type ResolvedProvenance,
+} from "./navigationGraphWrites";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import { TestCoverageRepository } from "../../db/testCoverageRepository";
 import { ActionableError } from "../../models/ActionableError";
@@ -44,7 +51,6 @@ import {
   NavigationProvenanceRecord,
   UIState,
   ScrollPosition,
-  SelectedElement,
 } from "../../utils/interfaces/NavigationGraph";
 import type {
   NavigationNodeProvenanceRow,
@@ -326,12 +332,14 @@ export interface NavigationBuildContextChange {
 /** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
 export const LEGACY_PROVENANCE_SENTINEL = "legacy";
 
-/** Immutable provenance snapshot captured once per event and shared by its writes (#4984). */
-interface ResolvedProvenance {
-  versionCode: number;
-  contentHash: string;
-  deviceId: string;
-  sessionUuid: string;
+/** What one recorded screen transition writes, shared by the node and edge persistence steps. */
+interface ScreenTransitionWrite {
+  appId: string;
+  screenName: string;
+  timestamp: number;
+  provenance: ResolvedProvenance;
+  modalStack: NonNullable<ToolCallInteraction["uiState"]>["modalStack"] | undefined;
+  interaction: ToolCallInteraction | undefined;
 }
 
 /**
@@ -1071,57 +1079,6 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
-   * Record a per-node provenance observation inside the caller's transaction
-   * (#4984). Must run on the transaction-bound repository so it commits atomically
-   * with the node mutation, using the caller's pre-captured provenance snapshot.
-   */
-  private async recordNodeProvenance(
-    repository: NavigationRepository,
-    appId: string,
-    nodeId: number,
-    timestamp: number,
-    provenance: ResolvedProvenance,
-  ): Promise<void> {
-    const buildKey = await repository.getOrCreateBuildKey(
-      appId,
-      provenance.versionCode,
-      provenance.contentHash,
-    );
-    await repository.recordNodeObservation(
-      nodeId,
-      buildKey.id,
-      provenance.deviceId,
-      provenance.sessionUuid,
-      timestamp,
-    );
-  }
-
-  /**
-   * Record a per-edge provenance observation inside the caller's transaction (#4984),
-   * using the same provenance snapshot as the node write for that transition.
-   */
-  private async recordEdgeProvenance(
-    repository: NavigationRepository,
-    appId: string,
-    edgeId: number,
-    timestamp: number,
-    provenance: ResolvedProvenance,
-  ): Promise<void> {
-    const buildKey = await repository.getOrCreateBuildKey(
-      appId,
-      provenance.versionCode,
-      provenance.contentHash,
-    );
-    await repository.recordEdgeObservation(
-      edgeId,
-      buildKey.id,
-      provenance.deviceId,
-      provenance.sessionUuid,
-      timestamp,
-    );
-  }
-
-  /**
    * Record back stack information for the current screen.
    * Updates the current node with back stack depth and task ID.
    */
@@ -1230,96 +1187,27 @@ export class NavigationGraphManager implements NavigationGraphService {
     // notifications, screenshot capture and in-memory field assignments stay OUTSIDE so
     // the exclusive connection is not held across non-DB IO, and so they never run when
     // the transaction rolls back.
+    const transition: ScreenTransitionWrite = {
+      appId,
+      screenName,
+      timestamp,
+      provenance,
+      modalStack: currentModalStack,
+      interaction: recentToolCall,
+    };
     const node = await this.runBothReposInTransaction(
       async (repository, testCoverageRepository) => {
-        // Get or create node and update visit count
-        const n = await repository.getOrCreateNode(appId, screenName, timestamp);
-
-        // Record per-node provenance for the current build/device/session (#4984),
-        // in the same transaction as the node mutation.
-        await this.recordNodeProvenance(repository, appId, n.id, timestamp, provenance);
-
-        // Record node visit for test coverage if session is active
-        if (this.activeTestSession) {
-          await testCoverageRepository.recordNodeVisit(this.activeTestSession.id, n.id, timestamp);
-        }
-
-        // Update node modals if present
-        if (currentModalStack && currentModalStack.length > 0) {
-          const modalIds = currentModalStack.map((m) => m.identifier || `${m.type}-${m.layer}`);
-          await repository.setNodeModals(n.id, modalIds);
-
-          logger.info(`[NAVIGATION_GRAPH] Screen ${screenName} has ${modalIds.length} modal(s)`);
-        }
+        const n = await this.persistTransitionNode(repository, testCoverageRepository, transition);
 
         // Create edge from previous screen to current screen
         if (previousScreen && previousScreen !== screenName) {
-          const interaction = recentToolCall;
-          edgeInteraction = interaction;
-
-          const toolName = interaction?.toolName || null;
-          const toolArgs = interaction?.args || null;
-
-          const edge = await repository.createEdge(
-            appId,
+          edgeInteraction = recentToolCall;
+          await this.persistTransitionEdge(
+            repository,
+            testCoverageRepository,
+            transition,
             previousScreen,
-            screenName,
-            toolName,
-            toolArgs,
-            timestamp,
           );
-          // The action just led from this screen to that one, so a remembered replay
-          // failure for it is stale.
-          this.forgetFailedEdgeReplay(
-            edgePairKey(appId, previousScreen, screenName),
-            edgeActionKey(toolName, toolArgs ?? undefined),
-          );
-
-          // Record per-edge provenance using the SAME snapshot as the node (#4984).
-          await this.recordEdgeProvenance(repository, appId, edge.id, timestamp, provenance);
-
-          // Record edge traversal for test coverage if session is active
-          if (this.activeTestSession) {
-            await testCoverageRepository.recordEdgeTraversal(
-              this.activeTestSession.id,
-              edge.id,
-              timestamp,
-            );
-          }
-
-          // Store UI elements if present in interaction
-          if (interaction?.uiState?.selectedElements) {
-            await this.storeUIElements(
-              repository,
-              edge.id,
-              interaction.uiState.selectedElements,
-              timestamp,
-            );
-          }
-
-          // Store modal stacks for from/to
-          const fromNode = await repository.getNode(appId, previousScreen);
-          if (fromNode) {
-            const fromModals = await repository.getNodeModals(fromNode.id);
-            if (fromModals.length > 0) {
-              await repository.setEdgeModals(edge.id, "from", fromModals);
-            }
-          }
-
-          if (currentModalStack && currentModalStack.length > 0) {
-            const toModalIds = currentModalStack.map((m) => m.identifier || `${m.type}-${m.layer}`);
-            await repository.setEdgeModals(edge.id, "to", toModalIds);
-          }
-
-          // Store scroll position if present
-          if (interaction?.uiState?.scrollPosition) {
-            await this.storeScrollPosition(
-              repository,
-              edge.id,
-              interaction.uiState.scrollPosition,
-              timestamp,
-            );
-          }
         }
 
         await repository.touchApp(appId);
@@ -1349,6 +1237,118 @@ export class NavigationGraphManager implements NavigationGraphService {
     this.notifyGraphUpdated();
 
     this.pushNavigationTelemetry(event, { appId, nodeId: node.id, screenName, timestamp });
+  }
+
+  private async persistTransitionNode(
+    repository: NavigationRepository,
+    testCoverageRepository: TestCoverageRepository,
+    transition: ScreenTransitionWrite,
+  ) {
+    const { appId, screenName, timestamp, provenance, modalStack } = transition;
+    // Get or create node and update visit count
+    const n = await repository.getOrCreateNode(appId, screenName, timestamp);
+
+    // Record per-node provenance for the current build/device/session (#4984),
+    // in the same transaction as the node mutation.
+    await recordNodeProvenance(repository, appId, n.id, timestamp, provenance);
+
+    // Record node visit for test coverage if session is active
+    if (this.activeTestSession) {
+      await testCoverageRepository.recordNodeVisit(this.activeTestSession.id, n.id, timestamp);
+    }
+
+    // Update node modals if present
+    if (modalStack && modalStack.length > 0) {
+      const modalIds = modalStack.map((m) => m.identifier || `${m.type}-${m.layer}`);
+      await repository.setNodeModals(n.id, modalIds);
+
+      logger.info(`[NAVIGATION_GRAPH] Screen ${screenName} has ${modalIds.length} modal(s)`);
+    }
+    return n;
+  }
+
+  private async persistTransitionEdge(
+    repository: NavigationRepository,
+    testCoverageRepository: TestCoverageRepository,
+    transition: ScreenTransitionWrite,
+    previousScreen: string,
+  ): Promise<void> {
+    const { appId, screenName, timestamp, provenance, interaction } = transition;
+    const toolName = interaction?.toolName || null;
+    const toolArgs = interaction?.args || null;
+
+    const edge = await repository.createEdge(
+      appId,
+      previousScreen,
+      screenName,
+      toolName,
+      toolArgs,
+      timestamp,
+    );
+    // The action just led from this screen to that one, so a remembered replay
+    // failure for it is stale.
+    this.forgetFailedEdgeReplay(
+      edgePairKey(appId, previousScreen, screenName),
+      edgeActionKey(toolName, toolArgs ?? undefined),
+    );
+
+    // Record per-edge provenance using the SAME snapshot as the node (#4984).
+    await recordEdgeProvenance(repository, appId, edge.id, timestamp, provenance);
+
+    // Record edge traversal for test coverage if session is active
+    if (this.activeTestSession) {
+      await testCoverageRepository.recordEdgeTraversal(
+        this.activeTestSession.id,
+        edge.id,
+        timestamp,
+      );
+    }
+    await this.persistEdgeContext(repository, edge.id, transition, previousScreen);
+  }
+
+  /** Elements, from/to modal stacks and scroll position carried by the edge's interaction. */
+  private async persistEdgeContext(
+    repository: NavigationRepository,
+    edgeId: number,
+    transition: ScreenTransitionWrite,
+    previousScreen: string,
+  ): Promise<void> {
+    const { appId, timestamp, modalStack, interaction } = transition;
+    // Store UI elements if present in interaction
+    if (interaction?.uiState?.selectedElements) {
+      await storeUIElements(
+        repository,
+        this.currentAppId,
+        edgeId,
+        interaction.uiState.selectedElements,
+        timestamp,
+      );
+    }
+
+    // Store modal stacks for from/to
+    const fromNode = await repository.getNode(appId, previousScreen);
+    if (fromNode) {
+      const fromModals = await repository.getNodeModals(fromNode.id);
+      if (fromModals.length > 0) {
+        await repository.setEdgeModals(edgeId, "from", fromModals);
+      }
+    }
+
+    if (modalStack && modalStack.length > 0) {
+      const toModalIds = modalStack.map((m) => m.identifier || `${m.type}-${m.layer}`);
+      await repository.setEdgeModals(edgeId, "to", toModalIds);
+    }
+
+    // Store scroll position if present
+    if (interaction?.uiState?.scrollPosition) {
+      await storeScrollPosition(
+        repository,
+        this.currentAppId,
+        edgeId,
+        interaction.uiState.scrollPosition,
+        timestamp,
+      );
+    }
   }
 
   /**
@@ -1533,7 +1533,7 @@ export class NavigationGraphManager implements NavigationGraphService {
         await repository.updateNodeVisit(existingNode.id, timestamp);
 
         // Record per-node provenance for this reach (#4984), same transaction.
-        await this.recordNodeProvenance(repository, appId, existingNode.id, timestamp, provenance);
+        await recordNodeProvenance(repository, appId, existingNode.id, timestamp, provenance);
 
         // Record node visit for test coverage if session is active
         if (this.activeTestSession) {
@@ -1635,94 +1635,6 @@ export class NavigationGraphManager implements NavigationGraphService {
     );
     this.activeNavigation = null;
     return true;
-  }
-
-  /**
-   * Store UI elements used in an edge transition.
-   *
-   * `repository` is the transaction-bound repository from the enclosing
-   * recordNavigationEvent write, so these element writes are part of the same
-   * atomic transaction. getOrCreateUIElement runs directly on the executor (it
-   * detects it is already inside a transaction) rather than opening a nested one.
-   */
-  private async storeUIElements(
-    repository: NavigationRepository,
-    edgeId: number,
-    selectedElements: SelectedElement[],
-    timestamp: number,
-  ): Promise<void> {
-    if (!this.currentAppId || selectedElements.length === 0) {
-      return;
-    }
-
-    const elementIds: number[] = [];
-
-    for (const selected of selectedElements) {
-      const element = await repository.getOrCreateUIElement(
-        this.currentAppId,
-        {
-          text: selected.text,
-          resourceId: selected.resourceId,
-          contentDescription: selected.contentDesc,
-        },
-        timestamp,
-      );
-      elementIds.push(element.id);
-    }
-
-    await repository.linkUIElementsToEdge(edgeId, elementIds);
-  }
-
-  /**
-   * Store scroll position for an edge.
-   *
-   * `repository` is the transaction-bound repository from the enclosing
-   * recordNavigationEvent write, so these writes are part of the same atomic
-   * transaction.
-   */
-  private async storeScrollPosition(
-    repository: NavigationRepository,
-    edgeId: number,
-    scrollPosition: ScrollPosition,
-    timestamp: number,
-  ): Promise<void> {
-    if (!this.currentAppId) {
-      return;
-    }
-
-    // Store the target element
-    const targetElement = await repository.getOrCreateUIElement(
-      this.currentAppId,
-      {
-        text: scrollPosition.targetElement.text,
-        resourceId: scrollPosition.targetElement.resourceId,
-        contentDescription: scrollPosition.targetElement.contentDesc,
-      },
-      timestamp,
-    );
-
-    // Store the container element if present
-    let containerElementId: number | undefined;
-    if (scrollPosition.container) {
-      const containerElement = await repository.getOrCreateUIElement(
-        this.currentAppId,
-        {
-          text: scrollPosition.container.text,
-          resourceId: scrollPosition.container.resourceId,
-          contentDescription: scrollPosition.container.contentDesc,
-        },
-        timestamp,
-      );
-      containerElementId = containerElement.id;
-    }
-
-    await repository.setScrollPosition(
-      edgeId,
-      targetElement.id,
-      scrollPosition.direction,
-      containerElementId,
-      scrollPosition.speed,
-    );
   }
 
   /**
@@ -2169,10 +2081,16 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   private async buildNodeDetail(dbNode: DBNavigationNode): Promise<NavigationGraphNodeDetail> {
+    return { id: dbNode.id, ...(await this.buildNodeBody(dbNode)) };
+  }
+
+  /** A node's detail without its database id (the shape served by the node resource). */
+  private async buildNodeBody(
+    dbNode: DBNavigationNode,
+  ): Promise<Omit<NavigationGraphNodeDetail, "id">> {
     const modals = await this.repository.getNodeModals(dbNode.id);
 
     return {
-      id: dbNode.id,
       screenName: dbNode.screen_name,
       firstSeenAt: dbNode.first_seen_at,
       lastSeenAt: dbNode.last_seen_at,
@@ -2241,10 +2159,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       return undefined;
     }
 
-    const detail = await this.buildNodeDetail(dbNode);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { id, ...node } = detail;
-    return node;
+    return await this.buildNodeBody(dbNode);
   }
 
   /**
@@ -2751,7 +2666,7 @@ export class NavigationGraphManager implements NavigationGraphService {
         fingerprint.app_id === appId &&
         (await repository.transferSuggestionObservations(suggestionId, node.id));
       if (!transferred) {
-        await this.recordNodeProvenance(repository, appId, node.id, timestamp, provenance);
+        await recordNodeProvenance(repository, appId, node.id, timestamp, provenance);
       }
 
       // #4931: touch navigation_apps.updated_at atomically with the promotion.

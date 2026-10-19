@@ -548,19 +548,11 @@ test("iOS host startup orphan is stopped by id through redrive and permits a fol
   control.onSignal = () => {
     control.running = false;
   };
-  const ffmpeg = new FfmpegVideoProcessingBackend(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+  const ffmpeg = new FfmpegVideoProcessingBackend(undefined, {
     timer,
-    undefined,
-    undefined,
-    undefined,
-    () => "generation-a",
-    control,
-  );
+    readHostStartToken: () => "generation-a",
+    hostRecorderControl: control,
+  });
   const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
   await retainStartupOrphan(async (target, descriptor, options) => {
     expect(target).toBeUndefined();

@@ -139,14 +139,12 @@ describe("navigation graph composition", () => {
       };
       const device: BootedDevice = { deviceId: "fake", platform: "ios", name: "Fake" };
       try {
-        const result = await new NavigateTo(
-          device,
-          new FakeAdbClientFactory(),
-          noSetup,
-          { waitForScreen: async () => true },
-          manager,
-          new FakeTimer(),
-        ).execute({ targetScreen: "Settings", platform: "ios" });
+        const result = await new NavigateTo(device, new FakeAdbClientFactory(), {
+          uiStateSetup: noSetup,
+          screenWaiter: { waitForScreen: async () => true },
+          navigationManager: manager,
+          timer: new FakeTimer(),
+        }).execute({ targetScreen: "Settings", platform: "ios" });
 
         expect(result.success).toBe(true);
         expect(dispatched).toEqual([{ text: "Settings" }]);

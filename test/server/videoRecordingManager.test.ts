@@ -1200,17 +1200,11 @@ describe("videoRecordingManager", () => {
         .setCommandResultSequence("shell stat -c %s /sdcard/empty.mp4", ["0", "0", "0", "0", "0"]);
       const captureBackend =
         platform === "ios"
-          ? new FfmpegVideoProcessingBackend(
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              captureTimer,
-              { remove: async () => {} },
-              undefined,
-              { size: async () => 0 },
-            )
+          ? new FfmpegVideoProcessingBackend(undefined, {
+              timer: captureTimer,
+              captureFileRemover: { remove: async () => {} },
+              recordingFileProbe: { size: async () => 0 },
+            })
           : new PlatformVideoCaptureBackend(factory, captureTimer);
       if (platform === "ios") {
         Object.defineProperty(captureBackend, "postProcessRecording", {

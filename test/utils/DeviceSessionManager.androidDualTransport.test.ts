@@ -49,15 +49,11 @@ function harness() {
         dispatched.push(args);
         return createExecResult("", "");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      pool.current?.getAndroidTransportRouting(),
+      {
+        retryExecutor: new DefaultRetryExecutor(timer),
+        timer,
+        transportRouting: pool.current?.getAndroidTransportRouting(),
+      },
     );
   const probe = new FakeAdbExecutor();
   probe.setCommandResponse("getprop ro.serialno", createExecResult(USB, ""));

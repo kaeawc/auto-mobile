@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import type { HighlightShape } from "../../src/models";
 import type { PinchOnArgs } from "../../src/server/interactionToolTypes";
 import {

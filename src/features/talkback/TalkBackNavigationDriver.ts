@@ -1,12 +1,8 @@
-import type { BootedDevice, ViewHierarchyResult } from "../../models";
-import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import type {
-  AccessibilityNodeSelector,
-  A11yActionResult,
-  A11yTapCoordinatesResult,
-} from "../observe/android/types";
+import type { BootedDevice } from "../../models";
+import type { A11yTapCoordinatesResult } from "../observe/android/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
+export { DefaultTalkBackNavigationDriverFactory } from "./DefaultTalkBackNavigationDriverFactory";
 
 /**
  * Extended driver interface for TalkBack navigation that adds coordinate tap capabilities to the
@@ -35,7 +31,7 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
   ): Promise<A11yTapCoordinatesResult>;
 }
 
-type TalkBackDriverClient = Pick<
+export type TalkBackDriverClient = Pick<
   AndroidCtrlProxyClient,
   | "getAccessibilityHierarchy"
   | "requestTraversalOrder"
@@ -48,104 +44,8 @@ type TalkBackDriverClient = Pick<
 >;
 
 /**
- * Default implementation of TalkBackNavigationDriver using AndroidCtrlProxyClient.
- */
-class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
-  private accessibilityService: TalkBackDriverClient;
-  constructor(accessibilityService: TalkBackDriverClient) {
-    this.accessibilityService = accessibilityService;
-  }
-
-  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
-    return this.accessibilityService.getAccessibilityHierarchy(undefined, {
-      skipWaitForFresh: false,
-      disableAllFiltering: true,
-    });
-  }
-
-  async requestTraversalOrder() {
-    return this.accessibilityService.requestTraversalOrder();
-  }
-
-  async requestCurrentFocus() {
-    return this.accessibilityService.requestCurrentFocus();
-  }
-
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    durationMs: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.accessibilityService.requestTapCoordinates(
-      x,
-      y,
-      durationMs,
-      undefined,
-      undefined,
-      undefined,
-      onDispatch,
-    );
-  }
-
-  async requestDoubleTapCoordinates(
-    x: number,
-    y: number,
-    onDispatch?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.accessibilityService.requestDoubleTapCoordinates(x, y, onDispatch);
-  }
-
-  async requestAction(
-    action: string,
-    resourceId?: string,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestAction(
-      action,
-      resourceId,
-      undefined,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestNodeAction(
-      action,
-      selector,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async supportsNodeActionSelectors(): Promise<boolean> {
-    return this.accessibilityService.supportsNodeActionSelectors();
-  }
-}
-
-/**
  * Factory interface for creating TalkBackNavigationDriver instances.
  */
 export interface TalkBackNavigationDriverFactory {
   createDriver(device: BootedDevice): TalkBackNavigationDriver;
-}
-
-/**
- * Default factory implementation for TalkBackNavigationDriver.
- */
-export class DefaultTalkBackNavigationDriverFactory implements TalkBackNavigationDriverFactory {
-  constructor(private readonly adbFactory: AdbClientFactory) {}
-
-  createDriver(device: BootedDevice): TalkBackNavigationDriver {
-    return new DefaultTalkBackNavigationDriver(
-      AndroidCtrlProxyClient.getInstance(device, this.adbFactory),
-    );
-  }
 }

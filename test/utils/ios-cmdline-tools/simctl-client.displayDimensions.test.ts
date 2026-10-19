@@ -37,23 +37,20 @@ describe("SimCtlClient display dimension enrichment", () => {
           "",
         );
       },
-      timer,
-      "darwin",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       {
-        profileFor: async () => ({
-          deviceTypeId: typeId,
-          productFamily: "iPhone",
-          modelIdentifier: null,
-          pixelWidth: 2007,
-          pixelHeight: 2853,
-          scale: 3,
-          dpi: 460,
-        }),
+        timer,
+        platform: "darwin",
+        deviceTypeProfiles: {
+          profileFor: async () => ({
+            deviceTypeId: typeId,
+            productFamily: "iPhone",
+            modelIdentifier: null,
+            pixelWidth: 2007,
+            pixelHeight: 2853,
+            scale: 3,
+            dpi: 460,
+          }),
+        },
       },
     );
     const [device] = await simctl.listSimulatorImages(100, { bypassCache: true });
@@ -128,14 +125,7 @@ describe("SimCtlClient display dimension enrichment", () => {
           }),
           "",
         ),
-      timer,
-      "darwin",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      profileSource,
+      { timer, platform: "darwin", deviceTypeProfiles: profileSource },
     );
 
     const listing = simctl.listSimulatorImages(5, { bypassCache: true });
@@ -169,14 +159,7 @@ describe("SimCtlClient display dimension enrichment", () => {
         timer.advanceTime(8);
         return simulatorList();
       },
-      timer,
-      "darwin",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      profileSource,
+      { timer, platform: "darwin", deviceTypeProfiles: profileSource },
     );
 
     const listing = simctl.listSimulatorImages(10, { bypassCache: true });
@@ -195,14 +178,11 @@ describe("SimCtlClient display dimension enrichment", () => {
         expired.advanceTime(10);
         return simulatorList();
       },
-      expired,
-      "darwin",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { profileFor: async () => (expiredCalls++, null) },
+      {
+        timer: expired,
+        platform: "darwin",
+        deviceTypeProfiles: { profileFor: async () => (expiredCalls++, null) },
+      },
     );
     await expect(
       expiredClient.listSimulatorImages(10, { bypassCache: true }),
@@ -213,18 +193,11 @@ describe("SimCtlClient display dimension enrichment", () => {
   test("propagates caller cancellation during profile enrichment", async () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
-    const simctl = new SimCtlClient(
-      null,
-      async () => simulatorList(),
+    const simctl = new SimCtlClient(null, async () => simulatorList(), {
       timer,
-      "darwin",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { profileFor: () => new Promise<never>(() => {}) },
-    );
+      platform: "darwin",
+      deviceTypeProfiles: { profileFor: () => new Promise<never>(() => {}) },
+    });
     const listing = simctl.listSimulatorImages(100, {
       bypassCache: true,
       signal: controller.signal,

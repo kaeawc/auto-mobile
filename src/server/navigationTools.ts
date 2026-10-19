@@ -117,16 +117,11 @@ function createDefaultNavigateTo(
   navigationManagerFactory: NavigationManagerFactory = getNavigationManager,
 ): NavigateToLike {
   const navigationManager = navigationManagerFactory(args.sessionUuid);
-  return new NavigateTo(
-    device,
-    undefined,
-    null,
-    null,
+  return new NavigateTo(device, undefined, {
     navigationManager,
-    undefined,
-    new DefaultPathOptimizer(navigationManager),
-    args.sessionUuid,
-  );
+    pathOptimizer: new DefaultPathOptimizer(navigationManager),
+    sessionUuid: args.sessionUuid,
+  });
 }
 
 export interface NavigateToHandlerDependencies {

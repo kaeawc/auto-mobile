@@ -59,8 +59,7 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
         }
         return createExecResult(capturedSimctlListing, "");
       },
-      new FakeTimer(),
-      "darwin",
+      { timer: new FakeTimer(), platform: "darwin" },
     );
     const manager = DeviceSessionManager.createInstance(
       new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),

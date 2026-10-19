@@ -2924,13 +2924,12 @@ describe("InstallApp", () => {
               );
             });
           },
-          clientTimer,
-          "darwin",
-          undefined,
-          undefined,
-          undefined,
-          // Listings parse through plutil; keep every process behind a fake.
-          fakePlist(bundleId),
+          {
+            timer: clientTimer,
+            platform: "darwin",
+            plist: // Listings parse through plutil; keep every process behind a fake.
+              fakePlist(bundleId),
+          },
         );
         const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
           // A separate clock: only simctl's own bound is under test, not the 120 s race.

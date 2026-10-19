@@ -2,6 +2,7 @@ import {
   getNativeHelperRegistry,
   type NativeHelperTracker,
 } from "../nativeHelpers/NativeHelperRegistry";
+import { resolveAdbClientSettings, type AdbClientDependencies } from "./AdbClientDependencies";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { parseAdbDevicesList } from "./parseAdbDevicesList";
 import { parseDeviceLock } from "./parseDeviceLock";
@@ -41,6 +42,7 @@ import {
 import { runWithAbortSignal, getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
+import { requirePipedOutput } from "../pipedChildProcess";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { delayForAttempt, sequenceBackoff } from "../Backoff";
 import { TTLCache } from "../cache/Cache";
@@ -53,11 +55,12 @@ import {
   isAdbTransportRestartCommand,
   type AdbTransportRestartRegistry,
 } from "./AdbTransportRestartRegistry";
-import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
-import {
-  defaultDiscoveryObservationSequence,
-  type DiscoveryObservationSequence,
-} from "../DiscoveryObservationSequence";
+import type { SystemDetection } from "../system/SystemDetection";
+import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
+import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
+import { AdbUnavailableError } from "./AdbUnavailableError";
+export { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
+export { AdbUnavailableError } from "./AdbUnavailableError";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
@@ -104,31 +107,6 @@ function redactCommandFromError(
     Reflect.set(error, "cmd", label);
   }
   return error;
-}
-
-/**
- * Thrown when an adb command exceeds its effective `timeoutMs` budget, as
- * opposed to failing for a device reason (offline, adb error, non-numeric output).
- *
- * The distinction is load-bearing for callers that thread a request deadline — the
- * daemon's append-text path. They tell "our budget expired" apart from "the device
- * cannot answer" by an `instanceof` check, never a message match: the former must
- * NOT be cached (a later request with a fresh budget should retry), the latter is
- * cached so a dead device is not re-probed on every call. The message is preserved
- * verbatim, so existing message-based logging is unaffected.
- */
-export class AdbCommandTimeoutError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AdbCommandTimeoutError";
-  }
-}
-
-export class AdbUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AdbUnavailableError";
-  }
 }
 
 // Module-level cache configuration and instances
@@ -232,9 +210,15 @@ export class AdbClient implements AdbExecutor {
   private apiLevelCache: number | null | undefined;
   private readonly retryExecutor: RetryExecutor;
   private readonly timer: Timer;
+  private readonly systemDetectionFactory: () => SystemDetection;
+  private readonly observationSequence: DiscoveryObservationSequence;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry | undefined;
+  private readonly defaultTimeoutMs: number;
+  private readonly transportRouting: AndroidTransportRouting | undefined;
+  private readonly transportRestartRegistry: AdbTransportRestartRegistry | undefined;
+  private readonly nativeHelperRegistry: NativeHelperTracker | undefined;
 
   static readonly DEVICE_LIST_TIMEOUT_MS = 10_000;
-  private static readonly DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
   private static readonly MAX_ADB_RETRIES = 3;
   private static readonly ADB_RETRY_BACKOFF = sequenceBackoff([200, 500, 1000]);
   private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
@@ -245,15 +229,7 @@ export class AdbClient implements AdbExecutor {
    * Create an AdbClient instance
    * @param device - Optional device
    * @param execAsyncFn - promisified exec function (for testing)
-   * @param spawnFn - spawn function (for testing)
-   * @param retryExecutor - retry executor for command retries (for testing)
-   * @param timer - Timer for delays and time tracking
-   * @param observationSequence - Monotonic discovery ordering source
-   * @param consoleBusyRegistry - Shared console-exclusive operation state
-   * @param defaultTimeoutMs - Per-command budget when no timeout is supplied
-   * @param hostProcessExecutor - Host process executor for cancellable commands
-   * @param transportRouting - Per-pool alias routing for the target serial
-   * @param transportRestartRegistry - Marks serials whose adbd this client restarts
+   * @param dependencies - optional collaborators (spawn, retry, timer, registries); see {@link AdbClientDependencies}
    */
   constructor(
     device: BootedDevice | null = null,
@@ -261,19 +237,26 @@ export class AdbClient implements AdbExecutor {
       | ((command: string, maxBuffer?: number) => Promise<ExecResult>)
       | ExecFileAsync
       | null = null,
-    spawnFn: SpawnFn | null = null,
-    retryExecutor: RetryExecutor = defaultRetryExecutor,
-    timer: Timer = defaultTimer,
-    private readonly systemDetectionFactory: () => SystemDetection = () =>
-      new DefaultSystemDetection(),
-    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    private readonly consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
-    private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
-    hostProcessExecutor: HostProcessExecutor = adbHostProcessExecutor,
-    private readonly transportRouting?: AndroidTransportRouting,
-    private readonly transportRestartRegistry?: AdbTransportRestartRegistry,
-    private readonly nativeHelperRegistry?: NativeHelperTracker,
+    dependencies: AdbClientDependencies = {},
   ) {
+    const {
+      spawnFn = null,
+      retryExecutor = defaultRetryExecutor,
+      timer = defaultTimer,
+      consoleBusyRegistry,
+      hostProcessExecutor = adbHostProcessExecutor,
+      transportRouting,
+      transportRestartRegistry,
+      nativeHelperRegistry,
+    } = dependencies;
+    const settings = resolveAdbClientSettings(dependencies);
+    this.systemDetectionFactory = settings.systemDetectionFactory;
+    this.observationSequence = settings.observationSequence;
+    this.consoleBusyRegistry = consoleBusyRegistry;
+    this.defaultTimeoutMs = settings.defaultTimeoutMs;
+    this.transportRouting = transportRouting;
+    this.transportRestartRegistry = transportRestartRegistry;
+    this.nativeHelperRegistry = nativeHelperRegistry;
     this.device = device;
     this.hostProcessExecutor = hostProcessExecutor;
     // Test mode if: custom execAsync provided OR global test mode flag is set
@@ -722,10 +705,13 @@ export class AdbClient implements AdbExecutor {
       args.join(" "),
     );
     const busyAtDispatch = this.getConsoleBusyAtDispatch();
-    const child = this.spawnFn(adbPath, fullArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-      signal: options.abortSignalScope === "startup" ? undefined : signal,
-    });
+    const child = requirePipedOutput(
+      this.spawnFn(adbPath, fullArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+        signal: options.abortSignalScope === "startup" ? undefined : signal,
+      }),
+      "the adb process",
+    );
     trackActiveAdbChild(child);
     (this.nativeHelperRegistry ?? getNativeHelperRegistry()).track(child, {
       kind: "adb",
@@ -794,8 +780,7 @@ export class AdbClient implements AdbExecutor {
       }
     });
 
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- the public interface deliberately exposes only lifecycle, stdio, and kill.
-    return child as unknown as AdbProcess;
+    return child;
   }
 
   /**

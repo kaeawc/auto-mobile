@@ -1,6 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { EncodedUnsupportedError } from "./EncodedUnsupportedError";
 import { basename } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { hasPipedStdio } from "../../utils/pipedChildProcess";
 import { ActionableError, toActionableError, type BootedDevice } from "../../models";
 import {
   CAPTURE_PERMISSION_PREFIX,
@@ -71,6 +73,10 @@ import {
   readScreenCaptureHelperEnvOverride,
   resolveIosScreenCaptureHelperPath,
 } from "../screen-stream/screenCaptureHelperPath";
+import { NoFirstFrameError } from "./NoFirstFrameError";
+import { ScreenRecordingPermissionHintError } from "./ScreenRecordingPermissionHintError";
+import { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
+export { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
 
 export {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
@@ -257,14 +263,11 @@ export interface IosFrameCaptureHelper {
   on(event: "error", listener: (error: Error) => void): this;
 }
 
-export interface IosH264EncoderProcess {
+export type IosH264EncoderProcess = FfmpegProcess & {
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;
-  kill(signal?: NodeJS.Signals): boolean;
-  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
-  once(event: "error", listener: (error: Error) => void): void;
-}
+};
 
 export type IosH264EncoderSpawner = ProcessSpawner<IosH264EncoderProcess>;
 export type IosFrameCaptureHelperFactory = (
@@ -385,41 +388,6 @@ export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
 }
 
-class NoFirstFrameError extends ActionableError {
-  finalStartupError(_approvalTarget: string | null): Error {
-    return this;
-  }
-}
-
-/** A legacy helper's "no frames" warning that may indicate Screen Recording was denied. */
-class ScreenRecordingPermissionHintError extends NoFirstFrameError {
-  override finalStartupError(approvalTarget: string | null): Error {
-    return new ScreenRecordingPermissionError(approvalTarget ?? "AutoMobile");
-  }
-}
-
-/**
- * A helper that advertised no encoded-video capability failed to start encoded
- * capture — i.e. an outdated binary that predates `--encode h264`. Signals
- * {@link IosH264Source.establishCapture} to fall back to the raw ffmpeg pipeline
- * (issue #4789).
- */
-class EncodedUnsupportedError extends ActionableError {}
-
-/**
- * Stable capture-startup failure for a denied macOS Screen Recording grant.
- * Socket consumers can classify this without exposing ScreenCaptureKit/TCC text
- * as their primary user guidance.
- */
-export class ScreenRecordingPermissionError extends ActionableError {
-  readonly approvalTarget: string;
-
-  constructor(approvalTarget = "AutoMobile") {
-    super("Screen Recording permission is required to discover and observe iOS Simulator windows.");
-    this.approvalTarget = approvalTarget;
-  }
-}
-
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;
   private readonly ffmpegPath: string;
@@ -514,10 +482,7 @@ export class IosH264Source implements H264CaptureSource {
       new DefaultFfmpegClient({
         binaryPath: this.ffmpegPath,
         spawn: options.spawner
-          ? (binaryPath, args) => {
-              // eslint-disable-next-line auto-mobile/no-unknown-cast -- The injected test spawner implements the process members FfmpegClient consumes.
-              return options.spawner!(binaryPath, args) as unknown as FfmpegProcess;
-            }
+          ? (binaryPath, args) => options.spawner!(binaryPath, args)
           : undefined,
       });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
@@ -1601,10 +1566,13 @@ export class IosH264Source implements H264CaptureSource {
       context: "iOS WebRTC H.264 encoder",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    // The argv above requests piped stdin/stdout/stderr; narrow the generic
-    // client process surface to the encoder contract used by this source.
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- The piped-stdio contract supplies every encoder process member used below.
-    const encoder = process as unknown as IosH264EncoderProcess;
+    // The argv above requests piped stdin/stdout/stderr; verify them before narrowing the
+    // generic client process surface to the encoder contract used by this source.
+    if (!hasPipedStdio<FfmpegProcess, IosH264EncoderProcess>(process)) {
+      process.kill();
+      throw new ActionableError("ffmpeg encoder started without piped stdio");
+    }
+    const encoder = process;
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;

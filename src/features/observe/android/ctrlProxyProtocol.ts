@@ -40,7 +40,6 @@ import type { PrototypeSpec, PrototypeJson, PrototypeData } from "../../prototyp
 import {
   clearPrototypeStorageMessage,
   type ClearPrototypeStorageMessage,
-  type PrototypeStorageReport,
 } from "../../prototype/prototypeStorageWire";
 export {
   PROTOTYPE_STORAGE_CAPABILITY,
@@ -672,8 +671,8 @@ export interface PrototypeStatusEntry {
   hiddenReason?: PrototypeHiddenReason;
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
-  /** What the device stores for this prototype's `storage` block (prototype_storage_v1, #12522). */
-  storage?: PrototypeStorageReport;
+  /** Device-reported `storage` block state (prototype_storage_v1, #12522); parsePrototypeStorageReport validates it. */
+  storage?: unknown;
 }
 
 /**

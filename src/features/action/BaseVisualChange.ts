@@ -4,6 +4,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import {
   applySuccessVerdict,
+  asObservedResult,
   attachTelemetry,
   hasUsableHierarchy,
   observationNeedsRetry,
@@ -384,7 +385,7 @@ export class BaseVisualChange {
     if (this.isUnconfirmedIosFailure(blockResult, options)) {
       perf.end();
       // Returned before any post-action read, so `observation` is absent (see ObservedEnvelope).
-      return blockResult as R & ObservedEnvelope;
+      return asObservedResult<R>(blockResult);
     }
     this.invalidateCtrlProxyCacheForDisplay(options);
 
@@ -1313,9 +1314,8 @@ export class BaseVisualChange {
       );
     }
 
-    // Same object as the block returned. Its declared result type `R` is trusted: blocks also
-    // return bare `{ success: false, error }` failures that lack `R`'s required fields.
-    return mutable as R & ObservedEnvelope;
+    // Same object as the block returned (see asObservedResult for why `R` is trusted).
+    return asObservedResult<R>(mutable);
   }
 
   private buildPredictionContext(

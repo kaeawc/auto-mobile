@@ -104,7 +104,7 @@ describe("swipeAt, multiTouch and snapshotOf output schemas (#11830)", () => {
     const hierarchy: ViewHierarchyResult = {
       screenWidth: 4,
       screenHeight: 4,
-      hierarchy: { node: [] },
+      hierarchy: {},
     };
     const image = new FakeImageBackend();
     image.setMetadataResult({ width: 4, height: 4, format: "png", size: 8 });

@@ -1,7 +1,7 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -22,7 +22,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 isolateToolRegistry();
 
 /**
- * End-to-end guard for issue #3053 part 2: run a real `DefaultPlanExecutor` step
+ * End-to-end guard for issue #3053 part 2: run a real `createDefaultPlanExecutor()` step
  * through the wrapped `tool.handler` → `finalizeToolResponse` chain with
  * `--actions-diff-observe` on, and prove the plan step's observation is NEVER
  * diffed and NEVER advances the agent-facing diff baseline. The two halves are
@@ -36,7 +36,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     platform: "android",
   };
 
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: ReturnType<
     typeof ToolRegistry.getCollaboratorsForTesting
@@ -87,7 +87,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   }
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = ToolRegistry.getCollaboratorsForTesting().deviceSessionManager;

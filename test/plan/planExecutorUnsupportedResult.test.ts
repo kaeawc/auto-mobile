@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, mock } from "bun:test";
 import { z } from "zod/v4";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -20,7 +20,7 @@ describe("PlanExecutor unsupported tool results", () => {
     );
     const next = mock(async () => createStructuredToolResponse({ success: true }));
     ToolRegistry.register("unsupportedNext", "next", z.object({}).passthrough(), next);
-    const executor = new DefaultPlanExecutor(new FakeTimer());
+    const executor = createDefaultPlanExecutor(new FakeTimer());
     const failed = await executor.executePlan(
       {
         name: "unsupported",
@@ -54,7 +54,7 @@ describe("PlanExecutor unsupported tool results", () => {
     ToolRegistry.register("setPosture", "mock posture", z.object({}).passthrough(), async () =>
       createStructuredToolResponse({ success: true, status: "success" }),
     );
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
       { name: "success", steps: [{ tool: "setPosture", params: {} }] },
       0,
     );

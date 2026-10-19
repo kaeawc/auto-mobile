@@ -8,7 +8,7 @@ import type {
   PlanExecutionResult,
   VideoRecordingMetadata,
 } from "../../src/models";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import type { RecordingHandle } from "../../src/features/video/VideoRecorderService";

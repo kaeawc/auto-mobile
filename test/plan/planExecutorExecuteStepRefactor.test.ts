@@ -4,7 +4,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
@@ -18,11 +18,11 @@ interface CapturedCall {
 }
 
 describe("PlanExecutor executeStep refactor", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let okCalls: CapturedCall[];
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     okCalls = [];
 
     const deviceSchema = z.object({
@@ -109,7 +109,7 @@ describe("PlanExecutor executeStep refactor", () => {
       },
     );
     let settled = false;
-    const pending = new DefaultPlanExecutor(timer)
+    const pending = createDefaultPlanExecutor(timer)
       .executePlan(
         {
           name: "parked barrier abort",

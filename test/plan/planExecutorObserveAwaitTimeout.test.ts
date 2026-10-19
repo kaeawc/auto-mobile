@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { z } from "zod/v4";
@@ -10,11 +10,11 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 isolateToolRegistry();
 
 describe("PlanExecutor — observe waitFor timeout", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   const nextStep = mock(async () => createStructuredToolResponse({ success: true }));
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor(new FakeTimer());
+    planExecutor = createDefaultPlanExecutor(new FakeTimer());
     nextStep.mockClear();
     const observeSchema = z.object({
       platform: z.string().optional(),

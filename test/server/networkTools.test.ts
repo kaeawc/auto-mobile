@@ -7,8 +7,8 @@ import {
   type IosMockRuleSyncResult,
 } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
-import { NetworkState } from "../../src/server/NetworkState";
-import type { NetworkMockSyncReport } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import type { NetworkMockSyncReport } from "../../src/utils/networkMockRules";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   isIosNetworkErrorSimulationAvailable,

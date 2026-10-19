@@ -7,7 +7,7 @@ import {
   type TelemetryPushTarget,
   type TelemetryEvent,
 } from "../../../src/features/telemetry/TelemetryRecorder";
-import { NetworkState } from "../../../src/server/NetworkState";
+import { NetworkState } from "../../../src/utils/NetworkState";
 import type { RecordLogEventInput } from "../../../src/db/logEventRepository";
 import type { RecordOsEventInput } from "../../../src/db/osEventRepository";
 import type { RecordNavigationEventInput } from "../../../src/db/navigationEventRepository";

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { NetworkState } from "../../src/server/NetworkState";
-import { buildNetworkMockRules } from "../../src/server/networkMockRules";
+import { NetworkState } from "../../src/utils/NetworkState";
+import { buildNetworkMockRules } from "../../src/utils/networkMockRules";
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,

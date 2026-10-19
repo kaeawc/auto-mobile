@@ -6,6 +6,7 @@ import {
 import { McpError } from "./mcpError";
 import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
+import { setDefaultResourceNotifier } from "../utils/NetworkState";
 import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
@@ -770,3 +771,10 @@ class ResourceRegistryClass {
 
 // Export a singleton instance
 export const ResourceRegistry = new ResourceRegistryClass();
+
+// NetworkState (a lower layer) notifies through this registry by default.
+setDefaultResourceNotifier({
+  notifyResourceUpdated(uri: string): void {
+    void ResourceRegistry.notifyResourceUpdated(uri);
+  },
+});

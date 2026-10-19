@@ -9,7 +9,7 @@ import {
   type RecordingAcquisitionDeps,
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
 import { drainUntil } from "../helpers/fakeTimerStepping";

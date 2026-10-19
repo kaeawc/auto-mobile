@@ -27,7 +27,7 @@ import { runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { advertiseBoundsForCompact } from "./compactBoundsAdvertisement";
-import { markInternalToolCall } from "./internalToolCall";
+import { markInternalToolCall } from "../daemon/internalToolCall";
 import { ListChangedBroadcaster, type ServerRegistrationOptions } from "./listChangedBroadcast";
 import { StructuredToolResponse } from "../utils/toolUtils";
 import {

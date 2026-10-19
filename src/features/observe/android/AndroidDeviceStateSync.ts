@@ -3,8 +3,8 @@
  * mock rules and error simulation, and the accessibility flag configuration. Extracted from
  * `AndroidCtrlProxyClient` (#11846); behaviour is unchanged.
  */
-import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
-import { buildNetworkMockRules } from "../../../server/networkMockRules";
+import { NetworkState, simulationRemainingMs } from "../../../utils/NetworkState";
+import { buildNetworkMockRules } from "../../../utils/networkMockRules";
 import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";

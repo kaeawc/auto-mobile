@@ -18,7 +18,7 @@ import {
   registerLocationRouteSessionCleanup,
 } from "../../src/features/utility/LocationRoutePlayer";
 import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 import {
   deferHeldPlanAppCleanup,
   takeHeldPlanAppCleanup,

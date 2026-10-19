@@ -14,7 +14,7 @@ import {
 } from "./ExploreDryRun";
 import { ExploreElementActions } from "./ExploreElementActions";
 import { ExplorePlatformRecovery } from "./ExplorePlatformRecovery";
-import { throwIfInternalToolFailed } from "../../server/internalToolCall";
+import { throwIfInternalToolFailed } from "../../daemon/internalToolCall";
 import { ToolRegistry } from "../../server/toolRegistry";
 import { generateExplorationReport, isExplorationResetDue } from "./ExploreReporting";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";

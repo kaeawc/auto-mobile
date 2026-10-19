@@ -11,7 +11,7 @@ import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManag
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
-import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
+import { INTERNAL_NO_DIFF_PARAM } from "../../../src/daemon/internalToolCall";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 describe("NavigateTo", () => {

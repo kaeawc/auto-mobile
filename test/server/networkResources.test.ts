@@ -3,7 +3,7 @@ import { aggregateStatsByHost, bucketEvents } from "../../src/server/networkReso
 import { registerNetworkResources } from "../../src/server/networkResources";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
-import { NetworkState } from "../../src/server/NetworkState";
+import { NetworkState } from "../../src/utils/NetworkState";
 
 function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWithId {
   return {

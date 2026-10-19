@@ -14,7 +14,7 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlPro
 import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
-import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/utils/storageSdkErrors";
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";

@@ -1,4 +1,4 @@
-import { errorMessage } from "../utils/describeUnknownError";
+import { errorMessage } from "./describeUnknownError";
 
 const SDK_UNAVAILABLE_PREFIX =
   "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)";

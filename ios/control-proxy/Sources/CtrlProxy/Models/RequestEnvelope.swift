@@ -4,7 +4,7 @@ import Foundation
 public struct RequestEnvelope: Decodable, Sendable {
     public var requestId: String?
     public var appId: String?
-    public var frameContext: String? = nil
+    public var frameContext: String?
 }
 
 extension RequestEnvelope: CommandPayload {}

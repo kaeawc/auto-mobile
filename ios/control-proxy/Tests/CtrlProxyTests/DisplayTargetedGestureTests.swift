@@ -37,31 +37,100 @@ final class DisplayTargetedGestureTests: XCTestCase {
         }
     }
 
+    private struct DisplayChoiceCase {
+        let screens: [TapDiagnostics.DisplayScreen]
+        let applicationDisplayId: UInt64?
+        let isPhoneIdiom: Bool
+        let expected: (displayId: UInt64?, reason: String)
+    }
+
     func testDisplayChoiceRules() {
-        for (screens, app, isPhoneIdiom, expected) in [
-            ([main, inner], UInt64(3), true, (UInt64(3), "appDisplay")),
-            ([main, inner], UInt64(1), true, (UInt64(2), "soleNonMainScreen")),
-            ([main, inner], UInt64(0), true, (UInt64(2), "soleNonMainScreen")),
-            ([main, inner], nil, true, (UInt64(2), "soleNonMainScreen")),
-            ([], nil, true, (nil, "noScreens")),
-            ([], UInt64(3), true, (nil, "noScreens")),
-            ([main], nil, true, (nil, "noNonMainScreen")),
-            ([main, inner, .init(displayId: 3, isMain: false)], nil, true, (nil, "ambiguousNonMainScreens")),
-            ([main, inner, .init(displayId: 3, isMain: false)], UInt64(3), true, (UInt64(3), "appDisplay")),
-            ([inner], UInt64(3), true, (UInt64(2), "soleNonMainScreen")),
-            ([main, inner], UInt64(3), false, (UInt64(3), "appDisplay")),
-            ([main, inner], UInt64(1), false, (nil, "nonPhoneIdiom")),
-            ([main, inner], UInt64(0), false, (nil, "nonPhoneIdiom")),
-            ([main, inner], nil, false, (nil, "nonPhoneIdiom")),
-            ([], nil, false, (nil, "noScreens")),
-            ([main], nil, false, (nil, "noNonMainScreen")),
-            ([main, inner, .init(displayId: 3, isMain: false)], nil, false, (nil, "ambiguousNonMainScreens")),
-        ] as [([TapDiagnostics.DisplayScreen], UInt64?, Bool, (UInt64?, String))] {
+        let cases: [DisplayChoiceCase] = [
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: UInt64(3),
+                isPhoneIdiom: true,
+                expected: (UInt64(3), "appDisplay")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: UInt64(1),
+                isPhoneIdiom: true,
+                expected: (UInt64(2), "soleNonMainScreen")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: UInt64(0),
+                isPhoneIdiom: true,
+                expected: (UInt64(2), "soleNonMainScreen")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: nil,
+                isPhoneIdiom: true,
+                expected: (UInt64(2), "soleNonMainScreen")
+            ),
+            .init(screens: [], applicationDisplayId: nil, isPhoneIdiom: true, expected: (nil, "noScreens")),
+            .init(screens: [], applicationDisplayId: UInt64(3), isPhoneIdiom: true, expected: (nil, "noScreens")),
+            .init(screens: [main], applicationDisplayId: nil, isPhoneIdiom: true, expected: (nil, "noNonMainScreen")),
+            .init(
+                screens: [main, inner, .init(displayId: 3, isMain: false)],
+                applicationDisplayId: nil,
+                isPhoneIdiom: true,
+                expected: (nil, "ambiguousNonMainScreens")
+            ),
+            .init(
+                screens: [main, inner, .init(displayId: 3, isMain: false)],
+                applicationDisplayId: UInt64(3),
+                isPhoneIdiom: true,
+                expected: (UInt64(3), "appDisplay")
+            ),
+            .init(
+                screens: [inner],
+                applicationDisplayId: UInt64(3),
+                isPhoneIdiom: true,
+                expected: (UInt64(2), "soleNonMainScreen")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: UInt64(3),
+                isPhoneIdiom: false,
+                expected: (UInt64(3), "appDisplay")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: UInt64(1),
+                isPhoneIdiom: false,
+                expected: (nil, "nonPhoneIdiom")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: UInt64(0),
+                isPhoneIdiom: false,
+                expected: (nil, "nonPhoneIdiom")
+            ),
+            .init(
+                screens: [main, inner],
+                applicationDisplayId: nil,
+                isPhoneIdiom: false,
+                expected: (nil, "nonPhoneIdiom")
+            ),
+            .init(screens: [], applicationDisplayId: nil, isPhoneIdiom: false, expected: (nil, "noScreens")),
+            .init(screens: [main], applicationDisplayId: nil, isPhoneIdiom: false, expected: (nil, "noNonMainScreen")),
+            .init(
+                screens: [main, inner, .init(displayId: 3, isMain: false)],
+                applicationDisplayId: nil,
+                isPhoneIdiom: false,
+                expected: (nil, "ambiguousNonMainScreens")
+            ),
+        ]
+        for testCase in cases {
             let inventory = GestureDisplayInventory(
-                screens: screens, applicationDisplayId: app, isPhoneIdiom: isPhoneIdiom
+                screens: testCase.screens, applicationDisplayId: testCase.applicationDisplayId,
+                isPhoneIdiom: testCase.isPhoneIdiom
             )
-            XCTAssertEqual(inventory.target.displayId, expected.0)
-            XCTAssertEqual(inventory.target.reason, expected.1)
+            XCTAssertEqual(inventory.target.displayId, testCase.expected.displayId)
+            XCTAssertEqual(inventory.target.reason, testCase.expected.reason)
         }
     }
 
@@ -574,7 +643,9 @@ final class DisplayTargetedGestureTests: XCTestCase {
             center: point, distanceStart: 120, distanceEnd: 300, rotationDegrees: 90, duration: 0.3
         )
         let pinch = try XCTUnwrap(provider.pinches.first)
-        func spread(_ a: GesturePoint, _ b: GesturePoint) -> Double { hypot(a.x - b.x, a.y - b.y) }
+        func spread(_ first: GesturePoint, _ second: GesturePoint) -> Double {
+            hypot(first.x - second.x, first.y - second.y)
+        }
         XCTAssertEqual(spread(pinch.first.start, pinch.second.start), 120, accuracy: 1e-9)
         XCTAssertEqual(spread(pinch.first.end, pinch.second.end), 300, accuracy: 1e-9)
         // Observed end axis is vertical (443,52)/(443,352); the 90-degree map makes it horizontal

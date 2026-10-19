@@ -512,9 +512,9 @@ function fakeShellGuard(allowList: HostSpawnAllowList = new Map()) {
     },
     { escape: (value: string) => `escaped ${value}` },
   );
-  const target: SpawnTarget = { spawn: () => 0, spawnSync: () => 0, $: shell };
+  const target = { spawn: () => 0, spawnSync: () => 0, $: shell };
   const guard = fakeGuard({ target, loadAllowList: () => allowList });
-  return { ...guard, target, shell, scripts, $: target.$ as unknown as typeof shell };
+  return { ...guard, target, shell, scripts, $: target.$ };
 }
 
 test("Bun's shell template is refused unless the file lists Bun.$", () => {

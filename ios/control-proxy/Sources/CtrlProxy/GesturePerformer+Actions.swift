@@ -33,20 +33,7 @@ import os
                 return
             }
 
-            var element: XCUIElement?
-            if let resourceId = resourceId {
-                element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement
-            }
-            if element == nil, let label = label {
-                if let bounds {
-                    element = elementLocator.findElement(byText: label, bounds: bounds) as? XCUIElement
-                    if element == nil {
-                        element = elementLocator.findElement(byText: label) as? XCUIElement
-                    }
-                } else {
-                    element = elementLocator.findElement(byText: label) as? XCUIElement
-                }
-            }
+            let element = actionElement(resourceId: resourceId, label: label, bounds: bounds)
             guard let found = element else {
                 throw GestureError.elementNotFound(resourceId ?? label ?? "unknown")
             }
@@ -71,6 +58,24 @@ import os
                     throw GestureError.notSupported("Action: \(action)")
                 }
             }
+        }
+
+        private func actionElement(resourceId: String?, label: String?, bounds: ElementBounds?) -> XCUIElement? {
+            var element: XCUIElement?
+            if let resourceId = resourceId {
+                element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement
+            }
+            if element == nil, let label = label {
+                if let bounds {
+                    element = elementLocator.findElement(byText: label, bounds: bounds) as? XCUIElement
+                    if element == nil {
+                        element = elementLocator.findElement(byText: label) as? XCUIElement
+                    }
+                } else {
+                    element = elementLocator.findElement(byText: label) as? XCUIElement
+                }
+            }
+            return element
         }
 
         private func systemAlertAcceptanceButton() -> XCUIElement? {

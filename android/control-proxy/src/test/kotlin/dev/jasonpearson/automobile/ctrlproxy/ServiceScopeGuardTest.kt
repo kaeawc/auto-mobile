@@ -40,7 +40,7 @@ class ServiceScopeGuardTest {
     val scope =
       CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler) + guard.handler)
 
-    scope.launch(RequestIdContext("req-1")) { throw RuntimeException("boom") }
+    scope.launch(RequestIdContext("req-1")) { throw IllegalStateException("boom") }
     advanceUntilIdle()
 
     assertEquals("exactly one error frame should be broadcast", 1, broadcasts.size)
@@ -100,7 +100,7 @@ class ServiceScopeGuardTest {
     val guard =
       ServiceScopeGuard(
         emitScope = { this },
-        broadcastResponse = { throw RuntimeException("socket closed") },
+        broadcastResponse = { throw IllegalStateException("socket closed") },
         logError = { message, _ -> logged.add(message) },
       )
     val scope =
@@ -108,7 +108,7 @@ class ServiceScopeGuardTest {
 
     // A failure while reporting the uncaught exception must not itself escape (which would re-enter
     // the handler and loop). It is logged and swallowed.
-    scope.launch(RequestIdContext("req-2")) { throw RuntimeException("original failure") }
+    scope.launch(RequestIdContext("req-2")) { throw IllegalStateException("original failure") }
     advanceUntilIdle()
 
     // Exactly two: the original uncaught failure, then the failure raised while broadcasting it.
@@ -138,14 +138,14 @@ class ServiceScopeGuardTest {
     val guard =
       ServiceScopeGuard(
         emitScope = { guardedScope!! },
-        broadcastResponse = { throw RuntimeException("socket closed") },
+        broadcastResponse = { throw IllegalStateException("socket closed") },
         logError = { message, _ -> logged.add(message) },
       )
     val scope =
       CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler) + guard.handler)
     guardedScope = scope
 
-    scope.launch(RequestIdContext("req-loop")) { throw RuntimeException("original failure") }
+    scope.launch(RequestIdContext("req-loop")) { throw IllegalStateException("original failure") }
     advanceUntilIdle()
 
     // Exactly two logs: the original uncaught failure and the single failed re-broadcast. A

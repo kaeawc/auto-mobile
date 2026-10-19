@@ -285,7 +285,7 @@ class StorageProtocolTest {
     assertNotNull(deserialized)
     assertIs<StorageResponse.Preferences>(deserialized)
     assertNotNull(deserialized.file)
-    assertEquals("prefs", deserialized.file!!.name)
+    assertEquals("prefs", deserialized.file.name)
     assertEquals(2, deserialized.entries.size)
     assertEquals("user_name", deserialized.entries[0].key)
     assertEquals("STRING", deserialized.entries[0].type)

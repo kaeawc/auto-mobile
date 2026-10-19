@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import type { ChildProcess } from "node:child_process";
+import { z } from "zod/v4";
+import { bindDevice } from "../../src/daemon/deviceBinding";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -36,6 +37,11 @@ import {
 } from "../../src/daemon/inputDeviceOwnership";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+
+const toolResponseSchema = z.object({
+  isError: z.boolean().optional(),
+  content: z.array(z.object({ text: z.string() })),
+});
 
 isolateToolRegistry();
 
@@ -235,8 +241,8 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         },
       });
       const originalKill = devices.killDevice.bind(devices);
-      devices.killDevice = async (target, options) => {
-        await originalKill(target, options);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
         devices.setBootedDevices("android", []);
       };
       await ToolRegistry.getTool("startDevice")!.handler({
@@ -340,8 +346,10 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         }
       },
     });
-    const result = await runWithToolSelectionContext({ routingSessionUuid: "owner-session" }, () =>
-      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+    const result = toolResponseSchema.parse(
+      await runWithToolSelectionContext({ routingSessionUuid: "owner-session" }, () =>
+        ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+      ),
     );
     expect(result.isError).not.toBe(true);
     expect(readinessCalls).toBe(2);
@@ -409,8 +417,10 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         }
       },
     });
-    const result = await runWithToolSelectionContext({ routingSessionUuid: "other-session" }, () =>
-      ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+    const result = toolResponseSchema.parse(
+      await runWithToolSelectionContext({ routingSessionUuid: "other-session" }, () =>
+        ToolRegistry.getTool("startDevice")!.handler({ platform: "android", name: device.name }),
+      ),
     );
     expect(result.isError).not.toBe(true);
     expect(readinessCalls).toBe(2);
@@ -571,7 +581,7 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         }
         const originalProcess = new ExitOnKillProcess();
         const replacementProcess = new ExitOnKillProcess();
-        devices.setMockChildProcess(device.name, originalProcess as ChildProcess);
+        devices.setMockChildProcess(device.name, originalProcess);
         const kill = devices.killDevice.bind(devices);
         devices.killDevice = async (...args) => {
           await kill(...args);
@@ -583,15 +593,14 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         setDeviceToolsDependencies({
           ensureCtrlProxyReady: async () => {
             if (++readinessCalls === 1) {
-              devices.setMockChildProcess(device.name, replacementProcess as ChildProcess);
+              devices.setMockChildProcess(device.name, replacementProcess);
               throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
             }
             const replacement = pool.getDevice(device.deviceId)!;
             await sessions.releaseSession("owner-session");
             await sessions.createSession("other-session", replacement.id, "android");
             // Pin cleanup directly even when a later handoff has changed the holder.
-            replacement.sessionId = "other-session";
-            replacement.status = "busy";
+            bindDevice(replacement, "other-session");
             controller.abort(new Error("cancelled after replacement changed holder"));
             throw controller.signal.reason;
           },
@@ -678,8 +687,8 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
       });
 
       const originalKill = devices.killDevice.bind(devices);
-      devices.killDevice = async (target, options) => {
-        await originalKill(target, options);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
         devices.setBootedDevices("android", []);
       };
 
@@ -793,7 +802,7 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     "cancellation after relaunch keeps one running device and returns every recovery reservation once",
     async () => {
       const replacement = new ExitOnKillProcess();
-      devices.setMockChildProcess(device.name, replacement as ChildProcess);
+      devices.setMockChildProcess(device.name, replacement);
       const kill = devices.killDevice.bind(devices);
       devices.killDevice = async (...args) => {
         await kill(...args);
@@ -847,13 +856,13 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         device: { ...device, deviceId: "unit-unheld" },
         source: "cold-boot",
         runningBeforeCall: true,
-        processHandle: handle as ChildProcess,
+        processHandle: handle,
         provisioned: false,
       };
       const coldBoot: DeviceBootResult = {
         device: { ...device, deviceId: "unit-unheld" },
         source: "cold-boot",
-        processHandle: handle as ChildProcess,
+        processHandle: handle,
         provisioned: false,
       };
 
@@ -878,13 +887,13 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         device: { ...device, deviceId: "unit-unheld" },
         source: "cold-boot",
         runningBeforeCall: true,
-        processHandle: kept as ChildProcess,
+        processHandle: kept,
         provisioned: false,
       };
       const coldBoot: DeviceBootResult = {
         device: { ...device, deviceId: "unit-unheld" },
         source: "cold-boot",
-        processHandle: created as ChildProcess,
+        processHandle: created,
         provisioned: false,
       };
 
@@ -916,13 +925,13 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     const alreadyBooted: DeviceBootResult = {
       device: iosDevice,
       source: "booted",
-      processHandle: kept as ChildProcess,
+      processHandle: kept,
       provisioned: false,
     };
     const coldBoot: DeviceBootResult = {
       device: iosDevice,
       source: "cold-boot",
-      processHandle: created as ChildProcess,
+      processHandle: created,
       provisioned: false,
     };
 
@@ -932,7 +941,7 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
     await rollBackUndeliveredBoot(coldBoot, identity);
     expect(created.killCalls).toBe(1);
     const cancelled = new ExitOnKillProcess();
-    await cancelUnownedColdBoot({ ...coldBoot, processHandle: cancelled as ChildProcess });
+    await cancelUnownedColdBoot({ ...coldBoot, processHandle: cancelled });
     expect(cancelled.killCalls).toBe(1);
   });
 
@@ -949,8 +958,8 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
         },
       });
       const originalKill = devices.killDevice.bind(devices);
-      devices.killDevice = async (target, options) => {
-        await originalKill(target, options);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
         devices.setBootedDevices("android", []);
       };
       const launchStarted = Promise.withResolvers<void>();
@@ -1017,22 +1026,22 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
       const replacementProcess = new ExitOnKillProcess(() =>
         devices.setBootedDevices("android", []),
       );
-      devices.setMockChildProcess(device.name, originalProcess as ChildProcess);
+      devices.setMockChildProcess(device.name, originalProcess);
       let readinessCalls = 0;
       const controller = new AbortController();
       setDeviceToolsDependencies({
         ensureCtrlProxyReady: async () => {
           readinessCalls++;
           if (readinessCalls === 1) {
-            devices.setMockChildProcess(device.name, replacementProcess as ChildProcess);
+            devices.setMockChildProcess(device.name, replacementProcess);
             throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
           }
           controller.abort(new Error("caller disconnected after relaunch"));
         },
       });
       const originalKill = devices.killDevice.bind(devices);
-      devices.killDevice = async (target, options) => {
-        await originalKill(target, options);
+      devices.killDevice = async (target) => {
+        await originalKill(target);
         devices.setBootedDevices("android", []);
         originalProcess.exit();
       };
@@ -1055,17 +1064,17 @@ describe("startDevice System UI ANR recovery for an already-running AVD", () => 
   );
 });
 
-class ExitOnKillProcess extends EventEmitter {
+class ExitOnKillProcess extends FakeChildProcess {
   readonly pid = 42001;
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killCalls = 0;
 
   constructor(private readonly onExit?: () => void) {
-    super();
+    super(new FakeTimer());
   }
 
-  kill(): boolean {
+  override kill(): boolean {
     this.killCalls++;
     this.exit();
     return true;

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
@@ -30,7 +31,7 @@ describe("Android file-pull screenshots", function () {
   test("rejects a quiet screencap failure before pulling a stale frame and cleans up", async function () {
     const fakeAdb = new FakeAdbExecutor();
     const fileSystem = new FakeFileSystem();
-    fakeAdb.setCommandResponse("screencap -p", { stdout: "AM_SCREENCAP_RC:1", stderr: "" });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:1", ""));
     const screenshot = new TakeScreenshot(
       androidFilePullDevice,
       new FakeAdbClientFactory(fakeAdb),
@@ -57,7 +58,7 @@ describe("Android file-pull screenshots", function () {
   test("uses and removes a unique device-side file for every successful file pull", async function () {
     const fakeAdb = new FakeAdbExecutor();
     const fileSystem = new FakeFileSystem();
-    fakeAdb.setCommandResponse("screencap -p", { stdout: "AM_SCREENCAP_RC:0", stderr: "" });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:0", ""));
     const localDir = "/screenshots/file-pull";
     const screenshot = new TakeScreenshot(
       androidFilePullDevice,
@@ -100,7 +101,7 @@ describe("Android file-pull screenshots", function () {
   test("cancels after pulling without leaving a stale final screenshot", async function () {
     const fakeAdb = new FakeAdbExecutor();
     const fileSystem = new FakeFileSystem();
-    fakeAdb.setCommandResponse("screencap -p", { stdout: "AM_SCREENCAP_RC:0", stderr: "" });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:0", ""));
     const controller = new AbortController();
     fakeAdb.abortAfterCommand("pull ", controller);
     const localDir = "/screenshots/file-pull";
@@ -131,7 +132,7 @@ describe("Android file-pull screenshots", function () {
   test("sanitizes malicious device temp ids and preserves pull argv boundaries", async function () {
     const fakeAdb = new FakeAdbExecutor();
     const fileSystem = new FakeFileSystem();
-    fakeAdb.setCommandResponse("screencap -p", { stdout: "AM_SCREENCAP_RC:0", stderr: "" });
+    fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:0", ""));
     const localDir = "/screenshots/file-pull";
     const screenshot = new TakeScreenshot(
       androidFilePullDevice,

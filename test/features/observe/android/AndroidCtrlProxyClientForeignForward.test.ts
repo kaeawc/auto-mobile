@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
 import { setCtrlProxyHostPortProbeForTesting } from "../../../../src/features/observe/android/ctrlProxyHostPortProbe";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -32,10 +33,10 @@ function harness(acquire = true, recorded = false) {
   const execute = adb.execute.bind(adb);
   adb.execute = async (args, options) => {
     if (args.join(" ") === "forward --list") {
-      adb.setCommandResponse("forward --list", {
-        stdout: listed ? `${device.deviceId} tcp:52001 tcp:8765` : "",
-        stderr: "",
-      });
+      adb.setCommandResponse(
+        "forward --list",
+        createExecResult(listed ? `${device.deviceId} tcp:52001 tcp:8765` : "", ""),
+      );
     }
     if (args.join(" ") === "forward --remove tcp:52001") {
       listed = false;

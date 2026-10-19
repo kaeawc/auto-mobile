@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -89,7 +90,7 @@ describe("screenshot encoding and truthful metadata", () => {
     })) as typeof AndroidCtrlProxyClient.getInstance;
     try {
       const directAdb = new FakeAdbExecutor();
-      directAdb.setDefaultResponse({ stdout: png.toString("base64"), stderr: "" });
+      directAdb.setDefaultResponse(createExecResult(png.toString("base64"), ""));
       const directWriter = new RecordingWriter();
       const direct = new TakeScreenshot(
         mockDevice,
@@ -132,7 +133,7 @@ describe("screenshot encoding and truthful metadata", () => {
 
       const pullAdb = new FakeAdbExecutor();
       pullAdb.setCommandError("base64", new Error("maxBuffer exceeded"));
-      pullAdb.setCommandResponse("AM_SCREENCAP_RC", { stdout: "AM_SCREENCAP_RC:0", stderr: "" });
+      pullAdb.setCommandResponse("AM_SCREENCAP_RC", createExecResult("AM_SCREENCAP_RC:0", ""));
       const fileSystem = new FakeFileSystem();
       const pullWriter = new RecordingWriter();
       const pull = new TakeScreenshot(
@@ -219,7 +220,7 @@ describe("screenshot encoding and truthful metadata", () => {
 
   test("ADB fallback encodes requested JPEG quality and writes through the secure writer seam", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setDefaultResponse({ stdout: png.toString("base64"), stderr: "" });
+    adb.setDefaultResponse(createExecResult(png.toString("base64"), ""));
     const writer = new RecordingWriter();
     const original = AndroidCtrlProxyClient.getInstance;
     AndroidCtrlProxyClient.getInstance = (() => ({

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { afterEach, expect, spyOn, test } from "bun:test";
@@ -44,7 +45,7 @@ class HoldingAdb extends FakeAdbExecutor {
 
   constructor(private readonly commandToHold: string) {
     super();
-    this.setCommandResponse("screencap", { stdout: png, stderr: "" });
+    this.setCommandResponse("screencap", createExecResult(png, ""));
   }
 
   override async executeCommand(
@@ -245,7 +246,7 @@ test.each(["finish", "timeout", "cancel"] as const)(
     // Read the exact command from the production capture, rather than inventing its temp path.
     const recorder = new FakeAdbExecutor();
     const commandProbe = screenshot(recorder, timer, new CountingIdGenerator("captures"));
-    recorder.setCommandResponse("screencap", { stdout: png, stderr: "" });
+    recorder.setCommandResponse("screencap", createExecResult(png, ""));
     await commandProbe.capture.startTrackedCapture({ format: "png", displayId: 0 }).promise;
     ScreenshotJobTracker.clear();
     const command = recorder.getExecutedCommands().find((value) => value.includes("screencap"))!;

@@ -1,7 +1,7 @@
 import { makePool } from "../helpers/makePool";
 import { concreteCtrlProxyClient } from "../helpers/concreteCtrlProxyClient";
 import { readFileSync } from "node:fs";
-import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
+import { parsePsSnapshot } from "../../src/devices/bootAdmission/psSnapshot";
 import {
   ProcessTableEmulatorProcessStopper,
   EmulatorStillRunningError,

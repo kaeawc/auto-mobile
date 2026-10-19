@@ -13,7 +13,6 @@
 1	test/features/action/TapOnElement.ensureChecked.test.ts
 1	test/features/action/TapOnElement.ensureCheckedClockSkew.test.ts
 1	test/features/action/TapOnElement.toolDispatch.test.ts
-1	test/features/debug/SimulatorHighlights.test.ts
 9	test/features/observe/ios/CtrlProxyClientAutoSetup.test.ts
 3	test/features/observe/ios/CtrlProxyClientCloseSingleCycle.test.ts
 1	test/features/observe/ios/CtrlProxyExchangeRecorder.test.ts
@@ -23,7 +22,6 @@
 3	test/features/observe/ios/IosSdkContractFixtures.contract.test.ts
 1	test/features/observe/ios/iosWindowLayer.test.ts
 1	test/features/observe/ios/tapDiagnostics.test.ts
-1	test/features/utility/DeepLinkManagerHostExec.test.ts
 1	test/fixtures/observe/observeFixture.ts
 3	test/helpers/daemonRestartScenario.ts
 4	test/helpers/devicePoolSuite.ts
@@ -55,7 +53,6 @@
 1	test/server/idleFlagOnEveryReleaseSurface.test.ts
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
-1	test/server/restartReservationOwnerOtherAvdOnReservedSerial.test.ts
 1	test/server/restartReservationStartAdmission.test.ts
 2	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts
 2	test/setup/fixedCtrlProxyPortFetchGuard.test.ts

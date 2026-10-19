@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   deviceLifecycleServerHost,
   registerDeviceLifecycleServerHost,
@@ -37,14 +37,17 @@ class RecordingHost implements DeviceLifecycleServerHost {
 }
 
 describe("deviceLifecycleServerHost", () => {
-  const previous = registerDeviceLifecycleServerHost(undefined);
-  registerDeviceLifecycleServerHost(previous);
+  // Capture at test time: the server registers its host when its modules load, which in a
+  // shared test process can happen after this file is collected.
+  let previous: DeviceLifecycleServerHost | undefined;
+  beforeEach(() => {
+    previous = registerDeviceLifecycleServerHost(undefined);
+  });
   afterEach(() => {
     registerDeviceLifecycleServerHost(previous);
   });
 
   it("refuses with an actionable error before a host is registered", async () => {
-    registerDeviceLifecycleServerHost(undefined);
     await expect(deviceLifecycleServerHost.notifyBootedDeviceResourcesUpdated()).rejects.toThrow(
       "No device lifecycle server host is registered",
     );

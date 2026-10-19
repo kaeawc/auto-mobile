@@ -2,7 +2,6 @@ import { describe, expect } from "bun:test";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -32,15 +31,6 @@ isolateToolRegistry();
 // Fixture follows test/server/restartReservationStartAdmission.test.ts.
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";
-interface Internals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    id: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<string, { restartHandoff?: boolean; deviceId: string }>;
-}
-
 class RestartDeviceManager extends FakeDeviceUtils {
   /** A stopped AVD has no serial; the emulator takes the lowest free console port at boot. */
   override async startDevice(...args: Parameters<FakeDeviceUtils["startDevice"]>) {
@@ -151,7 +141,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
     const liveRow = (await persistence.getSession!(HOLDER))!;
     liveRow.expires_at_ms = live.expiresAt;
     liveRow.session_timeout_ms = live.sessionTimeoutMs;
-    const internals = pool as unknown as Internals;
+    const internals = pool.testHooks;
     // restart-phone's emulator dies: HOLDER is handed off with the 180 s restart hold and the
     // serial emulator-5554 leaves the pool (its console port is now free).
     await internals.releaseDisconnectedRecoverySessionWithRetry(

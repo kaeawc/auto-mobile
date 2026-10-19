@@ -8,7 +8,6 @@ import { runAdbExecutorContract, type ScriptedAdb } from "./AdbExecutorContract"
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 

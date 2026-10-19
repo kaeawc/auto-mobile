@@ -18,7 +18,6 @@ import { wrapCommandError } from "../../../src/utils/CommandError";
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
-  isEmulator: true,
   name: "Test Device",
 };
 

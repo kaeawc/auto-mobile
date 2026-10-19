@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { Daemon } from "../../src/daemon/daemon";
+import { Daemon, type DaemonTestHooks } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
+import { FakeHttpListener } from "../fakes/FakeHttpListener";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 import { logger } from "../../src/utils/logger";
@@ -13,26 +14,6 @@ import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProb
 
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_FAILED_CHECKS = 3;
-
-interface FakeSocketServer {
-  isListening(): boolean;
-}
-
-interface FakeObservationStreamHealth {
-  isHealthy(): boolean;
-  recover(): Promise<void>;
-}
-
-interface DaemonHealthInternals {
-  httpIngress: { httpServer: { listening: boolean } | null };
-  socketServer: FakeSocketServer | null;
-  observationStreamHealth: FakeObservationStreamHealth;
-  healthCheck: { stop(): Promise<boolean> } | null;
-  lastDatabaseHealthFailure?: string;
-  startHealthCheckTimer(): void;
-  stopHealthCheckTimer(): Promise<void>;
-  attemptRecovery(failureKind?: string): Promise<void>;
-}
 
 class FakeDatabaseHealthProbe {
   checkCalls = 0;
@@ -73,10 +54,10 @@ function buildDaemon(
       recoverFromDatabaseHealthFailure: exitProcess,
     },
   );
-  (daemon as unknown as DaemonHealthInternals).observationStreamHealth = {
+  daemon.testHooks.setObservationStreamHealth({
     isHealthy: () => true,
     recover: async () => {},
-  };
+  });
   return daemon;
 }
 
@@ -94,11 +75,11 @@ async function advanceOneInterval(timer: FakeTimer): Promise<void> {
 }
 
 describe("Daemon database health check", () => {
-  let cleanup: { internals: DaemonHealthInternals; timer: FakeTimer } | null = null;
+  let cleanup: { internals: DaemonTestHooks; timer: FakeTimer } | null = null;
 
   afterEach(() => {
-    if (cleanup?.internals.healthCheck) {
-      void cleanup.internals.healthCheck.stop();
+    if (cleanup?.internals.healthCheck()) {
+      void cleanup.internals.healthCheck()?.stop();
       cleanup = null;
     }
     if (DaemonState.getInstance().isInitialized()) {
@@ -114,10 +95,10 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, probe, (code: number, detail?: string) => {
       exits.push({ code, detail });
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => true });
     internals.startHealthCheckTimer();
     // Move past the schedule before firing; async advance preserves the late reading.
     const tick = async (lateMs = 0) => {
@@ -231,7 +212,7 @@ describe("Daemon database health check", () => {
     await h.tick();
     h.probe.failWith(new DatabaseHealthProbeTimeoutError(2222));
     await h.tick(3000);
-    expect(h.internals.lastDatabaseHealthFailure).toBe(
+    expect(h.internals.lastDatabaseHealthFailure()).toBe(
       "Database health probe timed out after 1111ms",
     );
     expect(h.exits).toEqual([]);
@@ -245,15 +226,15 @@ describe("Daemon database health check", () => {
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     databaseHealthProbe.failWith(new Error("SQLITE_BUSY: database is locked"));
     const daemon = buildDaemon(timer, databaseHealthProbe);
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => true };
-    internals.attemptRecovery = async (failureKind) => {
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => true });
+    internals.setAttemptRecovery(async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
-    };
+    });
 
     internals.startHealthCheckTimer();
 
@@ -278,11 +259,11 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, databaseHealthProbe, (code) => {
       exitCodes.push(code);
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => true });
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
@@ -300,11 +281,11 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, databaseHealthProbe, (code: number, detail?: string) => {
       recoveryCalls.push({ code, detail });
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => true });
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS; i += 1) {
@@ -324,11 +305,11 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, databaseHealthProbe, (code: number, detail?: string) => {
       recoveryCalls.push({ code, detail });
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => true });
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
@@ -359,7 +340,7 @@ describe("Daemon database health check", () => {
         finishRecovery = resolve;
       });
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
 
     const recovery = internals.attemptRecovery("database");
     await flushMicrotasks();
@@ -385,18 +366,18 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, databaseHealthProbe, (code) => {
       exitCodes.push(code);
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
 
-    internals.httpIngress.httpServer = { listening: false };
-    internals.socketServer = { isListening: () => true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(false));
+    daemon.setSocketServerForTesting({ isListening: () => true });
     internals.startHealthCheckTimer();
 
     for (let i = 0; i < MAX_FAILED_CHECKS - 1; i += 1) {
       await advanceOneInterval(timer);
     }
 
-    internals.httpIngress.httpServer = { listening: true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
     await advanceOneInterval(timer);
 
     expect(databaseHealthProbe.checkCalls).toBe(1);
@@ -418,20 +399,20 @@ describe("Daemon database health check", () => {
     const daemon = buildDaemon(timer, databaseHealthProbe, (code) => {
       exitCodes.push(code);
     });
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
 
-    internals.httpIngress.httpServer = { listening: false };
-    internals.socketServer = { isListening: () => true };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(false));
+    daemon.setSocketServerForTesting({ isListening: () => true });
     internals.startHealthCheckTimer();
 
     await advanceOneInterval(timer);
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => false };
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => false });
     await advanceOneInterval(timer);
 
-    internals.socketServer = { isListening: () => true };
+    daemon.setSocketServerForTesting({ isListening: () => true });
     await advanceOneInterval(timer);
 
     expect(databaseHealthProbe.checkCalls).toBe(1);
@@ -449,23 +430,23 @@ describe("Daemon database health check", () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const daemon = buildDaemon(timer, databaseHealthProbe);
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
     let observationHealthChecks = 0;
 
-    internals.httpIngress.httpServer = { listening: false };
-    internals.socketServer = { isListening: () => true };
-    internals.observationStreamHealth = {
+    internals.httpIngress.setHttpServer(new FakeHttpListener(false));
+    daemon.setSocketServerForTesting({ isListening: () => true });
+    internals.setObservationStreamHealth({
       isHealthy: () => {
         observationHealthChecks += 1;
         return true;
       },
       recover: async () => {},
-    };
-    internals.attemptRecovery = async (failureKind) => {
+    });
+    internals.setAttemptRecovery(async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
-    };
+    });
 
     internals.startHealthCheckTimer();
 
@@ -487,23 +468,23 @@ describe("Daemon database health check", () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const daemon = buildDaemon(timer, databaseHealthProbe);
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
     let observationHealthChecks = 0;
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => false };
-    internals.observationStreamHealth = {
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => false });
+    internals.setObservationStreamHealth({
       isHealthy: () => {
         observationHealthChecks += 1;
         return true;
       },
       recover: async () => {},
-    };
-    internals.attemptRecovery = async (failureKind) => {
+    });
+    internals.setAttemptRecovery(async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
-    };
+    });
 
     internals.startHealthCheckTimer();
 
@@ -525,19 +506,19 @@ describe("Daemon database health check", () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const daemon = buildDaemon(timer, databaseHealthProbe);
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
 
-    internals.httpIngress.httpServer = { listening: true };
-    internals.socketServer = { isListening: () => true };
-    internals.observationStreamHealth = {
+    internals.httpIngress.setHttpServer(new FakeHttpListener(true));
+    daemon.setSocketServerForTesting({ isListening: () => true });
+    internals.setObservationStreamHealth({
       isHealthy: () => false,
       recover: async () => {},
-    };
-    internals.attemptRecovery = async (failureKind) => {
+    });
+    internals.setAttemptRecovery(async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
-    };
+    });
 
     internals.startHealthCheckTimer();
 
@@ -558,16 +539,16 @@ describe("Daemon database health check", () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const daemon = buildDaemon(timer, databaseHealthProbe);
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
     const recoverCalls: number[] = [];
 
-    internals.observationStreamHealth = {
+    internals.setObservationStreamHealth({
       isHealthy: () => false,
       recover: async () => {
         recoverCalls.push(timer.now());
       },
-    };
+    });
 
     await internals.attemptRecovery("socket");
 
@@ -578,7 +559,7 @@ describe("Daemon database health check", () => {
     const timer = new FakeTimer();
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const daemon = buildDaemon(timer, databaseHealthProbe);
-    const internals = daemon as unknown as DaemonHealthInternals;
+    const internals = daemon.testHooks;
     cleanup = { internals, timer };
     const intervalCountBeforeHealthCheck = timer.getPendingIntervalCount();
 
@@ -588,7 +569,7 @@ describe("Daemon database health check", () => {
     await internals.stopHealthCheckTimer();
 
     expect(timer.getPendingIntervalCount()).toBe(intervalCountBeforeHealthCheck);
-    expect(internals.healthCheck).toBe(null);
+    expect(internals.healthCheck()).toBe(null);
     cleanup = null;
   });
 });

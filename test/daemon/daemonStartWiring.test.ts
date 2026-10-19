@@ -1,8 +1,8 @@
+import { UnixSocketServer } from "../../src/daemon/socketServer";
 import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import type { BootedDevice } from "../../src/models";
-import type { ChildProcess } from "node:child_process";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
@@ -34,25 +34,6 @@ import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 // test. This drives `start()` through its first steps and stops it at the first startup step
 // that would touch the machine (the early owner record), with the real subscription in place.
 
-interface DaemonStartInternals {
-  daemonSessionId: string;
-  options: DaemonOptions;
-  port: number;
-  processStartHost(): DaemonStartHost;
-  setupShutdownHandlers(): void;
-  writeEarlyOwnerRecord(): Promise<void>;
-  startThroughSocketBind(): Promise<void>;
-  initializeDatabase(): Promise<void>;
-  initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void>;
-  initializeIosServices(): Promise<void>;
-  stopSessionTimers(): void;
-  startHost: DaemonStartHost;
-  sessionBrokerConfigPath: string | undefined;
-  socketBindCommitted: boolean;
-  openBindingRegistry(signal?: AbortSignal): Promise<unknown>;
-  closeManagedExecutionRelease(): Promise<void>;
-}
-
 class StartupStopped extends Error {}
 
 /** A guard whose refusal restore leaves the real PID file alone. */
@@ -72,8 +53,7 @@ async function makeDaemon(options: DaemonOptions, guard = new InertIncumbentGuar
     processGenerationToken: () => "memory-generation",
     incumbentOwnerGuard: guard,
   });
-  const internals = daemon as unknown as DaemonStartInternals;
-  return { daemon, internals, timer };
+  return { daemon, internals: daemon, timer };
 }
 
 describe("Daemon.start() tool-call-end wiring", () => {
@@ -112,8 +92,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
     const db = await createTestDatabase();
     const repository = new VideoRecordingRepository(db);
     const sessions = new DeviceSessionRepository(db, timer);
-    const actualOwnId = internals.daemonSessionId;
-    const host = internals.processStartHost();
+    const actualOwnId = internals.testHooks.daemonSessionId;
+    const host = internals.testHooks.processStartHost();
     const live = new Set([actualOwnId, "peer-daemon"]);
     for (const [owner, daemonId] of [
       ["own-owner", actualOwnId],
@@ -233,19 +213,18 @@ describe("Daemon.start() tool-call-end wiring", () => {
       disposed++;
     });
     try {
-      expect(await internals.processStartHost().redriveRecorderTeardowns()).toBe(true);
+      expect(await internals.testHooks.processStartHost().redriveRecorderTeardowns()).toBe(true);
       expect(videoManager.getStartupOrphanCaptures()?.find("old-process")).toEqual({
         recordingId: "old-process",
         deviceId: "emulator-5554",
         ownerSessionUuid: undefined,
       });
-      const pool = daemon.getDevicePool() as unknown as {
-        trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
-      };
-      await pool.trackStartedDeviceProcess(
-        { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
-        new FakeChildProcess(),
-      );
+      await daemon
+        .getDevicePool()
+        .trackStartedDeviceProcess(
+          { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
+          new FakeChildProcess(),
+        );
       expect(confirm).toHaveBeenCalledTimes(1);
       expect(confirm).toHaveBeenCalledWith(
         { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
@@ -276,7 +255,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       spyOn(logger, "info").mockImplementation(() => {}),
     ];
     const host: DaemonStartHost = {
-      ...internals.processStartHost(),
+      ...internals.testHooks.processStartHost(),
       enterProcess: () => {},
       publishForwardLeaseOwner: () => {},
       writeExitRecord: () => {},
@@ -311,7 +290,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
     const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockRejectedValue(
       new Error("fake open refused"),
     );
-    internals.sessionBrokerConfigPath = broker ? "/memory/broker.json" : undefined;
+    internals.testHooks.setSessionBrokerConfigPath(broker ? "/memory/broker.json" : undefined);
     internals.socketBindCommitted = bound;
     try {
       await expect(internals.openBindingRegistry()).rejects.toThrow("fake open refused");
@@ -341,21 +320,22 @@ describe("Daemon.start() tool-call-end wiring", () => {
         if (broker) {
           throw new Error("legacy owner still live");
         }
-        await new Promise<void>((resolve) =>
+        // The open never produces a registry; the abort is how the daemon cancels the wait.
+        return await new Promise<SqliteBindingRegistry>((_resolve, reject) =>
           signal?.addEventListener(
             "abort",
             () => {
               stopped = true;
-              resolve();
+              reject(new Error("registry open aborted"));
             },
             { once: true },
           ),
         );
       }),
     ];
-    internals.sessionBrokerConfigPath = broker ? "/memory/broker.json" : undefined;
-    internals.startHost = {
-      ...internals.processStartHost(),
+    internals.testHooks.setSessionBrokerConfigPath(broker ? "/memory/broker.json" : undefined);
+    internals.testHooks.setStartHost({
+      ...internals.testHooks.processStartHost(),
       enterProcess: () => {},
       publishForwardLeaseOwner: () => {},
       writeExitRecord: () => {},
@@ -368,20 +348,20 @@ describe("Daemon.start() tool-call-end wiring", () => {
       redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
         events.push("bind");
-        return null as unknown as Awaited<ReturnType<DaemonStartHost["bindControlSocket"]>>;
+        return new UnixSocketServer("/memory/unbound.sock", DaemonState.getInstance(), timer);
       },
-    };
+    });
     try {
       if (broker) {
-        await expect(internals.startThroughSocketBind()).rejects.toThrow(
+        await expect(internals.testHooks.startThroughSocketBind()).rejects.toThrow(
           "Session broker cannot start",
         );
         expect(events).toEqual(["retirement"]);
       } else {
-        await internals.startThroughSocketBind();
+        await internals.testHooks.startThroughSocketBind();
         expect(events).toEqual(["ingress", "pool", "bind", "retirement"]);
         expect(stopped).toBe(false);
-        await internals.closeManagedExecutionRelease();
+        await internals.testHooks.closeManagedExecutionRelease();
         expect(stopped).toBe(true);
         expect(timer.now()).toBe(0);
       }
@@ -400,13 +380,15 @@ describe("Daemon.start() tool-call-end wiring", () => {
       spyOn(logger, "info").mockImplementation(() => {}),
       spyOn(logger, "warn").mockImplementation(() => {}),
       spyOn(internals, "setupShutdownHandlers").mockImplementation(() => {}),
-      spyOn(internals, "writeEarlyOwnerRecord").mockRejectedValue(new StartupStopped()),
     ]) {
       restores.push(() => spy.mockRestore());
     }
     const exits: DaemonExitRecord[] = [];
-    const host = internals.processStartHost();
+    const host = internals.testHooks.processStartHost();
     host.writeExitRecord = (record) => exits.push(record);
+    host.writeEarlyOwnerRecord = async () => {
+      throw new StartupStopped();
+    };
     const sessionManager = daemon.getSessionManager();
     const session = await sessionManager.createSession("start-wiring", "emulator-5554", "android");
 
@@ -417,7 +399,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
         reason: "startup-failure",
         exitedAtMs: 0,
         buildId: "memory-build",
-        options: { ...daemonProcessOptions(internals.options), port: 3161 },
+        options: { ...daemonProcessOptions(internals.testHooks.options), port: 3161 },
       });
 
       // Held side: a call refused at admission is not use (#10824): its end moves nothing.
@@ -443,22 +425,24 @@ describe("Daemon.start() tool-call-end wiring", () => {
     "a start failing %s process entry records nothing through its host",
     async (phase) => {
       const { daemon, internals } = await makeDaemon({ port: 3161, debug: true });
-      const write = spyOn(internals.processStartHost(), "writeExitRecord").mockImplementation(
-        () => {},
-      );
+      const write = spyOn(
+        internals.testHooks.processStartHost(),
+        "writeExitRecord",
+      ).mockImplementation(() => {});
       restores.push(() => write.mockRestore());
       const host: DaemonStartHost = {
-        ...internals.processStartHost(),
+        ...internals.testHooks.processStartHost(),
         writeExitRecord: write,
         enterProcess: () => {
           throw new StartupStopped();
         },
       };
       if (phase === "before") {
-        const beforeEntry = spyOn(internals, "startThroughSocketBind").mockRejectedValue(
-          new StartupStopped(),
-        );
-        restores.push(() => beforeEntry.mockRestore());
+        internals.testHooks.setStartSteps({
+          startThroughSocketBind: async () => {
+            throw new StartupStopped();
+          },
+        });
       }
       try {
         await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
@@ -490,7 +474,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
     const { daemon, internals } = await makeDaemon({ port: 4000, debug: true }, guard);
     const exits: DaemonExitRecord[] = [];
     const host: DaemonStartHost = {
-      ...internals.processStartHost(),
+      ...internals.testHooks.processStartHost(),
       enterProcess: () => {},
       publishForwardLeaseOwner: () => {},
       writeExitRecord: (entry) => void exits.push(entry),

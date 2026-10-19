@@ -5251,7 +5251,7 @@ export class DevicePool {
     return this.emulatorProcessLifecycle.stopEmulatorProcess(childProcess, retainLeaseUntil);
   }
 
-  private async trackStartedDeviceProcess(
+  async trackStartedDeviceProcess(
     device: BootedDevice,
     childProcess: ChildProcess | null | undefined,
   ): Promise<void> {

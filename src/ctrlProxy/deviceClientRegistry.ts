@@ -1,4 +1,14 @@
+import type { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
 import { deleteDeviceInstanceIfCurrent, getOrCreateDeviceInstance } from "./deviceInstanceRegistry";
+
+/** The slice of a registered iOS manager that device add/remove handling drives; fakes implement it. */
+export type ExistingIosCtrlProxyManager = Pick<
+  IOSCtrlProxyManager,
+  | "suspendForDeviceRemoval"
+  | "rearmAfterDeviceReappearance"
+  | "removalGeneration"
+  | "supersededSinceRemoval"
+>;
 
 /**
  * One lifecycle vocabulary for per-device CtrlProxy client/manager instances (#11847).

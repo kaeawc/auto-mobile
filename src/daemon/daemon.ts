@@ -20,14 +20,10 @@ import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
-import {
-  createServer as createHttpServer,
-  Server as HttpServer,
-  type IncomingMessage,
-} from "node:http";
+import { createServer as createHttpServer } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { DaemonHttpIngress } from "./daemonHttpIngress";
+import { DaemonHttpIngress, type HttpListener, type HttpMcpRequestLike } from "./daemonHttpIngress";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
@@ -47,12 +43,11 @@ import {
 import { defaultMockLocationClearRegistry } from "../features/utility/MockLocationClear";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
-import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
+import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import {
   SessionManager,
   type ActiveSessionExecutionQuery,
-  type RehydrationSummary,
   type Session,
   type SessionReleaseOptions,
 } from "./sessionManager";
@@ -138,7 +133,6 @@ import {
   DaemonSelfExitRecorder,
   defaultDaemonExitRecordFileSystem,
   writeDaemonExitRecord,
-  type DaemonExitRecord,
   type DaemonExitRecordFileSystem,
 } from "./daemonExitRecord";
 import { daemonProcessOptions } from "./daemonOptionScopes";
@@ -243,7 +237,6 @@ import {
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
-  createPooledObservationExecutor,
   runObservationRequestBatch,
 } from "./observationRequestBatch";
 import {
@@ -277,13 +270,13 @@ import { pushInitialObservationFramesForSubscriber } from "./observationInitialF
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
   NavigationGraphStreamBridge,
+  type NavigationGraphPushTarget,
   type StorageSubscriptionRequest,
   applyStorageSubscriptionRequest,
   createObservationStreamIosClient,
   isHeldByAnotherOwner,
   logSkippedObservationStreamDevice,
 } from "./daemonStreamRouting";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
 import {
   BackgroundBindingRegistryUpgrade,
@@ -296,11 +289,7 @@ import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { PlatformLegacySlotDeviceStopper } from "./sessionBroker/registry/platformLegacySlotDeviceStopper";
 import { sessionDisposition } from "./sessionBroker/sessionDisposition";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
-import {
-  createDaemonTerminalReleaseJournal,
-  type DaemonTerminalReleaseJournalOptions,
-  type TerminalReleaseJournal,
-} from "./terminalReleaseJournal";
+import { createDaemonTerminalReleaseJournal } from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
@@ -362,7 +351,6 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "../processLifecycle";
-import type { BootedDevice, Platform } from "../models";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -398,7 +386,20 @@ import {
 } from "./daemonDependencies";
 import type { DaemonStateWrites } from "./daemonContext";
 import { AMBIENT_ENV, readEnvRaw } from "../config/env";
+import { createDaemonObservationExecutor } from "./daemonObservationExecutor";
+import {
+  getProcessWideAdbServerResetCohort,
+  isProcessWideAdbServerReset,
+} from "./processWideAdbServerReset";
+import type { DaemonTestHooks } from "./daemonTestHooks";
+import type { DaemonStartHost } from "./daemonStartHost";
 
+export {
+  getProcessWideAdbServerResetCohort,
+  isProcessWideAdbServerReset,
+} from "./processWideAdbServerReset";
+export type { DaemonStartHost } from "./daemonStartHost";
+export type { DaemonTestHooks } from "./daemonTestHooks";
 export type {
   DaemonDependencies,
   DaemonProcessBirthTimeProvider,
@@ -434,96 +435,18 @@ function shutdownStage(
   return shutdownStageFrom(DAEMON_SHUTDOWN_STAGES, name, waitingOn, run);
 }
 
-type DeviceSessionRoutingTargets = {
+/** What routing needs of a push server: its resolver slot. */
+type ResolverTarget = Pick<
+  NonNullable<ReturnType<typeof getPerformancePushServer>>,
+  "setDeviceSessionResolver"
+>;
+
+export type DeviceSessionRoutingTargets = {
   deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
-  performancePush: ReturnType<typeof getPerformancePushServer>;
-  failuresPush: ReturnType<typeof getFailuresPushServer>;
-  telemetryPush: ReturnType<typeof getTelemetryPushServer>;
+  performancePush: ResolverTarget | null;
+  failuresPush: ResolverTarget | null;
+  telemetryPush: ResolverTarget | null;
 };
-
-function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
-  return {
-    deviceId: pooledDevice.id,
-    name: pooledDevice.name,
-    platform: pooledDevice.platform,
-    iosVersion: pooledDevice.iosVersion,
-  };
-}
-
-/**
- * Per-device step of the pooled observation batch. An Android floor is read from the device's
- * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
- * floor (issue #9895).
- */
-function createDaemonObservationExecutor(
-  requestStart: number,
-  isViewerRead: (pooledDevice: PooledDevice) => boolean | Promise<boolean>,
-) {
-  return createPooledObservationExecutor({
-    hostRequestStartMs: requestStart,
-    readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
-      (
-        await defaultAdbClientFactory
-          .create(toBootedDevice(pooledDevice))
-          .getDeviceTimestampMsWithSource(undefined, signal)
-      ).timestampMs,
-    observe: (pooledDevice: PooledDevice, { minTimestamp, signal }) =>
-      new RealObserveScreen(toBootedDevice(pooledDevice)).execute({
-        skipWaitForFresh: false,
-        minTimestamp,
-        signal,
-      }),
-    // A watcher of a held device gets the `observe` tool's deviceId read (#10967): connect-only,
-    // never the session pipeline's service rebind or CtrlProxy setup on the holder's device.
-    viewerRead: {
-      applies: isViewerRead,
-      observe: (pooledDevice: PooledDevice, signal: AbortSignal) =>
-        new RealObserveScreen(toBootedDevice(pooledDevice), undefined, {
-          deviceReadOnly: true,
-        }).executeDeviceRead(signal, "none"),
-    },
-  });
-}
-
-export function getProcessWideAdbServerResetCohort(
-  bootedDeviceIds: ReadonlySet<string>,
-  succeededPlatforms: ReadonlySet<Platform>,
-  forceDisconnectedDeviceIds: ReadonlySet<string>,
-  pooledDevices: readonly PooledDevice[],
-): readonly PooledDevice[] {
-  const ownedAndroidEmulators = pooledDevices.filter(
-    (device) =>
-      device.platform === "android" &&
-      device.avdName !== undefined &&
-      device.androidImage !== undefined &&
-      device.id.startsWith("emulator-"),
-  );
-  if (
-    !succeededPlatforms.has("android") ||
-    ownedAndroidEmulators.length < 2 ||
-    !ownedAndroidEmulators.every((device) => !bootedDeviceIds.has(device.id)) ||
-    !ownedAndroidEmulators.some((device) => forceDisconnectedDeviceIds.has(device.id))
-  ) {
-    return [];
-  }
-  return ownedAndroidEmulators;
-}
-
-export function isProcessWideAdbServerReset(
-  bootedDeviceIds: ReadonlySet<string>,
-  succeededPlatforms: ReadonlySet<Platform>,
-  forceDisconnectedDeviceIds: ReadonlySet<string>,
-  pooledDevices: readonly PooledDevice[],
-): boolean {
-  return (
-    getProcessWideAdbServerResetCohort(
-      bootedDeviceIds,
-      succeededPlatforms,
-      forceDisconnectedDeviceIds,
-      pooledDevices,
-    ).length > 0
-  );
-}
 
 /**
  * Main daemon process
@@ -534,40 +457,6 @@ export function isProcessWideAdbServerReset(
  * - PID file management
  * - Graceful shutdown handling
  */
-
-/**
- * The steps of `Daemon.start()` that touch the machine: the process's working directory and
- * signal handlers, the PID file, the data directory, listening sockets, and the monitors that
- * probe devices. `start()` runs the process's own; `Daemon.startOn()` runs a caller's, so a test
- * harness starts a daemon through the same sequence with nothing reaching the host (#11441).
- * Each step sits where `start()` has always run it.
- */
-export interface DaemonStartHost {
-  /** Synchronous self-exit policy record; fake hosts keep it in memory. */
-  writeExitRecord(record: DaemonExitRecord): void;
-  /** Logging, the stable working directory and the shutdown handlers. */
-  enterProcess(): void;
-  /** Name this daemon's control socket in the CtrlProxy forwarding leases it takes (#10497). */
-  publishForwardLeaseOwner(): void;
-  /** Publish the owned database path in the PID file before the database opens (#2871). */
-  writeEarlyOwnerRecord(): Promise<void>;
-  /** This daemon's terminal-release journal, with dead daemons' intents adopted (#10959). */
-  openTerminalReleaseJournal(
-    owner: Pick<DaemonTerminalReleaseJournalOptions, "daemonSessionId" | "liveDaemonSessionIds">,
-  ): TerminalReleaseJournal;
-  /** The AVD provenance warm-up, port selection and the HTTP MCP listener. */
-  startHttpIngress(): Promise<void>;
-  /** Drop per-session appearance rows no rehydrated or recoverable session owns (#10976). */
-  sweepStaleAppearanceConfigs(rehydration: RehydrationSummary): Promise<void>;
-  /** Mark unconfirmed recorders before sessions can bind; never await background recovery. */
-  redriveRecorderTeardowns(): Promise<boolean>;
-  /** Create the control socket server over this daemon's state and start accepting clients. */
-  bindControlSocket(): Promise<UnixSocketServer>;
-  /** Auxiliary sockets, device monitors, the PID file and the health check. */
-  startServicesAfterSocketBind(): Promise<void>;
-  /** Navigation retention, forwarding-lease idle release, the orphan watchdog and broker reclaim. */
-  startMaintenanceMonitors(): void;
-}
 
 interface CapturedDisconnectRecoveryOptions {
   deviceId: string;
@@ -619,11 +508,13 @@ export async function findAvailableDaemonPort(
 }
 
 export class Daemon {
-  private readonly httpServerFactory: () => HttpServer;
+  private readonly httpServerFactory: () => HttpListener;
   private readonly liveDaemonSessionIdProvider: LiveDaemonSessionIdProvider;
   private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   private readonly bindingExclusionFactory: (timer: Timer) => BindingExclusion;
   private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
+  private readonly deviceManager?: PlatformDeviceManager;
+  private readonly iosDeviceVerifier: () => Pick<DeviceReadiness, "verifyIosDevice">;
   // One probe lifetime shared by all MCP connections and daemon doctor calls.
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
     coreDeviceProbe: createProductionCoreDeviceProbe(),
@@ -712,7 +603,7 @@ export class Daemon {
   private bindingRegistry: Promise<SqliteBindingRegistry> | undefined;
   private sessionBrokerService: SessionBrokerService | undefined;
   private sessionBrokerConfig: SessionBrokerHostConfig | undefined;
-  private readonly sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
+  private sessionBrokerConfigPath = process.env[SESSION_BROKER_HOST_CONFIG_ENV]
     ? resolve(process.env[SESSION_BROKER_HOST_CONFIG_ENV]!)
     : undefined;
   private bindingExecOwnerLiveness: BindingExecOwnerLiveness | undefined;
@@ -793,6 +684,8 @@ export class Daemon {
     this.avdManagerFactory = retained.avdManagerFactory;
     this.bindingExclusionFactory = retained.bindingExclusionFactory;
     this.foreignCtrlProxyForwardEvidence = retained.foreignCtrlProxyForwardEvidence;
+    this.deviceManager = retained.deviceManager;
+    this.iosDeviceVerifier = retained.iosDeviceVerifier;
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
       this.resolveStartupCompletion = resolve;
@@ -1058,7 +951,7 @@ export class Daemon {
 
   private backgroundRegistryUpgrade: BackgroundBindingRegistryUpgrade | undefined;
 
-  private openBindingRegistry(signal?: AbortSignal): Promise<SqliteBindingRegistry> {
+  openBindingRegistry(signal?: AbortSignal): Promise<SqliteBindingRegistry> {
     if (this.bindingRegistry) {
       return this.bindingRegistry;
     }
@@ -1221,6 +1114,7 @@ export class Daemon {
             ),
           }
         : {}),
+      ...(this.deviceManager ? { deviceManager: this.deviceManager } : {}),
       managedExecutionOwnership: () => this.managedExecutionReowner,
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
@@ -1925,7 +1819,7 @@ export class Daemon {
 
   /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
-    req: IncomingMessage,
+    req: HttpMcpRequestLike,
     scope: StatelessMcpRequestScope,
   ): ReturnType<typeof createStatelessMcpServer> {
     return createStatelessMcpServer(
@@ -2336,9 +2230,7 @@ export class Daemon {
     return applyStorageSubscriptionRequest({ devicePool: this.devicePool }, request);
   }
 
-  private setupNavigationGraphStreamListener(
-    server: ReturnType<typeof getDeviceDataStreamServer>,
-  ): void {
+  private setupNavigationGraphStreamListener(server: NavigationGraphPushTarget | null): void {
     this.navigationGraphBridge.listen(server);
   }
 
@@ -3625,7 +3517,7 @@ export class Daemon {
     }
 
     logger.info(`[Daemon] Initializing CtrlProxy iOS for ${iosDevices.length} iOS device(s)...`);
-    const deviceSessionManager = DeviceReadiness.getInstance();
+    const deviceSessionManager = this.iosDeviceVerifier();
 
     await initializeIosCtrlProxyAtStartup(
       iosDevices.map((device) => device.id),
@@ -3671,7 +3563,7 @@ export class Daemon {
           this.sessionManager.getSessionForDevice(id) === sessionUuid &&
           this.managedExecutionReowner?.ownershipState(sessionUuid) === undefined
         ) {
-          await DeviceReadiness.getInstance().verifyIosDevice(id, options);
+          await this.iosDeviceVerifier().verifyIosDevice(id, options);
         }
       },
     });
@@ -3770,6 +3662,73 @@ export class Daemon {
     // NOT crash the shared singleton daemon and wedge every session (issue #3408).
     // Log-then-continue; the offending tool call already failed on its own chain.
     setFatalProcessHandler(createDaemonFatalProcessHandler(logger));
+  }
+
+  /** Typed view of the internals unit tests drive; production code never reads it. */
+  get testHooks(): DaemonTestHooks {
+    return {
+      daemonSessionId: this.daemonSessionId,
+      options: this.options,
+      port: this.port,
+      httpIngress: this.httpIngress.testHooks,
+      setSessionManager: (manager) => {
+        this.sessionManager = manager;
+      },
+      setObserverSessionRegistry: (registry) => {
+        this.observerSessionRegistry = registry;
+      },
+      setObservationStreamHealth: (health) => {
+        this.observationStreamHealth = health;
+      },
+      setSessionBrokerConfigPath: (path) => {
+        this.sessionBrokerConfigPath = path;
+      },
+      setStartHost: (host) => {
+        this.startHost = host;
+      },
+      processStartHost: () => this.processStartHost(),
+      startThroughSocketBind: () => this.startThroughSocketBind(),
+      startAfterSocketBind: () => this.startAfterSocketBind(),
+      startUntilReady: () => this.startUntilReady(),
+      setStartSteps: (steps) => {
+        this.startThroughSocketBind = steps.startThroughSocketBind ?? this.startThroughSocketBind;
+        this.startAfterSocketBind = steps.startAfterSocketBind ?? this.startAfterSocketBind;
+        this.stopAfterFailedStartup = steps.stopAfterFailedStartup ?? this.stopAfterFailedStartup;
+      },
+      stopAfterFailedStartup: () => this.stopAfterFailedStartup(),
+      closeManagedExecutionRelease: () => this.closeManagedExecutionRelease(),
+      quiesceProvisioningIngress: () => this.quiesceProvisioningIngress(),
+      interruptProvisioningForShutdown: (drainTimeoutMs) =>
+        this.interruptProvisioningForShutdown(drainTimeoutMs),
+      resolveStartupCompletion: () => this.resolveStartupCompletion(),
+      rejectStartupCompletion: (reason) => this.rejectStartupCompletion(reason),
+      startHealthCheckTimer: () => this.startHealthCheckTimer(),
+      stopHealthCheckTimer: () => this.stopHealthCheckTimer(),
+      healthCheck: () => this.healthCheck,
+      lastDatabaseHealthFailure: () => this.lastDatabaseHealthFailure,
+      attemptRecovery: (failureKind) => this.attemptRecovery(failureKind),
+      setAttemptRecovery: (recover) => {
+        this.attemptRecovery = recover;
+      },
+      deviceSessionRegistry: this.deviceSessionRegistry,
+      deviceDataStreamServer: this.deviceDataStreamServer,
+      // The doubles carry the resolver slot the daemon wires; the rest of a real push server is the
+      // double's own business, so the result is widened back to the real targets at this one seam.
+      setDeviceSessionRoutingTargets: (resolve) => {
+        this.getDeviceSessionRoutingTargets = resolve;
+      },
+      setupDeviceSessionRouting: () => this.setupDeviceSessionRouting(),
+      setupDeviceDataStreamCallback: () => this.setupDeviceDataStreamCallback(),
+      setupNavigationGraphStreamListener: (server) =>
+        this.setupNavigationGraphStreamListener(server),
+      setNavigationGraphStreamListener: (listen) => {
+        this.setupNavigationGraphStreamListener = listen;
+      },
+      setNavigationGraphBridgeAttach: (attach) => {
+        this.navigationGraphBridge.attach = attach;
+      },
+      applyStorageSubscriptionRequest: (request) => this.applyStorageSubscriptionRequest(request),
+    };
   }
 
   /** Test seam: the daemon-owned device pool, so tests can seed and inspect it without private-field casts. */

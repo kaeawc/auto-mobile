@@ -11,15 +11,11 @@
 2	test/daemon/daemonAndroidAvdProvenanceStartup.test.ts
 1	test/daemon/daemonClientNotifications.test.ts
 1	test/daemon/daemonClientStaleSocketRecovery.integration.test.ts
-14	test/daemon/daemonDatabaseHealthCheck.test.ts
-7	test/daemon/daemonDevicePoolStartup.test.ts
 1	test/daemon/daemonExitRecord.test.ts
 1	test/daemon/daemonFatalHandler.test.ts
 3	test/daemon/daemonForeignForwardWiring.test.ts
 2	test/daemon/daemonHandshake.test.ts
 1	test/daemon/daemonHangupShutdownWiring.test.ts
-4	test/daemon/daemonHttpRequestAdmission.test.ts
-11	test/daemon/daemonHttpSessionShutdown.test.ts
 2	test/daemon/daemonIdGenerator.test.ts
 1	test/daemon/daemonManagerPeerRejoin.test.ts
 4	test/daemon/daemonManagerReadiness.integration.test.ts
@@ -34,9 +30,7 @@
 4	test/daemon/daemonShutdownSessionRelease.test.ts
 1	test/daemon/daemonShutdownStageBudget.test.ts
 2	test/daemon/daemonSocketIdentity.test.ts
-3	test/daemon/daemonStartWiring.test.ts
-21	test/daemon/daemonStreamWiring.integration.test.ts
-3	test/daemon/daemonStrictPortBind.test.ts
+1	test/daemon/daemonStartWiring.test.ts
 1	test/daemon/daemonToolCallEndWiring.test.ts
 1	test/daemon/devicePool.assignMultipleDevices.test.ts
 1	test/daemon/devicePool.bindDevice.sessionReuse.test.ts

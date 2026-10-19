@@ -22,7 +22,14 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.forcedRestartBudget;
   }
 
+  removalGeneration = 0;
+
+  supersededSinceRemoval(removalGeneration: number): boolean {
+    return this.removalGeneration !== removalGeneration;
+  }
+
   async suspendForDeviceRemoval(): Promise<void> {
+    this.removalGeneration += 1;
     this.executedOperations.push("suspendForDeviceRemoval");
     this.forcedRestartBudget.suspend("device disappeared from discovery");
     await this.stop();

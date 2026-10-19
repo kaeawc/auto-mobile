@@ -332,6 +332,8 @@ export interface AndroidEmulatorClientOptions {
   inventory?: AndroidDeviceInventoryScanner;
   launcher?: EmulatorLauncher;
   readinessPoller?: EmulatorReadinessPoller;
+  /** Resolves the `emulator` binary path (for testing; defaults to filesystem/shell detection) */
+  emulatorPathLocator?: () => Promise<string>;
 }
 
 type ResolvedClientOptions = AndroidEmulatorClientOptions &
@@ -368,6 +370,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
   private emulatorPath: string;
+  private readonly emulatorPathLocator: () => Promise<string>;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
   private avdConfigReader: AvdConfigReader;
@@ -413,7 +416,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       inventory,
       launcher,
       readinessPoller,
+      emulatorPathLocator = locateEmulatorPath,
     } = withClientOptionDefaults(options);
+    this.emulatorPathLocator = emulatorPathLocator;
     this.observationSequence = observationSequence;
     this.posterFileSystem = posterFileSystem;
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
@@ -600,7 +605,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * Ensure emulator path is properly detected and cached
    */
   private async ensureEmulatorPath(): Promise<string> {
-    this.emulatorPath = await locateEmulatorPath();
+    this.emulatorPath = await this.emulatorPathLocator();
     return this.emulatorPath;
   }
 

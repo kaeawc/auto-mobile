@@ -41,6 +41,7 @@ import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { exponentialBackoff } from "../utils/Backoff";
 import { ForcedRestartBudget } from "./ForcedRestartBudget";
+import type { ExistingIosManager } from "./ios/ExistingIosManager";
 import {
   DefaultProcessSupervisor,
   type ProcessSupervisor,
@@ -653,9 +654,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
   }
 
-  /**
-   * Get singleton instance for a device
-   */
+  /** Get singleton instance for a device */
   public static getInstance(device: BootedDevice, timer?: Timer): IOSCtrlProxyManager {
     requireBootedDevice(device, "IOSCtrlProxyManager.getInstance");
     return IOSCtrlProxyManager.registry.get(
@@ -664,7 +663,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     );
   }
 
-  public static getExistingInstance(deviceId: string): IOSCtrlProxyManager | undefined {
+  public static getExistingInstance(deviceId: string): ExistingIosManager | undefined {
     return IOSCtrlProxyManager.registry.peek(deviceId);
   }
 
@@ -925,7 +924,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     deviceId: string,
     timer: Timer = defaultTimer,
   ): Promise<void> {
-    const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
+    const manager = IOSCtrlProxyManager.registry.peek(deviceId);
     if (!manager) {
       return;
     }

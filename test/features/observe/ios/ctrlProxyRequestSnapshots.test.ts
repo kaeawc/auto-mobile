@@ -255,7 +255,14 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
   {
     name: "request_swipe",
     builder: "SharedGestureDelegate.requestSwipe (via CtrlProxyGestures)",
-    invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(10.5, 20.25, 300.75, 401.5, 275),
+    invoke: (h) =>
+      new CtrlProxyGestures(h.context).requestSwipe({
+        x1: 10.5,
+        y1: 20.25,
+        x2: 300.75,
+        y2: 401.5,
+        duration: 275,
+      }),
   },
   {
     name: "request_drag",
@@ -786,7 +793,15 @@ describe("iOS integer millisecond request boundary", () => {
       {
         name: "swipe",
         builder: "swipe",
-        invoke: (h) => new CtrlProxyGestures(h.context).requestSwipe(1, 2, 3, 4, 250.5, 1500.4),
+        invoke: (h) =>
+          new CtrlProxyGestures(h.context).requestSwipe({
+            x1: 1,
+            y1: 2,
+            x2: 3,
+            y2: 4,
+            duration: 250.5,
+            timeoutMs: 1500.4,
+          }),
       },
       {
         name: "pinch",

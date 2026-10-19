@@ -75,7 +75,8 @@ beforeEach(() => {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) =>
       ack(args[6]),
-    requestSwipe: (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => ack(args[8]),
+    requestSwipe: (request: Parameters<AndroidCtrlProxyClient["requestSwipe"]>[0]) =>
+      ack(request.onDispatch),
   }));
   unsubscribe = executionTracker.onSessionExecutionEnded((uuids) => {
     ended.push([...uuids]);

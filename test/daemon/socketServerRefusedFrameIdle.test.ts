@@ -269,7 +269,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       return createAndroidTestClient(androidDevice, {
         getScreenScaleMetadata: () => screenGeometry,
         requestTapCoordinates: record("tap", 6),
-        requestSwipe: record("swipe", 8),
+        requestSwipe: record("swipe", 0),
         requestGestureStart: record("gestureStart"),
         requestGestureMove: record("gestureMove"),
         requestGestureEnd: record("gestureEnd"),

@@ -12,18 +12,16 @@ function requestSwipe(
   signal: AbortSignal,
   onDispatch: () => void,
 ) {
-  return new CtrlProxyGestures(h.context).requestSwipe(
-    1,
-    2,
-    3,
-    4,
-    300,
-    50,
-    undefined,
-    undefined,
+  return new CtrlProxyGestures(h.context).requestSwipe({
+    x1: 1,
+    y1: 2,
+    x2: 3,
+    y2: 4,
+    duration: 300,
+    timeoutMs: 50,
     onDispatch,
     signal,
-  );
+  });
 }
 
 describe("iOS single-finger swipe dispatch contract", () => {
@@ -143,7 +141,7 @@ describe("iOS single-finger swipe dispatch contract", () => {
 });
 
 describe("IOSCtrlProxyClient.requestSwipe option forwarding", () => {
-  test("forwards the signal and dispatch callback into the delegate's own slots", async () => {
+  test("forwards the signal and dispatch callback to the delegate by name", async () => {
     const h = createIosDelegateHarness();
     const signal = new AbortController().signal;
     const onDispatch = () => {};
@@ -156,21 +154,19 @@ describe("IOSCtrlProxyClient.requestSwipe option forwarding", () => {
       h.timer,
     );
     try {
-      expect(
-        await client.requestSwipe(1, 2, 3, 4, 300, 50, undefined, "frame", signal, onDispatch),
-      ).toBe(result);
-      expect(swipe).toHaveBeenCalledWith(
-        1,
-        2,
-        3,
-        4,
-        300,
-        50,
-        undefined,
-        "frame",
-        onDispatch,
+      const request = {
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 300,
+        timeoutMs: 50,
+        contextOptions: "frame",
         signal,
-      );
+        onDispatch,
+      };
+      expect(await client.requestSwipe(request)).toBe(result);
+      expect(swipe).toHaveBeenCalledWith(request);
     } finally {
       swipe.mockRestore();
       await client.close();

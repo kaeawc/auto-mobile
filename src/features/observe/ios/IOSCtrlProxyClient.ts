@@ -93,7 +93,7 @@ import {
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
 import type { BaseResult, CtrlSocket } from "../shared/types";
-import type { GestureTimingResult, SwipeRequestOptions } from "../shared/types";
+import type { GestureTimingResult, SwipeRequest } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
@@ -378,18 +378,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
 
-  requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    contextOptions?: string | SwipeRequestOptions,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
+  requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   requestDoubleTapCoordinates(
     x: number,
@@ -3821,30 +3810,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     );
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    contextOptions?: string | SwipeRequestOptions,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
-    return this.gestures.requestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      timeoutMs,
-      perf,
-      contextOptions,
-      onDispatch,
-      signal,
-    );
+  async requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    return this.gestures.requestSwipe(request);
   }
 
   async requestDrag(

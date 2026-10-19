@@ -33,6 +33,7 @@ import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
+import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
 import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
 /**
@@ -872,20 +873,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestSwipe(request: SwipeRequest): Promise<A11ySwipeResult> {
+    const { x1, y1, x2, y2, onDispatch, beforeSend, signal, displayId } = request;
+    const { duration = 300 } = request;
     await this.applyDelay("swipe");
     beforeSend?.();
     if (this.swipeDispatchesBeforeResult) {

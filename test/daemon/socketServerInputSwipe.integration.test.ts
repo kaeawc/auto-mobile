@@ -17,6 +17,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import type { SwipeRequest } from "../../src/utils/interfaces/SwipeRequest";
 import { createIosTestClient } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
@@ -65,12 +66,10 @@ describe("UnixSocketServer input/swipe", () => {
   });
 
   test("routes Android coordinate swipes without forwarding through tools/call", async () => {
-    const requestSwipe = mock(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        args[8]?.();
-        return { success: true };
-      },
-    );
+    const requestSwipe = mock(async (request: SwipeRequest) => {
+      request.onDispatch?.();
+      return { success: true };
+    });
     const createMcpClient = mock(async () => {
       throw new Error("input/swipe should not create an MCP client");
     });
@@ -107,18 +106,17 @@ describe("UnixSocketServer input/swipe", () => {
       end: { x: 56.75, y: 78.5 },
       durationMs: 420,
     });
-    expect(requestSwipe).toHaveBeenCalledWith(
-      12.5,
-      34.25,
-      56.75,
-      78.5,
-      420,
-      1234,
-      undefined,
-      undefined,
-      expect.any(Function),
-      expect.any(AbortSignal),
-    );
+    expect(requestSwipe).toHaveBeenCalledWith({
+      x1: 12.5,
+      y1: 34.25,
+      x2: 56.75,
+      y2: 78.5,
+      duration: 420,
+      timeoutMs: 1234,
+      contextOptions: undefined,
+      onDispatch: expect.any(Function),
+      signal: expect.any(AbortSignal),
+    });
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -219,12 +217,10 @@ describe("UnixSocketServer input/swipe", () => {
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
-    const requestSwipe = mock(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        args[8]?.();
-        return { success: true };
-      },
-    );
+    const requestSwipe = mock(async (request: SwipeRequest) => {
+      request.onDispatch?.();
+      return { success: true };
+    });
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       createAndroidTestClient(androidDevice, { requestSwipe }),
     );
@@ -266,18 +262,17 @@ describe("UnixSocketServer input/swipe", () => {
       start: { x: 1, y: 2 },
       end: { x: 3, y: 4 },
     });
-    expect(requestSwipe).toHaveBeenCalledWith(
-      1,
-      2,
-      3,
-      4,
-      300,
-      30_000,
-      undefined,
-      undefined,
-      expect.any(Function),
-      expect.any(AbortSignal),
-    );
+    expect(requestSwipe).toHaveBeenCalledWith({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      duration: 300,
+      timeoutMs: 30_000,
+      contextOptions: undefined,
+      onDispatch: expect.any(Function),
+      signal: expect.any(AbortSignal),
+    });
   });
 
   test("serializes concurrent swipes for the same device across socket clients", async () => {
@@ -482,16 +477,14 @@ describe("UnixSocketServer input/swipe", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const deviceRequest = mock(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        args[9]?.throwIfAborted();
-        args[8]?.();
-        sent = true;
-        operationStarted.resolve();
-        await releaseOperation.promise;
-        return { success: true, totalTimeMs: 1 };
-      },
-    );
+    const deviceRequest = mock(async (request: SwipeRequest) => {
+      request.signal?.throwIfAborted();
+      request.onDispatch?.();
+      sent = true;
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      return { success: true, totalTimeMs: 1 };
+    });
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       createAndroidTestClient(androidDevice, {
         getScreenScaleMetadata: () => null,
@@ -544,16 +537,14 @@ describe("UnixSocketServer input/swipe", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const deviceRequest = mock(
-      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
-        operationStarted.resolve();
-        await releaseOperation.promise;
-        args[9]?.throwIfAborted();
-        args[8]?.();
-        sent = true;
-        return { success: true, totalTimeMs: 1 };
-      },
-    );
+    const deviceRequest = mock(async (request: SwipeRequest) => {
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      request.signal?.throwIfAborted();
+      request.onDispatch?.();
+      sent = true;
+      return { success: true, totalTimeMs: 1 };
+    });
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       createAndroidTestClient(androidDevice, {
         getScreenScaleMetadata: () => null,

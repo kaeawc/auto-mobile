@@ -7,6 +7,7 @@
  */
 
 import type { PerformanceTracker } from "../PerformanceTracker";
+import type { SwipeRequest } from "./SwipeRequest";
 import type { ViewHierarchyResult } from "../../models";
 import type { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 
@@ -177,15 +178,7 @@ export interface DeviceService {
    * @param timeoutMs Operation timeout in milliseconds
    * @param perf Optional performance tracker
    */
-  requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  requestSwipe(request: SwipeRequest): Promise<GestureResult>;
 
   /**
    * Perform a drag gesture (press, move, release).

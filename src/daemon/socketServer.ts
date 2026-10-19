@@ -5032,18 +5032,17 @@ export class UnixSocketServer {
               signal,
               remainingTimeoutMs,
               (fenced, onDispatch) =>
-                client.requestSwipe(
-                  args.startX,
-                  args.startY,
-                  args.endX,
-                  args.endY,
-                  args.durationMs,
-                  remainingTimeoutMs,
-                  undefined,
-                  args.frameContext,
+                client.requestSwipe({
+                  x1: args.startX,
+                  y1: args.startY,
+                  x2: args.endX,
+                  y2: args.endY,
+                  duration: args.durationMs,
+                  timeoutMs: remainingTimeoutMs,
+                  contextOptions: args.frameContext,
                   onDispatch,
-                  fenced,
-                ),
+                  signal: fenced,
+                }),
               dispatching,
             );
           }

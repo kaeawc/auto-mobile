@@ -166,7 +166,16 @@ const methods: RequestMethod[] = [
   {
     name: "requestSwipe",
     invoke: (h, s) =>
-      h.client.requestSwipe(1, 2, 3, 4, 100, LONG_TIMEOUT_MS, perf, undefined, undefined, s),
+      h.client.requestSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 100,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestTapCoordinates",

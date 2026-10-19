@@ -1,4 +1,5 @@
 import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
+import type { SwipeRequest } from "../../../src/utils/interfaces/SwipeRequest";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
@@ -176,6 +177,24 @@ function adb(): FakeAdbExecutor {
 // keep these unit tests in memory so file IO is not charged to them.
 beforeEach(() => setObserveCacheStore(new FakeObserveCacheStore()));
 afterEach(() => resetObserveCacheStore());
+
+/** A swipe request laid out like the tap and drag calls, so shared tail assertions line up. */
+function swipeCallTails(calls: ReadonlyArray<readonly [SwipeRequest]>): unknown[][] {
+  return calls.map(([request]) => [
+    request.x1,
+    request.y1,
+    request.x2,
+    request.y2,
+    request.duration,
+    request.timeoutMs,
+    request.perf,
+    request.contextOptions,
+    request.onDispatch,
+    request.signal,
+    request.displayId,
+    request.beforeSend,
+  ]);
+}
 
 describe("explicit action display", () => {
   let capabilitySpy: ReturnType<typeof spyOn>;
@@ -1727,7 +1746,11 @@ describe("CtrlProxy display-targeted action routing", () => {
         );
         expect(result.effect?.screenChanged).toBe(true);
         expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
-        const requests = [...tap.mock.calls, ...swipe.mock.calls, ...drag.mock.calls];
+        const requests = [
+          ...tap.mock.calls,
+          ...swipeCallTails(swipe.mock.calls),
+          ...drag.mock.calls,
+        ];
         expect(requests).toHaveLength(1);
         expect(requests[0].at(kind === "dragAndDrop" ? -4 : -3)).toBe(controller.signal);
         expect(requests[0].at(kind === "dragAndDrop" ? -3 : -2)).toBe(2);
@@ -1889,7 +1912,7 @@ describe("CtrlProxy display-targeted action routing", () => {
               }
               const calls = [
                 ...tap.mock.calls,
-                ...swipe.mock.calls,
+                ...swipeCallTails(swipe.mock.calls),
                 ...drag.mock.calls,
                 ...pinch.mock.calls,
               ];

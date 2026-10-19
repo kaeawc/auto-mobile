@@ -2095,8 +2095,16 @@ describe("IOSCtrlProxyClient", function () {
         );
 
         try {
-          const resultPromise = testClient.requestSwipe(100, 200, 100, 500, 300, 4200, undefined, {
-            lockScreen,
+          const resultPromise = testClient.requestSwipe({
+            x1: 100,
+            y1: 200,
+            x2: 100,
+            y2: 500,
+            duration: 300,
+            timeoutMs: 4200,
+            contextOptions: {
+              lockScreen,
+            },
           });
           const socket = await waitForSocket(getSocket);
           expect(socket).not.toBeNull();
@@ -2148,7 +2156,14 @@ describe("IOSCtrlProxyClient", function () {
       );
 
       try {
-        const result = await testClient.requestSwipe(100, 200, 100, 500, 300, 100);
+        const result = await testClient.requestSwipe({
+          x1: 100,
+          y1: 200,
+          x2: 100,
+          y2: 500,
+          duration: 300,
+          timeoutMs: 100,
+        });
 
         expect(result.success).toBe(false);
         expect(result.error).toBe("Not connected");

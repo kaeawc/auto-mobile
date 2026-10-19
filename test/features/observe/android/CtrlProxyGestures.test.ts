@@ -76,7 +76,7 @@ describe("Android gesture duration wire", () => {
       const gestures = new CtrlProxyGestures(context);
       const requests = [
         () => gestures.requestTapCoordinates(10, 20, duration),
-        () => gestures.requestSwipe(10, 20, 30, 40, duration),
+        () => gestures.requestSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration }),
         () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
         () => gestures.requestDrag(10, 20, 30, 40, duration, duration, duration, 5000),
         () => gestures.requestPinch(10, 20, 30, 40, 15.5, duration),
@@ -174,7 +174,7 @@ describe("Android swipe request duration bounds", () => {
     );
 
     for (const duration of [forwardDuration, returnDuration]) {
-      const pending = client.requestSwipe(10, 20, 30, 40, duration);
+      const pending = client.requestSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration });
       await flush();
       expect(timer.getPendingTimeouts()).toEqual([DEFAULT_GESTURE_REQUEST_TIMEOUT_MS]);
       const message = JSON.parse(sent.at(-1)!) as { requestId: string; duration: number };
@@ -217,7 +217,7 @@ describe("Android swipe request duration bounds", () => {
 
   it("an ordinary swipe preserves its wire duration and exact 5s timeout", async () => {
     const { context, sent, timer, requestManager } = createFakeContext();
-    const pending = new CtrlProxyGestures(context).requestSwipe(10, 20, 30, 40);
+    const pending = new CtrlProxyGestures(context).requestSwipe({ x1: 10, y1: 20, x2: 30, y2: 40 });
     await flush();
     expect(JSON.parse(sent[0])).toMatchObject({ type: "request_swipe", duration: 300 });
     expect(timer.getPendingTimeouts()).toEqual([5000]);
@@ -350,7 +350,14 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const gestures = new CtrlProxyGestures(context);
     const coords = [10.5, 20.49, -3.5, 40.999] as const;
 
-    const swipePromise = gestures.requestSwipe(...coords, 300, 5000);
+    const swipePromise = gestures.requestSwipe({
+      x1: coords[0],
+      y1: coords[1],
+      x2: coords[2],
+      y2: coords[3],
+      duration: 300,
+      timeoutMs: 5000,
+    });
     await flush();
     const swipeMsg = JSON.parse(sent[sent.length - 1]);
 
@@ -481,7 +488,15 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_swipe","requestId":"request","x1":10,"y1":20,"x2":30,"y2":40,"duration":300}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestSwipe(10, 20, 30, 40, 300, 5000, undefined, undefined, undefined, undefined, id),
+        g.requestSwipe({
+          x1: 10,
+          y1: 20,
+          x2: 30,
+          y2: 40,
+          duration: 300,
+          timeoutMs: 5000,
+          displayId: id,
+        }),
     },
     {
       name: "two-finger swipe",
@@ -585,19 +600,16 @@ describe("Android client forwards gesture displayId", () => {
     );
     client["_gestures"] = new CtrlProxyGestures(context);
     const controller = new AbortController();
-    const pending = client.requestSwipe(
-      1,
-      2,
-      3,
-      4,
-      300,
-      5000,
-      undefined,
-      undefined,
-      undefined,
-      controller.signal,
-      2,
-    );
+    const pending = client.requestSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      duration: 300,
+      timeoutMs: 5000,
+      signal: controller.signal,
+      displayId: 2,
+    });
     await flush();
 
     const message = JSON.parse(sent.at(-1)!) as { type: string; displayId: number };
@@ -626,7 +638,15 @@ describe("Android client forwards gesture displayId", () => {
     {
       name: "swipe",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, undefined, undefined, 2),
+        c.requestSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          duration: 300,
+          timeoutMs: 5000,
+          displayId: 2,
+        }),
     },
     {
       name: "two-finger swipe",
@@ -742,7 +762,17 @@ describe("gesture pre-send display fence during reconnect", () => {
     {
       name: "swipe",
       send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
-        c.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, undefined, signal, 2, guard),
+        c.requestSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          duration: 300,
+          timeoutMs: 5000,
+          signal,
+          displayId: 2,
+          beforeSend: guard,
+        }),
     },
     {
       name: "drag",

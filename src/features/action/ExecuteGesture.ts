@@ -255,8 +255,17 @@ export class ExecuteGesture extends BaseVisualChange {
         throwIfAborted(signal);
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence.assertCurrent();
-        return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf, undefined, () => {
-          dispatched = true;
+        return await client.requestSwipe({
+          x1,
+          y1,
+          x2,
+          y2,
+          duration,
+          timeoutMs: 5000,
+          perf,
+          onDispatch: () => {
+            dispatched = true;
+          },
         });
       });
       throwIfAborted(signal);
@@ -393,20 +402,20 @@ export class ExecuteGesture extends BaseVisualChange {
         throwIfAborted(signal);
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence?.assertCurrent();
-        return await client.requestSwipe(
+        return await client.requestSwipe({
           x1,
           y1,
           x2,
           y2,
           duration,
-          Math.min(5_000, options.timeoutMs ?? 5_000),
+          timeoutMs: Math.min(5_000, options.timeoutMs ?? 5_000),
           perf,
-          options.lockScreen === true ? { lockScreen: true } : undefined,
+          contextOptions: options.lockScreen === true ? { lockScreen: true } : undefined,
           signal,
-          () => {
+          onDispatch: () => {
             dispatched = true;
           },
-        );
+        });
       });
     } catch (error) {
       // An ActionableError (runner refusal, stale display) is a definite answer, not a lost reply.
@@ -587,17 +596,14 @@ export class ExecuteGesture extends BaseVisualChange {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    const result = await client.requestSwipe(
-      start.x,
-      start.y,
-      end.x,
-      end.y,
+    const result = await client.requestSwipe({
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
       duration,
-      undefined,
-      undefined,
-      undefined,
       signal,
-    );
+    });
     this.throwIfIosGestureUnconfirmed(result);
     throwIfAborted(signal);
     if (!result.success) {

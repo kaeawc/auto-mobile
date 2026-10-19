@@ -41,7 +41,6 @@ describe("AndroidCtrlProxyClient navigation ignores AutoMobile's prototype (#930
   const device: BootedDevice = {
     deviceId: "prototype-navigation-test-device",
     platform: "android",
-    isEmulator: true,
     name: "Prototype navigation test device",
   };
   let navHarness: InMemoryNavManagerHarness;

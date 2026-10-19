@@ -145,7 +145,9 @@ function clearAction(device: BootedDevice, observer: FakeObserveScreen) {
 
 function fieldObservation(value: string): ObserveResult {
   return {
-    timestamp: 1,
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 400, height: 800 },
     viewHierarchy: {
       hierarchy: {

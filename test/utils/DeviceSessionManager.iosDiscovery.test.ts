@@ -32,7 +32,6 @@ const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const DEVICECTL_RETENTION_MS = 60_000;
 
 function resetSimctlSharedListing(): void {
-  (SimCtlClient as unknown as { inFlightDeviceList: unknown }).inFlightDeviceList = null;
   SimCtlClient.invalidateDeviceListCache();
 }
 

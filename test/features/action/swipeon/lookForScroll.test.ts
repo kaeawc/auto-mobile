@@ -13,7 +13,9 @@ const container = {
 } as Element;
 function observation(texts: string[]): ObserveResult {
   return {
-    timestamp: 0,
+    updatedAt: 0,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 400, height: 900 },
     viewHierarchy: {
       hierarchy: {

@@ -41,7 +41,6 @@ describe("DeviceService Interface Compliance", () => {
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
         platform: "android",
-        isEmulator: true,
         name: "Test Android Device",
       };
 
@@ -95,7 +94,6 @@ describe("DeviceService Interface Compliance", () => {
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
         platform: "android",
-        isEmulator: true,
         name: "Test Android Device",
       };
 
@@ -165,7 +163,6 @@ describe("DeviceService Interface Compliance", () => {
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
         platform: "android",
-        isEmulator: true,
         name: "Test Android Device",
       };
 
@@ -189,7 +186,6 @@ describe("DeviceService Interface Compliance", () => {
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
         platform: "android",
-        isEmulator: true,
         name: "Test Android Device",
       };
 

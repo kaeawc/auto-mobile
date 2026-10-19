@@ -122,8 +122,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "The host-interface declaration plus the kill-time serial rediscovery (moved verbatim out of AndroidEmulatorClient.discoverEmulatorsForKill); never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
+      calls: 2,
+      reason:
+        "Public adb discovery declaration and delegate to AdbDeviceDiscovery; both run below the pool.",
+    },
+    "src/utils/android-cmdline-tools/AdbDeviceDiscovery.ts": {
       calls: 1,
-      reason: "adb discovery producer; runs below the pool.",
+      reason: "adb discovery producer moved verbatim from AdbClient; runs below the pool.",
     },
     "src/utils/android-cmdline-tools/interfaces/AdbExecutor.ts": {
       calls: 1,

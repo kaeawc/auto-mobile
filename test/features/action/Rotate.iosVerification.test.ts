@@ -18,7 +18,9 @@ describe("iOS observed rotation verification (#8778)", () => {
   let instanceSpy: ReturnType<typeof spyOn>;
 
   const createObserveResult = (rotation?: number, knownSize = true): ObserveResult => ({
-    timestamp: 1000,
+    updatedAt: 1000,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     rotation,
     screenSize: knownSize
       ? rotation === 1 || rotation === 3

@@ -577,7 +577,7 @@ describe("captured Photos readback", () => {
     }
   });
 
-  test.each(photosTccCases)("native probe agrees with add-only readback: %s", async (name) => {
+  test.each([...photosTccCases])("native probe agrees with add-only readback: %s", async (name) => {
     const reader = new FixtureTccReader(name);
     const permissions = new IosSimulatorPermissions(device27, new FakeSimctl(), reader);
     const { probe } = await loadPhotosTccCase(name);
@@ -598,7 +598,7 @@ describe("captured Photos readback", () => {
 });
 
 describe("iOS 26.5 Photos captures", () => {
-  test.each(photosTccCases265)("reports PhotoKit add-only probe for %s", async (name) => {
+  test.each([...photosTccCases265])("reports PhotoKit add-only probe for %s", async (name) => {
     const reader = new FixtureTccReader(name, "ios26.5");
     const permissions = new IosSimulatorPermissions(
       { ...device, iosVersion: "26.5" },

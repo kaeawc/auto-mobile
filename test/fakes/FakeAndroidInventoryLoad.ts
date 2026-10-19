@@ -57,7 +57,7 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
       value: async () => ({ adbPath: "fake-adb", baseArgs: device ? ["-s", device.deviceId] : [] }),
     });
     Object.defineProperty(client, "isTestMode", { value: false });
-    Object.defineProperty(client, "readDeviceListFromAdb", {
+    Object.defineProperty(client.adbDeviceDiscovery, "readDeviceListFromAdb", {
       value: async () => {
         this.record("host", "devices -l");
         await this.timer.sleep(1);

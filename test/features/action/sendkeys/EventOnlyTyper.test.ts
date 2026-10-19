@@ -11,7 +11,9 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 
 function observation(text: string): ObserveResult {
   return {
-    timestamp: 1,
+    updatedAt: 1,
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     viewHierarchy: {
       hierarchy: {
         node: {

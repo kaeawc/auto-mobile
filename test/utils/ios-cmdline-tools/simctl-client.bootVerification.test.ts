@@ -18,7 +18,6 @@ function resetSimctlState(): void {
     simulatorBoots: Map<string, unknown>;
     bootPresentationGenerations: Map<string, string>;
     simulatorAppPresentations: Map<string, unknown>;
-    inFlightDeviceList: Promise<unknown[]> | null;
   };
   simctlClass.simulatorBoots.clear();
   simctlClass.bootPresentationGenerations.clear();
@@ -28,7 +27,6 @@ function resetSimctlState(): void {
   // FakeTimer). Without this a later test's caller-independent coalesced read
   // (see SimCtlClient.listSimulatorImages, issue #6576) would silently join that
   // orphaned promise and hang forever awaiting a timer no one is driving.
-  simctlClass.inFlightDeviceList = null;
   SimCtlClient.invalidateDeviceListCache();
 }
 
@@ -1599,23 +1597,8 @@ describe("SimCtlClient boot self-verification", () => {
     // Seed a fresh (within-TTL) cache entry as if an earlier, unrelated caller
     // listed devices moments before this boot began, while the device was
     // still Shutdown.
-    (
-      SimCtlClient as unknown as {
-        deviceListCache: { devices: unknown[]; timestamp: number } | null;
-      }
-    ).deviceListCache = {
-      devices: [
-        {
-          name: "iPhone 17",
-          platform: "ios",
-          deviceId: UDID,
-          isRunning: false,
-          state: "Shutdown",
-          isAvailable: true,
-        },
-      ],
-      timestamp: harness.timer.now(),
-    };
+    const cached = await harness.timer.resolvePromise(harness.simctl.listSimulatorImages());
+    expect(cached[0].state).toBe("Shutdown");
     harness.setStates(["Booted"]);
 
     // Without the fix, resolveRegisteredBootSimulator's getBootedSimulatorsChecked

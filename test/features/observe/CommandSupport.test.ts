@@ -20,7 +20,6 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 const androidDevice: BootedDevice = {
   deviceId: "command-support-android",
   platform: "android",
-  isEmulator: true,
   name: "Android",
 };
 const iosDevice: BootedDevice = {

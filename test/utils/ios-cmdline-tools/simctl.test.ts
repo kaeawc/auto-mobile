@@ -1,3 +1,4 @@
+import { SimCtlInventory } from "../../../src/utils/ios-cmdline-tools/SimCtlInventory";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import {
   Simctl,
@@ -15,18 +16,11 @@ import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeou
 
 function resetSimctlCaches(): void {
   const simctlClass = Simctl as unknown as {
-    deviceListCache: { devices: unknown[]; timestamp: number } | null;
-    lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
-    inFlightDeviceList: Promise<unknown[]> | null;
-    inFlightDeviceListRequestSequence: number | null;
     simulatorBoots: Map<string, unknown>;
     bootPresentationGenerations: Map<string, string>;
     simulatorAppPresentations: Map<string, unknown>;
   };
-  simctlClass.deviceListCache = null;
-  simctlClass.lastGoodDeviceList = null;
-  simctlClass.inFlightDeviceList = null;
-  simctlClass.inFlightDeviceListRequestSequence = null;
+  Simctl.invalidateDeviceListCache();
   simctlClass.simulatorBoots.clear();
   simctlClass.bootPresentationGenerations.clear();
   simctlClass.simulatorAppPresentations.clear();
@@ -1629,12 +1623,7 @@ describe("Simctl", function () {
       await expect(inFlight).resolves.toHaveLength(1);
       expect(listCalls).toBe(1);
 
-      const simctlClass = Simctl as unknown as {
-        deviceListCache: { devices: unknown[]; timestamp: number } | null;
-        lastGoodDeviceList: { devices: unknown[]; timestamp: number } | null;
-      };
-      expect(simctlClass.deviceListCache).toBeNull();
-      expect(simctlClass.lastGoodDeviceList).toBeNull();
+      expect(SimCtlInventory.deviceListSnapshots()).toEqual({ cached: null, lastGood: null });
 
       // The stale-generation resolution must not have satisfied the cache: the
       // next call re-invokes simctl instead of trusting a phantom cache entry.

@@ -30,7 +30,6 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
     testDevice = {
       deviceId: "test-device-focus",
       platform: "android",
-      isEmulator: true,
       name: "Test Device",
     };
 

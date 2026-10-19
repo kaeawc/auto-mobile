@@ -64,7 +64,9 @@ describe("RecentApps", () => {
 
   // Helper function to create mock ObserveResult
   const createObserveResult = (viewHierarchy?: any): ObserveResult => ({
-    timestamp: Date.now(),
+    updatedAt: Date.now(),
+    observationId: "test-observation",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
     viewHierarchy: viewHierarchy || { node: {} },

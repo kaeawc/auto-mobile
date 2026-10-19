@@ -40,7 +40,6 @@
 1	src/daemon/proxy/daemonErrors.ts	eslint(max-classes-per-file)
 1	src/daemon/proxyLivenessRecovery.ts	eslint(max-classes-per-file)
 1	src/daemon/sessionBroker/broker.ts	eslint(max-classes-per-file)
-1	src/daemon/sessionBroker/provisioning/executionRelease.ts	auto-mobile(max-class-lines)
 1	src/daemon/sessionBroker/provisioning/reconciler.ts	auto-mobile(max-class-lines)
 1	src/daemon/sessionBroker/provisioning/reconciler.ts	eslint(max-classes-per-file)
 1	src/daemon/sessionBroker/provisioning/reconcilerPorts.ts	eslint(max-classes-per-file)

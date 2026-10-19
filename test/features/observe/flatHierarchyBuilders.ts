@@ -15,6 +15,11 @@ export interface FlatHierarchyNode extends ViewHierarchyNode {
   node?: FlatHierarchyNode[];
 }
 
+/** Typed identity for a single flat-attribute node, assignable to `ViewHierarchyNode`. */
+export function createFlatNodeForTest(node: FlatHierarchyNode): FlatHierarchyNode {
+  return node;
+}
+
 export type FlatHierarchyResult = Omit<ViewHierarchyResult, "hierarchy"> & {
   hierarchy: Omit<Hierarchy, "node"> & { node?: FlatHierarchyNode };
 };

@@ -1,7 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { EventEmitter } from "events";
-import type { ChildProcess } from "child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -1057,16 +1056,7 @@ describe("device acquisition wait deadlines", () => {
         deviceId: "emulator-5556",
         isRunning: false,
       };
-      const replacementProcess = Object.assign(new EventEmitter(), {
-        pid: 4242,
-        exitCode: null,
-        signalCode: null,
-        killed: false,
-        kill() {
-          replacementProcess.killed = true;
-          return true;
-        },
-      });
+      const replacementProcess = new FakeChildProcess();
       deviceUtils.setBootedDevices("android", [android]);
       await pool.initializeWithDevices([android]);
       await pool.bindOrReuseDeviceSession({
@@ -1076,10 +1066,7 @@ describe("device acquisition wait deadlines", () => {
         sourceImage: recoveryImage,
       });
       deviceUtils.setDeviceImages("android", [recoveryImage]);
-      deviceUtils.setMockChildProcess(
-        recoveryImage.name,
-        replacementProcess as unknown as ChildProcess,
-      );
+      deviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
       const killDevice = deviceUtils.killDevice.bind(deviceUtils);
       deviceUtils.killDevice = async (device) => {
         await killDevice(device);

@@ -928,7 +928,6 @@ test/features/sdk/sdkCapabilities.test.ts
 test/features/shared/MetricsUtils.property.test.ts
 test/features/shared/MetricsUtils.test.ts
 test/features/snapshot/DeviceSnapshotConfig.property.test.ts
-test/features/storage/storageCapabilities.test.ts
 test/features/storage/storageProviderCoverage.test.ts
 test/features/systemTray/NotificationUIDetector.test.ts
 test/features/systemTray/notificationDumpsys.test.ts
@@ -1028,6 +1027,7 @@ test/lint/appIdDeviceShellBoundary.test.ts
 test/lint/archiveExtractionBoundary.test.ts
 test/lint/auxSocketDirBoundary.test.ts
 test/lint/bareExpectRule.test.ts
+test/lint/bootAdmissionWiringEntry.test.ts
 test/lint/ctrlProxyHandRolledRequests.test.ts
 test/lint/daemonLauncherBoundary.test.ts
 test/lint/deprecatedSelectorFacadeRule.test.ts

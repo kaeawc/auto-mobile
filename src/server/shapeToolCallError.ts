@@ -29,10 +29,12 @@ import {
 } from "./deviceSessionResult";
 import {
   DaemonRestartDeferredError,
-  DaemonRestartPendingError,
   daemonRestartDeferredPayload,
-  daemonRestartPendingPayload,
 } from "../daemon/daemonRestartAdmission";
+import {
+  DaemonRestartPendingError,
+  daemonRestartPendingPayload,
+} from "../daemon/daemonRestartPending";
 import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,

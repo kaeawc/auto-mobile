@@ -24,7 +24,7 @@ import { freshTapHierarchy } from "./freshTapHierarchy";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
-} from "../accessibility/interfaces/AccessibilityDetector";
+} from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import {
   prepareTargetDisplayAction,
@@ -99,8 +99,8 @@ import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessib
 import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierarchy";
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
-import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
+import type { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { androidDisplayTapDispatch } from "./coordinateTapDispatch";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {

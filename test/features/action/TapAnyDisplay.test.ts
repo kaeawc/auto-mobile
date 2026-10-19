@@ -20,7 +20,7 @@ import {
   TALKBACK_ACTIVATION_WARNING,
   TalkBackTapStrategy,
 } from "../../../src/features/talkback/TalkBackTapStrategy";
-import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
 const inner = "4619827259835644672";

@@ -3,6 +3,7 @@
 // trace; processEntry must follow it immediately: captures the launcher pid before anything else runs (#11041).
 import "./runtime/bunRuntimeGuard";
 import "./daemon/processEntry";
+import "./daemon/bootAdmissionWiring";
 import "./runtime/reflectMetadata";
 import { ENV, readEnvRaw } from "./config/env";
 import { errorMessage } from "./utils/describeUnknownError";

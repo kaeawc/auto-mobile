@@ -1,4 +1,5 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import {
   ANDROID_DOUBLE_TAP_TIMEOUT_MS,
   DOUBLE_TAP_START_BUDGET_MS,
@@ -636,7 +637,7 @@ describe("tapAny (Android default display)", () => {
     tapAny.observedInteraction = (action) =>
       action(
         recordObservationRead({
-          viewHierarchy: { hierarchy: { node: { marker: "before" } } },
+          viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ marker: "before" }) } },
           screenSize: { width: 500, height: 500 },
         }),
       );

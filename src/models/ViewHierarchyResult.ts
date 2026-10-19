@@ -298,6 +298,22 @@ export type ViewHierarchyNode = {
    * Emitted by the iOS runner (`UIElementInfo.checkable`/`selected`, e.g.
    * `test/fixtures/ios/keyboard-modes/software-docked.runner-hierarchy.json`); string-typed on the wire.
    */
+  /**
+   * Flat attributes captured from real Android dumps (`test/fixtures/android-enabled/playground-disabled-control-api36.json`
+   * carries `enabled`, `scrollable` and `pane-title` on its nodes).
+   */
+  enabled?: boolean | string;
+  scrollable?: boolean | string;
+  "pane-title"?: string;
+  /**
+   * Captured on real nodes: iOS `role` and `hint-text` (`test/fixtures/observe-output/ios-keyboard-tabbar/observe-keyboard-up.json`)
+   * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`).
+   */
+  /** Emitted by the Android extractor (`ViewHierarchyExtractor.kt`) and the iOS runner. */
+  focusable?: boolean | string;
+  role?: string;
+  "hint-text"?: string;
+  "collection-column-index"?: number | string;
   checkable?: boolean | string;
   selected?: boolean | string;
   /**

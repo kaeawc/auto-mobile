@@ -16,7 +16,7 @@ import { ResolverElementSelector } from "../../../../src/features/utility/Resolv
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../../../src/features/utility/viewHierarchySearch";
-import { createFlatHierarchyForTest } from "../flatHierarchyBuilders";
+import { createFlatHierarchyForTest, createFlatNodeForTest } from "../flatHierarchyBuilders";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
@@ -1099,12 +1099,12 @@ describe("toSkeleton — acceptance criteria", () => {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "resource-id": resourceId,
                 "long-clickable": true,
                 text: "Hold",
                 bounds: bounds(0, 0, 80, 40),
-              },
+              }),
               {
                 "resource-id": resourceId,
                 "long-clickable": true,
@@ -1215,11 +1215,11 @@ describe("toSkeleton — acceptance criteria", () => {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "ios-accessibility-label": "Remove",
                 clickable: true,
                 bounds: bounds(0, 240, 80, 280),
-              },
+              }),
               {
                 "ios-accessibility-label": "Remove",
                 clickable: true,
@@ -1261,11 +1261,11 @@ describe("toSkeleton — acceptance criteria", () => {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "ios-accessibility-label": label,
                 clickable: true,
                 bounds: bounds(0, 240, 80, 280),
-              },
+              }),
               { "ios-accessibility-label": label, clickable: true, bounds: bounds(0, 0, 80, 40) },
             ],
           },
@@ -1368,11 +1368,11 @@ describe("toSkeleton — acceptance criteria", () => {
           node: {
             bounds: bounds(0, 0, 100, 200),
             node: [
-              {
+              createFlatNodeForTest({
                 "ios-accessibility-label": canonical,
                 clickable: true,
                 bounds: bounds(0, 0, 80, 40),
-              },
+              }),
               {
                 "ios-accessibility-label": variant,
                 clickable: true,

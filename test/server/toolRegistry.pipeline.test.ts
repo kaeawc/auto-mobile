@@ -36,9 +36,9 @@ import {
 } from "../../src/server/stripToolResultStructuredContent";
 import {
   JsonToolOutputArtifactWriter,
-  type ToolOutputArtifactFileSystem,
   type ToolOutputArtifactRetention,
 } from "../../src/server/toolOutputArtifactWriter";
+import { type ToolOutputArtifactFileSystem } from "../../src/server/nodeToolOutputArtifactFileSystem";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";

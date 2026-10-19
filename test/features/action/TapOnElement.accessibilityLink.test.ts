@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -188,7 +189,7 @@ describe("tapOn semantic link runner warning (#10082)", () => {
           },
         );
         const capture = spyOn(tap, "prepareSelectionCapture").mockResolvedValue(null);
-        tap.observedInteraction = async (run) => run(observation);
+        tap.observedInteraction = runBlockWith(observation);
         try {
           const outcome = await tap.execute({
             action: "tap",

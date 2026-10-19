@@ -1182,7 +1182,7 @@ export class DaemonMcpProxy {
   }
 
   /** Bind a ready receipt to the existing keeper without enrolling it in broker binding release. */
-  private async holdBrokerSession(requestId: string, sessionUuid: string): Promise<void> {
+  async holdBrokerSession(requestId: string, sessionUuid: string): Promise<void> {
     const trimmedRequestId = requestId.trim();
     const trimmedSessionUuid = sessionUuid.trim();
     if (trimmedRequestId.length === 0 || trimmedSessionUuid.length === 0) {

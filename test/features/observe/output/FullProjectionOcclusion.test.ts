@@ -36,14 +36,22 @@ function findNodes(
 
 describe("full projection marks rows under an AutoMobile prototype (#10715)", () => {
   test("a fully covered row is occluded with its actions removed", () => {
-    const out = sanitizeObserveResult(fullObservation(), { project: "full", compact: true });
+    const out = sanitizeObserveResult(fullObservation(), {
+      dropElements: false,
+      project: "full",
+      compact: true,
+    });
     const covered = clickableById(out, "button_elevated");
     expect(covered).toMatchObject({ occluded: true });
     expect(covered).not.toHaveProperty("actions");
   });
 
   test("the hierarchy node of the covered row is marked too, in every window copy", () => {
-    const out = sanitizeObserveResult(fullObservation(), { project: "full", compact: true });
+    const out = sanitizeObserveResult(fullObservation(), {
+      dropElements: false,
+      project: "full",
+      compact: true,
+    });
     const nodes = [
       ...findNodes(out.viewHierarchy!.hierarchy?.node, "button_elevated"),
       ...(out.viewHierarchy!.windows ?? []).flatMap((window) =>
@@ -58,7 +66,11 @@ describe("full projection marks rows under an AutoMobile prototype (#10715)", ()
   });
 
   test("partially covered and uncovered rows stay actionable and unmarked", () => {
-    const out = sanitizeObserveResult(fullObservation(), { project: "full", compact: true });
+    const out = sanitizeObserveResult(fullObservation(), {
+      dropElements: false,
+      project: "full",
+      compact: true,
+    });
     for (const id of ["button_regular", "button_text"]) {
       const row = clickableById(out, id);
       expect(row).toBeDefined();
@@ -69,8 +81,16 @@ describe("full projection marks rows under an AutoMobile prototype (#10715)", ()
 
   test("agrees with the skeleton: the same rows are occluded in both projections", () => {
     const observation = fullObservation();
-    const full = sanitizeObserveResult(observation, { project: "full", compact: true });
-    const skeleton = sanitizeObserveResult(observation, { project: "skeleton", compact: true });
+    const full = sanitizeObserveResult(observation, {
+      dropElements: false,
+      project: "full",
+      compact: true,
+    });
+    const skeleton = sanitizeObserveResult(observation, {
+      dropElements: false,
+      project: "skeleton",
+      compact: true,
+    });
     const skeletonRow = [...skeleton.skeleton!, ...(skeleton.context ?? [])].find(
       (row) => row.label === "Elevated Button",
     );
@@ -80,7 +100,7 @@ describe("full projection marks rows under an AutoMobile prototype (#10715)", ()
 
   test("the source observation is not mutated", () => {
     const observation = fullObservation();
-    sanitizeObserveResult(observation, { project: "full", compact: true });
+    sanitizeObserveResult(observation, { dropElements: false, project: "full", compact: true });
     const source = observation.elements!.clickable.find(
       (element) => element["resource-id"] === "button_elevated",
     );

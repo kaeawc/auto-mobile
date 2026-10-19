@@ -199,6 +199,7 @@ describe("iOS gesture phase diagnostics", () => {
         message.requestId ?? "phase-swipe",
         "swipe",
         5000,
+        () => ({ success: false, error: "Swipe timed out" }),
       );
       void hooks.deliverMessage(JSON.stringify(message));
       expect(await pending).toMatchObject({ success: false, perfTiming: message.perfTiming });

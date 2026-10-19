@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { sql } from "kysely";
 import {
-  DatabaseClosedForShutdownError,
   closeDatabase,
   ensureMigrations,
   getDatabase,
   getMigrationsPromiseForTest,
   refusedDatabaseAccessCountAfterShutdownClose,
 } from "../../src/db/database";
+import { DatabaseClosedForShutdownError } from "../../src/db/DatabaseClosedForShutdownError";
 import { getDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import * as migratorModule from "../../src/db/migrator";
 import { IN_MEMORY_DB_OPT_IN_ENV } from "../../src/db/migrationLock";

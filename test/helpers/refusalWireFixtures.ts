@@ -3,7 +3,7 @@ import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidd
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
@@ -43,11 +43,11 @@ import {
   McpTimeoutError,
   McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
 import {
-  DaemonRestartDeferredError,
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../src/daemon/daemonRestartAdmission";
+} from "../../src/daemon/daemonRestartPending";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";

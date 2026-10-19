@@ -35,7 +35,7 @@ function withDropFrame(bounds: ElementBounds): ObserveResult {
     drop,
     nodes.find((node) => node.parentIndex === drop.index && node.className === "CALayer")!,
   ]) {
-    node.source.bounds = [bounds.left, bounds.top, bounds.right, bounds.bottom];
+    node.source.bounds = { ...bounds };
   }
   return observation;
 }
@@ -56,7 +56,7 @@ for (const node of [
     (node) => node.parentIndex === siblingRemove.index && node.className === "CALayer",
   )!,
 ]) {
-  node.source.bounds = [304, 267, 389, 301];
+  node.source.bounds = { left: 304, top: 267, right: 389, bottom: 301 };
 }
 const collect = (observation: ObserveResult) =>
   new DefaultObserveElementCollector().collect(observation.viewHierarchy!, "ios")!;

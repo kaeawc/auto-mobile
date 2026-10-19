@@ -217,7 +217,18 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestPinch",
-    invoke: (h, s) => h.client.requestPinch(5, 5, 10, 20, 0, 100, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestPinch({
+        centerX: 5,
+        centerY: 5,
+        distanceStart: 10,
+        distanceEnd: 20,
+        rotationDegrees: 0,
+        duration: 100,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestGestureStart",
@@ -431,7 +442,17 @@ const methods: RequestMethod[] = [
   {
     name: "requestTwoFingerSwipe",
     abortable: false,
-    invoke: (h) => h.client.requestTwoFingerSwipe(1, 2, 3, 4, 100, 50, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 100,
+        offset: 50,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+      }),
   },
   {
     name: "requestMultiFingerSwipe",
@@ -580,6 +601,26 @@ describe("AndroidCtrlProxyClient request settlement (#11844)", () => {
 
 /** Request-shaped public methods with a reason they are not driven over the socket here. */
 const EXCLUDED: Record<string, string> = {
+  awaitCancellableRequest:
+    "protected transport helper; exercised through the public request methods in this table",
+  sendClientCommand:
+    "protected transport helper; exercised through the public request methods in this table",
+  handleHierarchyUpdate:
+    "inbound hierarchy delivery; resolves waiters rather than creating an outbound request",
+  handleWebSocketMessage:
+    "protected inbound dispatch; resolves waiters rather than creating an outbound request",
+  getAccessibilityHierarchy:
+    "uses the hierarchy delegate covered by requestHierarchySync and hierarchy-specific tests",
+  getLatestHierarchy:
+    "uses the hierarchy delegate covered by requestHierarchySync and hierarchy-specific tests",
+  hasCachedHierarchy: "reads the in-process hierarchy cache; it sends nothing",
+  invalidateCache: "invalidates the in-process hierarchy cache; it sends nothing",
+  supportsAccessibilityLinkActivation:
+    "capability query before dispatch, covered by accessibility-link tests",
+  supportsCommand: "capability query before dispatch, covered by command-capability tests",
+  supportsNodeActionSelectors: "capability query before dispatch, covered by node-action tests",
+  verifyServiceReady:
+    "bounded retry wrapper around requestHierarchySync, covered by service-readiness tests",
   requestInstallCaCertificateFromFile:
     "reads the certificate on the host, then sends the same frame as requestInstallCaCertificate",
   getSdkCapabilities:

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../../src/utils/HostCommandExecutor";
+import { EventEmitter } from "node:events";
 import {
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
@@ -37,7 +38,7 @@ describe("waitForDeviceReadyOrCancel", () => {
   /** A spy handle recording whether kill() was invoked. */
   function spyHandle(): { handle: ChildProcess; killed: () => boolean } {
     let wasKilled = false;
-    const handle = {
+    const handle: ChildProcess = Object.assign(new EventEmitter(), {
       pid: undefined,
       kill: (): boolean => {
         wasKilled = true;
@@ -47,7 +48,11 @@ describe("waitForDeviceReadyOrCancel", () => {
       connected: false,
       exitCode: 0,
       signalCode: null,
-    } as unknown as ChildProcess;
+      stdin: null,
+      stdout: null,
+      stderr: null,
+      unref: () => {},
+    });
     return { handle, killed: () => wasKilled };
   }
 

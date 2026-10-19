@@ -1,5 +1,2 @@
 # AutoMobile test as-any ratchet baseline -- see scripts/test-as-any-baseline.sh
-1	test/fakes/FakeDeviceUtils.ts
-11	test/features/action/TapOnElement.ensureChecked.test.ts
-13	test/features/action/TapOnElement.selectionStrategy.test.ts
-2	test/utils/DeviceSessionManager.test.ts
+

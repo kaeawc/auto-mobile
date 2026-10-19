@@ -1272,10 +1272,7 @@ describe("explicit action display", () => {
           },
         };
         const ctrl = new FakeCtrlProxy();
-        const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-          // @ts-expect-error -- Fake supplies the client methods exercised by this test.
-          ctrl,
-        );
+        const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
         const action = new TapOnElement(target, adb(), {
           timer: autoTimer(),
           tapStrategy: new FakeTapStrategy(),

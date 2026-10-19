@@ -215,7 +215,7 @@ import {
   BootedDeviceDiscoveryIncompleteError,
 } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { expectingPooledSources, isDeviceSourceIncomplete } from "../utils/discoverySource";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
 import {
@@ -5296,7 +5296,7 @@ export class UnixSocketServer {
    * answered. A start the runner did not accept opened nothing and is never cancelled.
    */
   private async forwardGestureStart(
-    client: AndroidCtrlProxyClient,
+    client: AndroidCtrlProxy,
     args: { gestureId: string; x: number; y: number; cancel: boolean },
     timeoutMs: number,
     admission: StrokeAdmission,
@@ -5363,7 +5363,7 @@ export class UnixSocketServer {
 
   /** Relay one gesture frame to the Android runner's continued-gesture path. */
   private forwardGestureFrame(
-    client: AndroidCtrlProxyClient,
+    client: AndroidCtrlProxy,
     kind: "start" | "move" | "end",
     args: { gestureId: string; x: number; y: number; cancel: boolean },
     timeoutMs: number,
@@ -5959,7 +5959,7 @@ export class UnixSocketServer {
   }
 
   private async validateAppendFrameContext(
-    client: AndroidCtrlProxyClient,
+    client: AndroidCtrlProxy,
     frameContext: string,
     deadline: number,
     totalTimeoutMs: number,

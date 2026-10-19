@@ -9,7 +9,7 @@
 6047	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
-8402	src/daemon/devicePool.ts
+8400	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
 3937	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
@@ -35,17 +35,17 @@
 2033	src/features/action/Rotate.ts
 1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
-1471	src/features/action/TapAtCoordinate.ts
-3775	src/features/action/TapOnElement.ts
+1468	src/features/action/TapAtCoordinate.ts
+3765	src/features/action/TapOnElement.ts
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
 1234	src/features/device/SetPosture.ts
 5790	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1084	src/features/navigation/Explore.ts
 1023	src/features/navigation/NavigationGraphManager.ts
-1567	src/features/observe/DeviceServiceClient.ts
+1566	src/features/observe/DeviceServiceClient.ts
 1026	src/features/observe/TakeScreenshot.ts
 1011	src/features/observe/ViewHierarchy.ts
-2908	src/features/observe/android/AndroidCtrlProxyClient.ts
+2594	src/features/observe/android/AndroidCtrlProxyClient.ts
 1840	src/features/observe/android/CtrlProxyHierarchy.ts
 1874	src/features/observe/android/ctrlProxyProtocol.ts
 1121	src/features/observe/android/ctrlProxyWireManifest.ts
@@ -77,7 +77,7 @@
 1329	src/server/planExecutionOrchestrator.ts
 2849	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
-1143	src/server/toolRegistry.ts
+1140	src/server/toolRegistry.ts
 1027	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1427	src/server/videoRecordingTools.ts
@@ -85,5 +85,4 @@
 1177	src/utils/android-cmdline-tools/AdbClient.ts
 2055	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
-1005	src/utils/ios-cmdline-tools/SimCtlClient.ts
-1263	src/utils/logger.ts
+1262	src/utils/logger.ts

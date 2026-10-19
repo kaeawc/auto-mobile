@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import type { ListChangedKind } from "../../src/server/listChangedBroadcast";
 import { defaultAppearanceSyncDependencies } from "../../src/daemon/AppearanceSyncScheduler";
 import {
   DEFAULT_SOCKET_PATH,
@@ -15,6 +14,7 @@ import { resolveAppearanceMode } from "../../src/daemon/appearanceManager";
 import {
   LIST_CHANGED_NOTIFICATION_METHODS,
   ListChangedBroadcaster,
+  type ListChangedKind,
 } from "../../src/daemon/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";

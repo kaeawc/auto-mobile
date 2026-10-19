@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 /**
  * Interface compliance tests for DeviceService implementations.
  *
@@ -35,7 +36,7 @@ describe("DeviceService Interface Compliance", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
 
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
@@ -89,7 +90,7 @@ describe("DeviceService Interface Compliance", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
 
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
@@ -159,7 +160,7 @@ describe("DeviceService Interface Compliance", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
 
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",
@@ -183,7 +184,7 @@ describe("DeviceService Interface Compliance", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const fakeAdb = new FakeAdbExecutor();
-      fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+      fakeAdb.setCommandResponse("forward", createExecResult("8765", ""));
 
       const testDevice: BootedDevice = {
         deviceId: "test-android-device",

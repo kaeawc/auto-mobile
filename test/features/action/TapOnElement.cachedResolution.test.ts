@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import {
   wasHierarchyReadDuringCall,
   withObservationReadScope,
@@ -147,7 +148,7 @@ describe("tapOn cached element resolution", () => {
     launch.awaitIdle = new FakeAwaitIdle();
     launch.window = new FakeWindow();
     h.adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    h.adb.setCommandResponse("shell am start --user 0", { stdout: "Starting: Intent", stderr: "" });
+    h.adb.setCommandResponse("shell am start --user 0", createExecResult("Starting: Intent", ""));
     const launched = await launch.execute("com.example.app", {
       clearAppData: false,
       coldBoot: false,

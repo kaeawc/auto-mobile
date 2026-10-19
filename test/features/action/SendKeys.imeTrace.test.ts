@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../../src/utils/debug";
 import type { ObserveResult } from "../../../src/models";
@@ -144,7 +145,7 @@ describe("IME trace opt-in", () => {
     async (path) => {
       setDebugModeEnabled(true);
       const h = harness("hello");
-      h.adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+      h.adb.setCommandResponse("shell ime disable", createExecResult("", "disable failed"));
       h.client.supportsImeTrace = async () => true;
       h.client.commitViaIme = async () => ({
         success: true,

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../../src/utils/execResult";
 import { describe, expect, test } from "bun:test";
 import { AccessibilityStateDetector } from "../../../../src/features/observe/audits/AccessibilityStateDetector";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -106,7 +107,7 @@ describe("AccessibilityStateDetector", () => {
 
   test("marks a checked, disabled service as confirmed", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("enabled_accessibility_services", { stdout: "null", stderr: "" });
+    adb.setCommandResponse("enabled_accessibility_services", createExecResult("null", ""));
     const flags: FeatureFlagReader = {
       isEnabled: (key: string) => key === "accessibility-auto-detect",
     };

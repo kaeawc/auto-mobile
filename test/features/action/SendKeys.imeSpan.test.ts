@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { expect, mock, spyOn, test } from "bun:test";
 import {
   DefaultSendKeysCommandExecutor,
@@ -510,7 +511,7 @@ test.each([undefined, "auto", "ime"] as const)(
   "a clear-only call in %s mode deletes with key events when the IME cannot be activated (#10479)",
   async (mode) => {
     const h = fieldHarness();
-    h.adb.setCommandResponse(activate, { stdout: "", stderr: "selection failed" });
+    h.adb.setCommandResponse(activate, createExecResult("", "selection failed"));
     const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
     expect(result.success).toBe(true);
     expect(h.clientCalls).toEqual([]);
@@ -743,19 +744,19 @@ test("an IME span pins a non-zero user once and restores that user after all com
   const h = harness();
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell am get-current-user", [
-    { stdout: "10", stderr: "" },
-    { stdout: "11", stderr: "" },
+    createExecResult("10", ""),
+    createExecResult("11", ""),
   ]);
-  adb.setCommandResponse("shell ime list --user 10 -a -s", {
-    stdout: `${priorIme}\n${AUTO_MOBILE_IME_ID}\n`,
-    stderr: "",
-  });
-  adb.setCommandResponse("shell ime list --user 10 -s", { stdout: priorIme, stderr: "" });
+  adb.setCommandResponse(
+    "shell ime list --user 10 -a -s",
+    createExecResult(`${priorIme}\n${AUTO_MOBILE_IME_ID}\n`, ""),
+  );
+  adb.setCommandResponse("shell ime list --user 10 -s", createExecResult(priorIme, ""));
   adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
-    { stdout: priorIme, stderr: "" },
-    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
-    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
-    { stdout: priorIme, stderr: "" },
+    createExecResult(priorIme, ""),
+    createExecResult(AUTO_MOBILE_IME_ID, ""),
+    createExecResult(AUTO_MOBILE_IME_ID, ""),
+    createExecResult(priorIme, ""),
   ]);
   const fake = modelDeviceSideRestore(h);
   const adbFactory = { create: () => adb };
@@ -805,8 +806,8 @@ test.each([
     // Android drops a subtype the commit IME does not advertise, so a subtype restore
     // aimed at the commit IME itself could never verify.
     h.adb.setCommandResponseSequence("shell settings get secure selected_input_method_subtype", [
-      { stdout: "3", stderr: "" },
-      { stdout: "-1", stderr: "" },
+      createExecResult("3", ""),
+      createExecResult("-1", ""),
     ]);
     try {
       const first = await h.action.execute([...commands]);

@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { expect, spyOn, test } from "bun:test";
 import {
@@ -46,10 +47,13 @@ function harness(
   const timer = new FakeTimer();
   // The bounded IME deadline advances only if explicitly requested, not during microtasks.
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("cmd display get-displays", {
-    stdout: 'Display id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 500 x 500}',
-    stderr: "",
-  });
+  adb.setCommandResponse(
+    "cmd display get-displays",
+    createExecResult(
+      'Display id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 500 x 500}',
+      "",
+    ),
+  );
   const device: BootedDevice = {
     deviceId: `fake-scoped-${route}`,
     name: "Scoped field",

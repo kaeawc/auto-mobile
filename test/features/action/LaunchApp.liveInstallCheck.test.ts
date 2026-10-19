@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { LaunchApp, amStartReportedFailure } from "../../../src/features/action/LaunchApp";
 import { wrapCommandError } from "../../../src/utils/CommandError";
@@ -78,10 +79,7 @@ describe("LaunchApp live install confirmation (#9976)", () => {
     staleStore = new FakeInstalledAppsRepository();
     staled = [];
     fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
-    fakeAdb.setCommandResponse("shell am start --user 0", {
-      stdout: "Starting: Intent",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse("shell am start --user 0", createExecResult("Starting: Intent", ""));
   });
 
   afterEach(async () => {
@@ -91,7 +89,7 @@ describe("LaunchApp live install confirmation (#9976)", () => {
   });
 
   test("launches an app the cache lacks but the device lists, and stales the cache", async () => {
-    fakeAdb.setCommandResponse(listCommand, { stdout: `package:${packageName}\n`, stderr: "" });
+    fakeAdb.setCommandResponse(listCommand, createExecResult(`package:${packageName}\n`, ""));
 
     const result = await createLaunchApp(["com.example.cached"]).execute(packageName, {
       clearAppData: false,
@@ -106,10 +104,7 @@ describe("LaunchApp live install confirmation (#9976)", () => {
   });
 
   test("still reports App is not installed when the live read also lacks the package", async () => {
-    fakeAdb.setCommandResponse(listCommand, {
-      stdout: "package:com.example.cached\n",
-      stderr: "",
-    });
+    fakeAdb.setCommandResponse(listCommand, createExecResult("package:com.example.cached\n", ""));
 
     const result = await createLaunchApp(["com.example.cached"]).execute(packageName, {
       clearAppData: false,
@@ -241,10 +236,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       "the first call fails fast with App is not installed when the launcher intent exits 1 (%s)",
       async (stream) => {
         failLaunchCommands(stream, missingComponentFailure);
-        fakeAdb.setCommandResponse(listCommand, {
-          stdout: "package:com.example.cached\n",
-          stderr: "",
-        });
+        fakeAdb.setCommandResponse(
+          listCommand,
+          createExecResult("package:com.example.cached\n", ""),
+        );
 
         const result = await createLaunchApp([missingPackage], missingPackage).execute(
           missingPackage,
@@ -270,14 +265,11 @@ describe("LaunchApp live install confirmation (#9976)", () => {
 
     test("an older adb that returns the am error with exit 0 fails fast the same way", async () => {
       // Same key as the suite default, so this replaces it for every `am start`.
-      fakeAdb.setCommandResponse("shell am start --user 0", {
-        stdout: launcherIntentFailure.output,
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse(listCommand, {
-        stdout: "package:com.example.cached\n",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell am start --user 0",
+        createExecResult(launcherIntentFailure.output, ""),
+      );
+      fakeAdb.setCommandResponse(listCommand, createExecResult("package:com.example.cached\n", ""));
 
       const result = await createLaunchApp([missingPackage], missingPackage).execute(
         missingPackage,
@@ -295,10 +287,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
       // the live listing is what tells the two apart. The component guesses fail with the
       // captured installed-app wrong-activity text.
       failLaunchCommands("stderr", wrongActivityFailure);
-      fakeAdb.setCommandResponse(listCommand, {
-        stdout: `package:${installedPackage}\n`,
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        listCommand,
+        createExecResult(`package:${installedPackage}\n`, ""),
+      );
 
       await expect(
         createLaunchApp([installedPackage], installedPackage).execute(installedPackage, {
@@ -372,10 +364,10 @@ describe("LaunchApp live install confirmation (#9976)", () => {
     });
 
     test("a launcher intent that succeeds never pays for a live listing", async () => {
-      fakeAdb.setCommandResponse("shell am start --user 0", {
-        stdout: "Starting: Intent",
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "shell am start --user 0",
+        createExecResult("Starting: Intent", ""),
+      );
 
       const result = await createLaunchApp([packageName]).execute(packageName, {
         clearAppData: false,

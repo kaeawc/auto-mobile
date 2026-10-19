@@ -1,3 +1,4 @@
+import { createExecResult } from "../../../src/utils/execResult";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -133,10 +134,13 @@ describe("PinchOn", () => {
         ...before,
         viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 0 },
       };
-      fakeAdb.setCommandResponse("cmd display get-displays", {
-        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
-        stderr: "",
-      });
+      fakeAdb.setCommandResponse(
+        "cmd display get-displays",
+        createExecResult(
+          'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
+          "",
+        ),
+      );
       fakeA11yService.setSupportedCommands(["gesture_display_id_v1"]);
       const transitions = new FakeDisplayTransitionReader();
       transitions.generation = 0;

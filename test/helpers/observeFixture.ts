@@ -48,3 +48,12 @@ export function observeResultFromFixture(raw: unknown, label = "fixture"): Obser
 export function observeResultFromJsonText(text: string, label = "fixture"): ObserveResult {
   return observeResultFromFixture(JSON.parse(text), label);
 }
+
+/** The fields every in-memory observation literal states; `display` and `observationId` are defaulted. */
+type ObservationFields = Omit<ObserveResult, "display" | "observationId"> &
+  Partial<Pick<ObserveResult, "display" | "observationId">>;
+
+/** Typed builder for in-memory observation literals, defaulting the required identity fields. */
+export function buildObserveResult(fields: ObservationFields): ObserveResult {
+  return { display: DEFAULT_DISPLAY, observationId: "test-observation", ...fields };
+}

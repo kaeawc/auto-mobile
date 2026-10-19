@@ -26,6 +26,7 @@ import type {
   EmulatorProcessLaunch,
   EmulatorLauncherHost,
 } from "./EmulatorLaunchSupport";
+import { ENV, readEnvRaw } from "../../config/env";
 
 export * from "./EmulatorLaunchSupport";
 
@@ -119,7 +120,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push("-no-window");
     }
     args.push(...this.host.emulatorAudioArguments());
-    const extraArgsRaw = process.env.AUTOMOBILE_EMULATOR_ARGS;
+    const extraArgsRaw = readEnvRaw(ENV.EMULATOR_ARGS);
     if (requestedExtraArgs) {
       args.push(...requestedExtraArgs);
     } else if (extraArgsRaw) {

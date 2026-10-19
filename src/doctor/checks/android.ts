@@ -22,6 +22,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { readSdkManagerVersion } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { logger } from "../../utils/logger";
+import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import type { AndroidToolsLocation } from "../../utils/android-cmdline-tools/detection";
 import {
   FileAvdConfigReader,
@@ -306,7 +307,7 @@ export async function checkAndroidHome(
  * Check JAVA_HOME environment variable
  */
 export async function checkJavaHome(): Promise<CheckResult> {
-  const javaHome = process.env.JAVA_HOME;
+  const javaHome = readEnvRaw(AMBIENT_ENV.JAVA_HOME);
 
   if (!javaHome) {
     return {

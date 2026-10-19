@@ -29,12 +29,12 @@ import {
   PrototypeViewerOverrideError,
   PrototypeViewerUnsupportedVersionError,
 } from "./iosPrototypeInstallerErrors";
+import { ENV } from "../../../config/env";
 
 const CACHE_SUBDIR = "prototype-viewer";
 const APP_NAME = "PrototypeViewer.app";
-export const IOS_PROTOTYPE_VIEWER_ENV = "AUTOMOBILE_IOS_PROTOTYPE_VIEWER";
-export const SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV =
-  "AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD";
+export const IOS_PROTOTYPE_VIEWER_ENV = ENV.IOS_PROTOTYPE_VIEWER.name;
+export const SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV = ENV.SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD.name;
 export const PROTOTYPE_VIEWER_METADATA_FILENAME = "AutoMobilePrototypeViewer.json";
 export const PROTOTYPE_VIEWER_DOWNLOAD_TIMEOUT_MS = 30_000;
 

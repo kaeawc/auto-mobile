@@ -128,7 +128,7 @@ describe("cell 1: the idle window alone, and against the heartbeat lease (T2, T2
       scenario.proxyConnection,
     );
     expect(info.idleReleaseAt).toBe(lastCallAt + IDLE_WINDOW_MS);
-    expect((ack.result as { idleReleaseAt: number }).idleReleaseAt).toBe(info.idleReleaseAt);
+    expect(ack.result?.idleReleaseAt).toBe(info.idleReleaseAt);
 
     await scenario.idle(IDLE_WINDOW_MS);
     expect(scenario.isHeld(session)).toBe(true);

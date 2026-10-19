@@ -10,6 +10,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError } from "../../src/models";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -914,8 +915,7 @@ describe("DevicePool autolock", () => {
       // session's release callback fires.
       const device = pool.getDevice("emulator-5554")!;
       device.autolockSessionId = "new-session";
-      device.sessionId = "new-session";
-      device.status = "busy";
+      patchDeviceBinding(device, { sessionId: "new-session", status: "busy" });
 
       // Expire the original session.
       timer.advanceTime(61 * 1000);

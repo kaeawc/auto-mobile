@@ -36,6 +36,7 @@ describe("proxy failed partial connect", () => {
       getDevicePool: () => ({
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
+        releaseDevice: async () => {},
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };

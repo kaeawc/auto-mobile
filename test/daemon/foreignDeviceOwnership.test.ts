@@ -35,6 +35,7 @@ import {
 } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createExecResult } from "../../src/utils/execResult";
 
 const SELF_PID = 100;
 const FOREIGN_PID = 4242;
@@ -136,10 +137,10 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
   test("F4c refresh shares one forward listing across all Android devices", async () => {
     const adb = new FakeAdbExecutor();
     const ids = ["a", "b", "c", "d"];
-    adb.setCommandResponse("forward --list", {
-      stdout: ids.map((id) => `${id} tcp:8767 tcp:8765`).join("\n"),
-      stderr: "",
-    });
+    adb.setCommandResponse(
+      "forward --list",
+      createExecResult(ids.map((id) => `${id} tcp:8767 tcp:8765`).join("\n"), ""),
+    );
     const evidence = new DefaultForeignCtrlProxyForwardEvidence({
       adbFactory: { create: () => adb },
       clientProbe: { findClientPids: async () => [FOREIGN_PID] },

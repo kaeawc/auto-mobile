@@ -3,10 +3,7 @@ import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
-import {
-  setVideoStreamSocketServerForTesting,
-  type VideoStreamSocketServer,
-} from "../../src/daemon/videoStreamSocketServer";
+import { setVideoStreamSocketServerForTesting } from "../../src/daemon/videoStreamSocketServer";
 import * as databaseModule from "../../src/db";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -257,11 +254,13 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     setVideoStreamSocketServerForTesting({
+      isListening: () => true,
+      start: async () => {},
       close: () => {
         events.push("video:close");
         return new Promise<void>(() => {});
       },
-    } as unknown as VideoStreamSocketServer);
+    });
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });

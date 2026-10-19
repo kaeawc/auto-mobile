@@ -6,6 +6,8 @@ import {
   type IdentityRecoveryIO,
 } from "./identityRecovery";
 import { createServer } from "node:net";
+import type { DaemonManagerSeams, DaemonManagerTestInternals } from "./managerTestInternals";
+import { fileSystemExtractionCleaner, type ExtractionCleaner } from "./extractionCleaner";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   consumeDaemonExitRecord,
@@ -13,11 +15,10 @@ import {
   removeDaemonExitRecord,
   resolveDaemonExitOptions,
   DAEMON_EXIT_RECORD_TTL_MS,
-  type DaemonExitRecordFileSystem,
 } from "./daemonExitRecord";
 import { getCurrentBuildIdentity } from "./buildIdentity";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { open, readFile, rm } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import {
   constants,
   existsSync,
@@ -27,10 +28,9 @@ import {
   readFileSync,
   writeSync,
 } from "node:fs";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
-import { devNull, tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
+import { devNull } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
-import { isPathInside } from "../utils/filesystem/pathContainment";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   INCOMPLETE_EXTRACTION_CODE,
@@ -160,6 +160,7 @@ import {
 } from "./cli/runDaemonCommand";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
+export { resolveExtractionRootForEntryScript, type ExtractionCleaner } from "./extractionCleaner";
 export type { DaemonManagerOptions } from "./managerOptions";
 import type { DaemonManagerOptions } from "./managerOptions";
 import { ENV } from "../config/env";
@@ -239,48 +240,6 @@ const DAEMON_PROCESS_BIRTH_IDENTITY_TOLERANCE_MS = 2_000;
 const defaultDaemonProcessSignaler: DaemonProcessSignaler = {
   signal(pid, signal): void {
     process.kill(pid, signal);
-  },
-};
-
-export interface ExtractionCleaner {
-  removeExtractionForEntryScript(entryScript: string): Promise<boolean>;
-}
-
-/** Exported for tests. */
-export function resolveExtractionRootForEntryScript(entryScript: string): string | null {
-  const resolved = resolve(entryScript);
-  const parts = resolved.split(sep);
-  const nodeModulesIndex = parts.lastIndexOf("node_modules");
-  if (nodeModulesIndex <= 0) {
-    return null;
-  }
-
-  const packagePath = parts.slice(nodeModulesIndex + 1, nodeModulesIndex + 3).join("/");
-  if (packagePath !== "@kaeawc/auto-mobile") {
-    return null;
-  }
-
-  const root = parts.slice(0, nodeModulesIndex).join(sep) || sep;
-  if (root === sep) {
-    return null;
-  }
-
-  const tempRoot = resolve(tmpdir());
-  if (!isPathInside(tempRoot, root, { allowEqual: false })) {
-    return null;
-  }
-  return root;
-}
-
-const fileSystemExtractionCleaner: ExtractionCleaner = {
-  async removeExtractionForEntryScript(entryScript: string): Promise<boolean> {
-    const extractionRoot = resolveExtractionRootForEntryScript(entryScript);
-    if (!extractionRoot) {
-      return false;
-    }
-
-    await rm(extractionRoot, { recursive: true, force: true });
-    return true;
   },
 };
 
@@ -519,15 +478,14 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly daemonProtocolHealthProbe: () => Promise<boolean>;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
-  /** Whether a TCP port can be bound right now; replaceable so tests need no real socket. */
-  private portFreeProbe: (port: number) => Promise<boolean> = isTcpPortFree;
-  protected exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
-  private launchLogFileSystem: {
-    openSync(path: string, flags: "w", mode: number): number;
-    closeSync(fd: number): void;
-  } = { openSync, closeSync };
-  private launchWorkingDirectory: () => string = resolveStableDaemonWorkingDirectory;
-  private currentBuildId: () => string = () => getCurrentBuildIdentity().buildId;
+  /** Replaceable I/O seams (port probe, exit-record and launch-log files, cwd, build id) so tests need no real I/O. */
+  protected readonly seams: DaemonManagerSeams = {
+    portFreeProbe: isTcpPortFree,
+    exitRecordFileSystem: defaultDaemonExitRecordFileSystem,
+    launchLogFileSystem: { openSync, closeSync },
+    launchWorkingDirectory: resolveStableDaemonWorkingDirectory,
+    currentBuildId: () => getCurrentBuildIdentity().buildId,
+  };
   private readonly runningRestartOptions = new WeakSet<DaemonOptions>();
   /**
    * A per-instance owner token written into the startup lock alongside the PID
@@ -1235,13 +1193,13 @@ export class DaemonManager implements DaemonManagerLike {
 
   /** Restore startup policy after a self-exit on this control socket. */
   private async inheritExitSettings(options: DaemonOptions): Promise<DaemonOptions> {
-    const record = consumeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+    const record = consumeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
     const resolution = resolveDaemonExitOptions(
       options,
       record,
       this.timer.now(),
       DAEMON_EXIT_RECORD_TTL_MS,
-      this.currentBuildId(),
+      this.seams.currentBuildId(),
     );
     if (resolution.outcome === "stale" || resolution.outcome === "build-mismatch") {
       logger.info(`Ignoring daemon exit record: ${resolution.outcome}`);
@@ -1253,7 +1211,7 @@ export class DaemonManager implements DaemonManagerLike {
     let portNote = "";
     if (resolution.inheritedPort && inherited.port !== undefined) {
       // A stolen predecessor port must not wedge every auto-start (#11074).
-      inherited.strictPort = await this.portFreeProbe(inherited.port);
+      inherited.strictPort = await this.seams.portFreeProbe(inherited.port);
       if (!inherited.strictPort) {
         portNote = "; previous port is busy, binding without strictness";
       }
@@ -1508,7 +1466,7 @@ export class DaemonManager implements DaemonManagerLike {
     if (inheritExitRecord) {
       options = await this.inheritExitSettings(options);
     } else {
-      removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+      removeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
     }
     stderrLog("Starting AutoMobile daemon...");
 
@@ -1551,7 +1509,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Open with restricted permissions (0o600 = owner read/write only).
     // Stderr-only containers deliberately skip the file capture and do not need
     // a writable AutoMobile data directory.
-    const logFd = this.launchLogFileSystem.openSync(logPath, "w", 0o600);
+    const logFd = this.seams.launchLogFileSystem.openSync(logPath, "w", 0o600);
 
     try {
       await this.launchWithExtractionRetry(
@@ -1587,7 +1545,7 @@ export class DaemonManager implements DaemonManagerLike {
       throw error;
     } finally {
       // Close our reference to the log file (daemon process still has it open)
-      this.launchLogFileSystem.closeSync(logFd);
+      this.seams.launchLogFileSystem.closeSync(logFd);
     }
 
     const newStatus = await this.lifecycleStatus();
@@ -1631,7 +1589,7 @@ export class DaemonManager implements DaemonManagerLike {
           args,
           spawnOptions: {
             detached: true,
-            cwd: this.launchWorkingDirectory(),
+            cwd: this.seams.launchWorkingDirectory(),
             stdio: [
               "ignore",
               capturesLaunchOutput ? logFd : "ignore",
@@ -2227,13 +2185,13 @@ export class DaemonManager implements DaemonManagerLike {
       // remove that CONFIRMED-DEAD daemon's PID FILE here — but NOT its
       // socket pathname (see removeConfirmedDeadPidFile for why).
       await this.removeConfirmedDeadPidFile();
-      removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+      removeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
       stderrLog("Daemon is not running");
       return;
     }
 
     await this.stopRunningDaemon(status, timeout);
-    removeDaemonExitRecord(this.socketPath, this.exitRecordFileSystem);
+    removeDaemonExitRecord(this.socketPath, this.seams.exitRecordFileSystem);
   }
 
   /**
@@ -2733,7 +2691,7 @@ export class DaemonManager implements DaemonManagerLike {
    * never delete a record this method cannot prove is still the confirmed-dead
    * one.
    */
-  private async removeConfirmedDeadPidFile(): Promise<void> {
+  protected async removeConfirmedDeadPidFile(): Promise<void> {
     // Cheap unlocked pre-check: skip acquiring the lock entirely when there is
     // plainly nothing to clean up (already gone, or already live).
     const unlockedRecord = await this.readConfirmedDeadPidData();
@@ -2796,7 +2754,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private recordedStatus(): DaemonStatus {
+  protected recordedStatus(): DaemonStatus {
     const record = this.identityRecoveryIO.readRecord();
     return record && record.socketPath === this.socketPath && this.isRecordedDaemonRunning(record)
       ? { ...record, running: true }
@@ -3278,7 +3236,7 @@ export class DaemonManager implements DaemonManagerLike {
    * Explicit restart may stop an orphan only when its marker or this socket's
    * response attributes it to this namespace. Ordinary start remains non-destructive.
    */
-  private async stopNamespaceOrphansForExplicitRestart(recordedPid?: number): Promise<void> {
+  protected async stopNamespaceOrphansForExplicitRestart(recordedPid?: number): Promise<void> {
     const candidates = (await this.findNamespaceDaemonProcessRecords()).filter(
       (candidate) => candidate.pid !== recordedPid,
     );
@@ -3435,7 +3393,7 @@ export class DaemonManager implements DaemonManagerLike {
    * consume the final budget; signaling after that would violate fail-closed
    * daemon recovery semantics.
    */
-  private async verifyDaemonGenerationBeforeSignal(
+  protected async verifyDaemonGenerationBeforeSignal(
     expected: DaemonProcessRecord,
     recoveryDeadline: number | undefined,
     context: string = "Daemon recovery",
@@ -3947,6 +3905,18 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private socketPathObservable(): boolean {
     return this.platform === "win32" || existsSync(this.socketPath);
+  }
+
+  /** Test-only typed view of the injectable collaborators and private steps suites drive. */
+  getInternalsForTesting(): DaemonManagerTestInternals {
+    return {
+      seams: this.seams,
+      identityRecoveryIO: this.identityRecoveryIO,
+      inheritExitSettings: (options) => this.inheritExitSettings(options),
+      recoveryOptions: (status, options) => this.recoveryOptions(status, options),
+      tryJoinPeerDaemonAfterSpawnExit: (budgetMs) => this.tryJoinPeerDaemonAfterSpawnExit(budgetMs),
+      isIsolatedSocketNamespace: () => this.isIsolatedSocketNamespace(),
+    };
   }
 
   /** Compare built-in defaults so environment-overridden namespaces keep their short rejoin grace. */

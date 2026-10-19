@@ -129,7 +129,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
 
   it("does not corrupt non-object bounds forms (string/array)", () => {
     const hierarchy: ViewHierarchyResult = {
-      hierarchy: { node: { $: { bounds: "[0,0][100,200]" } } as any },
+      hierarchy: { node: { $: { bounds: "[0,0][100,200]" } } },
       screenWidth: 100,
       screenHeight: 200,
     };

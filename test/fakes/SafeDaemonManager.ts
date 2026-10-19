@@ -51,7 +51,7 @@ export class SafeDaemonManager extends DaemonManager {
         },
       },
     });
-    this.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
+    this.seams.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
     this.defaultSpawner = spawner;
     this.defaultSignals = signals;
   }

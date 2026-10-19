@@ -15,6 +15,7 @@ import { errorMessage } from "../describeUnknownError";
 import type { HostChildProcess as ChildProcess } from "../HostCommandExecutor";
 
 import { logger } from "../logger";
+import { createSimulatorLaunchHandle } from "./simulatorLaunchHandle";
 
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice } from "../../models";
 import { DeviceAlreadyRunningError } from "../../models/DeviceAlreadyRunningError";
@@ -206,26 +207,16 @@ export class SimCtlBoot {
     // — shutting it back down. `ChildProcess.kill` is synchronous, so the
     // shutdown is fired best-effort and the boolean result reports that a
     // cancellation was initiated.
-    return {
-      pid: undefined,
-      kill: (): boolean => {
-        // Cancellation cleanup must not inherit an already-aborted request signal.
-        const cleanupSignal = new AbortController().signal;
-        void this.context
-          .shutdownSimulatorCoordinated(udid, 10_000, cleanupSignal, ownerToken)
-          .catch((error) => {
-            logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
-          });
-        return true;
-      },
-      killed: false,
-      connected: false,
-      exitCode: 0,
-      signalCode: null,
-    } as Pick<
-      ChildProcess,
-      "pid" | "kill" | "killed" | "connected" | "exitCode" | "signalCode"
-    > as ChildProcess;
+    return createSimulatorLaunchHandle((): boolean => {
+      // Cancellation cleanup must not inherit an already-aborted request signal.
+      const cleanupSignal = new AbortController().signal;
+      void this.context
+        .shutdownSimulatorCoordinated(udid, 10_000, cleanupSignal, ownerToken)
+        .catch((error) => {
+          logger.debug(`[iOS] handle.kill() shutdown failed for ${udid}: ${error}`);
+        });
+      return true;
+    });
   }
 
   async runOwnedBoot<T>(udid: string, operation: () => Promise<T>): Promise<T> {

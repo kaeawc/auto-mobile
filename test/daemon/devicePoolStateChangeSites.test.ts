@@ -65,7 +65,10 @@ function calleeName(node: AstNode): string | undefined {
 
 function scanFile(path: string): FunctionScan[] {
   const source = readFileSync(path, "utf8");
-  const program = parseSync(path, source).program as unknown as AstNode;
+  const program: unknown = parseSync(path, source).program;
+  if (!isNode(program)) {
+    throw new Error(`Expected a Program node from ${path}`);
+  }
   const scans: FunctionScan[] = [];
   const stack: FunctionScan[] = [];
 

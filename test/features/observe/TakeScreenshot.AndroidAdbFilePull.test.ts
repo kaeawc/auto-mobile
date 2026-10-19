@@ -32,18 +32,15 @@ describe("Android file-pull screenshots", function () {
     const fakeAdb = new FakeAdbExecutor();
     const fileSystem = new FakeFileSystem();
     fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:1", ""));
-    const screenshot = new TakeScreenshot(
-      androidFilePullDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer(),
-      new FakeIdGenerator(["quiet-failure"]),
-      writerFor(fileSystem),
+    const screenshot = new TakeScreenshot(androidFilePullDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["quiet-failure"]),
+      fileWriter: writerFor(fileSystem),
       fileSystem,
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     await expect(
       screenshot.testHooks.filePull("/screenshots/quiet-failure.png", {
         format: "png",
@@ -60,18 +57,15 @@ describe("Android file-pull screenshots", function () {
     const fileSystem = new FakeFileSystem();
     fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:0", ""));
     const localDir = "/screenshots/file-pull";
-    const screenshot = new TakeScreenshot(
-      androidFilePullDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer(),
-      new FakeIdGenerator(["first", "second"]),
-      writerFor(fileSystem),
+    const screenshot = new TakeScreenshot(androidFilePullDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["first", "second"]),
+      fileWriter: writerFor(fileSystem),
       fileSystem,
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     const firstPath = path.join(localDir, "first.png");
     const secondPath = path.join(localDir, "second.png");
     fileSystem.setBinaryFile(`${firstPath}.temp`, pngBytes);
@@ -106,18 +100,15 @@ describe("Android file-pull screenshots", function () {
     fakeAdb.abortAfterCommand("pull ", controller);
     const localDir = "/screenshots/file-pull";
     const finalPath = path.join(localDir, "cancelled.png");
-    const screenshot = new TakeScreenshot(
-      androidFilePullDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer(),
-      new FakeIdGenerator(["cancelled"]),
-      writerFor(fileSystem),
+    const screenshot = new TakeScreenshot(androidFilePullDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["cancelled"]),
+      fileWriter: writerFor(fileSystem),
       fileSystem,
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
     await expect(
       screenshot.testHooks.filePull(finalPath, { format: "png" }, controller.signal),
@@ -134,18 +125,15 @@ describe("Android file-pull screenshots", function () {
     const fileSystem = new FakeFileSystem();
     fakeAdb.setCommandResponse("screencap -p", createExecResult("AM_SCREENCAP_RC:0", ""));
     const localDir = "/screenshots/file-pull";
-    const screenshot = new TakeScreenshot(
-      androidFilePullDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      new FakeTimer(),
-      new FakeIdGenerator(["../evil id; rm -rf /"]),
-      writerFor(fileSystem),
+    const screenshot = new TakeScreenshot(androidFilePullDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["../evil id; rm -rf /"]),
+      fileWriter: writerFor(fileSystem),
       fileSystem,
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     const finalPath = path.join(localDir, "malicious.png");
     const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("../evil id; rm -rf /")}.png`;
     fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);

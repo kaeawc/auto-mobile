@@ -55,13 +55,12 @@ describe("TakeScreenshot iOS cancellation", function () {
     installDeviceDataStreamSocketServerForTesting(streamServer);
 
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-single-decode"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        new FakeScreenshotFileWriter(),
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-single-decode"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: new FakeScreenshotFileWriter(),
+      });
       const result = await screenshot.execute({ format: "png" });
 
       expect(result.success).toBe(true);
@@ -98,13 +97,12 @@ describe("TakeScreenshot iOS cancellation", function () {
           ensureConnected: async () => true,
           requestScreenshot: async () => ({ success: true, data }),
         })) as typeof IOSCtrlProxyClient.getInstance;
-        const screenshot = new TakeScreenshot(
-          iosDevice("ios-image-dimensions"),
-          new FakeAdbClientFactory(new FakeAdbExecutor()),
-          new FakeTimer(),
-          new CountingIdGenerator("capture"),
-          new FakeScreenshotFileWriter(),
-        );
+        const screenshot = new TakeScreenshot(iosDevice("ios-image-dimensions"), {
+          adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+          timer: new FakeTimer(),
+          idGenerator: new CountingIdGenerator("capture"),
+          fileWriter: new FakeScreenshotFileWriter(),
+        });
         expect((await screenshot.execute({ format: "png" })).success).toBe(true);
       }
 
@@ -142,10 +140,9 @@ describe("TakeScreenshot iOS cancellation", function () {
       },
     })) as typeof IOSCtrlProxyClient.getInstance;
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-device-id"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-device-id"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      });
       const resultPromise = screenshot.execute({ format: "png" }, controller.signal);
       controller.abort();
       const result = await resultPromise;
@@ -170,10 +167,9 @@ describe("TakeScreenshot iOS cancellation", function () {
       },
     })) as typeof IOSCtrlProxyClient.getInstance;
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-device-id"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-device-id"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      });
       const result = await screenshot.execute({ format: "png" }, controller.signal);
       expect(requestScreenshotCalls).toBe(1);
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
@@ -195,13 +191,12 @@ describe("TakeScreenshot iOS cancellation", function () {
     })) as typeof IOSCtrlProxyClient.getInstance;
     const writer = new FakeScreenshotFileWriter(() => controller.abort());
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-late-cancel"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        writer,
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-late-cancel"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: writer,
+      });
       const result = await screenshot.execute({ format: "png" }, controller.signal);
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
       expect(writer.written).toHaveLength(1);
@@ -228,13 +223,12 @@ describe("TakeScreenshot iOS cancellation", function () {
     const pushSpy = spyOn(streamServer, "pushScreenshotUpdate");
     installDeviceDataStreamSocketServerForTesting(streamServer);
     try {
-      const screenshot = new TakeScreenshot(
-        iosDevice("ios-pre-cancel"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        writer,
-      );
+      const screenshot = new TakeScreenshot(iosDevice("ios-pre-cancel"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: writer,
+      });
       const result = await screenshot.testHooks.ios(
         path.join(os.tmpdir(), "ios-pre-cancel.png"),
         { format: "png" },

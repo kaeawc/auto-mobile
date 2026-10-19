@@ -591,13 +591,16 @@ function observeWaitParameters(
   return [
     observeScreen,
     { ...args.waitFor, settled: args.settled, layer: args.layer },
-    signal,
-    args.skipBackStack ?? false,
-    dependencies.timer ?? defaultTimer,
-    device.platform,
-    screenshot.mode,
-    screenshot.options,
-    ...displayWaitInventory(device),
+    {
+      signal,
+      skipBackStack: args.skipBackStack ?? false,
+      timer: dependencies.timer ?? defaultTimer,
+      platform: device.platform,
+      screenshot: screenshot.mode,
+      screenshotOptions: screenshot.options,
+      displayInventory: displayWaitInventory(device)[0],
+      displayPanels: displayWaitInventory(device)[1],
+    },
   ];
 }
 

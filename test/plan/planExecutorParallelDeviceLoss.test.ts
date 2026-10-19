@@ -83,9 +83,7 @@ async function checkDeviceLoss(
               return await waitForObservation(
                 screen,
                 { posture: "closed", timeout: 40_000 },
-                signal,
-                false,
-                timer,
+                { signal, skipBackStack: false, timer },
               );
             }
             throw loss;

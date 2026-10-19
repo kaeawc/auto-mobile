@@ -123,7 +123,6 @@ test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.crossDaemonExplicitBind.test.ts
 test/daemon/devicePool.crossDaemonIdleLeaseRelinquish.test.ts
-test/daemon/devicePool.exitedLauncherSameSerial.test.ts
 test/daemon/devicePool.heartbeatExpiry.test.ts
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts
 test/daemon/devicePool.incompleteScanStart.test.ts
@@ -539,6 +538,7 @@ test/features/action/imageRelativePoint.test.ts
 test/features/action/imeActionApproximationWarning.test.ts
 test/features/action/imeActionFailedAfterTextEntered.test.ts
 test/features/action/imeFailureDiagnostics.test.ts
+test/features/action/installAppParsing.test.ts
 test/features/action/iosRotateVerification.test.ts
 test/features/action/iosTapOwnershipWindowLayers.test.ts
 test/features/action/keyboardNodeClickTarget.test.ts
@@ -659,6 +659,7 @@ test/features/observe/AndroidCtrlProxyRequestSettlement.test.ts
 test/features/observe/AndroidMultiDisplayActivity.test.ts
 test/features/observe/ConditionPredicates.test.ts
 test/features/observe/ConditionResolver.test.ts
+test/features/observe/ConnectionFailureRecord.test.ts
 test/features/observe/CtrlProxyDelegatesSendCommand.test.ts
 test/features/observe/DeviceServiceClient.realWebSocketGuard.test.ts
 test/features/observe/DeviceServiceClientConcurrentConnect.test.ts
@@ -740,6 +741,7 @@ test/features/observe/android/ctrlProxyHierarchySingleFlight.test.ts
 test/features/observe/android/ctrlProxyHierarchyWindows.test.ts
 test/features/observe/android/ctrlProxyRecompositionAbort.test.ts
 test/features/observe/android/foreignCtrlProxyForwardEvidence.test.ts
+test/features/observe/android/hierarchyFreshness.test.ts
 test/features/observe/android/imeCommitContract.test.ts
 test/features/observe/android/imeInsertedTextMatches.table.test.ts
 test/features/observe/android/normalizeStorageWireValue.test.ts

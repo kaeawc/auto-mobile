@@ -601,27 +601,9 @@ test("explicit capture freshness also controls the hierarchy collector fallback 
   const waits: boolean[] = [];
   const collector = new FakeHierarchyCollector();
   const originalCollect = collector.collect.bind(collector);
-  collector.collect = async (
-    result,
-    queryOptions,
-    perf,
-    skipWaitForFresh,
-    minTimestamp,
-    signal,
-    readOnly,
-    capturedHierarchy,
-  ) => {
-    waits.push(skipWaitForFresh);
-    return originalCollect(
-      result,
-      queryOptions,
-      perf,
-      skipWaitForFresh,
-      minTimestamp,
-      signal,
-      readOnly,
-      capturedHierarchy,
-    );
+  collector.collect = async (result, options) => {
+    waits.push(options?.skipWaitForFresh ?? false);
+    return originalCollect(result, options);
   };
   const { observeScreen } = createObserveScreen(
     undefined,

@@ -2306,18 +2306,19 @@ describe("post-action screenshot resolved display", () => {
         stderr: "",
       });
       const timer = autoTimer();
-      const screenshot = new TakeScreenshot(
-        android,
-        new FakeAdbClientFactory(executor),
+      const screenshot = new TakeScreenshot(android, {
+        adbFactory: new FakeAdbClientFactory(executor),
         timer,
-        new FakeIdGenerator(["capture", "command"]),
-        new FakeScreenshotFileWriter(),
-        new FakeFileSystem(),
-        () => "/fake/screenshots",
-        new FakeAndroidPhysicalDisplayIdResolver(new Map([[2, EXTERNAL_PHYSICAL_DISPLAY_ID]])),
-        false,
-        { pathProtection: new FakeScreenshotPathProtection(timer) },
-      );
+        idGenerator: new FakeIdGenerator(["capture", "command"]),
+        fileWriter: new FakeScreenshotFileWriter(),
+        fileSystem: new FakeFileSystem(),
+        cacheDirResolver: () => "/fake/screenshots",
+        physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+          new Map([[2, EXTERNAL_PHYSICAL_DISPLAY_ID]]),
+        ),
+        cleanupOnCreate: false,
+        pathProtection: new FakeScreenshotPathProtection(timer),
+      });
       const ids: Array<number | undefined> = [];
       // Forward production display selection to the real screenshot transport.
       class CaptureRecorder extends FakeScreenshotRecorder {

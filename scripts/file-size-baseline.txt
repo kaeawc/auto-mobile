@@ -34,7 +34,6 @@
 1528	src/features/action/InstallApp.ts
 2264	src/features/action/LaunchApp.ts
 2033	src/features/action/Rotate.ts
-1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1468	src/features/action/TapAtCoordinate.ts
 3765	src/features/action/TapOnElement.ts
@@ -44,7 +43,6 @@
 1084	src/features/navigation/Explore.ts
 1023	src/features/navigation/NavigationGraphManager.ts
 1566	src/features/observe/DeviceServiceClient.ts
-1026	src/features/observe/TakeScreenshot.ts
 1011	src/features/observe/ViewHierarchy.ts
 2594	src/features/observe/android/AndroidCtrlProxyClient.ts
 1840	src/features/observe/android/CtrlProxyHierarchy.ts
@@ -73,7 +71,7 @@
 1222	src/server/deviceToolsShutdown.ts
 1247	src/server/deviceToolsStartDevice.ts
 1661	src/server/finalizeToolResponse.ts
-3061	src/server/interactionTools.ts
+3060	src/server/interactionTools.ts
 1329	src/server/planExecutionOrchestrator.ts
 2849	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts

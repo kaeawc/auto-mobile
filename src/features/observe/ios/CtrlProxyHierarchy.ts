@@ -148,21 +148,9 @@ export class CtrlProxyHierarchy {
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
-    skipWaitForFreshArg?: boolean,
-    minTimestampArg?: number,
-    disableAllFilteringArg?: boolean,
-    signalArg?: AbortSignal,
-    timeoutMsArg?: number,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null> {
-    const resolved = resolveAccessibilityHierarchyArgs(
-      perfOrRequest,
-      skipWaitForFreshArg,
-      minTimestampArg,
-      disableAllFilteringArg,
-      signalArg,
-      timeoutMsArg,
-    );
+    const resolved = resolveAccessibilityHierarchyArgs(request);
     const { perf, skipWaitForFresh, minTimestamp, signal } = resolved;
     const timeoutMs =
       typeof resolved.readOptions === "number"

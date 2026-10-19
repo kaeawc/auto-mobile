@@ -33,9 +33,14 @@ import type {
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
-import type { BaseResult, SwipeRequestOptions } from "../../src/features/observe/shared/types";
+import type {
+  BaseResult,
+  DragRequest,
+  SwipeRequest,
+} from "../../src/features/observe/shared/types";
 import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
+import type { MultiFingerSwipeRequest } from "../../src/utils/interfaces/MultiFingerSwipeRequest";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -646,21 +651,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean,
-    signalArg?: AbortSignal,
-    timeoutMsArg?: number,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null> {
-    const { readOptions } = resolveAccessibilityHierarchyArgs(
-      perfOrRequest,
-      skipWaitForFresh,
-      minTimestamp,
-      disableAllFiltering,
-      signalArg,
-      timeoutMsArg,
-    );
+    const { readOptions } = resolveAccessibilityHierarchyArgs(request);
     const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
     this.hierarchyRequestCount++;
     this.hierarchyRequestTimeouts.push(timeoutMs);
@@ -829,18 +822,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     );
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    contextOptions?: string | SwipeRequestOptions,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+  async requestSwipe(request: SwipeRequest): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    const { x1, y1, x2, y2, signal, onDispatch } = request;
+    const { duration = 300 } = request;
     signal?.throwIfAborted();
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
@@ -859,16 +843,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     );
   }
 
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-  ): Promise<CtrlProxyDragResult> {
+  async requestDrag(request: DragRequest): Promise<CtrlProxyDragResult> {
+    const { x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs } = request;
     await this.applyDelay("drag");
     this.checkFailure("drag");
 
@@ -1339,19 +1315,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
 
   async requestMultiFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    fingerCount: number,
-    duration: number = 300,
-    _timeoutMs: number = 5000,
-    _perf?: PerformanceTracker,
-    fingerSpacing?: number,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-    beforeSend?: () => void,
+    request: MultiFingerSwipeRequest,
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    const { x1, y1, x2, y2, fingerCount, fingerSpacing, signal, onDispatch, beforeSend } = request;
+    const { duration = 300 } = request;
     // Mirrors `sendIOSPressCommand`: an expired deadline never reaches the device, and the
     // synchronous display fence runs immediately before the socket write.
     signal?.throwIfAborted();

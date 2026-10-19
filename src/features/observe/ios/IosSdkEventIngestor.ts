@@ -22,7 +22,7 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import type { NavigationEvent } from "../../../utils/interfaces/NavigationGraph";
-import type { ViewHierarchyResult } from "../../../models";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
 import { decodeSdkNetworkVersion, IOS_SDK_NETWORK_DIAGNOSTIC_TAG } from "./IosSdkNetworkWire";
@@ -651,7 +651,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     try {
       prevContext = recorder.getContext();
       recorder.setContext(this.deviceId, null);
-      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy);
+      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy.node);
       // Use the converted ViewHierarchyResult format — same data as the observation stream
       const hierarchyJson = JSON.stringify({
         nodeCount,
@@ -697,21 +697,14 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     }
   }
 
-  private countViewHierarchyNodes(node: unknown): number {
-    if (!node || typeof node !== "object") {
+  /** Counts converted nodes; the converter emits a lone child as an object, not a one-item array. */
+  private countViewHierarchyNodes(node: ViewHierarchyNode | undefined): number {
+    if (!node) {
       return 0;
     }
-    const obj = node as Record<string, unknown>;
-    let count = 0;
-    if (obj["$"] || obj["node"]) {
-      count = 1;
-    }
-    const children = obj["node"];
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        count += this.countViewHierarchyNodes(child);
-      }
-    }
-    return count;
+    const own = node.$ || node.node ? 1 : 0;
+    return [node.node ?? []]
+      .flat()
+      .reduce((count, child) => count + this.countViewHierarchyNodes(child), own);
   }
 }

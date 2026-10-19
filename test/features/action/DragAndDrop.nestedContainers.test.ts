@@ -151,7 +151,7 @@ function harness(route: Route, kind: Kind = "success", vision = false) {
       expect(drag).not.toHaveBeenCalled();
     } else {
       expect(drag).toHaveBeenCalledTimes(1);
-      expect(drag.mock.calls[0]?.slice(0, 4)).toEqual([50, start, 50, end]);
+      expect(drag.mock.calls[0]?.[0]).toMatchObject({ x1: 50, y1: start, x2: 50, y2: end });
       expect(adb.wasCommandExecuted("input")).toBe(false);
     }
   };

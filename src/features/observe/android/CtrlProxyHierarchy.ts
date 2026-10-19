@@ -677,12 +677,7 @@ export class CtrlProxyHierarchy {
    */
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perfOrRequest?: PerformanceTracker | AccessibilityHierarchyRequest,
-    skipWaitForFreshArg?: boolean,
-    minTimestampArg?: number,
-    disableAllFilteringArg?: boolean,
-    signalArg?: AbortSignal,
-    readOptionsArg?: number | HierarchyReadOptions,
+    request?: AccessibilityHierarchyRequest,
   ): Promise<ViewHierarchyResult | null> {
     const {
       perf = new NoOpPerformanceTracker(),
@@ -691,14 +686,7 @@ export class CtrlProxyHierarchy {
       disableAllFiltering = false,
       signal,
       readOptions,
-    } = resolveAccessibilityHierarchyArgs(
-      perfOrRequest,
-      skipWaitForFreshArg,
-      minTimestampArg,
-      disableAllFilteringArg,
-      signalArg,
-      readOptionsArg,
-    );
+    } = resolveAccessibilityHierarchyArgs(request);
     const { timeoutMs, requireFreshExtraction } = this.getHierarchyReadPolicy(readOptions);
     const startTime = this.context.timer.now();
     const cachedHierarchy = this.context.getCachedHierarchy();

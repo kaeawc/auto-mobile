@@ -150,8 +150,9 @@ run_cmd() {
 # a function name in a condition.
 RUN_STATUS=0
 run_capture_status() {
-    RUN_STATUS=0
-    "$@" || RUN_STATUS=$?
+local run_rc=0
+"$@" || run_rc=$?
+RUN_STATUS="${run_rc}"
 }
 
 # run_cmd with its output captured into CAPTURED_OUTPUT and its exit status in

@@ -151,7 +151,7 @@ describe("DragAndDrop - iOS", () => {
   // can finish after the host has stopped waiting, using only fake time.
   const fakeRunnerReply = (replyDelayMs?: number, controller?: AbortController) => {
     return spyOn(iosDragClient, "requestDrag").mockImplementation(
-      async (_x1, _y1, _x2, _y2, _press, _drag, _hold, timeoutMs, _context, signal, onDispatch) => {
+      async ({ timeoutMs, signal, onDispatch }) => {
         onDispatch?.();
         const timeout = new Error(`Drag timed out after ${timeoutMs}ms`);
         if (controller) {
@@ -244,34 +244,30 @@ describe("DragAndDrop - iOS", () => {
     });
     try {
       const onDispatch = () => {};
-      await client.requestDrag(
-        50,
-        50,
-        250,
-        250,
-        600,
-        300,
-        100,
-        5000,
-        undefined,
-        controller.signal,
+      await client.requestDrag({
+        x1: 50,
+        y1: 50,
+        x2: 250,
+        y2: 250,
+        pressDurationMs: 600,
+        dragDurationMs: 300,
+        holdDurationMs: 100,
+        timeoutMs: 5000,
+        signal: controller.signal,
         onDispatch,
-      );
-      expect(delegate).toHaveBeenCalledWith(
-        50,
-        50,
-        250,
-        250,
-        600,
-        300,
-        100,
-        5000,
-        undefined,
-        controller.signal,
-        undefined,
-        undefined,
+      });
+      expect(delegate).toHaveBeenCalledWith({
+        x1: 50,
+        y1: 50,
+        x2: 250,
+        y2: 250,
+        pressDurationMs: 600,
+        dragDurationMs: 300,
+        holdDurationMs: 100,
+        timeoutMs: 5000,
+        signal: controller.signal,
         onDispatch,
-      );
+      });
     } finally {
       delegate.mockRestore();
     }
@@ -306,12 +302,12 @@ describe("DragAndDrop - iOS", () => {
     });
     const controller = new AbortController();
     const ready = Promise.withResolvers<void>();
-    const runner = spyOn(iosDragClient, "requestDrag").mockImplementation((...args) => {
-      args[10]?.();
+    const runner = spyOn(iosDragClient, "requestDrag").mockImplementation((request) => {
+      request.onDispatch?.();
       const pending = raceWithDeadline(new Promise<never>(() => {}), {
         timer,
-        timeoutMs: args[7],
-        signal: args[9],
+        timeoutMs: request.timeoutMs,
+        signal: request.signal,
         label: "Drag",
       });
       ready.resolve();
@@ -346,7 +342,7 @@ describe("DragAndDrop - iOS", () => {
         kind === "ambient" ? runWithAbortSignal(controller.signal, execute) : execute();
       await expect(pending).rejects.toThrow("Operation cancelled");
       expect(fakeTimer.now()).toBe(25);
-      expect(runner.mock.calls[0][9]).toBe(controller.signal);
+      expect(runner.mock.calls[0][0].signal).toBe(controller.signal);
       expect(runner).toHaveBeenCalledTimes(1);
     },
   );
@@ -590,9 +586,9 @@ describe("DragAndDrop - iOS", () => {
   });
 
   test.each([false, true])("maps a runner failure with dispatched=%s", async (dispatched) => {
-    spyOn(iosDragClient, "requestDrag").mockImplementation(async (...args) => {
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async (request) => {
       if (dispatched) {
-        args[10]?.();
+        request.onDispatch?.();
       }
       return { success: false, totalTimeMs: 0, error: "Drag failed on runner" };
     });
@@ -610,8 +606,8 @@ describe("DragAndDrop - iOS", () => {
   });
 
   test("keeps iOS dispatched failure rules for Android no-op text", async () => {
-    spyOn(iosDragClient, "requestDrag").mockImplementation(async (...args) => {
-      args[10]?.();
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async (request) => {
+      request.onDispatch?.();
       return { success: false, totalTimeMs: 0, error: "Failed to dispatch gesture" };
     });
     const result = await dragAndDrop.execute({
@@ -624,9 +620,9 @@ describe("DragAndDrop - iOS", () => {
   });
 
   test.each([false, true])("maps a transport throw with dispatched=%s", async (dispatched) => {
-    spyOn(iosDragClient, "requestDrag").mockImplementation(async (...args) => {
+    spyOn(iosDragClient, "requestDrag").mockImplementation(async (request) => {
       if (dispatched) {
-        args[10]?.();
+        request.onDispatch?.();
       }
       throw new Error("transport disconnected");
     });

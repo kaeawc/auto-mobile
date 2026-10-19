@@ -238,13 +238,11 @@ async function drag(scenario: Scenario, endpoint: "source" | "target"): Promise<
       source: endpoint === "source" ? selector(scenario) : fixed,
       target: endpoint === "target" ? selector(scenario) : fixed,
     });
-    const offset = endpoint === "source" ? 0 : 2;
     return {
       ...result,
-      gestures: dispatch.mock.calls.map((call: Parameters<typeof client.requestDrag>) => ({
-        x: call[offset],
-        y: call[offset + 1],
-      })),
+      gestures: dispatch.mock.calls.map(([request]) =>
+        endpoint === "source" ? { x: request.x1, y: request.y1 } : { x: request.x2, y: request.y2 },
+      ),
     };
   } finally {
     dispatch.mockRestore();

@@ -9,6 +9,8 @@ import type {
 } from "../../src/daemon/performanceStreamSocketTypes";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { performanceStreamResponseFrameSchema } from "../helpers/wireMessageSchemas";
+import type { PerformanceStreamResponseFrame } from "../helpers/wireMessageSchemas";
 
 type Query = Parameters<PerformanceStreamRepository["listResultsSince"]>[0];
 type Results = Awaited<ReturnType<PerformanceStreamRepository["listResultsSince"]>>;
@@ -33,11 +35,11 @@ class TestableServer extends PerformanceStreamSocketServer {
   }
 
   /** Send `wire` (any JSON-serializable frame) through the real line path and return the reply. */
-  async sendRawForTest(wire: unknown): Promise<PerformanceStreamSocketResponse | undefined> {
+  async sendRawForTest(wire: unknown): Promise<PerformanceStreamResponseFrame | undefined> {
     const socket = new FakeSocket<PerformanceStreamSocketResponse>();
     await this.processLine(socket, JSON.stringify(wire));
     await this.pendingBySocket.get(socket);
-    return socket.getWrittenMessages<PerformanceStreamSocketResponse>().at(-1);
+    return socket.getWrittenMessages(performanceStreamResponseFrameSchema).at(-1);
   }
 }
 

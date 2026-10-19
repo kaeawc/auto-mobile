@@ -1,3 +1,5 @@
+import { createExecResult } from "../../src/utils/execResult";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import {
@@ -49,7 +51,7 @@ describe("prototype display targeting", () => {
     client = new FakeCtrlProxy(timer);
     client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
-    adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(BOTH_PANELS, ""));
     unsubscribe = registerPrototypeTools({
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(adb),
@@ -62,10 +64,18 @@ describe("prototype display targeting", () => {
     restore();
   });
 
+  function shownPrototype(index: number) {
+    const entry = client.getPrototypeHistory().at(index);
+    if (entry?.method !== "show") {
+      throw new Error(`expected a show request at history index ${index}`);
+    }
+    return entry;
+  }
+
   async function call(input: Record<string, unknown>) {
     const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   /** The registry wraps device-aware handlers in this seam, which injects a session pin. */
@@ -83,13 +93,13 @@ describe("prototype display targeting", () => {
       },
       invoke: (args) => handler(device, args),
     })) as { structuredContent: unknown };
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
 
   test("default: no display reads no inventory and sends no display", async () => {
     const payload = await call({ action: "show", spec });
     expect(payload.success).toBe(true);
-    expect(client.getPrototypeHistory()).toEqual([
+    expect<unknown>(client.getPrototypeHistory()).toEqual([
       { method: "show", spec, timeoutMs: 5000, perf: undefined },
     ]);
     expect(Object.hasOwn(client.getPrototypeHistory()[0], "displayId")).toBe(false);
@@ -116,7 +126,7 @@ describe("prototype display targeting", () => {
     client.setSupportedCommands([]);
     const payload = await call({ action: "show", spec, display: "cover" });
     expect(payload.success).toBe(true);
-    expect(client.getPrototypeHistory()[0].displayId).toBeUndefined();
+    expect(shownPrototype(0).displayId).toBeUndefined();
     expect(payload.lastResult).toBeDefined();
     expect(Object.hasOwn(payload.lastResult ?? {}, "displayId")).toBe(false);
     const status = await call({ action: "status" });
@@ -126,7 +136,7 @@ describe("prototype display targeting", () => {
   test("a session pin that resolves to the default display records no displayId", async () => {
     const payload = await callPinned({ action: "show", spec }, "cover");
     expect(payload.success).toBe(true);
-    expect(client.getPrototypeHistory()[0].displayId).toBeUndefined();
+    expect(shownPrototype(0).displayId).toBeUndefined();
     expect(Object.hasOwn(payload.lastResult ?? {}, "displayId")).toBe(false);
   });
 
@@ -139,7 +149,7 @@ describe("prototype display targeting", () => {
   test("explicit display beats the session pin", async () => {
     await callPinned({ action: "show", spec, display: "cover" }, "inner");
     expect(client.getPrototypeHistory()).toHaveLength(1);
-    expect(client.getPrototypeHistory()[0].displayId).toBeUndefined();
+    expect(shownPrototype(0).displayId).toBeUndefined();
   });
 
   test("a session pin never injects display into dismiss or status", async () => {
@@ -173,8 +183,8 @@ describe("prototype display targeting", () => {
     expect(again.warning).toBeUndefined();
     // The in-place replacement names the display it replaces on, so a dismissal racing the
     // replacement cannot move it to the default display.
-    expect(client.getPrototypeHistory()[0].displayId).toBe(2);
-    expect(client.getPrototypeHistory()[1].displayId).toBe(2);
+    expect(shownPrototype(0).displayId).toBe(2);
+    expect(shownPrototype(1).displayId).toBe(2);
   });
 
   test("a same-id show under the pin it was shown with carries no warning", async () => {
@@ -203,7 +213,7 @@ describe("prototype display targeting", () => {
 
   test("a same-id show ignores a selector that cannot resolve instead of failing", async () => {
     await call({ action: "show", spec });
-    adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(COVER_ONLY, ""));
     const moved = await call({ action: "show", spec, display: "inner" });
     expect(moved.success).toBe(true);
     expect(moved.error).toBeUndefined();
@@ -236,7 +246,7 @@ describe("prototype display targeting", () => {
     expect(second.success).toBe(true);
     expect(second.warning).toContain("logical display 2");
     expect(second.lastResult?.displayId).toBe(2);
-    expect(client.getPrototypeHistory()[1].displayId).toBe(2);
+    expect(shownPrototype(1).displayId).toBe(2);
     expect(
       (await call({ action: "status", sessionUuid: "two" })).prototypes?.map((e) => e.displayId),
     ).toEqual([2]);
@@ -244,7 +254,7 @@ describe("prototype display targeting", () => {
 
   test("a same-id show from another session ignores a selector the device cannot resolve", async () => {
     await call({ action: "show", spec, display: "inner", sessionUuid: "one" });
-    adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(COVER_ONLY, ""));
     const second = await call({ action: "show", spec, display: "inner", sessionUuid: "two" });
     expect(second.success).toBe(true);
     expect(second.lastResult?.displayId).toBe(2);
@@ -307,14 +317,14 @@ describe("prototype display targeting", () => {
     expect(olderPayload.error).toContain("newer show");
     // The device still shows the newer prototype on the default display, matching host status.
     expect(client.getPrototypeHistory()).toHaveLength(1);
-    expect(client.getPrototypeHistory()[0].displayId).toBeUndefined();
+    expect(shownPrototype(0).displayId).toBeUndefined();
     const prototypes = (await call({ action: "status" })).prototypes;
     expect(prototypes).toHaveLength(1);
     expect(Object.hasOwn(prototypes?.[0] ?? {}, "displayId")).toBe(false);
   });
 
   test("a disconnected panel is refused with posture guidance and nothing is sent", async () => {
-    adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(COVER_ONLY, ""));
     const payload = await call({ action: "show", spec, display: "inner" });
     expect(payload.success).toBe(false);
     expect(payload.error).toContain('Display "inner-key" (inner) is not connected');
@@ -323,7 +333,7 @@ describe("prototype display targeting", () => {
   });
 
   test("a stale pin on a disconnected panel names the pin remedy", async () => {
-    adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
+    adb.setCommandResponse("cmd display get-displays", createExecResult(COVER_ONLY, ""));
     const payload = await callPinned({ action: "show", spec }, "inner");
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("Clear the pin with setActiveDevice");

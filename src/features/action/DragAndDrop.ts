@@ -197,23 +197,22 @@ export class DragAndDrop extends BaseVisualChange {
         result = await awaitWhileRequestIsLive(
           Promise.resolve().then(() => {
             throwIfAborted(signal);
-            return this.accessibilityService.requestDrag(
-              start.x,
-              start.y,
-              end.x,
-              end.y,
+            return this.accessibilityService.requestDrag({
+              x1: start.x,
+              y1: start.y,
+              x2: end.x,
+              y2: end.y,
               pressDurationMs,
-              duration,
+              dragDurationMs: duration,
               holdDurationMs,
-              getIosDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
-              undefined,
+              timeoutMs: getIosDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
               signal,
-              target.displayId === 0 ? undefined : target.displayId,
-              target.assertCurrent,
-              () => {
+              displayId: target.displayId === 0 ? undefined : target.displayId,
+              beforeSend: target.assertCurrent,
+              onDispatch: () => {
                 dispatched = true;
               },
-            );
+            });
           }),
           signal,
         );
@@ -720,34 +719,30 @@ export class DragAndDrop extends BaseVisualChange {
       const request = Promise.resolve().then(() => {
         throwIfAborted(signal);
         return this.device.platform === "ios"
-          ? IOSCtrlProxyClient.getInstance(this.device).requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
+          ? IOSCtrlProxyClient.getInstance(this.device).requestDrag({
+              x1: startX,
+              y1: startY,
+              x2: endX,
+              y2: endY,
               pressDurationMs,
               dragDurationMs,
               holdDurationMs,
               timeoutMs,
-              undefined,
               signal,
               onDispatch,
-            )
-          : this.accessibilityService.requestDrag(
-              startX,
-              startY,
-              endX,
-              endY,
+            })
+          : this.accessibilityService.requestDrag({
+              x1: startX,
+              y1: startY,
+              x2: endX,
+              y2: endY,
               pressDurationMs,
               dragDurationMs,
               holdDurationMs,
               timeoutMs,
-              undefined,
               signal,
-              undefined,
-              undefined,
               onDispatch,
-            );
+            });
       });
       result = await awaitWhileRequestIsLive(request, signal);
       throwIfAborted(signal);

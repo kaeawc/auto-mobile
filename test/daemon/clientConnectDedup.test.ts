@@ -16,6 +16,7 @@ class DeferredSocket extends FakeSocket {
 
 const sockets: DeferredSocket[] = [];
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { idFrameSchema } from "../helpers/wireMessageSchemas";
 
 let timer: FakeTimer;
 let client: InstanceType<typeof DaemonClient>;
@@ -205,7 +206,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     test(`a stale ${event} leaves the live socket and its pending request intact`, async () => {
       const { oldSocket, newSocket, closedCount } = await connectAndReplace();
       const response = observe(client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 }));
-      const [{ id }] = newSocket.getWrittenMessages<{ id: string }>();
+      const [{ id }] = newSocket.getWrittenMessages(idFrameSchema);
       const frame = responseFrame(id, "日");
       const split = frame.indexOf(Buffer.from("日")) + 1;
       newSocket.emit("data", frame.subarray(0, split));
@@ -223,7 +224,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
   test("stale data cannot complete a live request or corrupt its buffer and decoder", async () => {
     const { oldSocket, newSocket } = await connectAndReplace();
     const response = observe(client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 }));
-    const [{ id }] = newSocket.getWrittenMessages<{ id: string }>();
+    const [{ id }] = newSocket.getWrittenMessages(idFrameSchema);
     oldSocket.emit("data", responseFrame(id, "stale"));
     expect(client.testHooks.hasPendingRequest(id)).toBe(true);
     const frame = responseFrame(id, "日");

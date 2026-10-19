@@ -1,4 +1,9 @@
-import type { BootedDevice, ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
+import type {
+  BootedDevice,
+  ElementBounds,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../../src/models";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import type { ObserveScreenDependencies } from "../../../src/features/observe/ObserveScreenDependencies";
 import { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
@@ -56,9 +61,14 @@ export function createObserveScreenForTest(
   );
 }
 
-/** Flat Android attributes use the same open attribute contract as NodeAttributes. */
-export interface TestHierarchyNode extends ViewHierarchyNode {
+/**
+ * Flat Android attributes use the same open attribute contract as NodeAttributes.
+ * Captured wire nodes from older runners carry compact `[left, top, right, bottom]` bounds,
+ * which the model type does not admit but `ElementParser` tolerates, so fixtures may state them.
+ */
+export interface TestHierarchyNode extends Omit<ViewHierarchyNode, "bounds" | "node"> {
   [attribute: string]: unknown;
+  bounds?: ElementBounds | number[];
   node?: TestHierarchyNode[];
 }
 

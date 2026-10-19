@@ -606,7 +606,6 @@ export class TapAtCoordinate extends BaseVisualChange {
           }
           dispatchedCoordinates = resolved;
 
-          const frameContext = observeResult.viewHierarchy?.frameContext;
           this.assertDisplayRevisionCurrent(transitionRevision);
           throwIfAborted(signal);
           switch (this.device.platform) {
@@ -633,10 +632,10 @@ export class TapAtCoordinate extends BaseVisualChange {
               break;
             }
             case "ios":
-              iosDispatchTimestamp = await this.dispatchIosTaps(
+              iosDispatchTimestamp = await this.dispatchIosTapsWithOneFreshRetry(
                 options,
                 resolved,
-                frameContext,
+                observeResult,
                 transitionRevision,
                 onTapDelivered,
                 signal,
@@ -723,6 +722,55 @@ export class TapAtCoordinate extends BaseVisualChange {
           : partialDoubleTapNote(action, tapsDelivered);
     }
     return result;
+  }
+
+  /**
+   * The pre-dispatch observation may be a cached frame the runner has already moved past (a
+   * gesture such as pinchOn advances it without the daemon seeing a new frame, #13437). A runner
+   * stale-frame rejection proves nothing was dispatched, so observe a genuinely fresh frame and
+   * retry once when the tap target is unchanged. A second rejection surfaces to the caller.
+   */
+  private async dispatchIosTapsWithOneFreshRetry(
+    options: TapAtOptions,
+    point: { x: number; y: number },
+    observation: ObserveResult,
+    transitionRevision: { revision: number; observedGeneration: number },
+    onTapDelivered: () => void,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    const frameContext = observation.viewHierarchy?.frameContext;
+    try {
+      return await this.dispatchIosTaps(
+        options,
+        point,
+        frameContext,
+        transitionRevision,
+        onTapDelivered,
+        signal,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      const actionable = toActionableError(error, "Failed to dispatch iOS coordinate tap");
+      if (frameContext === undefined || !isStaleFrameContextRejection(actionable.message)) {
+        throw actionable;
+      }
+      const refreshed = await this.observeScreen.execute({ freshness: "fresh", signal });
+      this.assertDisplayRevisionCurrent(transitionRevision);
+      this.assertSnapshotCurrent(options, refreshed);
+      const retry = this.resolveFreshFrameRetry(options, point, observation, refreshed);
+      if (!retry) {
+        throw actionable;
+      }
+      // No loop: a second stale rejection surfaces to the caller.
+      return await this.dispatchIosTaps(
+        options,
+        retry.point,
+        retry.frameContext,
+        transitionRevision,
+        onTapDelivered,
+        signal,
+      );
+    }
   }
 
   private async dispatchIosTaps(
@@ -812,7 +860,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       });
       assertCurrent();
       this.assertSnapshotCurrent(options, refreshedObservation);
-      const retry = this.resolveFreshAndroidRetry(
+      const retry = this.resolveFreshFrameRetry(
         options,
         resolved,
         observation,
@@ -922,7 +970,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       });
       this.assertDisplayRevisionCurrent(transitionRevision);
       this.assertSnapshotCurrent(options, refreshedObservation);
-      const retry = this.resolveFreshAndroidRetry(
+      const retry = this.resolveFreshFrameRetry(
         options,
         resolved,
         observeResult,
@@ -987,7 +1035,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     return { doubleTapDelivered: false, startedAt };
   }
 
-  private resolveFreshAndroidRetry(
+  private resolveFreshFrameRetry(
     options: TapAtOptions,
     point: { x: number; y: number },
     initial: ObserveResult,

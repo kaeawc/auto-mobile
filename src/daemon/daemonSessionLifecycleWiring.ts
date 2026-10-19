@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { registerLocationRouteSessionCleanup } from "../features/utility/LocationRoutePlayer";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";

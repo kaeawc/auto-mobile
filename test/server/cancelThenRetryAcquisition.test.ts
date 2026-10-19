@@ -13,7 +13,7 @@ import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwner
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";

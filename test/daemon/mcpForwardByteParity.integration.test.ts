@@ -47,7 +47,7 @@ import {
   runWithSelectedDisplayPin,
 } from "../../src/features/observe/SessionDisplayContext";
 import { ActionableError } from "../../src/models/ActionableError";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {

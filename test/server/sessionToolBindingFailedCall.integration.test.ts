@@ -5,7 +5,7 @@ import { ActionableError } from "../../src/models";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { toolText } from "../helpers/toolResponse";

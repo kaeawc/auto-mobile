@@ -12,7 +12,7 @@ import {
   ExecutionTrackerPlanExecutionLock,
   type PlanExecutionLockScopeProvider,
 } from "../../src/server/PlanExecutionLock";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { PlanExecutionLockScope } from "../../src/utils/ServerConfig";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {

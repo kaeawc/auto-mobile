@@ -19,7 +19,7 @@ import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonito
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../../src/features/toolSelection/selectionSessionResolver";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 
 import {
   PlanExecutionOrchestrator,

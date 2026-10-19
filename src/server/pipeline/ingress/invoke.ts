@@ -14,7 +14,7 @@ import { runWithToolSelectionContext } from "../../../features/toolSelection/too
 import { runWithTextRequestContext } from "../../../features/action/textTransportTimeout";
 import type { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { runWithAbortSignal } from "../../../utils/AbortContext";
-import { executionTracker, sessionExecutionMetadataOf } from "../../executionTracker";
+import { executionTracker, sessionExecutionMetadataOf } from "../../../daemon/executionTracker";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import type { ToolCallProgress } from "../../toolCallDispatch";

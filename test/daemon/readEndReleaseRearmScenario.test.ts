@@ -3,7 +3,7 @@ import {
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 
 // #11381: through the real Daemon and device-tool path, control calls defer owner-disconnect

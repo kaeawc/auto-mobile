@@ -14,7 +14,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   DeviceSettingDefaults,
   installDeviceSettingDefaults,

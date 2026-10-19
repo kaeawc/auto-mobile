@@ -1,13 +1,13 @@
-import { holderOf } from "../daemon/deviceBinding";
+import { holderOf } from "./deviceBinding";
 import type { BootedDevice } from "../models";
 import type { TransitionalSimulatorState } from "../models/TransitionalSimulator";
-import type { PooledDevice } from "../daemon/devicePool";
-import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
+import type { PooledDevice } from "./devicePool";
+import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import {
   configuredImageForBootedDevice,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
-import type { Session } from "../daemon/sessionManager";
+import type { Session } from "./sessionManager";
 import { describeDevice, type DeviceDescriptionInput } from "./deviceDescription";
 
 type BootedInput = Extract<DeviceDescriptionInput, { kind: "booted" }>;

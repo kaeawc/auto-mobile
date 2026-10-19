@@ -8,7 +8,7 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import {
   resetVideoRecordingManagerDependencies,
@@ -26,7 +26,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";

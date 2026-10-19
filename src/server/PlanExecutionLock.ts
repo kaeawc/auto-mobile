@@ -1,6 +1,6 @@
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
-import type { ExecutionTracker } from "./executionTracker";
-import { executionTracker } from "./executionTracker";
+import type { ExecutionTracker } from "../daemon/executionTracker";
+import { executionTracker } from "../daemon/executionTracker";
 import { serverConfig } from "../utils/ServerConfig";
 
 // Observation may inspect a running plan without driving its device. Every other read is exempted

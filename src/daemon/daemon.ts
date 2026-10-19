@@ -14,7 +14,7 @@ import {
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
 import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
-import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
+import { ambientExecutionIdReader } from "./deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
@@ -172,7 +172,7 @@ import {
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
 import { processGenerationRecordFields } from "./processGenerationFields";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import {
   createDeviceStateChangeNotifier,
   type DeviceStateChangeNotifier,

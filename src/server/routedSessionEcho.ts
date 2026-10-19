@@ -1,6 +1,6 @@
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
-import { executionTracker } from "./executionTracker";
+import { executionTracker } from "../daemon/executionTracker";
 import { withRoutedSessionMeta } from "./routedSessionMeta";
 
 /**

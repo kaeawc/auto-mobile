@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";

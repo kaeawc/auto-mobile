@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { handleSessionInfo } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

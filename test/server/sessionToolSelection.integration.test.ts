@@ -14,7 +14,7 @@ import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelec
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -27,7 +27,7 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";

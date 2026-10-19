@@ -21,7 +21,7 @@ import {
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "../../deviceSessionResult";
-import { executionTracker, subscribeRequestCancellation } from "../../executionTracker";
+import { executionTracker, subscribeRequestCancellation } from "../../../daemon/executionTracker";
 import {
   isControlCallOnNamedSession,
   refuseControlOnForeignOwnedSession,

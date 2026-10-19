@@ -6,7 +6,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import type { IdGenerator } from "../utils/IdGenerator";
-import { executionTracker } from "../server/executionTracker";
+import { executionTracker } from "./executionTracker";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import type { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { MCP_STREAMABLE_PATH } from "./constants";

@@ -5,7 +5,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { type ActiveExecution, executionTracker } from "../../src/server/executionTracker";
+import { type ActiveExecution, executionTracker } from "../../src/daemon/executionTracker";
 import type {
   StatelessMcpHttpEndpoint,
   StatelessMcpRequestScope,

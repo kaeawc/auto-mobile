@@ -15,7 +15,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";

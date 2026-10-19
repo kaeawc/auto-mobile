@@ -10,7 +10,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonState } from "../../src/daemon/daemonState";

@@ -13,7 +13,7 @@ import {
   ExecutionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../../src/server/executionTracker";
+} from "../../src/daemon/executionTracker";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,

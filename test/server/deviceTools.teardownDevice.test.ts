@@ -28,7 +28,7 @@ import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import {
   registerDeviceTools,
   getDeviceTeardownService,

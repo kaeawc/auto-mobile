@@ -15,7 +15,7 @@ import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwner
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { ExactProvisionedDevice } from "../../src/devices/exactDeviceProvisioning";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { classifyDisplayCutout } from "../../src/utils/displayCutout";

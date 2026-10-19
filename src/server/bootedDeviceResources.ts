@@ -1,10 +1,12 @@
+import { BOOTED_DEVICE_RESOURCE_URIS } from "../constants/deviceResourceUris";
+export { BOOTED_DEVICE_RESOURCE_URIS };
 import { holderOf } from "../daemon/deviceBinding";
 import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
 import {
   describeInventoryDevice,
   type AdbOfflineHold,
   type SimulatorTransitionHold,
-} from "./inventoryDeviceDescription";
+} from "../daemon/inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -42,7 +44,7 @@ import {
   poolHoldFor,
   type BootedDeviceDescription,
   type DeviceDescription,
-} from "./deviceDescription";
+} from "../daemon/deviceDescription";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -96,10 +98,6 @@ import {
 } from "../devices/deviceBootService";
 
 // Resource URIs
-export const BOOTED_DEVICE_RESOURCE_URIS = {
-  ALL_BOOTED: "automobile:devices/booted",
-  PLATFORM_TEMPLATE: "automobile:devices/booted/{platform}",
-} as const;
 
 // A lightweight per-device lock-state resource. The full booted-devices resource also carries
 // `locked`, but computing it there recomputes service status (isInstalled/isEnabled/sha256) for

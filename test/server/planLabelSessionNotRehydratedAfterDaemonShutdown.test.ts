@@ -8,7 +8,7 @@ import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import {
   BASE,
   LABEL_B,

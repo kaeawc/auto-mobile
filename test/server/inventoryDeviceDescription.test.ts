@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { describeInventoryDevice } from "../../src/server/inventoryDeviceDescription";
+import { describeInventoryDevice } from "../../src/daemon/inventoryDeviceDescription";
 import type { StableConfiguredDeviceImage } from "../../src/utils/configuredDeviceInventory";
 
 const heldDevice: BootedDevice = {

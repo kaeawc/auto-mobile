@@ -28,7 +28,7 @@ import {
   type ResourceContent,
   type ResourceReadContext,
 } from "../../src/server/resourceRegistry";
-import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";

@@ -11,7 +11,7 @@ import {
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import {

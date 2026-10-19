@@ -34,7 +34,7 @@ import type {
   McpTaskStore,
   NewMcpTask,
 } from "../../src/db/mcpTaskRepository";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { TASKS_EXTENSION_ID } from "../../src/server/tasks/mcpTasksExtension";

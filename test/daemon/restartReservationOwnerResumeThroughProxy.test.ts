@@ -12,7 +12,7 @@ import {
   resetDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";

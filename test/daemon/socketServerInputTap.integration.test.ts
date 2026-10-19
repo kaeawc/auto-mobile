@@ -20,7 +20,7 @@ import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { DAEMON_PREPARE_RESTART_METHOD } from "../../src/daemon/daemonRestartAdmission";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {

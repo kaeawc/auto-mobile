@@ -25,7 +25,7 @@ import {
   executionTracker,
   sessionExecutionMetadataOf,
   type ActiveExecution,
-} from "../server/executionTracker";
+} from "./executionTracker";
 import { admitInputOnHolderSession } from "./inputDeviceOwnership";
 import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";

@@ -4,8 +4,8 @@ import { z } from "zod/v4";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
-import { executionTracker } from "../../src/server/executionTracker";
+} from "../../src/utils/directSessionDeviceRegistry";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";

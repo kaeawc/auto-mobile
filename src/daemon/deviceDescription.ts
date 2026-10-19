@@ -1,4 +1,4 @@
-import { statusOf } from "../daemon/deviceBinding";
+import { statusOf } from "./deviceBinding";
 import {
   describeImage,
   imageLinkFrom,
@@ -21,11 +21,11 @@ export type {
   ConfiguredImage,
 } from "../models/deviceDescription";
 export { projectConfiguredImage } from "../utils/deviceDescriptionProjection";
-import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
+import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import { z } from "zod/v4";
-import { classifyPoolStatus, type PoolStatusBucket } from "../daemon/devicePool";
-import type { GenericAvailability, PooledDevice } from "../daemon/devicePool";
-import type { Session } from "../daemon/sessionManager";
+import { classifyPoolStatus, type PoolStatusBucket } from "./devicePool";
+import type { GenericAvailability, PooledDevice } from "./devicePool";
+import type { Session } from "./sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { TransitionalSimulatorState } from "../models/TransitionalSimulator";
 import type { ExactProvisionedDevice } from "../devices/exactDeviceProvisioning";

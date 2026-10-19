@@ -13,7 +13,7 @@ import { assertBrokerConnectionPlainToolCall } from "../../brokerConnectionToolG
 import { SessionOutsideBoundSessionError } from "../../deviceOutsideBoundSessionRefusal";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
 import { isDeviceSessionAcquisitionTool } from "../../deviceSessionResult";
-import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
+import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRegistry";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";

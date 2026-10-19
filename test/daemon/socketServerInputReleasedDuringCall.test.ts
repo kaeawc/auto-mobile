@@ -3,7 +3,7 @@ import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleased
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {

@@ -12,7 +12,7 @@ import { NavigationGraphManager } from "../../src/features/navigation/Navigation
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";

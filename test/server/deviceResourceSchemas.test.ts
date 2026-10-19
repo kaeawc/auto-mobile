@@ -72,7 +72,7 @@ describe("device resource advertised constraints", () => {
 });
 
 test("restoration and desired resource configuration are mutually exclusive", async () => {
-  const { setDeviceResourcesSchema } = await import("../../src/server/deviceResourceSchemas");
+  const { setDeviceResourcesSchema } = await import("../../src/utils/deviceResourceSchemas");
   const restore = {
     deviceId: "emulator-5580",
     bootId: "11111111-1111-4111-8111-111111111111",

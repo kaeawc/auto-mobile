@@ -1,10 +1,7 @@
 import { z } from "zod/v4";
 import { androidResourceRestorationSchema } from "../models/AndroidResourceRestoration";
-import {
-  DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
-  MAX_DEVICE_READY_TIMEOUT_MS,
-} from "../utils/deviceTimeouts";
-import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "../utils/schemaHelpers";
+import { DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS, MAX_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
+import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./schemaHelpers";
 import {
   deviceResourceDescriptions,
   type ConfigurableDeviceResource,

@@ -5,7 +5,7 @@ import { BootedDevice } from "../../src/models";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { z } from "zod/v4";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";

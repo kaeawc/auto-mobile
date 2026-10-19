@@ -8,7 +8,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
-} from "../../src/server/directSessionDeviceRegistry";
+} from "../../src/utils/directSessionDeviceRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";

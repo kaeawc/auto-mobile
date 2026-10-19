@@ -1,6 +1,6 @@
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { describe, expect, test } from "bun:test";
-import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/executionTracker";
+import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/daemon/executionTracker";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

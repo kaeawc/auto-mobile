@@ -1,5 +1,5 @@
 import { spyOn } from "bun:test";
-import { executionTracker } from "../../src/server/executionTracker";
+import { executionTracker } from "../../src/daemon/executionTracker";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
   createFakeDaemonState as createDrainDaemonState,

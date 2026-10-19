@@ -26,7 +26,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { ExecutionTracker } from "../../src/server/executionTracker";
+import { ExecutionTracker } from "../../src/daemon/executionTracker";
 import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
 import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
 

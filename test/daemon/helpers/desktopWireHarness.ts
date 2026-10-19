@@ -14,7 +14,7 @@ import {
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { BootedDevice } from "../../../src/models";
 import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionResult";
-import { executionTracker } from "../../../src/server/executionTracker";
+import { executionTracker } from "../../../src/daemon/executionTracker";
 import { createSetActiveDeviceHandler } from "../../../src/server/setActiveDevice";
 import { shapeToolCallError } from "../../../src/server/shapeToolCallError";
 import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";

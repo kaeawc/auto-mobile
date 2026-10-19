@@ -3569,27 +3569,59 @@ export class Daemon {
     setFatalProcessHandler(createDaemonFatalProcessHandler(logger));
   }
 
-  /** Test seam: the daemon-owned device pool, so tests can seed and inspect it without private-field casts. */
-  getDevicePoolForTesting(): DevicePool {
-    return this.devicePool;
-  }
-
-  /** Test seam: install (or clear) a socket server double whose members the shutdown path calls. */
-  setSocketServerForTesting(server: Partial<UnixSocketServer> | null): void {
-    this.socketServer = server as UnixSocketServer | null;
-  }
-
-  /** Test seam: register an in-flight HTTP request double that shutdown must close. */
-  registerTransportForTesting(
-    requestScopeId: string,
-    transport: Pick<StreamableHTTPServerTransport, "close">,
-  ): void {
-    this.httpIngress.trackTransportForTesting(requestScopeId, () => transport.close());
-  }
-
-  /** Test seam: behave as if shutdown had already started, without running it. */
-  markShutdownInProgressForTesting(): void {
-    this.shutdownInProgress = true;
+  /** @internal Typed view of private state for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      sessionManager: this.sessionManager,
+      devicePool: this.devicePool,
+      deviceSessionRegistry: this.deviceSessionRegistry,
+      navigationGraphBridge: this.navigationGraphBridge,
+      deviceDataStreamServer: (): typeof this.deviceDataStreamServer => this.deviceDataStreamServer,
+      httpIngress: this.httpIngress.testHooks,
+      observationStreamHealth: (): ObservationStreamHealth => this.observationStreamHealth,
+      setObservationStreamHealth: (health: ObservationStreamHealth): void => {
+        this.observationStreamHealth = health;
+      },
+      healthCheck: (): SingleFlightInterval | null => this.healthCheck,
+      lastDatabaseHealthFailure: (): string | undefined => this.lastDatabaseHealthFailure,
+      /** Installs (or clears) a socket server double whose members the shutdown path calls. */
+      setSocketServer: (server: Partial<UnixSocketServer> | null): void => {
+        this.socketServer = server as UnixSocketServer | null;
+      },
+      /** Registers an in-flight HTTP request double that shutdown must close. */
+      registerTransport: (
+        requestScopeId: string,
+        transport: Pick<StreamableHTTPServerTransport, "close">,
+      ): void => this.httpIngress.trackTransportForTesting(requestScopeId, () => transport.close()),
+      /** Behaves as if shutdown had already started, without running it. */
+      markShutdownInProgress: (): void => {
+        this.shutdownInProgress = true;
+      },
+      overrideRoutingTargets: (targets: () => DeviceSessionRoutingTargets): void => {
+        this.getDeviceSessionRoutingTargets = targets;
+      },
+      setupDeviceSessionRouting: (): void => this.setupDeviceSessionRouting(),
+      setupDeviceDataStreamCallback: (): void => this.setupDeviceDataStreamCallback(),
+      setupNavigationGraphStreamListener: (
+        server: ReturnType<typeof getDeviceDataStreamServer>,
+      ): void => this.setupNavigationGraphStreamListener(server),
+      overrideNavigationGraphListener: (
+        listen: (server: ReturnType<typeof getDeviceDataStreamServer>) => void,
+      ): void => {
+        this.setupNavigationGraphStreamListener = listen;
+      },
+      applyStorageSubscriptionRequest: (request: StorageSubscriptionRequest): Promise<void> =>
+        this.applyStorageSubscriptionRequest(request),
+      attemptRecovery: (failureKind?: HealthFailureKind): Promise<void> =>
+        this.attemptRecovery(failureKind),
+      overrideAttemptRecovery: (
+        recover: (failureKind?: HealthFailureKind) => Promise<void>,
+      ): void => {
+        this.attemptRecovery = recover;
+      },
+      startHealthCheckTimer: (): void => this.startHealthCheckTimer(),
+      stopHealthCheckTimer: (): Promise<void> => this.stopHealthCheckTimer(),
+    } as const;
   }
 
   /**

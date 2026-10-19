@@ -135,6 +135,15 @@ export class DaemonHttpIngress {
     this.startupCompleted = true;
   }
 
+  /** @internal Typed view of private state for unit tests; not part of the public API. */
+  get testHooks() {
+    return {
+      setHttpServer: (server: HttpServer | null): void => {
+        this.httpServer = server;
+      },
+    };
+  }
+
   /** Test seam: register an in-flight HTTP request double that shutdown must close. */
   trackTransportForTesting(requestScopeId: string, close: () => Promise<void>): void {
     this.mcpHttpEndpoint.trackForTesting(requestScopeId, close);

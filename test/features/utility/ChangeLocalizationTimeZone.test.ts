@@ -142,15 +142,15 @@ describe("validateTimeZoneId (#10190)", () => {
   it("accepts the tzdata rule zones even when the host runtime does not know them (CI's ICU throws for them)", () => {
     const original = Intl.DateTimeFormat;
     const rejected = new Set(["EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT"]);
-    class RuleZoneRejectingFormat extends original {
-      constructor(locales?: string | string[], options?: Intl.DateTimeFormatOptions) {
+    Intl.DateTimeFormat = new Proxy(original, {
+      construct(target, args: ConstructorParameters<typeof original>) {
+        const [locales, options] = args;
         if (options?.timeZone !== undefined && rejected.has(options.timeZone)) {
           throw new RangeError(`Invalid time zone specified: ${options.timeZone}`);
         }
-        super(locales, options);
-      }
-    }
-    Intl.DateTimeFormat = RuleZoneRejectingFormat;
+        return new target(locales, options);
+      },
+    });
     try {
       for (const id of rejected) {
         expect(checkTimeZoneId(id)).toEqual({ error: null });

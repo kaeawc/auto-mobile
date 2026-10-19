@@ -1,3 +1,5 @@
+import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
@@ -68,28 +70,30 @@ for (const platform of ["android", "ios"] as const) {
       insets = { top: 0, right: 0, bottom: 0, left: 0 },
       size = { width: 402, height: 874 },
     ) => {
-      const screen: ObserveResult = {
+      const screen: ObserveResult = buildObserveResult({
         updatedAt: timer.now(),
         screenSize: size,
         systemInsets: insets,
         viewHierarchy: {
           hierarchy: {
-            node: [
-              {
-                $: {
-                  "resource-id": "container-id",
-                  text: "Example Domain",
-                  bounds,
-                  class: "android.widget.FrameLayout",
-                  scrollable: true,
-                },
-              },
-            ],
+            node: createFlatNodeForTest({
+              node: [
+                createFlatNodeForTest({
+                  $: {
+                    "resource-id": "container-id",
+                    text: "Example Domain",
+                    bounds,
+                    class: "android.widget.FrameLayout",
+                    scrollable: true,
+                  },
+                }),
+              ],
+            }),
           },
           packageName: "com.test.app",
           updatedAt: timer.now(),
         },
-      };
+      });
       observe.setObserveResult(screen);
     };
 
@@ -160,7 +164,7 @@ for (const platform of ["android", "ios"] as const) {
       const screen = observe.getConfiguredObserveResult()!;
       const hierarchy = screen.viewHierarchy!;
       // The reviewer's single-object root is a window/container, not a display.
-      hierarchy.hierarchy.node = {
+      hierarchy.hierarchy.node = createFlatNodeForTest({
         $: {
           "resource-id": "container-id",
           text: "Example Domain",
@@ -168,7 +172,7 @@ for (const platform of ["android", "ios"] as const) {
           class: "android.widget.FrameLayout",
           scrollable: true,
         },
-      };
+      });
       if (trustedSource === "capture") {
         hierarchy.screenWidth = 402;
         hierarchy.screenHeight = 874;
@@ -258,7 +262,10 @@ for (const platform of ["android", "ios"] as const) {
             capture: new FakeHierarchyCapture(() => ({
               ...hierarchy,
               hierarchy: {
-                node: { bounds: { left: 0, top: 0, right: width, bottom: 402 }, node: child },
+                node: createFlatNodeForTest({
+                  bounds: { left: 0, top: 0, right: width, bottom: 402 },
+                  node: child ? [child] : [],
+                }),
               },
             })),
           });

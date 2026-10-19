@@ -1,3 +1,4 @@
+import type { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import type { TapCoordinatesRequest } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
@@ -567,8 +568,8 @@ describe("androidDisplayTapDispatch", () => {
 
   test.each([
     ["tap", undefined, "tap 10 20", 1, undefined],
-    ["longPress", async () => false, "swipe 10 20 10 20 800", 1, undefined],
-    ["longPress", async () => false, "swipe 10 20 10 20 20000", 1, 20000],
+    ["longPress", async (): Promise<boolean> => false, "swipe 10 20 10 20 800", 1, undefined],
+    ["longPress", async (): Promise<boolean> => false, "swipe 10 20 10 20 20000", 1, 20000],
     ["doubleTap", undefined, "tap 10 20", 2, undefined],
   ] as const)(
     "preserves ADB %s routing without display capability",
@@ -616,7 +617,10 @@ describe("coordinate tap transport timeouts", () => {
         const requestTapCoordinates = mock(async (_request: TapCoordinatesRequest) => ({
           success: true,
         }));
-        const client: CoordinateTapClient = { requestTapCoordinates };
+        const client = {
+          requestTapCoordinates,
+          requestDoubleTapCoordinates: async () => ({ success: true }),
+        };
         if (platform === "ios") {
           await dispatchIosCoordinateTap(client, 10, 20, duration);
         } else {
@@ -630,7 +634,10 @@ describe("coordinate tap transport timeouts", () => {
       const requestTapCoordinates = mock(async (_request: TapCoordinatesRequest) => ({
         success: true,
       }));
-      const client: CoordinateTapClient = { requestTapCoordinates };
+      const client = {
+        requestTapCoordinates,
+        requestDoubleTapCoordinates: async () => ({ success: true }),
+      };
       if (platform === "ios") {
         await dispatchIosCoordinateTap(client, 10, 20, 50);
       } else {
@@ -647,7 +654,10 @@ test.each([500, 4000, MAX_SETTIMEOUT_DELAY_MS])(
     const requestTapCoordinates = mock(async (_request: TapCoordinatesRequest) => ({
       success: true,
     }));
-    const client: CoordinateTapClient = { requestTapCoordinates };
+    const client = {
+      requestTapCoordinates,
+      requestDoubleTapCoordinates: async () => ({ success: true }),
+    };
     await dispatchIosCoordinateTap(client, 10, 20, duration);
     await dispatchAndroidCoordinateTap(client, new FakeAdbExecutor(), 10, 20, duration);
     for (const call of requestTapCoordinates.mock.calls) {
@@ -680,10 +690,12 @@ describe("androidDisplayTapDispatch with TalkBack on (#9905)", () => {
       method: "coordinate-fallback" as const,
       focusCompleted: true,
     })),
-    executeCoordinateFallback: mock(async () => ({
-      success: true,
-      method: "coordinate-fallback" as const,
-    })),
+    executeCoordinateFallback: mock(
+      async (..._args: Parameters<TalkBackTapStrategy["executeCoordinateFallback"]>) => ({
+        success: true,
+        method: "coordinate-fallback" as const,
+      }),
+    ),
   });
   const driver = new FakeTalkBackNavigationDriver();
 

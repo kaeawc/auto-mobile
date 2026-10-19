@@ -345,7 +345,7 @@ export class MissingDeviceLiveness {
    * either the pooled entry is the runtime that answered, or a different one
    * has taken the serial and the entry must be replaced.
    */
-  private async reconcileDiscoveredPooledDevice(
+  async reconcileDiscoveredPooledDevice(
     device: PooledDevice,
     bootedDevice: BootedDevice,
     assignmentLockHeld: boolean,
@@ -610,7 +610,7 @@ export class MissingDeviceLiveness {
     return true;
   }
 
-  private async resolveMissingDeviceIncident(
+  async resolveMissingDeviceIncident(
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
     incidentId: string | undefined,

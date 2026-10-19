@@ -1012,13 +1012,12 @@ describe("deviceSnapshotManager", () => {
       await setDeviceSnapshotManagerDependencies({
         deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
         createRestoreProvider: () =>
-          new RestoreSnapshot(
-            device,
-            { create: () => adb },
+          new RestoreSnapshot(device, {
+            adbFactory: { create: () => adb },
             emulator,
-            fakeTimer,
-            new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
-          ),
+            timer: fakeTimer,
+            store: new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
+          }),
       });
       const restore = restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName });
       // Attach rejection handling before rejecting the deferred readiness promise.

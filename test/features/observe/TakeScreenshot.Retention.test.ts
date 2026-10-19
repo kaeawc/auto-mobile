@@ -54,18 +54,16 @@ let files: RetentionFiles;
 let protection: BoundedScreenshotPathProtection;
 let states: InMemoryScreenshotStateStore;
 function capture(cleanupOnCreate = false) {
-  return new TakeScreenshot(
-    androidDevice("retention"),
-    new FakeAdbClientFactory(new FakeAdbExecutor()),
+  return new TakeScreenshot(androidDevice("retention"), {
+    adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
     timer,
-    new CountingIdGenerator(),
-    new FakeScreenshotFileWriter(),
-    files,
-    () => "/screenshots",
-    undefined,
+    idGenerator: new CountingIdGenerator(),
+    fileWriter: new FakeScreenshotFileWriter(),
+    fileSystem: files,
+    cacheDirResolver: () => "/screenshots",
     cleanupOnCreate,
-    { pathProtection: protection },
-  );
+    pathProtection: protection,
+  });
 }
 async function sweep() {
   await protection.sweep("/screenshots", files);
@@ -96,18 +94,16 @@ test("constructing multiple screenshot services sweeps a cache directory once", 
   const sweepSpy = spyOn(protection, "sweep").mockResolvedValue(undefined);
   const cacheDir = "/screenshots";
   const create = () =>
-    new TakeScreenshot(
-      androidDevice("retention"),
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    new TakeScreenshot(androidDevice("retention"), {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator(),
-      new FakeScreenshotFileWriter(),
-      files,
-      () => cacheDir,
-      undefined,
-      true,
-      { pathProtection: protection },
-    );
+      idGenerator: new CountingIdGenerator(),
+      fileWriter: new FakeScreenshotFileWriter(),
+      fileSystem: files,
+      cacheDirResolver: () => cacheDir,
+      cleanupOnCreate: true,
+      pathProtection: protection,
+    });
 
   create();
   create();
@@ -118,18 +114,16 @@ test("constructing multiple screenshot services sweeps a cache directory once", 
 test("a fresh protection sweeps the same cache directory once again", async () => {
   const firstSweep = spyOn(protection, "sweep").mockResolvedValue(undefined);
   const create = (pathProtection: BoundedScreenshotPathProtection) =>
-    new TakeScreenshot(
-      androidDevice("retention"),
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    new TakeScreenshot(androidDevice("retention"), {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator(),
-      new FakeScreenshotFileWriter(),
-      files,
-      () => "/screenshots",
-      undefined,
-      true,
-      { pathProtection },
-    );
+      idGenerator: new CountingIdGenerator(),
+      fileWriter: new FakeScreenshotFileWriter(),
+      fileSystem: files,
+      cacheDirResolver: () => "/screenshots",
+      cleanupOnCreate: true,
+      pathProtection,
+    });
 
   create(protection);
   const freshProtection = new BoundedScreenshotPathProtection(timer, undefined);

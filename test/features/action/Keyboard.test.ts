@@ -31,16 +31,12 @@ describe("Keyboard", () => {
   let fakeClient: FakeKeyboardOpenClient;
 
   const newKeyboard = () =>
-    new Keyboard(
-      testDevice,
-      fakeAdbFactory,
-      fakeHierarchy,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
-      fakeClient,
-    );
+    new Keyboard(testDevice, {
+      adbFactory: fakeAdbFactory,
+      hierarchyProvider: fakeHierarchy,
+      timer: fakeTimer,
+      openClient: fakeClient,
+    });
 
   const testDevice: BootedDevice = {
     deviceId: "test-device",
@@ -998,7 +994,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("detect");
 
       expect(result.success).toBe(true);
@@ -1040,12 +1040,11 @@ describe("Keyboard", () => {
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
     });
     try {
-      const result = await new Keyboard(
-        iosDevice,
-        fakeAdbFactory,
-        fakeHierarchy,
-        fakeTimer,
-      ).execute("detect");
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      }).execute("detect");
       expect(result.success).toBe(true);
       expect(result.open).toBe(open);
       expect(result.message).toStartWith(open ? "Keyboard is open" : "Keyboard is closed");
@@ -1063,7 +1062,11 @@ describe("Keyboard", () => {
     });
     try {
       expect(
-        await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("open"),
+        await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: fakeHierarchy,
+          timer: fakeTimer,
+        }).execute("open"),
       ).toEqual({ success: true, open: true, message: "Keyboard opened" });
     } finally {
       spy.mockRestore();
@@ -1076,12 +1079,11 @@ describe("Keyboard", () => {
       requestKeyboard: async () => ({ success: true, open: true, totalTimeMs: 1 }),
     });
     try {
-      const result = await new Keyboard(
-        iosDevice,
-        fakeAdbFactory,
-        fakeHierarchy,
-        fakeTimer,
-      ).execute("open");
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      }).execute("open");
       expect(result.success).toBe(false);
       expect(result.open).toBe(false);
       expect(result.error).toContain("minimized off screen");
@@ -1099,12 +1101,11 @@ describe("Keyboard", () => {
         requestKeyboard: async () => ({ success: true, open: false, totalTimeMs: 1 }),
       });
       try {
-        const result = await new Keyboard(
-          iosDevice,
-          fakeAdbFactory,
-          fakeHierarchy,
-          fakeTimer,
-        ).execute(action);
+        const result = await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: fakeHierarchy,
+          timer: fakeTimer,
+        }).execute(action);
         expect(result.open).toBe(false);
         expect(fakeHierarchy.getCallCount()).toBe(0);
       } finally {
@@ -1128,9 +1129,11 @@ describe("Keyboard", () => {
         },
       };
       try {
-        const result = await new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute(
-          action,
-        );
+        const result = await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: provider,
+          timer: fakeTimer,
+        }).execute(action);
         expect(result).toMatchObject({ success: true, open: true });
         expect(fakeTimer.now()).toBe(2000);
         expect(options).toEqual([{ timeoutMs: 2000, forceFresh: true }]);
@@ -1163,7 +1166,11 @@ describe("Keyboard", () => {
     };
     try {
       await expect(
-        new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute("detect", {
+        new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: provider,
+          timer: fakeTimer,
+        }).execute("detect", {
           signal: controller.signal,
         }),
       ).rejects.toThrow("Operation cancelled");
@@ -1225,7 +1232,11 @@ describe("Keyboard", () => {
     });
     try {
       expect(
-        await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("open"),
+        await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: fakeHierarchy,
+          timer: fakeTimer,
+        }).execute("open"),
       ).toMatchObject({ success: true, open: true });
       expect(fakeHierarchy.getReadOptions()).toEqual([{ timeoutMs: 2000, forceFresh: true }]);
     } finally {
@@ -1241,7 +1252,11 @@ describe("Keyboard", () => {
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect(
-        await new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer).execute("detect"),
+        await new Keyboard(iosDevice, {
+          adbFactory: fakeAdbFactory,
+          hierarchyProvider: fakeHierarchy,
+          timer: fakeTimer,
+        }).execute("detect"),
       ).toMatchObject({ success: true, open: true });
       expect(warning).toHaveBeenCalledWith(
         "iOS keyboard visibility hierarchy is stale; using runner state",
@@ -1263,9 +1278,11 @@ describe("Keyboard", () => {
           throw new Error("read failed");
         },
       };
-      const result = await new Keyboard(iosDevice, fakeAdbFactory, provider, fakeTimer).execute(
-        "detect",
-      );
+      const result = await new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: provider,
+        timer: fakeTimer,
+      }).execute("detect");
       expect(result.open).toBe(true);
       expect(warning).toHaveBeenCalled();
     } finally {
@@ -1285,7 +1302,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("close");
 
       expect(result.success).toBe(false);
@@ -1317,7 +1338,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("close");
       expect(result).toMatchObject({ success: false, open: true, error, message: error });
     } finally {
@@ -1343,7 +1368,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("close");
 
       expect(result).toMatchObject({ success: true, open: false, method, message });
@@ -1372,7 +1401,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("close");
       expect(result).toMatchObject({
         success: true,
@@ -1403,7 +1436,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("close");
       expect(result.success).toBe(true);
       expect(result.open).toBe(false);
@@ -1435,7 +1472,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("close");
       expect(result).toMatchObject({ success: false, error: "Keyboard timed out after 8000ms" });
       expect(calls).toEqual(["close", "detect"]);
@@ -1455,7 +1496,11 @@ describe("Keyboard", () => {
     });
 
     try {
-      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = new Keyboard(iosDevice, {
+        adbFactory: fakeAdbFactory,
+        hierarchyProvider: fakeHierarchy,
+        timer: fakeTimer,
+      });
       const result = await keyboard.execute("open");
 
       expect(result.success).toBe(false);

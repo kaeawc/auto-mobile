@@ -201,7 +201,7 @@ export class DeviceRuntimeIdentity {
    * {@link quarantineDisagreeingPooledIdentity}: their serial is never reassigned
    * and their name is not identity.
    */
-  private async reconcileObservedPooledIdentity(
+  async reconcileObservedPooledIdentity(
     pooled: PooledDevice,
     device: Pick<
       BootedDevice,

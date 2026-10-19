@@ -42,14 +42,14 @@ async function waitForTarget(
     absent
       ? { absent: { text: duoSelectionText }, timeout: 100 }
       : { text: duoSelectionText, timeout: 100 },
-    undefined,
-    false,
-    timer,
-    device.platform,
-    "none",
-    undefined,
-    "multi",
-    device.displays?.panels ?? [],
+    {
+      skipBackStack: false,
+      timer,
+      platform: device.platform,
+      screenshot: "none",
+      displayInventory: "multi",
+      displayPanels: device.displays?.panels ?? [],
+    },
   );
 }
 

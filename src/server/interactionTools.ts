@@ -2960,13 +2960,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
       ? await waitForObservation(
           new RealObserveScreen(device),
           { ...args.waitFor, settled: args.settled },
-          signal,
-          false,
-          defaultTimer,
-          device.platform,
-          undefined,
-          undefined,
-          ...displayWaitInventory(device),
+          {
+            signal,
+            platform: device.platform,
+            displayInventory: displayWaitInventory(device)[0],
+            displayPanels: displayWaitInventory(device)[1],
+          },
         )
       : null;
 

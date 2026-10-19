@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import * as fs from "node:fs";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import {
@@ -11,18 +11,10 @@ import {
 } from "../../src/utils/startupBenchmark";
 
 describe("StartupBenchmark checkpoints", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
+  const scratch = useScratchRoot("startup-benchmark-");
 
   test("persists active startup phases until daemon readiness completes", () => {
-    const dir = mkdtempSync(join(tmpdir(), "startup-benchmark-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const outputPath = join(dir, "startup.json");
     let now = 100;
     const benchmark = new StartupBenchmark(true, {
@@ -57,8 +49,7 @@ describe("StartupBenchmark checkpoints", () => {
   });
 
   test("persists module loading as the active phase before imports complete", () => {
-    const dir = mkdtempSync(join(tmpdir(), "startup-benchmark-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const outputPath = join(dir, "startup.json");
     const benchmark = new StartupBenchmark(true, { outputPath });
 
@@ -75,8 +66,7 @@ describe("StartupBenchmark checkpoints", () => {
   });
 
   test("preserves the ready report when a background phase settles after readiness", () => {
-    const dir = mkdtempSync(join(tmpdir(), "startup-benchmark-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const outputPath = join(dir, "startup.json");
     let now = 100;
     const benchmark = new StartupBenchmark(true, {
@@ -100,8 +90,7 @@ describe("StartupBenchmark checkpoints", () => {
   });
 
   test("atomically replaces checkpoint files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "startup-benchmark-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const outputPath = join(dir, "startup.json");
     const renameCalls: Array<[string, string]> = [];
     const fileSystem: StartupBenchmarkFileSystem = {
@@ -120,8 +109,7 @@ describe("StartupBenchmark checkpoints", () => {
   });
 
   test("resolves relative output paths from the daemon launch working directory", () => {
-    const launchCwd = mkdtempSync(join(tmpdir(), "startup-benchmark-launch-cwd-"));
-    tempDirs.push(launchCwd);
+    const launchCwd = scratch.next();
     const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
     const writes: string[] = [];
     const renames: Array<[string, string]> = [];
@@ -156,8 +144,7 @@ describe("StartupBenchmark checkpoints", () => {
   });
 
   test("keeps a failed phase active in its checkpoint", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "startup-benchmark-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const outputPath = join(dir, "startup.json");
     const benchmark = new StartupBenchmark(true, { outputPath });
     const failure = new Error("database unavailable");

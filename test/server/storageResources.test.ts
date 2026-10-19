@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerStorageResources,
   type StorageResourceDependencies,
@@ -6,8 +6,6 @@ import {
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { ProviderUnavailableError } from "../../src/features/storage/ProviderUnavailableError";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../src/utils/execResult";
@@ -19,6 +17,11 @@ function useStorageResourcesAdbClientFactoryForTesting(
   value: StorageResourceDependencies["adbClientFactory"] | null,
 ): void {
   deps = { ...deps, adbClientFactory: value ?? undefined };
+  registerStorageResources(deps);
+}
+
+function useStorageClients(clients: Partial<StorageResourceDependencies>): void {
+  deps = { ...deps, ...clients };
   registerStorageResources(deps);
 }
 
@@ -34,8 +37,6 @@ const ANDROID_SHARED_PREFERENCES_XML = readFileSync(
 // construction and not-found paths are exercised with only a FakeDeviceManager
 // — no DB, no clock, no device, no sockets.
 describe("storageResources", () => {
-  const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-  const originalIosGetInstance = IOSCtrlProxyClient.getInstance;
   beforeEach(() => {
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], []));
     registerStorageResources(deps);
@@ -43,9 +44,8 @@ describe("storageResources", () => {
 
   afterEach(() => {
     PlatformDeviceManagerFactory.setInstance(null);
-    AndroidCtrlProxyClient.getInstance = originalGetInstance;
-    IOSCtrlProxyClient.getInstance = originalIosGetInstance;
-    useStorageResourcesAdbClientFactoryForTesting(null);
+    deps = {};
+    registerStorageResources(deps);
   });
 
   function readResource(uri: string) {
@@ -65,18 +65,22 @@ describe("storageResources", () => {
           [{ deviceId: "emulator-5554", name: "Test", platform: "android" }],
         ),
       );
-      AndroidCtrlProxyClient.getInstance = mock(() => ({
-        listPreferenceFiles: async () => {
-          throw new ProviderUnavailableError(
-            "Unknown authority com.example.nondebug.automobile.sharedprefs",
-          );
-        },
-        getPreferenceEntries: async () => {
-          throw new ProviderUnavailableError(
-            "Unknown authority com.example.nondebug.automobile.sharedprefs",
-          );
-        },
-      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+      const unavailable = () =>
+        new ProviderUnavailableError(
+          "Unknown authority com.example.nondebug.automobile.sharedprefs",
+        );
+      useStorageClients({
+        preferenceFilesClient: () => ({
+          listPreferenceFiles: async () => {
+            throw unavailable();
+          },
+        }),
+        preferenceEntriesClient: () => ({
+          getPreferenceEntries: async () => {
+            throw unavailable();
+          },
+        }),
+      });
       if (suffix.endsWith("entries")) {
         const adb = new FakeAdbExecutor();
         adb.setCommandError("cat shared_prefs/", new Error("run-as is unavailable"));
@@ -113,15 +117,17 @@ describe("storageResources", () => {
     PlatformDeviceManagerFactory.setInstance(
       new FakeDeviceManager([], [{ deviceId: "ios-sim", name: "Test", platform: "ios" }]),
     );
-    IOSCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => [
-        { key: "flagged", type: "STRING", value: "private", redacted: true },
-        { key: "legacy", type: "STRING", value: "[REDACTED]" },
-        { key: "plain", type: "STRING", value: "visible" },
-        { key: "count", type: "INT", value: "not-an-int", redacted: true },
-        { key: "enabled", type: "BOOLEAN", value: "not-a-bool", redacted: true },
-      ],
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => [
+          { key: "flagged", type: "STRING", value: "private", redacted: true },
+          { key: "legacy", type: "STRING", value: "[REDACTED]" },
+          { key: "plain", type: "STRING", value: "visible" },
+          { key: "count", type: "INT", value: "not-an-int", redacted: true },
+          { key: "enabled", type: "BOOLEAN", value: "not-a-bool", redacted: true },
+        ],
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/ios-sim/storage/com.example.app/Standard/entries",
@@ -146,13 +152,15 @@ describe("storageResources", () => {
       createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => {
-        throw new ProviderUnavailableError(
-          "Unknown authority com.example.app.automobile.sharedprefs",
-        );
-      },
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => {
+          throw new ProviderUnavailableError(
+            "Unknown authority com.example.app.automobile.sharedprefs",
+          );
+        },
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
@@ -182,13 +190,15 @@ describe("storageResources", () => {
       createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => {
-        throw new ProviderUnavailableError(
-          "Unknown authority com.example.app.automobile.sharedprefs",
-        );
-      },
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => {
+          throw new ProviderUnavailableError(
+            "Unknown authority com.example.app.automobile.sharedprefs",
+          );
+        },
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
@@ -218,13 +228,15 @@ describe("storageResources", () => {
       );
     }
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => {
-        throw new ProviderUnavailableError(
-          "Unknown authority com.example.app.automobile.sharedprefs",
-        );
-      },
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => {
+          throw new ProviderUnavailableError(
+            "Unknown authority com.example.app.automobile.sharedprefs",
+          );
+        },
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
@@ -256,14 +268,16 @@ describe("storageResources", () => {
       createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async (packageName: string, _fileName: string) => {
-        if (packageName === "com.example.runas") {
-          throw new ProviderUnavailableError("SharedPreferences provider is unavailable");
-        }
-        return kotlinEncodedEntries;
-      },
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async (packageName: string, _fileName: string) => {
+          if (packageName === "com.example.runas") {
+            throw new ProviderUnavailableError("SharedPreferences provider is unavailable");
+          }
+          return kotlinEncodedEntries;
+        },
+      }),
+    });
 
     const ctrlProxyContent = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.ctrlproxy/settings/entries",
@@ -286,9 +300,11 @@ describe("storageResources", () => {
     const entries = [{ key: "enabled", type: "BOOLEAN" as const, value: "true" }];
     const adb = new FakeAdbExecutor();
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => entries,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => entries,
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
@@ -306,11 +322,13 @@ describe("storageResources", () => {
     const adb = new FakeAdbExecutor();
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
     const failure = new Error("invalid preference request");
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => {
-        throw failure;
-      },
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => {
+          throw failure;
+        },
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
@@ -335,11 +353,13 @@ describe("storageResources", () => {
         createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
       );
       useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-      AndroidCtrlProxyClient.getInstance = mock(() => ({
-        getPreferenceEntries: async () => {
-          throw new Error(message);
-        },
-      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+      useStorageClients({
+        preferenceEntriesClient: () => ({
+          getPreferenceEntries: async () => {
+            throw new Error(message);
+          },
+        }),
+      });
 
       const content = await readResource(
         "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
@@ -356,11 +376,13 @@ describe("storageResources", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("cat shared_prefs/settings.xml", new Error("run-as permission denied"));
     useStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
-      getPreferenceEntries: async () => {
-        throw new ProviderUnavailableError("CtrlProxy provider is unavailable");
-      },
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    useStorageClients({
+      preferenceEntriesClient: () => ({
+        getPreferenceEntries: async () => {
+          throw new ProviderUnavailableError("CtrlProxy provider is unavailable");
+        },
+      }),
+    });
 
     const content = await readResource(
       "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",

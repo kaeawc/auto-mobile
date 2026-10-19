@@ -1,3 +1,4 @@
+import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import {
   afterAll,
   afterEach,
@@ -38,7 +39,7 @@ import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycl
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { PROTOTYPE_EVENT_BUFFER_CAPACITY } from "../../src/features/prototype/PrototypeEventBuffer";
-import { getRemovedToolActionHint } from "../../src/models/removedTools";
+import { getRemovedToolActionHint } from "../../src/utils/removedTools";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
@@ -1169,6 +1170,15 @@ describe("prototype discovery over MCP", () => {
     );
     // First listing builds every tool's schema and the client's validators; keep it out of the test.
     await fixture.client.listTools();
+    // Enabling a tool rebuilds the listing with its schemas and the client validates them; run the
+    // same enable, list, disable cycle once so the test measures steady state.
+    for (const enabled of [true, false]) {
+      await fixture.client.callTool({
+        name: "setToolEnabled",
+        arguments: { toolName: "prototype", enabled },
+      });
+      await fixture.client.listTools();
+    }
   });
   afterAll(async () => {
     unsubscribe();
@@ -1255,10 +1265,8 @@ describe("prototype CLI and advertised schema registration", () => {
     );
   });
   test("the advertised theme objects reject empty objects like the validator does", () => {
-    type Node = { minProperties?: number; properties: Record<string, Node> };
-    const root = definition.inputSchema as unknown as Node;
-    const theme = root.properties.spec.properties.theme;
-    expect(theme.minProperties).toBe(1);
-    expect(theme.properties.colors.minProperties).toBe(1);
+    const theme = parseJsonSchemaNode(definition.inputSchema).properties?.spec?.properties?.theme;
+    expect(theme?.minProperties).toBe(1);
+    expect(theme?.properties?.colors?.minProperties).toBe(1);
   });
 });

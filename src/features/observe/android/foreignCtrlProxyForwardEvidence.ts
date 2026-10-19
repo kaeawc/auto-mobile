@@ -1,4 +1,3 @@
-import { ActionableError } from "../../../models/ActionableError";
 import { PortManager } from "../../../utils/PortManager";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -14,18 +13,12 @@ import {
   type ForwardClientConnectionProbe,
 } from "./CtrlProxyForwardClientProbe";
 
+export { CtrlProxyForwardOwnershipUnreadableError } from "./CtrlProxyForwardOwnershipUnreadableError";
+
 export type ForeignCtrlProxyForwardVerdict =
   | { kind: "none" }
   | { kind: "foreign"; ports: number[]; clientPids: number[]; message: string }
   | { kind: "unknown"; ports: number[]; reason: string; message: string };
-
-export class CtrlProxyForwardOwnershipUnreadableError extends ActionableError {
-  constructor(deviceId: string, reason: string) {
-    super(
-      `Cannot read CtrlProxy forward ownership on ${deviceId}: adb forward --list failed (${reason}); retry before driving this device.`,
-    );
-  }
-}
 
 export interface ForeignCtrlProxyForwardEvidence {
   /** Never mutates the device or the host. */

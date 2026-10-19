@@ -118,7 +118,7 @@ for (const row of scopedSelectionMatrix) {
     });
     tap.observedInteraction = (action) =>
       action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
-    tap.setRefreshViewHierarchyForTesting(async () => capture);
+    tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });
       expect(result.error).toBeUndefined();
@@ -157,7 +157,7 @@ for (const row of scopedSelectionMatrix) {
     });
     tap.observedInteraction = (action) =>
       action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
-    tap.setRefreshViewHierarchyForTesting(async () => capture);
+    tap.testHooks.setRefreshViewHierarchy(async () => capture);
     try {
       const result = await tap.execute({ action: "tap", ...options });
       expect(result.error).toBeUndefined();

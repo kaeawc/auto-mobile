@@ -30,7 +30,7 @@ import type { AndroidCtrlProxy } from "../../src/features/observe/android/Androi
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   resetDeviceCreationGate,
   setDeviceCreationGate,

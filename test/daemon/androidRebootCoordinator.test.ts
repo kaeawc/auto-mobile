@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import type { BootedDevice } from "../../src/models";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import {
   AndroidRebootCoordinator,
   UnconfirmedRecoveryShutdownError,

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
@@ -85,7 +85,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
   let devices: RefusingRunningImageDeviceUtils;
   let coordinator: InMemoryVirtualDeviceLifecycleCoordinator;
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -128,7 +128,19 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     resetDeviceToolsDependencies();
@@ -191,7 +203,7 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
   };
 
   // Control: iOS (#9902) serves the queued start from the simulator the first one booted.
-  test("control: the same client's queued iOS start adopts the booted simulator", async () => {
+  arranged("control: the same client's queued iOS start adopts the booted simulator", async () => {
     const [first, second] = await startTwoBehindHeldLease("ios", "mcp-a");
 
     expect(first.ok).toBe(true);
@@ -202,18 +214,21 @@ describe("two starts that resolve to one device, queued behind its lifecycle lea
     );
   });
 
-  test("the same client's queued Android start adopts the emulator the first start booted", async () => {
-    const [first, second] = await startTwoBehindHeldLease("android", "mcp-a");
+  arranged(
+    "the same client's queued Android start adopts the emulator the first start booted",
+    async () => {
+      const [first, second] = await startTwoBehindHeldLease("android", "mcp-a");
 
-    expect(first.ok).toBe(true);
-    expect(second.ok ? "adopted" : second.error.message).toBe("adopted");
-    expect(second.ok && second.payload.acquisition).toBe("already-booted");
-    expect(second.ok && second.payload.runtime.session.sessionUuid).toBe(
-      first.ok ? first.payload.runtime.session.sessionUuid : undefined,
-    );
-  });
+      expect(first.ok).toBe(true);
+      expect(second.ok ? "adopted" : second.error.message).toBe("adopted");
+      expect(second.ok && second.payload.acquisition).toBe("already-booted");
+      expect(second.ok && second.payload.runtime.session.sessionUuid).toBe(
+        first.ok ? first.payload.runtime.session.sessionUuid : undefined,
+      );
+    },
+  );
 
-  test("another client's queued Android start gets the typed held-device refusal", async () => {
+  arranged("another client's queued Android start gets the typed held-device refusal", async () => {
     const [first, second] = await startTwoBehindHeldLease("android", "mcp-b");
 
     expect(first.ok).toBe(true);

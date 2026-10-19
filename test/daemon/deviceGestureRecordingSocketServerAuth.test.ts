@@ -17,7 +17,7 @@ import {
 } from "../../src/daemon/streamSocketAuth";
 import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { ActionableError } from "../../src/models";
-import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import type { DeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import type { DeviceGestureRecordingDeviceResolution } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import {
   getDeviceGestureRecordingStatus,

@@ -68,7 +68,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
    * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
    */
   const SCANNED = [
-    "src/daemon/daemon.ts",
+    "src/daemon/daemonStreamRouting.ts",
     "src/daemon/socketServer.ts",
     "src/daemon/deviceDataStreamSocketServer.ts",
     "src/daemon/videoStreamSocketServer.ts",
@@ -90,7 +90,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
 
   const GATED_HANDLERS: readonly Handler[] = [
     {
-      file: "src/daemon/daemon.ts",
+      file: "src/daemon/daemonStreamRouting.ts",
       fn: "applyStorageSubscriptionRequest",
       what:
         "each target an all-device subscribe_storage expands to — the request names no serial, " +

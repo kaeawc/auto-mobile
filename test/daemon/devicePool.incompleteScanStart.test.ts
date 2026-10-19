@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
@@ -47,7 +47,7 @@ describe("device pool start on an incomplete booted-device scan", () => {
   let manager: FakeDeviceManager;
   let pool: DevicePool;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager = new FakeDeviceManager();
@@ -56,7 +56,19 @@ describe("device pool start on an incomplete booted-device scan", () => {
     pool = makePool(sessions, "incomplete-scan-test", { timer, deviceManager: manager });
     await pool.initializeWithDevices([android("d1")]);
     await pool.bindOrReuseDeviceSession("base", "d1", "android");
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
   afterEach(() => {
     sessions.stopCleanupTimer();
     timer.reset();
@@ -80,7 +92,7 @@ describe("device pool start on an incomplete booted-device scan", () => {
       { stepMs: 1_000, maxSteps: 8, description: "allocation outcome" },
     );
 
-  test("does not cold-boot an image when the Android listing is incomplete", async () => {
+  arranged("does not cold-boot an image when the Android listing is incomplete", async () => {
     failAndroidDiscoveryWhen(manager, () => true);
 
     const outcome = String(await allocate());
@@ -90,24 +102,27 @@ describe("device pool start on an incomplete booted-device scan", () => {
     expect(sessions.getSession("base:B")).toBeNull();
   });
 
-  test("does not adopt an unlaunched emulator when the adopt-check listing is incomplete", async () => {
-    manager.startOutcome = "already-running";
-    manager.startVisibleDeviceId = "emulator-5560";
-    failAndroidDiscoveryWhen(manager, () => manager.startedDevices.length > 0);
-    const readinessWaits: string[] = [];
-    const waitForDeviceReady = manager.waitForDeviceReady.bind(manager);
-    manager.waitForDeviceReady = async (device) => {
-      readinessWaits.push(device.name);
-      return await waitForDeviceReady(device);
-    };
+  arranged(
+    "does not adopt an unlaunched emulator when the adopt-check listing is incomplete",
+    async () => {
+      manager.startOutcome = "already-running";
+      manager.startVisibleDeviceId = "emulator-5560";
+      failAndroidDiscoveryWhen(manager, () => manager.startedDevices.length > 0);
+      const readinessWaits: string[] = [];
+      const waitForDeviceReady = manager.waitForDeviceReady.bind(manager);
+      manager.waitForDeviceReady = async (device) => {
+        readinessWaits.push(device.name);
+        return await waitForDeviceReady(device);
+      };
 
-    const outcome = String(await allocate());
+      const outcome = String(await allocate());
 
-    expect(manager.startedDevices.map((device) => device.name)).toEqual(["spare-avd"]);
-    // Refused before readiness: the incomplete listing cannot prove it is adoptable.
-    expect(readinessWaits).toEqual([]);
-    expect(outcome).toContain("Timed out allocating devices");
-    expect(pool.getDevice("emulator-5560")?.sessionId ?? null).toBeNull();
-    expect(sessions.getSession("base:B")).toBeNull();
-  });
+      expect(manager.startedDevices.map((device) => device.name)).toEqual(["spare-avd"]);
+      // Refused before readiness: the incomplete listing cannot prove it is adoptable.
+      expect(readinessWaits).toEqual([]);
+      expect(outcome).toContain("Timed out allocating devices");
+      expect(pool.getDevice("emulator-5560")?.sessionId ?? null).toBeNull();
+      expect(sessions.getSession("base:B")).toBeNull();
+    },
+  );
 });

@@ -5,6 +5,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const IOS_SIMULATOR: BootedDevice = {
   deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
@@ -709,7 +710,7 @@ describe("SystemConfigurationManager", () => {
       // setprop returns the new zone so verification passes.
       const responses = ["America/Los_Angeles", "Asia/Tokyo"];
       const original = fakeAdbClient.executeCommand.bind(fakeAdbClient);
-      fakeAdbClient.executeCommand = (async (command: string, ...rest: any[]) => {
+      fakeAdbClient.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "shell getprop persist.sys.timezone") {
           const stdout = responses.shift() ?? "Asia/Tokyo";
           return {
@@ -720,8 +721,8 @@ describe("SystemConfigurationManager", () => {
             includes: (s: string) => stdout.includes(s),
           };
         }
-        return original(command, ...rest);
-      }) as any;
+        return original(command, options);
+      };
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setTimeZone("Asia/Tokyo");
 

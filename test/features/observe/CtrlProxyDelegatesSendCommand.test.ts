@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { CtrlProxyCertificates } from "../../../src/features/observe/android/CtrlProxyCertificates";
 import {
@@ -34,7 +33,7 @@ async function harness() {
     { deviceId: "delegates-send-command", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
@@ -42,7 +41,7 @@ async function harness() {
   );
   await Promise.resolve();
   timer.advanceTime(123);
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   const manager = client["requestManager"];
   const ids = new CountingIdGenerator("wire");
   manager.generateId = (prefix) => `${prefix}_${ids.next()}`;
@@ -280,7 +279,7 @@ for (const method of methods) {
       if (method.autoConnect) {
         h.client.ensureConnected = async () => false;
       } else {
-        h.client["ws"] = null;
+        h.client.connectionTestHooks.socket = null;
       }
       expect(await method.invoke(h)).toMatchObject({ error: method.notConnectedError });
       expect(h.socket.frames).toEqual([]);

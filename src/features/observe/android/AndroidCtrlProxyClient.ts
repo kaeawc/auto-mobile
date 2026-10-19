@@ -59,9 +59,10 @@ import type { ScreenIdentity } from "../../../models/ObserveResult";
 
 import {
   HostForwardClientConnectionProbe,
-  NoForwardClientConnectionProbe,
   type ForwardClientConnectionProbe,
 } from "./CtrlProxyForwardClientProbe";
+import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe";
+import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
 import {
   BootedDevice,
   ImeAction,
@@ -74,6 +75,10 @@ import {
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
+import {
+  type DeviceClientRegistry,
+  MapDeviceClientRegistry,
+} from "../../../ctrlProxy/deviceClientRegistry";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
@@ -173,11 +178,8 @@ import {
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
 import type { StorageSubscription } from "../../storage/storageTypes";
-import {
-  ObserverPendingRequestTimeoutError,
-  WebSocketFactory,
-  defaultWebSocketFactory,
-} from "../DeviceServiceClient";
+import { WebSocketFactory, defaultWebSocketFactory } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
 import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
@@ -190,11 +192,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator
 import { errorMessage } from "../../../utils/describeUnknownError";
 import {} from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
-import {
-  FileCtrlProxyForwardLease,
-  NoOpCtrlProxyForwardLease,
-  type CtrlProxyForwardLease,
-} from "./CtrlProxyForwardLease";
+import { FileCtrlProxyForwardLease, type CtrlProxyForwardLease } from "./CtrlProxyForwardLease";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -219,6 +217,7 @@ import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages"
 
 // Import types
 import type { DelegateContext } from "../shared/types";
+import type { AndroidCtrlProxyClientTestHooks } from "./AndroidCtrlProxyClientTestHooks";
 import { defaultPrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
 import type {
@@ -676,9 +675,9 @@ export class AndroidCtrlProxyClient
   private readonly portAllocationId: string;
 
   // Singleton instances per device
-  private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
+  public static readonly registry: DeviceClientRegistry<AndroidCtrlProxyClient> =
+    new MapDeviceClientRegistry<AndroidCtrlProxyClient>();
   private static readonly activeObservers = new Set<AndroidCtrlProxyClient>();
-  private static readonly retiredDeviceIds = new Set<string>();
 
   // Build/device provenance (#4984): lazily-built content-hash provider (cached by
   // (deviceId, packageId, versionCode)), the resolved build context per app (kept on
@@ -722,7 +721,7 @@ export class AndroidCtrlProxyClient
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
   private restartRearmTimeout: NodeJS.Timeout | null = null;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
-  private readonly forcedRestartBudget: ForcedRestartBudget;
+  public readonly forcedRestartBudget: ForcedRestartBudget;
   private serviceRecovery: AndroidServiceRecovery | undefined;
   public static readonly OBSERVE_RECOVERY_WAIT_MS = OBSERVE_RECOVERY_WAIT_MS;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
@@ -907,19 +906,17 @@ export class AndroidCtrlProxyClient
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
-    if (AndroidCtrlProxyClient.retiredDeviceIds.has(deviceId)) {
-      const existing = AndroidCtrlProxyClient.instances.get(deviceId);
-      if (existing) {
-        return existing;
-      }
-      const retired = new AndroidCtrlProxyClient(device, adbFactory.create(device));
-      retired.closed = true;
-      retired.autoReconnectEnabled = false;
-      AndroidCtrlProxyClient.instances.set(deviceId, retired);
-      return retired;
+    const registry = AndroidCtrlProxyClient.registry;
+    if (registry.isRetired(deviceId)) {
+      return registry.get(deviceId, () => {
+        const retired = new AndroidCtrlProxyClient(device, adbFactory.create(device));
+        retired.closed = true;
+        retired.autoReconnectEnabled = false;
+        return retired;
+      });
     }
     const currentToken = AndroidCtrlProxyClient.currentIncarnationToken(deviceId);
-    const existing = AndroidCtrlProxyClient.instances.get(deviceId);
+    const existing = registry.peek(deviceId);
     if (
       existing?.incarnationToken !== undefined &&
       currentToken !== undefined &&
@@ -937,25 +934,21 @@ export class AndroidCtrlProxyClient
     } else if (existing && existing.incarnationToken === undefined) {
       existing.incarnationToken = currentToken;
     }
-    if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
+    return registry.get(deviceId, () => {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
-      AndroidCtrlProxyClient.instances.set(
-        deviceId,
-        new AndroidCtrlProxyClient(device, adbFactory.create(device)),
-      );
-    }
-    return AndroidCtrlProxyClient.instances.get(deviceId)!;
+      return new AndroidCtrlProxyClient(device, adbFactory.create(device));
+    });
   }
 
   private static currentIncarnationToken(deviceId: string): string | undefined {
     // A retired client serves no runtime; preserve its inert resolution path.
-    return AndroidCtrlProxyClient.retiredDeviceIds.has(deviceId)
+    return AndroidCtrlProxyClient.registry.isRetired(deviceId)
       ? undefined
       : deviceIncarnationToken(deviceId);
   }
 
   public static getExistingInstance(deviceId: string): AndroidCtrlProxyClient | null {
-    return AndroidCtrlProxyClient.instances.get(deviceId) ?? null;
+    return AndroidCtrlProxyClient.registry.peek(deviceId) ?? null;
   }
 
   /** A one-read client; never registers as an owner or recovers the service. */
@@ -977,7 +970,8 @@ export class AndroidCtrlProxyClient
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   public static registerForTesting(client: AndroidCtrlProxyClient, deviceId: string): void {
-    AndroidCtrlProxyClient.instances.set(deviceId, client);
+    AndroidCtrlProxyClient.registry.invalidate(deviceId);
+    AndroidCtrlProxyClient.registry.get(deviceId, () => client);
   }
 
   /**
@@ -989,7 +983,7 @@ export class AndroidCtrlProxyClient
    */
   public static clearInstanceRegistryForTesting(): void {
     resetForeignCtrlProxyForwardEvidenceForTesting();
-    AndroidCtrlProxyClient.instances.clear();
+    AndroidCtrlProxyClient.registry.closeAll();
   }
 
   /**
@@ -1000,12 +994,12 @@ export class AndroidCtrlProxyClient
    * `getInstance` build a fresh, auto-reconnect-enabled client.
    */
   public static removeInstance(deviceId: string): void {
-    AndroidCtrlProxyClient.instances.delete(deviceId);
+    AndroidCtrlProxyClient.registry.invalidate(deviceId);
   }
 
   public static retireForShutdown(deviceId: string): void {
-    AndroidCtrlProxyClient.retiredDeviceIds.add(deviceId);
-    const client = AndroidCtrlProxyClient.instances.get(deviceId);
+    AndroidCtrlProxyClient.registry.retire(deviceId);
+    const client = AndroidCtrlProxyClient.registry.peek(deviceId);
     if (client) {
       client.closed = true;
       client.autoReconnectEnabled = false;
@@ -1014,17 +1008,17 @@ export class AndroidCtrlProxyClient
 
   public static resumeAfterDeviceStart(deviceId: string): void {
     // An explicit startDevice/setup is a fresh start for forced-restart admission (#11246).
-    AndroidCtrlProxyClient.instances
-      .get(deviceId)
-      ?.forcedRestartBudget.rearm("explicit device start");
-    if (AndroidCtrlProxyClient.retiredDeviceIds.delete(deviceId)) {
-      AndroidCtrlProxyClient.instances.delete(deviceId);
+    const registry = AndroidCtrlProxyClient.registry;
+    registry.peek(deviceId)?.forcedRestartBudget.rearm("explicit device start");
+    if (registry.isRetired(deviceId)) {
+      registry.resume(deviceId);
+      registry.invalidate(deviceId);
     }
   }
 
   /** The device re-entered the ready state; rearm only if recovery saw it absent (#11246). */
   public static noteDeviceOnline(deviceId: string): void {
-    AndroidCtrlProxyClient.instances.get(deviceId)?.rearmAfterDeviceOnline();
+    AndroidCtrlProxyClient.registry.peek(deviceId)?.rearmAfterDeviceOnline();
   }
 
   private rearmAfterDeviceOnline(): void {
@@ -1033,9 +1027,7 @@ export class AndroidCtrlProxyClient
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
   public static removeInstanceIfCurrent(deviceId: string, instance: AndroidCtrlProxyClient): void {
-    if (AndroidCtrlProxyClient.getExistingInstance(deviceId) === instance) {
-      AndroidCtrlProxyClient.removeInstance(deviceId);
-    }
+    AndroidCtrlProxyClient.registry.invalidate(deviceId, instance);
   }
 
   /** Close the old guest connection and remove its serial singleton. */
@@ -1109,16 +1101,15 @@ export class AndroidCtrlProxyClient
     );
   }
 
-  /** Lease-bookkeeping view over the static client registry (instances map stays here). */
+  /** Lease-bookkeeping view over the static client registry (registry stays here). */
   private static forwardLeaseRegistry(): ForwardLeaseClientRegistry {
     return {
       singletonEntries: () =>
-        [...AndroidCtrlProxyClient.instances.entries()].map(([deviceId, client]) => [
-          deviceId,
-          client.asForwardLeaseClient(),
-        ]),
+        AndroidCtrlProxyClient.registry
+          .entries()
+          .map(([deviceId, client]) => [deviceId, client.asForwardLeaseClient()]),
       singleton: (deviceId) =>
-        AndroidCtrlProxyClient.instances.get(deviceId)?.asForwardLeaseClient(),
+        AndroidCtrlProxyClient.registry.peek(deviceId)?.asForwardLeaseClient(),
       observers: () =>
         [...AndroidCtrlProxyClient.activeObservers].map((c) => c.asForwardLeaseClient()),
       evictSingleton: (deviceId) => {
@@ -1129,7 +1120,9 @@ export class AndroidCtrlProxyClient
         AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
         return client.asForwardLeaseClient();
       },
-      clearSingletons: () => AndroidCtrlProxyClient.instances.clear(),
+      clearSingletons: () => {
+        AndroidCtrlProxyClient.registry.closeAll();
+      },
     };
   }
 
@@ -1154,9 +1147,7 @@ export class AndroidCtrlProxyClient
    * held so a replacement client cannot share an ADB forward with late cleanup.
    */
   public invalidateForShutdownRecovery(): void {
-    if (AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId) === this) {
-      AndroidCtrlProxyClient.removeInstance(this.device.deviceId);
-    }
+    AndroidCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
     PortManager.releaseIfAllocated(this.portAllocationId, this.localPort);
     PortManager.holdForCleanup(this.localPort);
     this.cleanupHeldPort = this.localPort;
@@ -1280,24 +1271,16 @@ export class AndroidCtrlProxyClient
     if (!this.hierarchyUpdateHandler) {
       const client = this;
       this.hierarchyUpdateHandler = new AndroidHierarchyUpdateHandler({
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
-        get transientObserver() {
-          return client.transientObserver;
-        },
+        transientObserver: client.transientObserver,
         get hierarchy() {
           return client.hierarchy;
         },
-        get observerHierarchyRequestIds() {
-          return client.observerHierarchyRequestIds;
-        },
-        get hierarchyObservationStreamSuppressions() {
-          return client.hierarchyObservationStreamSuppressions;
-        },
+        observerHierarchyRequestIds: client.observerHierarchyRequestIds,
+        hierarchyObservationStreamSuppressions: client.hierarchyObservationStreamSuppressions,
         get sdkNavigationAppIds() {
           return client.sdkNavigationAppIds;
         },
@@ -1335,9 +1318,7 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
@@ -1347,18 +1328,10 @@ export class AndroidCtrlProxyClient
         get logger() {
           return client.loggerInstance;
         },
-        get idGenerator() {
-          return client.idGenerator;
-        },
-        get physicalDisplayIdResolver() {
-          return client.physicalDisplayIdResolver;
-        },
-        get screenGeometry() {
-          return client.screenGeometry;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
+        idGenerator: client.idGenerator,
+        physicalDisplayIdResolver: client.physicalDisplayIdResolver,
+        screenGeometry: client.screenGeometry,
+        requestManager: client.requestManager,
         get screenshotObservationStreamSuppressions() {
           return client.screenshotObservationStreamSuppressions;
         },
@@ -1390,9 +1363,7 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         getNavigationGraphManager: () => client.getNavigationGraphManager(),
         requestPackageInfo: (appId, options, timeoutMs) =>
           client.requestPackageInfo(appId, options, timeoutMs),
@@ -1405,15 +1376,9 @@ export class AndroidCtrlProxyClient
     if (!this.actionDispatcher) {
       const client = this;
       this.actionDispatcher = new AndroidActionDispatcher({
-        get timer() {
-          return client.timer;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
-        get pendingFocusedInputClickIds() {
-          return client.pendingFocusedInputClickIds;
-        },
+        timer: client.timer,
+        requestManager: client.requestManager,
+        pendingFocusedInputClickIds: client.pendingFocusedInputClickIds,
         get supportedCommands() {
           return client.supportedCommands;
         },
@@ -1435,12 +1400,8 @@ export class AndroidCtrlProxyClient
     if (!this.clientRequests) {
       const client = this;
       this.clientRequests = new AndroidClientRequests({
-        get timer() {
-          return client.timer;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
+        timer: client.timer,
+        requestManager: client.requestManager,
         get logger() {
           return client.loggerInstance;
         },
@@ -1463,9 +1424,7 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
@@ -1496,12 +1455,8 @@ export class AndroidCtrlProxyClient
         set recoveryPromise(value: Promise<boolean> | null) {
           client.recoveryPromise = value;
         },
-        get forcedRestartBudget() {
-          return client.forcedRestartBudget;
-        },
-        get serviceManagerFactory() {
-          return client.serviceManagerFactory;
-        },
+        forcedRestartBudget: client.forcedRestartBudget,
+        serviceManagerFactory: client.serviceManagerFactory,
         get restartRearmPending() {
           return client.restartRearmTimeout !== null;
         },
@@ -1523,15 +1478,11 @@ export class AndroidCtrlProxyClient
         get adb() {
           return client.adb;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get deviceId() {
           return client.device.deviceId;
         },
-        get ctrlProxyForwardLease() {
-          return client.ctrlProxyForwardLease;
-        },
+        ctrlProxyForwardLease: client.ctrlProxyForwardLease,
         get forwardClientProbe() {
           return client.forwardClientProbe;
         },
@@ -1547,9 +1498,7 @@ export class AndroidCtrlProxyClient
         set localPort(value) {
           client.localPort = value;
         },
-        get portAllocationId() {
-          return client.portAllocationId;
-        },
+        portAllocationId: client.portAllocationId,
         get portForwardingSetup() {
           return client.portForwardingSetup;
         },
@@ -1565,7 +1514,7 @@ export class AndroidCtrlProxyClient
         getLiveLocalPorts: () =>
           new Set(
             [
-              ...AndroidCtrlProxyClient.instances.values(),
+              ...AndroidCtrlProxyClient.registry.entries().map(([, client]) => client),
               ...AndroidCtrlProxyClient.activeObservers,
             ]
               .filter((other) => other.device.deviceId === this.device.deviceId && !other.closed)
@@ -1603,16 +1552,15 @@ export class AndroidCtrlProxyClient
    */
   public static resetInstances(): void {
     resetForeignCtrlProxyForwardEvidenceForTesting();
-    for (const instance of AndroidCtrlProxyClient.instances.values()) {
+    for (const instance of AndroidCtrlProxyClient.registry.closeAll()) {
       instance.close().catch((error) => {
         const logger = instance.loggerInstance;
         // The local alias keeps the injected logger visible to the catch-convention lint rule.
         logger.warn(`[CTRL_PROXY] Instance reset cleanup failed: ${errorMessage(error)}`, error);
       });
     }
-    AndroidCtrlProxyClient.instances.clear();
     AndroidCtrlProxyClient.activeObservers.clear();
-    AndroidCtrlProxyClient.retiredDeviceIds.clear();
+    AndroidCtrlProxyClient.registry.clearRetired();
     PortManager.reset();
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }
@@ -1639,6 +1587,63 @@ export class AndroidCtrlProxyClient
       client.screenshotBackoffScheduler = deps.screenshotBackoffScheduler;
     }
     return client;
+  }
+
+  /** @internal Typed view of internals for unit tests; production code must not use it. */
+  get testHooks(): AndroidCtrlProxyClientTestHooks {
+    const client = this;
+    return {
+      requestManager: client.requestManager,
+      forcedRestartBudget: client.forcedRestartBudget,
+      text: () => client.text,
+      webSocketMessageHandlers: () => client.webSocketMessageHandlers,
+      cachedHierarchy: () => client.cachedHierarchy,
+      handleWebSocketMessage: (data) => client.handleWebSocketMessage(data),
+      getWebSocketUrl: () => client.getWebSocketUrl(),
+      removeCtrlProxyPortForward: (port) => client.removeCtrlProxyPortForward(port),
+      get recoveryPromise() {
+        return client.recoveryPromise;
+      },
+      set recoveryPromise(value) {
+        client.recoveryPromise = value;
+      },
+      get isRecoveringService() {
+        return client.isRecoveringService;
+      },
+      set isRecoveringService(value) {
+        client.isRecoveringService = value;
+      },
+      get connectionAttempts() {
+        return client.connectionAttempts;
+      },
+      set connectionAttempts(value) {
+        client.connectionAttempts = value;
+      },
+      get lastConnectionAttempt() {
+        return client.lastConnectionAttempt;
+      },
+      set lastConnectionAttempt(value) {
+        client.lastConnectionAttempt = value;
+      },
+      get connectionResetMs() {
+        return client.config.connectionResetMs;
+      },
+      set connectionResetMs(value) {
+        client.config.connectionResetMs = value;
+      },
+      get portForwardingSetup() {
+        return client.portForwardingSetup;
+      },
+      set portForwardingSetup(value) {
+        client.portForwardingSetup = value;
+      },
+      get localPort() {
+        return client.localPort;
+      },
+      set localPort(value) {
+        client.localPort = value;
+      },
+    };
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
@@ -1873,7 +1878,7 @@ export class AndroidCtrlProxyClient
     return connected;
   }
 
-  protected override async connectWebSocket(
+  public override async connectWebSocket(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
     if (this.closed) {
@@ -2399,15 +2404,9 @@ export class AndroidCtrlProxyClient
     if (!this.screenshotRequesterInstance) {
       const client = this;
       this.screenshotRequesterInstance = new AndroidScreenshotRequester({
-        get timer() {
-          return client.timer;
-        },
-        get requestManager() {
-          return client.requestManager;
-        },
-        get screenGeometry() {
-          return client.screenGeometry;
-        },
+        timer: client.timer,
+        requestManager: client.requestManager,
+        screenGeometry: client.screenGeometry,
         get screenshotObservationStreamSuppressions() {
           return client.screenshotObservationStreamSuppressions;
         },
@@ -2466,9 +2465,7 @@ export class AndroidCtrlProxyClient
     if (!this.serviceReadinessVerifierInstance) {
       const client = this;
       this.serviceReadinessVerifierInstance = new AndroidServiceReadinessVerifier({
-        get retryExecutor() {
-          return client.retryExecutor;
-        },
+        retryExecutor: client.retryExecutor,
         get logger() {
           return client.loggerInstance;
         },
@@ -2772,12 +2769,8 @@ export class AndroidCtrlProxyClient
     if (!this.inboundMessageRouter) {
       const client = this;
       this.inboundMessageRouter = new AndroidInboundMessageRouter({
-        get transientObserver() {
-          return client.transientObserver;
-        },
-        get rejectedCommands() {
-          return client.rejectedCommands;
-        },
+        transientObserver: client.transientObserver,
+        rejectedCommands: client.rejectedCommands,
         get supportedCommands() {
           return client.supportedCommands;
         },
@@ -2790,9 +2783,7 @@ export class AndroidCtrlProxyClient
         get lateCancelledScreenshotRequestIds() {
           return client.lateCancelledScreenshotRequestIds;
         },
-        get requestManager() {
-          return client.requestManager;
-        },
+        requestManager: client.requestManager,
         get _hierarchy() {
           return client._hierarchy;
         },
@@ -2826,9 +2817,7 @@ export class AndroidCtrlProxyClient
         get prototypes() {
           return client.prototypes;
         },
-        get timer() {
-          return client.timer;
-        },
+        timer: client.timer,
         get lastInteractionByApp() {
           return client.lastInteractionByApp;
         },
@@ -2909,14 +2898,18 @@ export class AndroidCtrlProxyClient
     this.getHierarchyUpdateHandler().handle(data, perfTiming, frameContext, requestId);
   }
 
+  /** Converts wire to domain at the push; provenance stays keyed by the wire object. */
   private pushHierarchyToObservationStream(
-    hierarchy: ViewHierarchyResult,
+    wireHierarchy: AccessibilityHierarchy,
     frameContext?: string,
   ): void {
+    const hierarchy = this.hierarchy.convertToViewHierarchyResult(wireHierarchy);
+    hierarchy.updatedAt = wireHierarchy.updatedAt || undefined; // stream timestamp source
     this.forwardHierarchyToObservationStream(hierarchy, frameContext, {
       logTag: "CTRL_PROXY",
       recordForwarded: (captureSequence) => {
-        this.streamedCaptureSequences.set(hierarchy, captureSequence);
+        wireHierarchy.captureSequence = captureSequence;
+        this.streamedCaptureSequences.set(wireHierarchy, captureSequence);
         this.screenGeometry.markForwarded(captureSequence);
       },
     });

@@ -1,10 +1,15 @@
-import { isEmulatorStopDispatchedError } from "../utils/android-cmdline-tools/EmulatorProcessStop";
+import {
+  isAlreadyStoppedDeviceError,
+  resumeCtrlProxyAfterUnconfirmedFailure,
+  resumeCtrlProxyWhenPreparationSettles,
+  shouldKeepIntentionalShutdownAfterCommandError,
+} from "./deviceToolsShutdownCtrlProxyResume";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
+import { ActionableError, type BootedDevice } from "../models";
 import type { DeviceShutdownOptions, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
-import { DaemonState } from "../daemon/daemonState";
+import type { DaemonStateLike } from "../daemon/daemonState";
 import type {
   DevicePool,
   PooledDevice,
@@ -25,8 +30,6 @@ import {
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { DeviceShutdownService } from "../devices/deviceShutdownService";
-import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
-import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,
   DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
@@ -71,24 +74,6 @@ export {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 
 const IOS_SHUTDOWN_CONFIRMATION_MIN_MS = 2_000;
-
-function isAlreadyStoppedDeviceError(
-  platform: SomePlatform,
-  deviceId: string,
-  error: unknown,
-): boolean {
-  const message = String(error instanceof Error ? error.message : error).toLowerCase();
-  if (platform === "android") {
-    return (
-      (message.includes("not running") && message.includes("emulator")) ||
-      isAdbMissingDeviceError(error, deviceId)
-    );
-  }
-  if (platform === "ios") {
-    return isIosSimulatorAlreadyStoppedError(error);
-  }
-  return false;
-}
 
 export function createKillDeviceResponse(
   args: KillDeviceArgs,
@@ -143,6 +128,7 @@ interface AndroidObserverShutdownState {
 async function stopIosCtrlProxyBeforeShutdown(
   context: ShutdownDeadlineContext,
   perf: ReturnType<typeof createPerformanceTracker>,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
 ): Promise<void> {
   if (context.device.platform !== "ios") {
     return;
@@ -176,7 +162,7 @@ async function stopIosCtrlProxyBeforeShutdown(
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
-      resumeCtrlProxyWhenPreparationSettles(stop, context.device);
+      resumeCtrlProxyWhenPreparationSettles(stop, context.device, daemonState);
       if (stop) {
         // CtrlProxy shutdown mutates process state after its caller stops waiting.
         // Keep this device unavailable until it settles, but release it after a
@@ -195,6 +181,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
   context: ShutdownDeadlineContext,
   perf: ReturnType<typeof createPerformanceTracker>,
   stopAndroidObservers: (device: BootedDevice) => Promise<void>,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
 ): Promise<AndroidObserverShutdownState> {
   if (context.device.platform !== "android") {
     return { hadActiveObserver: false, boundSessionId: null, deviceIdentity: null };
@@ -220,7 +207,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
-      resumeCtrlProxyWhenPreparationSettles(stop, context.device);
+      resumeCtrlProxyWhenPreparationSettles(stop, context.device, daemonState);
       if (stop) {
         // Observer detach can keep mutating adb/port state after its caller stops
         // waiting. Hold the device unavailable until it settles, releasing after a
@@ -234,55 +221,6 @@ async function stopAndroidCtrlProxyBeforeShutdown(
     perf.endOperation("stopAndroidCtrlProxy");
   }
   return observerState;
-}
-
-async function resumeCtrlProxyAfterFailedKill(device: BootedDevice): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (
-    daemonState.isInitialized() &&
-    (await daemonState.getDevicePool().isShutdownReserved(device.deviceId))
-  ) {
-    return;
-  }
-  ctrlProxyClientLifecycle.resumeAfterDeviceStart(device.platform, device.deviceId);
-}
-
-async function resumeCtrlProxyAfterUnconfirmedFailure(
-  device: BootedDevice,
-  error: unknown,
-  requestAbortSignal: AbortSignal | undefined,
-  shutdownWasConfirmed = false,
-): Promise<void> {
-  if (
-    !shutdownWasConfirmed &&
-    !isAlreadyStoppedDeviceError(device.platform, device.deviceId, error) &&
-    !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
-  ) {
-    await resumeCtrlProxyAfterFailedKill(device);
-  }
-}
-
-function resumeCtrlProxyWhenPreparationSettles(
-  stop: Promise<void> | undefined,
-  device: BootedDevice,
-): void {
-  // The same in-flight teardown retains the pool reservation on timeout/abort.
-  // A new shutdown or an unresolved shutdown marker keeps the client retired.
-  void stop?.then(
-    () => resumeCtrlProxyAfterFailedKill(device),
-    () => resumeCtrlProxyAfterFailedKill(device),
-  );
-}
-
-function shouldKeepIntentionalShutdownAfterCommandError(
-  error: unknown,
-  requestAbortSignal: AbortSignal | undefined,
-): boolean {
-  return (
-    requestAbortSignal?.aborted === true ||
-    isShutdownTimeoutError(error) ||
-    isEmulatorStopDispatchedError(error)
-  );
 }
 
 function shouldRestoreAndroidObserverAfterCommandFailure(
@@ -301,11 +239,11 @@ function hasLiveAndroidObserverSessionBinding(
   device: BootedDevice,
   boundSessionId: string | null,
   deviceIdentity: BootedDevice | null,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getSessionManager">,
 ): boundSessionId is string {
   if (boundSessionId === null) {
     return false;
   }
-  const daemonState = DaemonState.getInstance();
   if (daemonState.isInitialized()) {
     return daemonState.getSessionManager().getSessionForDevice(device.deviceId) === boundSessionId;
   }
@@ -318,22 +256,24 @@ function hasLiveAndroidObserverSessionBinding(
 }
 
 function bindLiveAndroidObserverSession(
-  observer: AndroidCtrlProxyClient,
+  observer: Pick<AndroidCtrlProxyClient, "bindSession">,
   device: BootedDevice,
   observerState: AndroidObserverShutdownState,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getSessionManager">,
 ): void {
   if (
     hasLiveAndroidObserverSessionBinding(
       device,
       observerState.boundSessionId,
       observerState.deviceIdentity,
+      daemonState,
     )
   ) {
     observer.bindSession(observerState.boundSessionId);
   }
 }
 
-function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: string): void {
+function invalidateObserver(observer: import("./observerTypes").Invalidatable, id: string): void {
   // Removal is deliberately synchronous and precedes cleanup. `close()` can
   // wait on an ADB forward removal that does not honour the shutdown deadline;
   // retaining the singleton until that completes would keep an obsolete client
@@ -341,7 +281,7 @@ function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: s
   observer.invalidateForShutdownRecovery();
   void observer.close().catch((error) => {
     logger.warn(
-      `[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`,
+      `[DeviceTools] Failed to clean up invalidated Android observer for ${id}: ${error}`,
     );
   });
 }
@@ -360,7 +300,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
     ShutdownObserverRecoveryContext,
     "device" | "timer" | "shutdownDeadlineMs" | "requestAbortSignal" | "timeoutMs"
   >,
-  observer: AndroidCtrlProxyClient,
+  observer: import("./observerTypes").Reconnectable,
 ): Promise<boolean> {
   const { device, timer, shutdownDeadlineMs, requestAbortSignal, timeoutMs } = context;
   const reconnect = async (): Promise<boolean> => {
@@ -381,7 +321,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
         // Platform setup does not accept an AbortSignal. Invalidate the
         // in-flight client so a late port-forward cannot register a stale
         // observer or leave future callers waiting on its connection.
-        invalidateAndroidObserver(observer, device.deviceId);
+        invalidateObserver(observer, device.deviceId);
       }
       throw error;
     }
@@ -395,7 +335,7 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
 
 async function revalidateReconnectedAndroidObserver(
   context: ShutdownObserverRecoveryContext,
-  observer: AndroidCtrlProxyClient,
+  observer: import("./observerTypes").Invalidatable,
   observerState: AndroidObserverShutdownState,
 ): Promise<boolean> {
   const { device } = context;
@@ -413,7 +353,7 @@ async function revalidateReconnectedAndroidObserver(
   } catch (error) {
     // A connected observer cannot be safely retained when its incarnation
     // could not be reconfirmed within the same failed-shutdown budget.
-    invalidateAndroidObserver(observer, device.deviceId);
+    invalidateObserver(observer, device.deviceId);
     throw error;
   }
 }
@@ -422,6 +362,7 @@ async function restoreAndroidObserverAfterCommandFailure(
   context: ShutdownObserverRecoveryContext,
   observerState: AndroidObserverShutdownState,
   error: unknown,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool" | "getSessionManager">,
 ): Promise<void> {
   const { device, requestAbortSignal } = context;
   if (
@@ -442,7 +383,6 @@ async function restoreAndroidObserverAfterCommandFailure(
       observerState.deviceIdentity !== null &&
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
-      const daemonState = DaemonState.getInstance();
       if (
         daemonState.isInitialized() &&
         (await daemonState.getDevicePool().isShutdownReserved(device.deviceId))
@@ -454,7 +394,7 @@ async function restoreAndroidObserverAfterCommandFailure(
       // Bind before connecting so a frame arriving immediately after the socket
       // opens is attributed to the surviving session. A post-connect identity
       // mismatch still invalidates this client before it is retained.
-      bindLiveAndroidObserverSession(observer, device, observerState);
+      bindLiveAndroidObserverSession(observer, device, observerState, daemonState);
       const connected = await reconnectAndroidObserverWithinShutdownDeadline(context, observer);
       if (!connected) {
         logger.warn(
@@ -468,7 +408,7 @@ async function restoreAndroidObserverAfterCommandFailure(
         observerState,
       );
       if (!sameIncarnation) {
-        invalidateAndroidObserver(observer, device.deviceId);
+        invalidateObserver(observer, device.deviceId);
         return;
       }
     }
@@ -498,13 +438,17 @@ function handleShutdownCommandError(
 }
 
 async function recoverAfterShutdownFailure(
-  device: BootedDevice,
-  error: unknown,
-  requestAbortSignal: AbortSignal | undefined,
+  failure: {
+    device: BootedDevice;
+    error: unknown;
+    requestAbortSignal: AbortSignal | undefined;
+    shutdownWasConfirmed: boolean;
+  },
   devicePool: DevicePool | undefined,
   releaseShutdownReservation: () => Promise<void>,
-  shutdownWasConfirmed: boolean,
+  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
 ): Promise<void> {
+  const { device, error, requestAbortSignal, shutdownWasConfirmed } = failure;
   // Only a definitive failure may reopen CtrlProxy after our fence clears;
   // the shared shutdown accessor still blocks a concurrent kill. Timeout or
   // cancellation keeps the marker and the client retired for late shutdown.
@@ -526,6 +470,7 @@ async function recoverAfterShutdownFailure(
     device,
     error,
     requestAbortSignal,
+    daemonState,
     shutdownWasConfirmed,
   );
 }
@@ -764,6 +709,7 @@ async function handleUnconfirmedKillCommandError(
     retainReservationUntil: KillProcessAndRetireOwnershipOptions["retainReservationUntil"];
     releaseShutdownReservation: () => Promise<void>;
     androidObserverState: AndroidObserverShutdownState;
+    daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool" | "getSessionManager">;
   },
 ): Promise<string | undefined> {
   const {
@@ -776,6 +722,7 @@ async function handleUnconfirmedKillCommandError(
     retainReservationUntil,
     releaseShutdownReservation,
     androidObserverState,
+    daemonState,
     deviceManager,
     timer,
     deadlineMs,
@@ -804,11 +751,12 @@ async function handleUnconfirmedKillCommandError(
     devicePool?.clearIntentionalShutdown(device.deviceId);
     await releaseShutdownReservation();
   }
-  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal);
+  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, daemonState);
   await restoreAndroidObserverAfterCommandFailure(
     { deviceManager, device, timer, shutdownDeadlineMs: deadlineMs, requestAbortSignal, timeoutMs },
     androidObserverState,
     error,
+    daemonState,
   );
   return handleShutdownCommandError(device, error, devicePool, keepIntentionalShutdown);
 }
@@ -953,6 +901,7 @@ async function killProcessAndRetireOwnership(
         retainReservationUntil,
         releaseShutdownReservation,
         androidObserverState,
+        daemonState: dependencies.daemonState,
       });
     }
   }
@@ -1004,12 +953,10 @@ async function killProcessAndRetireOwnership(
     return undefined;
   } catch (error) {
     await recoverAfterShutdownFailure(
-      device,
-      error,
-      requestAbortSignal,
+      { device, error, requestAbortSignal, shutdownWasConfirmed },
       devicePool,
       releaseShutdownReservation,
-      shutdownWasConfirmed,
+      dependencies.daemonState,
     );
     throw error;
   }
@@ -1164,7 +1111,7 @@ export async function shutdownDevice(
   const shutdownDeadlineMs = context.deadlineMs;
   const perf = createPerformanceTracker(true);
   perf.serial(operationName);
-  const daemonState = DaemonState.getInstance();
+  const { daemonState } = dependencies;
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
   let expectedSession: Session | undefined;
   // Ambient scope (only under --debug-perf) so the adb/emulator-console/simctl
@@ -1230,11 +1177,12 @@ export async function shutdownDevice(
           devicePool,
         );
         await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
-        await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf);
+        await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf, dependencies.daemonState);
         const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
           shutdownContext,
           perf,
           dependencies.stopAndroidObservers,
+          dependencies.daemonState,
         );
 
         const alreadyStoppedMessage = await killProcessAndRetireOwnership(

@@ -14,7 +14,7 @@ import { type Kysely, sql } from "kysely";
  * sentinels for device_id/session_uuid, so today's behavior falls out as the
  * degenerate one-build case with no data loss.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Build-key dimension: (packageId=app_id, versionCode, contentHash). Normalized
   // so observation rows carry a cheap int reference instead of repeating strings.
   await db.schema
@@ -152,7 +152,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("navigation_edge_observations").execute();
   await db.schema.dropTable("navigation_node_observations").execute();
   await db.schema.dropTable("navigation_build_keys").execute();

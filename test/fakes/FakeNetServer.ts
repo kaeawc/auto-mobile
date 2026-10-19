@@ -1,4 +1,4 @@
-import { Socket } from "node:net";
+import { Socket, type SocketConnectOpts } from "node:net";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
@@ -23,7 +23,7 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
     return this._writtenData.map((frame) => JSON.parse(frame) as Response);
   }
   private _writtenData: string[] = [];
-  private _peer: FakeSocket | null = null;
+  private _peer: FakeSocket<unknown> | null = null;
 
   /**
    * Get all data written to this socket
@@ -55,19 +55,31 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   /**
    * Connect this socket to a peer (for bidirectional communication)
    */
-  connectToPeer(peer: FakeSocket): void {
+  connectToPeer(peer: FakeSocket<unknown>): void {
     this._peer = peer;
     peer._peer = this;
   }
 
   /**
-   * Write data to the socket. Returns true if successful.
+   * Write data to the socket. Returns true if successful. The overloads mirror
+   * `net.Socket#write`, so a `FakeSocket` is assignable wherever a `Socket` is expected.
    */
-  write(data: string | Buffer, callback?: (error?: Error | null) => void): boolean {
+  write(buffer: string | Uint8Array, cb?: (err?: Error | null) => void): boolean;
+  write(
+    str: string | Uint8Array,
+    encoding?: BufferEncoding,
+    cb?: (err?: Error | null) => void,
+  ): boolean;
+  write(
+    data: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    maybeCallback?: (error?: Error | null) => void,
+  ): boolean {
     if (this.destroyed && this.throwOnWriteAfterDestroy) {
       throw Object.assign(new Error("Socket is destroyed"), { code: "EPIPE" });
     }
-    const str = typeof data === "string" ? data : data.toString();
+    const callback = typeof encodingOrCallback === "function" ? encodingOrCallback : maybeCallback;
+    const str = typeof data === "string" ? data : Buffer.from(data).toString();
     this.written.push(typeof data === "string" ? data : Buffer.from(data));
     this._writtenData.push(str);
     callback?.();
@@ -128,18 +140,26 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   /**
    * End the socket gracefully
    */
-  end(): void {
+  end(callback?: () => void): this;
+  end(buffer: string | Uint8Array, callback?: () => void): this;
+  end(str: string | Uint8Array, encoding?: BufferEncoding, callback?: () => void): this;
+  end(..._args: unknown[]): this {
     if (!this.destroyed) {
       this.destroyed = true;
       this.writable = false;
       this.emit("close", false);
     }
+    return this;
   }
 
   /**
    * Simulate a connection event
    */
-  connect(_options: { path: string }): this {
+  connect(options: SocketConnectOpts, connectionListener?: () => void): this;
+  connect(port: number, host: string, connectionListener?: () => void): this;
+  connect(port: number, connectionListener?: () => void): this;
+  connect(path: string, connectionListener?: () => void): this;
+  connect(..._target: unknown[]): this {
     // In fake mode, connection is instant
     process.nextTick(() => {
       if (!this.destroyed) {

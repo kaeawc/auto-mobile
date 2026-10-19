@@ -49,6 +49,21 @@ export class PressButton extends BaseVisualChange {
     this.device = device;
   }
 
+  /** Typed test view so tests can drive the deadline gate and the per-platform dispatch without a full press. */
+  get testHooks(): {
+    verifyAndroidHomeForeground: (
+      options?: Parameters<BaseVisualChange["verifyAndroidHomeForeground"]>[0],
+    ) => Promise<boolean>;
+    executeAndroidButtonPress: PressButton["press"];
+    executeiOSButtonPress: PressButton["press"];
+  } {
+    return {
+      verifyAndroidHomeForeground: (options = {}) => this.verifyAndroidHomeForeground(options),
+      executeAndroidButtonPress: (...args) => this.executeAndroidButtonPress(...args),
+      executeiOSButtonPress: (...args) => this.executeiOSButtonPress(...args),
+    };
+  }
+
   private assertHeldRequestLive(signal?: AbortSignal): void {
     if (this.holdRequest) {
       throwIfAborted(signal);

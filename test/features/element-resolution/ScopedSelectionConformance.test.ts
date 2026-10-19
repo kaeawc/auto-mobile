@@ -201,7 +201,7 @@ async function tapAny(scenario: Scenario): Promise<Outcome> {
     accessibilityDetector: new FakeAccessibilityDetector(),
     accessibilityService: service,
   });
-  action.setRefreshViewHierarchyForTesting(async () => null);
+  action.testHooks.setRefreshViewHierarchy(async () => null);
   action.observedInteraction = (run) =>
     run(recordObservationRead(observation(hierarchy(scenario))));
   const result = await action.execute({

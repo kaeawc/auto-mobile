@@ -1063,7 +1063,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);
 
     // Keep only the 2 newest occurrences -> both belong to "new".
-    await (repo as any).pruneToRowCap(2);
+    await repo.testHooks.pruneToRowCap(2);
 
     const occurrences = await db
       .selectFrom("failure_occurrences")
@@ -1086,7 +1086,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     await repo.recordFailure(input("keep"));
 
     // Cap of 2 prunes the single oldest occurrence but the group retains two.
-    await (repo as any).pruneToRowCap(2);
+    await repo.testHooks.pruneToRowCap(2);
 
     expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
     const groups = await db.selectFrom("failure_groups").select("signature").execute();
@@ -1099,7 +1099,7 @@ describe("FailureAnalyticsRepository row-cap retention (#3436)", () => {
     timer.setCurrentTime(2000);
     await repo.recordFailure(input("b"));
 
-    await (repo as any).pruneToRowCap(10);
+    await repo.testHooks.pruneToRowCap(10);
 
     expect(await db.selectFrom("failure_occurrences").selectAll().execute()).toHaveLength(2);
     expect(await db.selectFrom("failure_groups").selectAll().execute()).toHaveLength(2);

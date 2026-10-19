@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   ImeSpanService,
-  ImeRestorationError,
   isImeRestorationFailure,
   type ImeSpanHost,
 } from "../../../../src/features/action/sendkeys/ImeSpan";
+import { ImeRestorationError } from "../../../../src/features/action/sendkeys/ImeRestorationError";
 import type { SendKeysCommandExecutor } from "../../../../src/features/action/SendKeys";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 

@@ -90,7 +90,7 @@ describe("SnapshotProvider interfaces", () => {
     platform: "android",
   };
   const iosDevice: BootedDevice = { deviceId: "ios-device-1", name: "iPhone 15", platform: "ios" };
-  const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
+  const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() };
   const store = () =>
     new DeviceSnapshotStore("/tmp/no-op", noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 

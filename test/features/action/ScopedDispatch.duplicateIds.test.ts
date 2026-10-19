@@ -130,10 +130,10 @@ for (const row of rows) {
           tap.observedInteraction = (action) =>
             action({ viewHierarchy: capture, screenSize: { width: 1080, height: 2400 } });
           let dispatched = false;
-          tap.setBeforeAndroidTapForTesting(() => {
+          tap.testHooks.setBeforeAndroidTap(() => {
             dispatched = true;
           });
-          tap.setRefreshViewHierarchyForTesting(async () => (dispatched ? null : capture));
+          tap.testHooks.setRefreshViewHierarchy(async () => (dispatched ? null : capture));
           const result = await tap.execute({
             action: "tap",
             selectionStrategy: "first",

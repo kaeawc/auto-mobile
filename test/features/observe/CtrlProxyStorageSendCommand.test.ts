@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { CtrlProxyStorage } from "../../../src/features/observe/android/CtrlProxyStorage";
 import { isCtrlProxyStorageUnavailableError } from "../../../src/features/observe/android/CtrlProxyStorage";
@@ -35,7 +34,7 @@ async function harness() {
     { deviceId: "storage-send-command", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => socket,
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
@@ -43,7 +42,7 @@ async function harness() {
   );
   await Promise.resolve();
   timer.advanceTime(123);
-  client["ws"] = socket as unknown as WebSocket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "discover_keystore",
     "get_sdk_capabilities",
@@ -311,7 +310,7 @@ for (const method of methods) {
           h.client.ensureConnected = async () => false;
         }
         if (failure === "socket") {
-          h.client["ws"] = null;
+          h.client.connectionTestHooks.socket = null;
         }
         if (failure === "send") {
           h.socket.sendError = new Error("send failed");

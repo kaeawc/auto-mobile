@@ -295,6 +295,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private createEventAllTyper(): EventAllTyper {
     return new EventAllTyper({
       session: this.session,
+      timer: this.timer,
       textClient: this.textClient,
       hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
       graphemeCodePoints: (graphemes) => graphemeCodePoints(graphemes),
@@ -856,6 +857,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private async readPrecedingState(needed: boolean): Promise<InsertTextState | undefined> {
     return needed ? this.textClient.readInsertTextState?.() : undefined;
+  }
+
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return { executeKeyEventPlan: this.executeKeyEventPlan.bind(this) };
   }
 
   private executeKeyEventPlanSafely(

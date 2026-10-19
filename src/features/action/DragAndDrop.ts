@@ -265,9 +265,11 @@ export class DragAndDrop extends BaseVisualChange {
           options.display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         if (this.device.platform === "android") {
           return await this.observedInteraction(
@@ -571,6 +573,11 @@ export class DragAndDrop extends BaseVisualChange {
       );
     }
     return safe;
+  }
+
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return { resolveTarget: this.resolveTarget.bind(this) };
   }
 
   private resolveTarget(

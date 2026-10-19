@@ -10,13 +10,24 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import {
+  parseInputKeyParams,
+  parseInputPressButtonParams,
+  parseInputTapParams,
+  parseInputTypeTextParams,
+} from "../../src/daemon/inputRouteParams";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { DAEMON_PREPARE_RESTART_METHOD } from "../../src/daemon/daemonRestartAdmission";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  createAndroidTestClient,
+  spyOnAndroidClientInstance,
+} from "../helpers/androidCtrlProxyClientSpies";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import {
   androidDevice,
   iosDevice,
@@ -29,7 +40,7 @@ import {
 
 describe("UnixSocketServer input/tap", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   let fakeTimer: FakeTimer;
   let originalAndroidGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalIosGetInstance: typeof IOSCtrlProxyClient.getInstance;
@@ -75,11 +86,11 @@ describe("UnixSocketServer input/tap", () => {
     const createMcpClient = mock(async () => {
       throw new Error("input/tap should not create an MCP client");
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -130,11 +141,11 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
       createFakeDaemonState(new Map(), new Map(), new Set(["emulator-5554"])),
       fakeTimer,
@@ -168,11 +179,11 @@ describe("UnixSocketServer input/tap", () => {
       await tapReleased;
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const tap = sendRequest(socketPath, "input/tap", {
@@ -199,12 +210,12 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
       getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2340 }),
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const negative = await sendRequest(socketPath, "input/tap", {
@@ -239,13 +250,13 @@ describe("UnixSocketServer input/tap", () => {
       },
     );
     const fetchHierarchy = mock(async () => ({ hierarchy: {} }));
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -277,11 +288,11 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -305,13 +316,13 @@ describe("UnixSocketServer input/tap", () => {
       },
     );
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     await sendRequest(socketPath, "input/tap", {
@@ -339,13 +350,13 @@ describe("UnixSocketServer input/tap", () => {
       },
     );
     const fetchHierarchy = mock(async () => null); // not connected / timed out -> FAILURE
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -370,13 +381,13 @@ describe("UnixSocketServer input/tap", () => {
     const fetchHierarchy = mock(async () => {
       throw new Error("ws disconnected");
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -406,13 +417,13 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
       return { hierarchy: {} };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -448,13 +459,13 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3 };
       return { hierarchy: {} };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -478,12 +489,12 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -513,13 +524,13 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
       return { hierarchy: {} };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -552,13 +563,13 @@ describe("UnixSocketServer input/tap", () => {
       scale = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
       return { hierarchy: {} };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
       getScreenScaleMetadata: () => scale,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -590,11 +601,11 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestTapCoordinates,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -617,14 +628,14 @@ describe("UnixSocketServer input/tap", () => {
         return { success: true };
       },
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
     const mcpAutolockSessions = new Map<string, string>();
-    server = new UnixSocketServer(
+    server = new UnixSocketServerHarness(
       socketPath,
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
@@ -644,9 +655,7 @@ describe("UnixSocketServer input/tap", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = server.sessionIds[0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -681,12 +690,12 @@ describe("UnixSocketServer input/tap", () => {
       inFlight -= 1;
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const [first, second] = await Promise.all([
@@ -724,11 +733,11 @@ describe("UnixSocketServer input/tap", () => {
       }
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       requestTapCoordinates,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const first = sendRequest(socketPath, "input/tap", {
@@ -771,7 +780,7 @@ describe("UnixSocketServer input/tap", () => {
 
   test("surfaces platform discovery failures before device targeting errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([], new Set()));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -787,7 +796,7 @@ describe("UnixSocketServer input/tap", () => {
 
   test("rejects missing and non-numeric coordinates with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/tap", {
@@ -807,14 +816,11 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("parseInputTapParams rejects non-finite x/y and non-integer duration (#3615)", () => {
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createFakeDaemonState(), fakeTimer);
     // ±Infinity cannot survive a JSON round-trip (stringify -> null, parse rejects the
     // literal), so it only reaches the parser from a non-JSON in-process caller. Exercise
     // parseInputTapParams directly with the raw floats the parser is responsible for.
-    const parseTap = (args: Record<string, unknown>): unknown =>
-      (server as unknown as { parseInputTapParams(params: unknown): unknown }).parseInputTapParams(
-        args,
-      );
+    const parseTap = (args: Record<string, unknown>): unknown => parseInputTapParams(args);
 
     for (const bad of [Infinity, -Infinity, NaN]) {
       expect(() => parseTap({ platform: "android", x: bad, y: 10 })).toThrow(
@@ -840,10 +846,10 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("accepts optional frameContext on every non-pointer input contract", () => {
-    const target = server as unknown as {
-      parseInputTypeTextParams(value: unknown): { frameContext?: string };
-      parseInputPressButtonParams(value: unknown): { frameContext?: string };
-      parseInputKeyParams(value: unknown): { frameContext?: string };
+    const target = {
+      parseInputTypeTextParams,
+      parseInputPressButtonParams,
+      parseInputKeyParams,
     };
 
     expect(
@@ -866,7 +872,7 @@ describe("UnixSocketServer input/tap", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    const client = createAndroidTestClient(androidDevice);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
     const deviceRequest = spyOn(client, "requestTapCoordinates").mockImplementation(
@@ -884,7 +890,7 @@ describe("UnixSocketServer input/tap", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/tap", {
       platform: "android",
@@ -922,7 +928,7 @@ describe("UnixSocketServer input/tap", () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
     let sent = false;
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    const client = createAndroidTestClient(androidDevice);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
     const deviceRequest = spyOn(client, "requestTapCoordinates").mockImplementation(
@@ -940,7 +946,7 @@ describe("UnixSocketServer input/tap", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
+    server = new UnixSocketServerHarness(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/tap", {
       platform: "android",

@@ -224,7 +224,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
@@ -258,7 +258,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
@@ -288,7 +288,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const connection = new Promise<boolean>((resolve) => {
       finish = resolve;
     });
-    const connect = spyOn(client as any, "connectWebSocket").mockReturnValue(connection);
+    const connect = spyOn(client, "connectWebSocket").mockReturnValue(connection);
     const close = spyOn(client, "close");
     const controller = new AbortController();
     let settled = false;
@@ -312,7 +312,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       timer: fakeTimer,
     });
-    const connect = spyOn(client as any, "connectWebSocket").mockResolvedValue(true);
+    const connect = spyOn(client, "connectWebSocket").mockResolvedValue(true);
     const controller = new AbortController();
     let settled = false;
     const result = client.supportsNodeActionSelectors(undefined, controller.signal).catch(() => {
@@ -338,14 +338,14 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
     await client.ensureConnected();
     const send = spyOn(socket, "send");
     let finish!: (connected: boolean) => void;
-    const connect = spyOn(client as any, "connectWebSocket").mockReturnValue(
+    const connect = spyOn(client, "connectWebSocket").mockReturnValue(
       new Promise<boolean>((resolve) => {
         finish = resolve;
       }),
@@ -365,7 +365,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     expect(settled).toBe(true);
     finish(true);
     expect((await result).success).toBe(false);
-    expect((client as any).requestManager.getPendingCount()).toBe(0);
+    expect(client.testHooks.requestManager.getPendingCount()).toBe(0);
     for (let i = 0; i < 12; i++) {
       await Promise.resolve();
     }
@@ -382,7 +382,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
         webSocketFactory: (url) => {
           socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-          return socket as unknown as WebSocket;
+          return socket;
         },
         timer: fakeTimer,
       });
@@ -400,7 +400,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       for (let i = 0; i < 20; i++) {
         await Promise.resolve();
       }
-      const manager = (client as any).requestManager;
+      const manager = client.testHooks.requestManager;
       const [requestId] = manager.getPendingIds();
       expect(requestId).toBeDefined();
       controller.abort();
@@ -429,7 +429,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       timer: fakeTimer,
     });
-    const connect = spyOn(client as any, "connectWebSocket").mockResolvedValue(true);
+    const connect = spyOn(client, "connectWebSocket").mockResolvedValue(true);
     const controller = new AbortController();
     controller.abort();
     await expect(
@@ -456,7 +456,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
@@ -487,7 +487,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     );
     expect(result.success).toBe(false);
     expect(result.action).toBe("click");
-    expect((client as any).requestManager.getPendingCount()).toBe(0);
+    expect(client.testHooks.requestManager.getPendingCount()).toBe(0);
     expect(client.isConnected()).toBe(true);
     send.mockRestore();
     await client.close();

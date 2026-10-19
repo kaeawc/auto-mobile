@@ -1,5 +1,5 @@
+import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, expect, test } from "bun:test";
-import WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { ScreenshotResult } from "../../../../src/features/observe/android/types";
 import {
@@ -29,15 +29,14 @@ function clientWithCapturedFrames(supportedCommands?: readonly string[]) {
   const adb = new FakeAdbExecutor();
   AndroidCtrlProxyClient.resetInstances();
   const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
-    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
     screenshotBackoffScheduler: new FakeScreenshotBackoffScheduler(),
   });
   const frames: Record<string, unknown>[] = [];
-  client["ws"] = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => frames.push(JSON.parse(data) as Record<string, unknown>),
-  } as unknown as WebSocket;
+  client.connectionTestHooks.socket = new FakeOpenSocket((data) => {
+    frames.push(JSON.parse(data) as Record<string, unknown>);
+  });
   // The handshake itself sends set_hierarchy_interval; only screenshot frames matter here.
   const sent = {
     get frames() {

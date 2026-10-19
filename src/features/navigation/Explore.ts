@@ -127,15 +127,15 @@ export class Explore extends BaseVisualChange {
   private explorationPath: string[] = [];
   private elementSelections: ElementSelectionStats[] = [];
   private consecutiveBackCount: number = 0;
-  private consecutiveNoChangeCount: number = 0;
+  consecutiveNoChangeCount: number = 0;
   private permissionDialogIdentity: string | null = null;
   private permissionDialogTapAttempts: number = 0;
-  private loopDetection: Map<string, number> = new Map();
+  loopDetection: Map<string, number> = new Map();
   private elementParser: ElementParser;
   private stopReason: string = "";
-  private previousScreen: string | null = null;
+  previousScreen: string | null = null;
   private targetPackageName: string | null = null;
-  private consecutiveOutOfAppCount: number = 0;
+  consecutiveOutOfAppCount: number = 0;
   private readonly rootScreens: Set<string> = new Set();
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
@@ -157,7 +157,7 @@ export class Explore extends BaseVisualChange {
 
   // Constants for safety limits
   private static readonly MAX_CONSECUTIVE_BACKS = 5;
-  private static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
+  static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
   private static readonly MAX_PERMISSION_DIALOG_TAP_ATTEMPTS = 3;
   private static readonly MAX_LOOP_ITERATIONS = 3;
   private static readonly DEFAULT_RESET_INTERVAL = 15;
@@ -177,6 +177,52 @@ export class Explore extends BaseVisualChange {
     this.elementParser = new DefaultElementParser();
     this.sessionUuid = sessionUuid;
     this.tapActionFactory = tapActionFactory;
+  }
+
+  /**
+   * Read-only snapshot of the traversal counters and stop state, for tests and
+   * diagnostics. Returns copies, so callers cannot mutate exploration state.
+   */
+  get diagnostics(): {
+    readonly stopReason: string;
+    readonly rootScreens: ReadonlySet<string>;
+    readonly consecutiveOutOfAppCount: number;
+    readonly consecutiveBackCount: number;
+    readonly consecutiveNoChangeCount: number;
+  } {
+    return {
+      stopReason: this.stopReason,
+      rootScreens: new Set(this.rootScreens),
+      consecutiveOutOfAppCount: this.consecutiveOutOfAppCount,
+      consecutiveBackCount: this.consecutiveBackCount,
+      consecutiveNoChangeCount: this.consecutiveNoChangeCount,
+    };
+  }
+
+  /**
+   * Seeds traversal state before calling the step methods directly, so a test
+   * can start a step mid-exploration without running the whole loop.
+   */
+  setStateForTesting(state: {
+    consecutiveNoChangeCount?: number;
+    targetPackageName?: string | null;
+    rootScreens?: Iterable<string>;
+    elementParser?: ElementParser;
+  }): void {
+    if (state.consecutiveNoChangeCount !== undefined) {
+      this.consecutiveNoChangeCount = state.consecutiveNoChangeCount;
+    }
+    if (state.targetPackageName !== undefined) {
+      this.targetPackageName = state.targetPackageName;
+    }
+    if (state.rootScreens !== undefined) {
+      for (const screen of state.rootScreens) {
+        this.rootScreens.add(screen);
+      }
+    }
+    if (state.elementParser !== undefined) {
+      this.elementParser = state.elementParser;
+    }
   }
 
   /**
@@ -726,7 +772,7 @@ export class Explore extends BaseVisualChange {
    * the no-op lets the existing stuck-screen accounting stop the run instead
    * (partially addresses issue #6169).
    */
-  private async handlePermissionDialogFastPath(
+  async handlePermissionDialogFastPath(
     observation: ObserveResult,
     progress?: ProgressCallback,
   ): Promise<"continue" | "break" | "none"> {
@@ -848,7 +894,7 @@ export class Explore extends BaseVisualChange {
   /**
    * Select the next element to interact with based on strategy
    */
-  private async selectNextElement(
+  async selectNextElement(
     observation: ObserveResult,
     strategy: ExplorationStrategy,
     mode: ExplorationMode,
@@ -1000,7 +1046,7 @@ export class Explore extends BaseVisualChange {
     return trimmed.length > 0 ? trimmed : null;
   }
 
-  private async enforceTargetApp(
+  async enforceTargetApp(
     observation: ObserveResult,
     targetPackageName: string,
     progress?: ProgressCallback,
@@ -1076,7 +1122,7 @@ export class Explore extends BaseVisualChange {
   /**
    * Perform interaction with selected element
    */
-  private async performInteraction(
+  async performInteraction(
     element: Element,
     observation: ObserveResult,
     progress?: ProgressCallback,
@@ -1143,7 +1189,7 @@ export class Explore extends BaseVisualChange {
   }
 
   /** Tap an element by selector, else its centre; null when it has no tap target. */
-  private async tapElement(
+  async tapElement(
     element: Element,
     observation: ObserveResult,
     progress?: ProgressCallback,
@@ -1271,7 +1317,7 @@ export class Explore extends BaseVisualChange {
   /**
    * Handle dead-end situation by going back
    */
-  private async handleDeadEnd(
+  async handleDeadEnd(
     progress?: ProgressCallback,
     observation?: ObserveResult,
     signal?: AbortSignal,
@@ -1317,7 +1363,7 @@ export class Explore extends BaseVisualChange {
   /**
    * Reset to home screen
    */
-  private async resetToHome(progress?: ProgressCallback, signal?: AbortSignal): Promise<void> {
+  async resetToHome(progress?: ProgressCallback, signal?: AbortSignal): Promise<void> {
     this.discardPendingToolCall();
     try {
       if (progress) {
@@ -1456,7 +1502,7 @@ export class Explore extends BaseVisualChange {
   /**
    * Generate final report
    */
-  private async generateReport(
+  async generateReport(
     initialGraph: ExportedGraph,
     startTime: number,
     cancelled: boolean,

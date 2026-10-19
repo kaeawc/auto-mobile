@@ -1,7 +1,7 @@
 import { type Kysely, sql } from "kysely";
 import { EVENT_TABLES } from "../eventTables";
 
-async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+async function tableExists<DB>(db: Kysely<DB>, tableName: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
   `.execute(db);
@@ -41,7 +41,7 @@ async function tableExists(db: Kysely<unknown>, tableName: string): Promise<bool
  * `2026_07_02_000_event_composite_indexes.ts`, so the composite that subsumes
  * each device index is guaranteed present when its device index is dropped.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   for (const table of EVENT_TABLES) {
     // .ifExists() so replay on a DB that never had the standalone device index
     // (or a partial recovery order) does not throw.
@@ -49,7 +49,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   for (const table of EVENT_TABLES) {
     if (!(await tableExists(db, table))) {
       continue;

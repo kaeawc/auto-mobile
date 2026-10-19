@@ -1,4 +1,8 @@
 import { warmedTests } from "../../helpers/warmedTests";
+import {
+  createHierarchyForTest,
+  type TestHierarchyNode,
+} from "../observe/observeScreenTestBuilders";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,6 +41,9 @@ import type {
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const POLL_INTERVAL_MS = 250;
 // Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
@@ -1087,7 +1094,7 @@ const createTrayWithGroupedNotifications = (
   titles: string[],
   headerExpandContentDesc: string = "Expand",
 ): ViewHierarchyResult =>
-  ({
+  createHierarchyForTest({
     packageName: SYSTEM_TRAY_PACKAGE,
     hierarchy: {
       node: {
@@ -1160,13 +1167,13 @@ const createTrayWithGroupedNotifications = (
         ],
       },
     },
-  }) as unknown as ViewHierarchyResult;
+  });
 
 const createTrayWithGroupedNotificationsNoExpandButton = (
   appLabel: string,
   titles: string[],
 ): ViewHierarchyResult =>
-  ({
+  createHierarchyForTest({
     packageName: SYSTEM_TRAY_PACKAGE,
     hierarchy: {
       node: {
@@ -1228,10 +1235,10 @@ const createTrayWithGroupedNotificationsNoExpandButton = (
         ],
       },
     },
-  }) as unknown as ViewHierarchyResult;
+  });
 
 const createTrayWithExpandedNotifications = (titles: string[]): ViewHierarchyResult =>
-  ({
+  createHierarchyForTest({
     packageName: SYSTEM_TRAY_PACKAGE,
     hierarchy: {
       node: {
@@ -1263,7 +1270,7 @@ const createTrayWithExpandedNotifications = (titles: string[]): ViewHierarchyRes
         })),
       },
     },
-  }) as unknown as ViewHierarchyResult;
+  });
 
 // The notification_children_container subtrees below are trimmed directly from
 // CtrlProxy captures on API 36. The bounds and SystemUI resource ids are kept
@@ -1289,7 +1296,7 @@ const createCtrlProxyCapturedGroupTray = (
         [42, 838, 1038, 889],
       ];
   const bounds = ([left, top, right, bottom]: number[]) => ({ left, top, right, bottom });
-  return {
+  return createHierarchyForTest({
     packageName: SYSTEM_TRAY_PACKAGE,
     hierarchy: {
       node: {
@@ -1477,7 +1484,7 @@ const createCtrlProxyCapturedGroupTray = (
         },
       },
     },
-  } as unknown as ViewHierarchyResult;
+  });
 };
 
 const transformHierarchyBounds = <T>(
@@ -1579,7 +1586,7 @@ const createRealisticGroupNotificationTray = (
   const groupBottom = expanded ? headerBottom + titles.length * childStep : headerBottom + 128;
   const containerBottom = Math.max(groupBottom, 993);
 
-  return {
+  return createHierarchyForTest({
     packageName: SYSTEM_TRAY_PACKAGE,
     hierarchy: {
       node: {
@@ -1774,7 +1781,7 @@ const createRealisticGroupNotificationTray = (
         },
       },
     },
-  } as unknown as ViewHierarchyResult;
+  });
 };
 
 const combineGroupNotificationTrays = (...trays: ViewHierarchyResult[]): ViewHierarchyResult => ({
@@ -1786,7 +1793,7 @@ const combineGroupNotificationTrays = (...trays: ViewHierarchyResult[]): ViewHie
         packageName: SYSTEM_TRAY_PACKAGE,
         bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
       },
-      node: trays.map((tray) => (tray.hierarchy as any).node.node),
+      node: trays.map((tray) => tray.hierarchy.node?.node),
     },
   },
 });
@@ -3760,7 +3767,7 @@ describe("systemTray dismiss outcome verification (#10010)", () => {
 // capture with rows removed or replaced, which is the shape a group has once a
 // child leaves: the summary and the sibling rows are still in the shade.
 describe("systemTray dismiss verification on captured groups (#10010)", () => {
-  type RawNode = { [key: string]: unknown; node?: RawNode | RawNode[] };
+  type RawNode = TestHierarchyNode;
   const SWIPE_SETTLE_MS = 400;
   const HEADERLESS_ROW_ID = "android:id/notification_headerless_view_row";
   const NOTIFICATION_ROW_ID = "com.android.systemui:id/expandableNotificationRow";
@@ -3770,8 +3777,7 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
     ToolRegistry.clearTools();
   });
 
-  const childrenOf = (node: RawNode): RawNode[] =>
-    node.node === undefined ? [] : Array.isArray(node.node) ? node.node : [node.node];
+  const childrenOf = (node: RawNode): RawNode[] => node.node ?? [];
 
   const subtreeTexts = (node: RawNode): string[] => [
     ...(typeof node.text === "string" ? [node.text] : []),
@@ -3788,11 +3794,11 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
 
   const editedExpandedGroup = (edit: (child: RawNode) => RawNode | null): ViewHierarchyResult => {
     const expanded = structuredClone(headerlessTwoNotificationGroups.expanded);
-    const root = (expanded.hierarchy as unknown as { node: RawNode }).node;
-    return {
+    const root: RawNode = expanded.hierarchy.node ?? {};
+    return createHierarchyForTest({
       ...expanded,
       hierarchy: { node: mapRawTree(root, edit) },
-    } as unknown as ViewHierarchyResult;
+    });
   };
 
   const withoutChildRow = (title: string): ViewHierarchyResult =>
@@ -3859,7 +3865,7 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
     edit: (copy: RawNode) => RawNode = (copy) => copy,
   ): ViewHierarchyResult => {
     const expanded = structuredClone(headerlessTwoNotificationGroups.expanded);
-    const root = (expanded.hierarchy as unknown as { node: RawNode }).node;
+    const root: RawNode = expanded.hierarchy.node ?? {};
     const isTitledRow = (candidate: RawNode): boolean => isChildRowTitled(candidate, title);
     const duplicate = (node: RawNode): RawNode => ({
       ...node,
@@ -3867,17 +3873,17 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
         .flatMap((child) => (isTitledRow(child) ? [child, edit(structuredClone(child))] : [child]))
         .map(duplicate),
     });
-    return {
+    return createHierarchyForTest({
       ...expanded,
       hierarchy: { node: duplicate(root) },
-    } as unknown as ViewHierarchyResult;
+    });
   };
 
   // The captured shade with every row removed and a status-bar style node left
   // behind that still names the dismissed app text outside any row.
   const shadeWithOnlyStatusBarIcon = (iconText: string): ViewHierarchyResult => {
     const expanded = structuredClone(headerlessTwoNotificationGroups.expanded);
-    const root = (expanded.hierarchy as unknown as { node: RawNode }).node;
+    const root: RawNode = expanded.hierarchy.node ?? {};
     const icon: RawNode = {
       "resource-id": "com.android.systemui:id/status_bar_icon",
       bounds: [0, 0, 80, 80],
@@ -3885,10 +3891,10 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
       class: "android.widget.ImageView",
       "content-desc": iconText,
     };
-    return {
+    return createHierarchyForTest({
       ...expanded,
       hierarchy: { node: { ...root, node: [icon] } },
-    } as unknown as ViewHierarchyResult;
+    });
   };
 
   const runGroupDismiss = async (

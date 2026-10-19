@@ -1,5 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { BootedDevice } from "../models";
 
@@ -36,17 +36,18 @@ function getSessionIncarnation(session: object): number {
  * bookkeeping: it never discovers devices or constructs device clients.
  */
 export function resolveActiveSessionDevice(sessionUuid: string): ActiveSessionDevice | undefined {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const sessions = defaultDaemonContext.sessionManager();
+  const pool = defaultDaemonContext.devicePool();
+  if (!sessions || !pool) {
     return resolveDirectSessionDevice(sessionUuid);
   }
 
-  const session = daemonState.getSessionManager().findSession(sessionUuid);
+  const session = sessions.findSession(sessionUuid);
   if (!session) {
     return undefined;
   }
 
-  const pooledDevice = daemonState.getDevicePool().getDevice(session.assignedDevice);
+  const pooledDevice = pool.getDevice(session.assignedDevice);
   if (!pooledDevice || holderOf(pooledDevice) !== sessionUuid) {
     return undefined;
   }

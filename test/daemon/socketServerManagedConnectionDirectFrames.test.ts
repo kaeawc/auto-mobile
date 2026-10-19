@@ -1,13 +1,11 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   computeBindingScopeKey,
   type ManagedDeviceEntry,
 } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type { FeatureFlagKey } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -19,7 +17,13 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import { createFakeDaemonState, createFakeDeviceManager } from "./helpers/inputSocketHarness";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
@@ -35,13 +39,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * Real socket server, real SessionManager and BrokerConnectionScopes on a FakeTimer; only the
  * device clients and mutation services are fakes.
  */
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  sessions: Map<string, unknown>;
-}
 
 const SLOT_SESSION = "slot-exec";
 const GENERIC_SESSION = "generic-harness";
@@ -60,7 +57,7 @@ const OUTSIDE_SLOTS = { success: false, code: "device_outside_broker_grant" };
 describe("direct frames from a managed connection outside its slots", () => {
   let sessionManager: SessionManager;
   let scopes: BrokerConnectionScopes;
-  let internals: Internals;
+  let server: UnixSocketServerHarness;
   let managed: FakeSocket;
   let generic: FakeSocket;
   let writes: string[];
@@ -72,7 +69,9 @@ describe("direct frames from a managed connection outside its slots", () => {
   let bindingHeld: boolean;
   let poolRefreshes: string[];
   let flagWrites: Array<{ key: string; enabled: boolean }>;
-  const flags = [{ key: "debug", label: "Debug", description: "Debug", enabled: false }];
+  const flags: Awaited<ReturnType<FeatureFlagAdmin["listFlags"]>> = [
+    { key: "debug", label: "Debug", description: "Debug", enabled: false },
+  ];
   const slotEntry: ManagedDeviceEntry = {
     platform: "android",
     stableDeviceId: slotDevice.deviceId,
@@ -94,7 +93,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     for (let i = 0; i < 6; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -130,52 +129,48 @@ describe("direct frames from a managed connection outside its slots", () => {
     scopes = new BrokerConnectionScopes();
 
     discovered = [slotDevice, freeDevice, heldDevice];
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => discovered,
-      getBootedDevicesDetailed: async () => ({
-        devices: discovered,
-        succeededPlatforms: new Set(["android", "ios"]),
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager(discovered));
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      createAndroidTestClient(slotDevice, {
+        getScreenScaleMetadata: () => null,
+        requestTapCoordinates: async (...args) => {
+          args[6]?.();
+          taps++;
+          return { success: true };
+        },
+        setPreference: async (...args) => {
+          if (typeof args[5] === "object") {
+            args[5].onDispatch?.();
+          }
+          writes.push("setPreference");
+          return undefined;
+        },
+        removePreference: async (...args) => {
+          if (typeof args[3] === "object") {
+            args[3].onDispatch?.();
+          }
+          writes.push("removePreference");
+          return undefined;
+        },
+        clearPreferenceStore: async (...args) => {
+          if (typeof args[2] === "object") {
+            args[2].onDispatch?.();
+          }
+          writes.push("clearPreferenceStore");
+          return undefined;
+        },
       }),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
-      getScreenScaleMetadata: () => null,
-      requestTapCoordinates: async (
-        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-      ) => {
-        args[6]?.();
-        taps++;
-        return { success: true };
-      },
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        writes.push("setPreference");
-      },
-      removePreference: async (...args: Parameters<AndroidCtrlProxyClient["removePreference"]>) => {
-        if (typeof args[3] === "object") {
-          args[3].onDispatch?.();
-        }
-        writes.push("removePreference");
-      },
-      clearPreferenceStore: async (
-        ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
-      ) => {
-        if (typeof args[2] === "object") {
-          args[2].onDispatch?.();
-        }
-        writes.push("clearPreferenceStore");
-      },
-    }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      () =>
-        ({
-          ensureCompatibleVersion: async () => {
-            writes.push("ensureCompatibleVersion");
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
     );
+    const ctrlProxyManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+      slotDevice,
+      new FakeAdbExecutor(),
+      new FakeTimer(),
+    );
+    spyOn(ctrlProxyManager, "ensureCompatibleVersion").mockImplementation(async () => {
+      writes.push("ensureCompatibleVersion");
+      return { status: "compatible" };
+    });
+    spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(ctrlProxyManager);
     const fakePool = {
       ...createFakeDaemonState().getDevicePool(),
       refreshDevices: async () => {
@@ -207,7 +202,7 @@ describe("direct frames from a managed connection outside its slots", () => {
         }
       },
     };
-    const server = createTestUnixSocketServer(
+    server = createHarnessServer(
       "unused",
       {
         isInitialized: () => true,
@@ -215,12 +210,12 @@ describe("direct frames from a managed connection outside its slots", () => {
         getDevicePool: () => fakePool,
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getBrokerConnectionScopes: () => scopes,
-      } as unknown as DaemonStateAccess,
+      },
       new FakeTimer(),
       {
-        setFlag: async (key: string, enabled: boolean) => {
+        setFlag: async (key: FeatureFlagKey, enabled: boolean) => {
           flagWrites.push({ key, enabled });
-          return { key, enabled };
+          return { key, label: key, description: key, enabled };
         },
         listFlags: async () => flags,
       } satisfies FeatureFlagAdmin,
@@ -234,16 +229,15 @@ describe("direct frames from a managed connection outside its slots", () => {
         },
       },
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    server.allowRequests();
     managed = new FakeSocket();
-    internals.handleConnection(managed as unknown as Socket);
+    server.connect(managed);
     // What broker acquisition does for the socket that asked (`bindBrokerConnection`).
-    const [socketSessionId] = [...internals.sessions.keys()];
+    const [socketSessionId] = server.sessionIds;
     scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [SLOT_SESSION] });
     // An ordinary connection on the same daemon: never bound, never confined.
     generic = new FakeSocket();
-    internals.handleConnection(generic as unknown as Socket);
+    server.connect(generic);
   });
 
   afterEach(() => {

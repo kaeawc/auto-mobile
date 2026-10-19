@@ -1,6 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // 1. Clear all existing navigation data (cascade handles related tables)
   // This is a breaking change - navigation graphs will need to be rebuilt
   await db.deleteFrom("navigation_edges" as never).execute();
@@ -82,7 +82,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("navigation_suggestions").execute();
   await db.schema.dropTable("navigation_node_fingerprints").execute();
 }

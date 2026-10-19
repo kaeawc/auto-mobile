@@ -3,6 +3,9 @@ import { registerNavigationTools } from "../../src/server/navigationTools";
 import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const NAVIGATION_TOOLS = ["explore", "navigateTo", "getNavigationGraph"];
 

@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../shared/types";
 import { parsePrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import { panelFingerprintFromWire } from "../../../models/DisplayPanel";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
@@ -22,7 +23,6 @@ import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import type { ViewHierarchyResult } from "../../../models";
-import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type {
   HierarchyDelegateContext,
@@ -43,10 +43,11 @@ import {
   resolveAccessibilityHierarchyArgs,
   type AccessibilityHierarchyRequest,
 } from "../hierarchyReadArgs";
+import { HierarchyRunnerError } from "./HierarchyRunnerError";
+import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 
-/** Cooldown after a WebSocket timeout before retrying fresh-data waits.
- *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
- *  a cascade where every hierarchy request returns stale data. */
+/** Cooldown after a WebSocket timeout before retrying fresh-data waits. Keep short: a long
+ *  cooldown (e.g. 5s) makes one slow response cascade into stale data for every request. */
 const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 500;
 
 /** Default wait window for a fresh WebSocket-pushed hierarchy.
@@ -76,13 +77,6 @@ function accessibilityToolSpread(hierarchy: AccessibilityHierarchy): {
   return typeof hierarchy.accessibilityTool === "boolean"
     ? { accessibilityTool: hierarchy.accessibilityTool }
     : {};
-}
-
-class HierarchyRunnerError extends Error {
-  constructor(readonly runnerError: string) {
-    super(runnerError);
-    this.name = "HierarchyRunnerError";
-  }
 }
 
 /**
@@ -247,7 +241,7 @@ export class CtrlProxyHierarchy {
     );
   }
 
-  private isDispatchSocketValid(dispatchSocket?: WebSocket | null): boolean {
+  private isDispatchSocketValid(dispatchSocket?: CtrlSocket | null): boolean {
     return (
       dispatchSocket === undefined ||
       (!!dispatchSocket &&
@@ -1528,7 +1522,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     requestId?: string,
     options: {
-      dispatchSocket?: WebSocket | null;
+      dispatchSocket?: CtrlSocket | null;
       allowStaleResponse: boolean;
       observerMode?: boolean;
       displayId?: number;

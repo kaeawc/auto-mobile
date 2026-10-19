@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
@@ -9,6 +9,7 @@ import {
   type DeviceReadinessProxyDriver,
 } from "./deviceReadinessProxyProvider";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import { isDeviceLostError } from "../models/DeviceLostError";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
@@ -39,8 +40,7 @@ const MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS = 5;
 const DEVICE_ACQUISITION_SETUP_DEADLINE_MS = 300_000;
 
 function setupTimingSessionManager(): SessionManager | undefined {
-  const state = DaemonState.getInstance();
-  return state.isInitialized() ? state.getSessionManager() : undefined;
+  return defaultDaemonContext.sessionManager();
 }
 
 /** Session-owned timing never falls back to another session's device timing. */
@@ -652,6 +652,11 @@ const RETRYABLE_SETUP_CATEGORIES: ReadonlySet<ProxySetupErrorCategory> = new Set
 ]);
 
 function isRetryableSetupFailure(result: ProxySetupResult): boolean {
+  // A typed DeviceLostError cause is a confirmed loss (#13392): terminal, never
+  // retried, even though its message classifies as deviceConnection.
+  if (isDeviceLostError(result.cause)) {
+    return false;
+  }
   return result.category !== undefined && RETRYABLE_SETUP_CATEGORIES.has(result.category);
 }
 
@@ -787,6 +792,7 @@ async function handleSetupFailure(
 
   throw new ActionableError(
     `Failed to setup accessibility service for device ${ctx.deviceId} (session ${ctx.sessionId}): ${errorMsg}`,
+    isDeviceLostError(setupResult.cause) ? { cause: setupResult.cause } : undefined,
   );
 }
 

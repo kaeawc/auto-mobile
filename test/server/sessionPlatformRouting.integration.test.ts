@@ -16,6 +16,9 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const android: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
 const ios: BootedDevice = { deviceId: "iphone", platform: "ios", name: "iPhone" };

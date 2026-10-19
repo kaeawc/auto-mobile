@@ -100,7 +100,7 @@ interface ScrollUntilVisibleDependencies {
   device: BootedDevice;
   resolver?: Pick<ElementResolver, "resolve">;
   geometry: ElementGeometry;
-  observeScreen: ObserveScreen;
+  observeScreen: Pick<ObserveScreen, "execute">;
   accessibilityService: ScrollAccessibilityService;
   accessibilityDetector: AccessibilityDetector;
   adb: AdbExecutor;

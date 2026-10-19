@@ -66,16 +66,15 @@ import {
   resolveObserveScreenDependencies,
   resolveObserveViewHierarchy,
 } from "./ObserveScreenDefaults";
-import type { HierarchyCollector } from "./collectors/HierarchyCollector";
 import {
   platformObservationTraits,
   type PlatformObservationTraits,
 } from "./collectors/PlatformObservationTraits";
 import {
   AndroidDisplayBindingCollector,
-  IosDisplayBindingCollector,
   type DisplayBindingCollector,
 } from "./collectors/DisplayBindingCollector";
+import { IosDisplayBindingCollector } from "./collectors/IosDisplayBindingCollector";
 import {
   DefaultAndroidObservationCollector,
   scopeActiveWindowToBackStack,
@@ -85,7 +84,7 @@ import {
   DefaultIosObservationCollector,
   type IosObservationCollector,
 } from "./collectors/IosObservationCollector";
-import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort, HierarchyCollectorPort } from "./collectors/collectorPorts";
 import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
@@ -146,8 +145,8 @@ export class RealObserveScreen implements ObserveScreen {
   private readonly screenshotService: ScreenshotService;
   private screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
   private readonly pathProtection: ScreenshotPathProtection;
-  private hierarchyCollector: HierarchyCollector;
-  private deviceStateCollector: DeviceStateCollector;
+  private hierarchyCollector: HierarchyCollectorPort;
+  private deviceStateCollector: DeviceStateCollectorPort;
   private readonly iosLockStateProbe: IosLockStateProbe;
   private performanceAuditor: Pick<PerformanceAuditor, "run">;
   private accessibilityAuditor: Pick<AccessibilityAuditor, "run">;

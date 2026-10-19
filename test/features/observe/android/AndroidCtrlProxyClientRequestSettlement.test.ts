@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { AndroidCtrlProxyDelegatingFacade } from "../../../../src/features/observe/android/AndroidCtrlProxyDelegatingFacade";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -40,7 +40,7 @@ async function harness() {
     },
   );
   await Promise.resolve();
-  client["ws"] = socket as WebSocket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "full_command_set_v1",
     "request_id_echo_v1",
@@ -499,7 +499,7 @@ async function settle(
   if (trigger === "abort") {
     controller.abort(new Error("caller cancelled"));
   } else {
-    h.client["finishEstablishedConnection"](h.socket as WebSocket);
+    h.client["finishEstablishedConnection"](h.socket);
   }
   await flush();
   if (!settled) {
@@ -545,32 +545,29 @@ const EXCLUDED: Record<string, string> = {
     "sends only when the device advertises the optional command, which this harness does not",
   discoverKeystore:
     "sends only when the device advertises the optional command, which this harness does not",
+  addStorageChangeListener: "registers an in-process listener; it sends nothing",
+  attachPrototypeRequestHost: "wires an in-process host; it sends nothing",
+  onPrototypeEvent: "registers an in-process listener; it sends nothing",
   requestIdFromWireData: "decodes an inbound frame's id; it sends nothing",
 };
 
-function requestMethodNames(client: object): string[] {
-  const names = new Set<string>();
-  for (
-    let o = Object.getPrototypeOf(client);
-    o && o !== Object.prototype;
-    o = Object.getPrototypeOf(o)
-  ) {
-    for (const name of Object.getOwnPropertyNames(o)) {
-      if (
-        /^(request[A-Z]|subscribe[A-Z]|commitVia|setKeyboardProfile|listKeyboardProfiles|validateFrame|(list|get|set|remove|clear|discover|unsubscribe)(Preference|DataStore|Storage|AccessibilityFocus|Keystore|SdkCapabilities))/.test(
-          name,
-        )
-      ) {
-        names.add(name);
-      }
-    }
-  }
-  return [...names].sort();
+/**
+ * Every method the delegating facade declares. The universe is the facade's own method list
+ * (not a name-prefix regex), so a newly added request method must be driven or excluded with a
+ * reason; it cannot slip past by not matching a pattern.
+ */
+function facadeMethodNames(): string[] {
+  const proto = AndroidCtrlProxyDelegatingFacade.prototype;
+  return Object.getOwnPropertyNames(proto)
+    .filter(
+      (name) =>
+        name !== "constructor" &&
+        typeof Object.getOwnPropertyDescriptor(proto, name)?.value === "function",
+    )
+    .sort();
 }
 
-test("the settlement table covers every public request method", async () => {
-  const h = await harness();
+test("the settlement table covers every public facade method", () => {
   const covered = new Set([...methods.map((m) => m.name), ...Object.keys(EXCLUDED)]);
-  expect(requestMethodNames(h.client).filter((name) => !covered.has(name))).toEqual([]);
-  await h.client.close();
+  expect(facadeMethodNames().filter((name) => !covered.has(name))).toEqual([]);
 });

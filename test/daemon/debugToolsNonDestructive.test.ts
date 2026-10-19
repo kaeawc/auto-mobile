@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir, platform } from "node:os";
+import { describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, writeFileSync } from "node:fs";
+import { platform } from "node:os";
 import { join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import { getDaemonHealthReport, runSocketDiagnostics } from "../../src/daemon/debugTools";
@@ -14,11 +15,10 @@ const isWindows = platform() === "win32";
  * have its live socket unlinked just because the probe errors or times out.
  */
 describe("daemon health probes are non-destructive", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemon-nondestructive-test-");
 
   function createTempPaths(): { socketPath: string; pidFilePath: string } {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-nondestructive-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     return {
       socketPath: join(dir, "daemon.sock"),
       pidFilePath: join(dir, "daemon.pid"),
@@ -35,13 +35,6 @@ describe("daemon health probes are non-destructive", () => {
     };
     writeFileSync(pidFilePath, JSON.stringify(pidData));
   }
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
 
   // #6140 design change: `isAvailable` no longer takes recovery options at all —
   // it NEVER unlinks anything, unconditionally, so there is nothing left to

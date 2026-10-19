@@ -61,7 +61,7 @@ describe("SwipeOnElement", () => {
 
     expect(gesture.calls).toHaveLength(1);
     expect(gesture.calls[0]?.slice(0, 5)).toEqual([200, 700, 200, 200, options]);
-    expect(gesture.calls[0]?.[6]).toBe(controller.signal);
+    expect(gesture.calls[0]?.[5]).toMatchObject({ signal: controller.signal });
     expect(result).toBe(gesture.result);
   });
 

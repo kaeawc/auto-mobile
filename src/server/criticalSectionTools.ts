@@ -1,6 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { ToolRegistry, type RegisteredTool } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
@@ -344,7 +344,7 @@ const criticalSectionHandler = async (
 export function registerCriticalSectionTools(timer: Timer = defaultTimer): void {
   const stepExecutor = new DefaultPlanStepExecutor<RegisteredTool>(
     ToolRegistry,
-    () => DaemonState.getInstance().isInitialized(),
+    () => defaultDaemonContext.isInitialized(),
     timer,
   );
   ToolRegistry.registerDeviceAware(

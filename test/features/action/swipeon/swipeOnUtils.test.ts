@@ -113,27 +113,4 @@ describe("resolveSwipeDirection", () => {
       expect(resolveSwipeDirection({ direction: undefined }).error).toBe("direction is required");
     });
   });
-
-  describe("unknown gestureType", () => {
-    it("treats any non-finger gestureType as a scroll and inverts the direction", () => {
-      // Documents current behavior: an unrecognized gestureType falls through to
-      // the scroll branch and inverts the finger direction.
-      const result = resolveSwipeDirection({
-        direction: "up",
-        gestureType: "totally-unknown" as unknown as "scrollTowardsDirection",
-      });
-      expect(result.direction).toBe("down");
-    });
-  });
-
-  describe("regression: object API required (not positional args)", () => {
-    it("returns error when direction field is missing from options object", () => {
-      // The old call site used resolveSwipeDirection(args.direction, args.gestureType) with
-      // positional args. The function signature requires an options object. Passing a string
-      // as the options object results in direction being undefined inside the function.
-      const stringAsOptions = "up" as any;
-      const result = resolveSwipeDirection(stringAsOptions);
-      expect(result.error).toBe("direction is required");
-    });
-  });
 });

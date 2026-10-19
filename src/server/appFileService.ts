@@ -15,7 +15,7 @@ import {
   AppFileReadRequest,
   AppFileReadResult,
   AppContainersTarget,
-  LegacyPutAppFileArgs,
+  LegacyPutAppFileInput,
   PutAppFileArgs,
   PutAppFileBatchResult,
   PutAppFileInput,
@@ -110,7 +110,7 @@ export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   signal?: AbortSignal;
 };
 
-export type LegacyPutAppFileRequest = Omit<LegacyPutAppFileArgs, "device"> & {
+export type LegacyPutAppFileRequest = Omit<LegacyPutAppFileInput, "device"> & {
   device: BootedDevice;
   signal?: AbortSignal;
 };
@@ -1836,7 +1836,7 @@ interface IosWrittenFile {
   preexisting: boolean;
 }
 
-class IosSimulatorAppFileProvider
+export class IosSimulatorAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
   readonly platform = "ios" as const;

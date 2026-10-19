@@ -118,8 +118,8 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           createFakeBuilder(),
           executor,
         );
-        manager.setXcTestProcessIdForTesting(42);
-        manager.registerForTesting();
+        manager.testHooks.setState({ xcTestProcessId: 42 });
+        manager.testHooks.register();
         let settled = false;
         const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer).then(() => {
           settled = true;
@@ -250,7 +250,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
             undefined,
             remoteRunner,
             { isAvailable: async () => true },
-          ).registerForTesting();
+          ).testHooks.register();
           spyOn(manager, "isRunning").mockResolvedValue(false);
 
           const startup = manager.start();

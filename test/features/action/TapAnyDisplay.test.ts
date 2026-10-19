@@ -184,7 +184,7 @@ test("tapAny single-display omitted display retains default dispatch path", asyn
   Reflect.set(h.action, "executeAndroidTap", async (_action: string, x: number) => {
     points.push(x);
   });
-  h.action.setRefreshViewHierarchyForTesting(async () => null);
+  h.action.testHooks.setRefreshViewHierarchy(async () => null);
   expect((await h.action.execute({ action: "tap" })).success).toBe(true);
   expect(points).toHaveLength(1);
   expect(h.observe.getExecuteCallCount()).toBe(0);

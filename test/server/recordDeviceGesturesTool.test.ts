@@ -1,15 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -29,7 +19,7 @@ import * as realDeviceGestureRecordingManager from "../../src/server/deviceGestu
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { z } from "zod/v4";
-import { getRemovedToolHint } from "../../src/models/removedTools";
+import { getRemovedToolHint } from "../../src/utils/removedTools";
 import { executionTracker } from "../../src/server/executionTracker";
 
 isolateToolRegistry();
@@ -204,7 +194,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     typeof spyOn<typeof realDeviceGestureRecordingManager, "startDeviceGestureRecording">
   >;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     const timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
     manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
@@ -258,7 +248,19 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
       platform: held.platform,
     });
     registerPlanTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     start.mockRestore();
@@ -284,34 +286,37 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(tools.runs).toEqual([]);
   }
 
-  test("a sessionless explicit unheld start is refused before device work", async () => {
+  arranged("a sessionless explicit unheld start is refused before device work", async () => {
     await expect(
       tools.call("recordDeviceGestures", { deviceId: unheld.deviceId }),
     ).rejects.toMatchObject(unheldRefusal);
     expectNoDeviceWork();
   });
 
-  test("a sessionless predicted unheld start is refused before device work", async () => {
+  arranged("a sessionless predicted unheld start is refused before device work", async () => {
     tools.deviceSessionManager.setConnectedDevices([unheld]);
     await expect(tools.call("recordDeviceGestures", {})).rejects.toMatchObject(unheldRefusal);
     expectNoDeviceWork();
   });
 
   for (const deviceId of [undefined, unheld.deviceId]) {
-    test(`a live device-less session cannot auto-acquire (${deviceId ?? "no target"})`, async () => {
-      const session = await manager.createSession("device-less", "", "android");
-      await expect(
-        tools.call("recordDeviceGestures", { sessionUuid: session.sessionId, deviceId }),
-      ).rejects.toMatchObject(unheldRefusal);
-      expect(manager.getSession(session.sessionId)?.assignedDevice).toBe("");
-      expect(pool.getAllDevices().some((device) => device.sessionId === session.sessionId)).toBe(
-        false,
-      );
-      expectNoDeviceWork();
-    });
+    arranged(
+      `a live device-less session cannot auto-acquire (${deviceId ?? "no target"})`,
+      async () => {
+        const session = await manager.createSession("device-less", "", "android");
+        await expect(
+          tools.call("recordDeviceGestures", { sessionUuid: session.sessionId, deviceId }),
+        ).rejects.toMatchObject(unheldRefusal);
+        expect(manager.getSession(session.sessionId)?.assignedDevice).toBe("");
+        expect(pool.getAllDevices().some((device) => device.sessionId === session.sessionId)).toBe(
+          false,
+        );
+        expectNoDeviceWork();
+      },
+    );
   }
 
-  test("an unheld start throws a typed refusal rendered as an MCP error result", async () => {
+  arranged("an unheld start throws a typed refusal rendered as an MCP error result", async () => {
     const refusal = await tools.call("recordDeviceGestures", { deviceId: unheld.deviceId }).then(
       () => undefined,
       (error: unknown) => error,
@@ -328,7 +333,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expectNoDeviceWork();
   });
 
-  test("a different control tool still admits a sessionless unheld device", async () => {
+  arranged("a different control tool still admits a sessionless unheld device", async () => {
     ToolRegistry.registerDeviceAware(
       "unheldControl",
       "Control admission pin",
@@ -343,36 +348,39 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  test("a persisted restart-recovery row may restore its held device before starting", async () => {
-    await persistence.upsertActiveSession({
-      sessionUuid: "recovering",
-      deviceId: unheld.deviceId,
-      platform: "android",
-      createdAtMs: 0,
-      lastUsedAtMs: 0,
-      expiresAtMs: 60_000,
-      sessionTimeoutMs: 60_000,
-      heartbeatTimeoutMs: 60_000,
-      hasReceivedHeartbeat: false,
-    });
-    readiness.mockImplementationOnce(
-      async (sessionId, _manager, _pool, _options, _execution, admitted) => {
-        expect(admitted).toBeUndefined();
-        await pool.bindOrReuseDeviceSession(sessionId!, unheld.deviceId, "android");
-        return { sessionId, deviceId: unheld.deviceId, devicePlatform: "android" };
-      },
-    );
-    await tools.call("recordDeviceGestures", {
-      sessionUuid: "recovering",
-      deviceId: unheld.deviceId,
-    });
-    expect(readiness).toHaveBeenCalledTimes(1);
-    expect(manager.getSessionForDevice(unheld.deviceId)).toBe("recovering");
-    expect(start).toHaveBeenCalledTimes(1);
-    expect(start.mock.calls[0]?.[4]).toBe("recovering");
-  });
+  arranged(
+    "a persisted restart-recovery row may restore its held device before starting",
+    async () => {
+      await persistence.upsertActiveSession({
+        sessionUuid: "recovering",
+        deviceId: unheld.deviceId,
+        platform: "android",
+        createdAtMs: 0,
+        lastUsedAtMs: 0,
+        expiresAtMs: 60_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: false,
+      });
+      readiness.mockImplementationOnce(
+        async (sessionId, _manager, _pool, _options, _execution, admitted) => {
+          expect(admitted).toBeUndefined();
+          await pool.bindOrReuseDeviceSession(sessionId!, unheld.deviceId, "android");
+          return { sessionId, deviceId: unheld.deviceId, devicePlatform: "android" };
+        },
+      );
+      await tools.call("recordDeviceGestures", {
+        sessionUuid: "recovering",
+        deviceId: unheld.deviceId,
+      });
+      expect(readiness).toHaveBeenCalledTimes(1);
+      expect(manager.getSessionForDevice(unheld.deviceId)).toBe("recovering");
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(start.mock.calls[0]?.[4]).toBe("recovering");
+    },
+  );
 
-  test("direct mode still permits an unheld recording start", async () => {
+  arranged("direct mode still permits an unheld recording start", async () => {
     DaemonState.getInstance().reset();
     await tools.call("recordDeviceGestures", { deviceId: unheld.deviceId });
     expect(readiness).not.toHaveBeenCalled();
@@ -380,7 +388,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
-  test("a held binding device refuses the non-holder before the binding refusal", async () => {
+  arranged("a held binding device refuses the non-holder before the binding refusal", async () => {
     await manager.createSession("slot-holder", binding.deviceId, "ios");
     await expect(
       tools.call("recordDeviceGestures", { deviceId: binding.deviceId }),
@@ -392,7 +400,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expectNoDeviceWork();
   });
 
-  test("a predicted idle binding device keeps its refusal before readiness", async () => {
+  arranged("a predicted idle binding device keeps its refusal before readiness", async () => {
     tools.deviceSessionManager.setConnectedDevices([binding]);
     await expect(tools.call("recordDeviceGestures", { platform: "ios" })).rejects.toMatchObject({
       code: "device_assigned_to_binding",
@@ -401,22 +409,25 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   });
 
   for (const sessionUuid of ["stranger", undefined]) {
-    test(`${sessionUuid ?? "sessionless"} is refused before readiness or recording setup`, async () => {
-      await expect(
-        tools.call("recordDeviceGestures", { deviceId: held.deviceId, sessionUuid }),
-      ).rejects.toMatchObject({
-        code: "device_owned_by_other_session",
-        deviceId: held.deviceId,
-        retryable: false,
-      });
-      expect(readiness).not.toHaveBeenCalled();
-      expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
-      expect(start).not.toHaveBeenCalled();
-      expect(tools.runs).toEqual([]);
-    });
+    arranged(
+      `${sessionUuid ?? "sessionless"} is refused before readiness or recording setup`,
+      async () => {
+        await expect(
+          tools.call("recordDeviceGestures", { deviceId: held.deviceId, sessionUuid }),
+        ).rejects.toMatchObject({
+          code: "device_owned_by_other_session",
+          deviceId: held.deviceId,
+          retryable: false,
+        });
+        expect(readiness).not.toHaveBeenCalled();
+        expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
+        expect(start).not.toHaveBeenCalled();
+        expect(tools.runs).toEqual([]);
+      },
+    );
   }
 
-  test("the holder's start works and calls the fake readiness once", async () => {
+  arranged("the holder's start works and calls the fake readiness once", async () => {
     const response = await tools.call("recordDeviceGestures", {
       deviceId: held.deviceId,
       sessionUuid: "holder",
@@ -427,7 +438,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(start.mock.calls[0]?.[4]).toBe("holder");
   });
 
-  test("the acquiring MCP connection's deviceId-only start works as the holder", async () => {
+  arranged("the acquiring MCP connection's deviceId-only start works as the holder", async () => {
     const response = await tools.call("recordDeviceGestures", {
       deviceId: held.deviceId,
       __mcpSessionId: "acquiring-connection",
@@ -438,7 +449,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(start.mock.calls[0]?.[4]).toBe("holder");
   });
 
-  test("an idle binding device keeps its existing refusal before readiness", async () => {
+  arranged("an idle binding device keeps its existing refusal before readiness", async () => {
     await expect(
       tools.call("recordDeviceGestures", { deviceId: binding.deviceId }),
     ).rejects.toMatchObject({ code: "device_assigned_to_binding" });

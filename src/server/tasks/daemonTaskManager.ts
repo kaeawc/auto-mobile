@@ -1,4 +1,4 @@
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { McpTaskRepository } from "../../db/mcpTaskRepository";
 import { logger } from "../../utils/logger";
 import { DefaultTaskManager, type TaskManager } from "./TaskManager";
@@ -23,10 +23,7 @@ export function daemonTaskManager(): TaskManager {
  */
 export function daemonTaskLeaseKeepalive(): HeartbeatTaskLeaseKeepalive {
   keepaliveInstance ??= new HeartbeatTaskLeaseKeepalive({
-    sessions: () => {
-      const state = DaemonState.getInstance();
-      return state.isInitialized() ? state.getSessionManager() : undefined;
-    },
+    sessions: () => defaultDaemonContext.sessionManager(),
   });
   return keepaliveInstance;
 }

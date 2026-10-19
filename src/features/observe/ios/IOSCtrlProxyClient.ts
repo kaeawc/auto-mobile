@@ -1,7 +1,9 @@
+import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
 import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
+import type { IosHierarchyMessageEffects } from "./IosHierarchyMessageEffects";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -20,7 +22,7 @@ import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger
 import { decodeSdkEventBatches, type DecodedSdkEvent } from "./decodeSdkEventBatches";
 import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
-import { IosRunnerBusyError, IosRunnerStalledError } from "./runnerErrorCodes";
+import { iosRunnerRefusalError } from "./IosRunnerStalledError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import type { TimedOutRequest } from "../../../utils/RequestManager";
@@ -80,17 +82,17 @@ import { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint";
 import { appWindowsOnly } from "../hierarchyLayer";
 import {
   DeviceServiceClient,
-  ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   rethrowRealCtrlProxyWebSocketInTestError,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
-import type { BaseResult } from "../shared/types";
+import type { BaseResult, CtrlSocket } from "../shared/types";
 import type { GestureTimingResult, SwipeRequestOptions } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
@@ -112,14 +114,6 @@ import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/re
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
 import { serializeIosRequest } from "./serializeIosRequest";
 import { iosMutationTokens } from "../../storage/IosMutationTokens";
-
-/** Pending requests lose their transport when the service endpoint changes. */
-export class CtrlProxyServicePortChangedError extends Error {
-  constructor() {
-    super("CtrlProxy service port changed");
-    this.name = "CtrlProxyServicePortChangedError";
-  }
-}
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -191,6 +185,8 @@ interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
   retryExecutor?: RetryExecutor;
+  /** Replaces the side effects `processMessage` runs for hierarchy messages; tests observe their order. */
+  messageEffects?: IosHierarchyMessageEffects;
 }
 
 interface ScreenshotObservationStreamOptions {
@@ -244,15 +240,6 @@ const noOpIosMetadataSource: IosAppMetadataSource = {
   getPhysicalDeviceAppInfo: async () => null,
 };
 
-type IosSdkCapability =
-  | "hierarchy"
-  | "network_mocking"
-  | "network_fault_rules"
-  | "network_error_simulation"
-  | "database"
-  | "highlight"
-  | "magic_tap";
-
 interface IosSdkCapabilities {
   bundleId: string;
   capabilities: Set<IosSdkCapability>;
@@ -264,66 +251,9 @@ interface IosSdkCapabilitiesResult extends BaseResult {
   capabilities?: string[];
 }
 
-/**
- * A capability waiter was created under one probe generation, but a hierarchy
- * update (foreground app change, reconnect, SDK failure) invalidated that
- * generation before its probe answered. The replacement generation's result
- * belongs to a different foreground app and must never authorize this waiter
- * (#6896): callers either retry against the new generation or fail actionably.
- */
-export class SdkCapabilityProbeSupersededError extends ActionableError {
-  constructor(
-    readonly capability: IosSdkCapability,
-    readonly probeGeneration: number,
-    readonly currentGeneration: number,
-  ) {
-    super(
-      `The AutoMobile SDK capability probe for ${capability} (generation ${probeGeneration}) was superseded by a newer foreground state (generation ${currentGeneration}); re-observe and retry against the current foreground app.`,
-    );
-    this.name = "SdkCapabilityProbeSupersededError";
-  }
-}
-
 /** Default production lister that queries the real device manager. */
 const defaultBootedDeviceLister: BootedDeviceLister = () =>
   PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
-
-/**
- * No-op factory used by createForTesting so that tests which don't supply
- * a factory never trigger real CtrlProxy setup on connection failure.
- */
-class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
-  private readonly forcedRestartBudget = new ForcedRestartBudget();
-  getForcedRestartBudget(): ForcedRestartBudget {
-    return this.forcedRestartBudget;
-  }
-  async setup(): Promise<{ success: false; message: string }> {
-    return { success: false, message: "no-op test stub" };
-  }
-  async isInstalled(): Promise<boolean> {
-    return false;
-  }
-  async isRunning(): Promise<boolean> {
-    return false;
-  }
-  async isAvailable(): Promise<boolean> {
-    return false;
-  }
-  async start(): Promise<void> {}
-  async stop(): Promise<void> {}
-  getServicePort(): number {
-    return 0;
-  }
-  async getReportedRunnerPort(): Promise<number | null> {
-    return null;
-  }
-  setAutoRestart(): void {}
-  isAutoRestartEnabled(): boolean {
-    return false;
-  }
-  async forceRestart(): Promise<void> {}
-  resetSetupState(): void {}
-}
 
 const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlProxyManager();
 
@@ -389,6 +319,12 @@ import type {
   CtrlProxyHighlightResult,
   WebSocketMessage,
 } from "./types";
+import { CtrlProxyServicePortChangedError } from "./CtrlProxyServicePortChangedError";
+import {
+  SdkCapabilityProbeSupersededError,
+  type IosSdkCapability,
+} from "./SdkCapabilityProbeSupersededError";
+import { NoOpIOSCtrlProxyManager } from "./NoOpIOSCtrlProxyManager";
 
 /**
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
@@ -779,7 +715,8 @@ export function getRequiredIosRunnerFeatureFlags(
  */
 export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
   private readonly streamedCaptureSequences = new WeakMap<XCTestHierarchy, number>();
-  private static instances: Map<string, IOSCtrlProxyClient> = new Map();
+  /** Per-device client instances (#11847); retired-device state stays on IOSCtrlProxyManager. */
+  public static readonly registry = new MapDeviceClientRegistry<IOSCtrlProxyClient>();
 
   // Default port matches CtrlProxy on iOS
   public static readonly DEFAULT_PORT = 8765;
@@ -907,8 +844,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private resolvePendingRestart: ((stable: boolean) => void) | undefined;
   /** Only a socket opened after forceRestart teardown may satisfy this attempt. */
   private restartAcceptsReplacement = false;
-  private restartReplacementSocket: WebSocket | null = null;
-  private restartSocketBeforeTeardown: WebSocket | null = null;
+  private restartReplacementSocket: CtrlSocket | null = null;
+  private restartSocketBeforeTeardown: CtrlSocket | null = null;
   private connectedSocketPort: number | null = null;
   /** Port acquired by this registered client, if it still uses that allocation. */
   private allocatedPort: number | null = null;
@@ -923,6 +860,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // SDK-event ingestion (telemetry/failure fan-out + layout telemetry)
   private readonly sdkEventIngestor: IosSdkEventIngestor;
+  private readonly messageEffects: IosHierarchyMessageEffects;
   private readonly sdkScreenIdentitiesByApplicationId = new Map<string, ScreenIdentity>();
   private readonly sdkScreenIdentityOrdersByApplicationId = new Map<
     string,
@@ -997,6 +935,31 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         getNavigationGraphManager: () => this.getNavigationGraphManager(),
         captureScreenshot: (timeoutMs: number) => this.requestScreenshot(timeoutMs),
       });
+    this.messageEffects = this.createMessageEffects(options.messageEffects);
+  }
+
+  /** Delegates each effect to this client's own member at call time, so per-instance overrides still apply. */
+  private createMessageEffects(override?: IosHierarchyMessageEffects): IosHierarchyMessageEffects {
+    return (
+      override ?? {
+        ignoreOlderPush: (message) => this.ignoreOlderHierarchyPush(message),
+        retainScaleMetadata: (hierarchy) => this.retainScaleMetadataFrom(hierarchy),
+        recordNavigation: (hierarchy, perfTiming) =>
+          this.handleHierarchyUpdateForNavigation(hierarchy, perfTiming),
+        convert: (hierarchy) => this.convertToViewHierarchyResult(hierarchy),
+        recordLayoutTelemetry: (converted) =>
+          this.sdkEventIngestor.recordLayoutTelemetryEvent(converted),
+        consumeStreamSuppression: (requestId) =>
+          this.consumeHierarchyObservationStreamSuppression(requestId),
+        pushToObservationStream: (converted, source, frameContext) =>
+          this.pushHierarchyToObservationStream(converted, source, frameContext),
+        startScreenshotBackoff: () => this.startScreenshotBackoff(),
+        notifyPushListeners: (hierarchy) => this.notifyPushUpdateListeners(hierarchy),
+        resolveRequest: (requestId, result) => {
+          this.requestManager.resolve(requestId, result);
+        },
+      }
+    );
   }
 
   /**
@@ -1006,27 +969,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
     const key = device.deviceId;
     const retired = IOSCtrlProxyManager.isDeviceRetired(key);
-    const existing = IOSCtrlProxyClient.instances.get(key);
+    const existing = IOSCtrlProxyClient.registry.peek(key);
     if (existing) {
       if (port !== undefined && !existing.closed && !retired) {
         existing.updatePort(port);
       }
       return existing;
     }
-    const allocatePort = !retired && port === undefined && device.platform === "ios";
-    const resolvedPort = allocatePort
-      ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
-      : ((retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ?? IOSCtrlProxyClient.DEFAULT_PORT);
-    const client = new IOSCtrlProxyClient(device, resolvedPort);
-    if (allocatePort) {
-      client.allocatedPort = resolvedPort;
-    }
-    if (retired) {
-      client.closed = true;
-      client.autoReconnectEnabled = false;
-    }
-    IOSCtrlProxyClient.instances.set(key, client);
-    return client;
+    return IOSCtrlProxyClient.registry.get(key, () => {
+      const allocatePort = !retired && port === undefined && device.platform === "ios";
+      const resolvedPort = allocatePort
+        ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
+        : ((retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ?? IOSCtrlProxyClient.DEFAULT_PORT);
+      const client = new IOSCtrlProxyClient(device, resolvedPort);
+      if (allocatePort) {
+        client.allocatedPort = resolvedPort;
+      }
+      if (retired) {
+        client.closed = true;
+        client.autoReconnectEnabled = false;
+      }
+      return client;
+    });
   }
 
   /**
@@ -1039,12 +1003,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (IOSCtrlProxyManager.isDeviceRetired(deviceId)) {
       return null;
     }
-    return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
+    return IOSCtrlProxyClient.registry.peek(deviceId) ?? null;
   }
 
   /** @internal Test seam matching AndroidCtrlProxyClient.registerForTesting. */
   public static registerForTesting(client: IOSCtrlProxyClient, deviceId: string): void {
-    IOSCtrlProxyClient.instances.set(deviceId, client);
+    IOSCtrlProxyClient.registry.invalidate(deviceId);
+    IOSCtrlProxyClient.registry.get(deviceId, () => client);
   }
 
   /**
@@ -1055,13 +1020,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * untouched.
    */
   public static clearInstanceRegistryForTesting(): void {
-    IOSCtrlProxyClient.instances.clear();
+    IOSCtrlProxyClient.registry.closeAll();
   }
 
   /** Permanently retire the registered client for one device incarnation. */
   public static async retireInstance(deviceId: string): Promise<void> {
     IOSCtrlProxyManager.retireDevice(deviceId);
-    const instance = IOSCtrlProxyClient.instances.get(deviceId);
+    const instance = IOSCtrlProxyClient.registry.peek(deviceId);
     if (!instance) {
       return;
     }
@@ -1074,7 +1039,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (!IOSCtrlProxyManager.isDeviceRetired(deviceId)) {
       return;
     }
-    IOSCtrlProxyClient.instances.delete(deviceId);
+    IOSCtrlProxyClient.registry.invalidate(deviceId);
     IOSCtrlProxyManager.resumeDevice(deviceId);
   }
 
@@ -1618,10 +1583,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
-    for (const instance of IOSCtrlProxyClient.instances.values()) {
+    for (const instance of IOSCtrlProxyClient.registry.closeAll()) {
       void instance.close();
     }
-    IOSCtrlProxyClient.instances.clear();
     IOSCtrlProxyManager.resetRetiredDevicesForTesting();
   }
 
@@ -1822,9 +1786,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     try {
       await super.close();
     } finally {
-      const registered = IOSCtrlProxyClient.instances.get(this.device.deviceId);
+      const registered = IOSCtrlProxyClient.registry.peek(this.device.deviceId);
       if (registered === this) {
-        IOSCtrlProxyClient.instances.delete(this.device.deviceId);
+        IOSCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
       }
       if (this.allocatedPort !== null && (!registered || registered === this)) {
         PortManager.releaseIfAllocated(this.device.deviceId, this.allocatedPort);
@@ -3416,7 +3380,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return false;
     }
     // Reject out-of-order pushes before they can affect cache or observation state.
-    if (this.ignoreOlderHierarchyPush(message)) {
+    if (this.messageEffects.ignoreOlderPush(message)) {
       return false;
     }
     // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first
@@ -3426,13 +3390,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // getScreenScaleMetadata() null on exactly the paths #4549 must still be able to read.
     const observerResponse = requestId ? this.observerHierarchyRequestIds.delete(requestId) : false;
     if (!observerResponse) {
-      this.retainScaleMetadataFrom(message.data! as XCTestHierarchy);
-      this.handleHierarchyUpdateForNavigation(message.data!, message.perfTiming);
+      this.messageEffects.retainScaleMetadata(message.data! as XCTestHierarchy);
+      this.messageEffects.recordNavigation(message.data!, message.perfTiming);
     }
     // Record layout telemetry event using converted hierarchy (same format as observation stream)
-    const converted = this.convertToViewHierarchyResult(message.data!);
+    const converted = this.messageEffects.convert(message.data!);
     if (!observerResponse) {
-      this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
+      this.messageEffects.recordLayoutTelemetry(converted);
     }
     // Only push to observation stream for request-response updates (with requestId).
     // Push messages (no requestId) are handled in the dedicated push-message branch below
@@ -3448,10 +3412,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     observerResponse: boolean,
   ): void {
     if (requestId) {
-      const suppressObservationStreamPush =
-        this.consumeHierarchyObservationStreamSuppression(requestId);
+      const suppressObservationStreamPush = this.messageEffects.consumeStreamSuppression(requestId);
       if (!suppressObservationStreamPush && !observerResponse) {
-        this.pushHierarchyToObservationStream(
+        this.messageEffects.pushToObservationStream(
           converted,
           message.data as XCTestHierarchy,
           message.frameContext,
@@ -3493,9 +3456,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         // runner lifecycle. Normal hierarchy observation owns bounded recovery.
         this.requestManager.reject(
           decoded.requestId,
-          decoded.runnerStalled
-            ? new IosRunnerStalledError(decoded.errorMessage)
-            : new IosRunnerBusyError(decoded.errorMessage),
+          iosRunnerRefusalError(decoded.errorMessage, decoded.runnerStalled),
         );
         return true;
       }
@@ -3509,7 +3470,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         );
         return true;
       }
-      this.requestManager.resolve(decoded.requestId, decoded.result);
+      this.messageEffects.resolveRequest(decoded.requestId, decoded.result);
       return true;
     }
     return false;
@@ -3538,21 +3499,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
 
     // Convert and push to observation stream for IDE plugins
-    const viewHierarchyResult = this.convertToViewHierarchyResult(message.data!);
-    this.pushHierarchyToObservationStream(
+    const viewHierarchyResult = this.messageEffects.convert(message.data!);
+    this.messageEffects.pushToObservationStream(
       viewHierarchyResult,
       message.data! as XCTestHierarchy,
       message.frameContext,
     );
 
     // Start screenshot backoff sequence for real-time screenshot streaming
-    this.startScreenshotBackoff();
+    this.messageEffects.startScreenshotBackoff();
 
     // Performance monitoring is handled in handleHierarchyUpdateForNavigation
     // which runs for ALL hierarchy_update messages (both push and request-response)
 
     // Notify listeners (e.g., ObserveScreen to clear its cache)
-    this.notifyPushUpdateListeners(message.data!);
+    this.messageEffects.notifyPushListeners(message.data!);
     return;
   }
 

@@ -118,6 +118,27 @@ function isProcessEnv(node: Expression): boolean {
 function rawProcessEnvReads(file: string, source: string, registered: Set<string>): string[] {
   const hits: string[] = [];
   new Visitor({
+    VariableDeclarator(node) {
+      // `const { HOME } = process.env` is a raw read exactly like `process.env.HOME`.
+      if (node.id.type !== "ObjectPattern" || !node.init || !isProcessEnv(node.init)) {
+        return;
+      }
+      for (const property of node.id.properties) {
+        if (property.type !== "Property" || property.computed) {
+          continue;
+        }
+        const key = property.key;
+        const name =
+          key.type === "Identifier"
+            ? key.name
+            : key.type === "Literal" && typeof key.value === "string"
+              ? key.value
+              : undefined;
+        if (name && registered.has(name)) {
+          hits.push(`${file}\t${name}`);
+        }
+      }
+    },
     MemberExpression(node) {
       if (!isProcessEnv(node.object)) {
         return;
@@ -215,6 +236,17 @@ describe("environment variable registry", () => {
         registered,
       ),
     ).toEqual(["x.ts\tHOME", "x.ts\tHOME"]);
+  });
+
+  test("raw process.env detector flags destructured reads", () => {
+    const registered = new Set(["HOME", "PATH"]);
+    expect(
+      rawProcessEnvReads(
+        "x.ts",
+        `const { HOME, OTHER, "PATH": p } = process.env; const { HOME: h2 } = env;`,
+        registered,
+      ),
+    ).toEqual(["x.ts\tHOME", "x.ts\tPATH"]);
   });
 
   test("baseline is sorted and has no duplicates", () => {

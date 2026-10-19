@@ -1,6 +1,6 @@
 import { makePool } from "../helpers/makePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -30,7 +30,7 @@ describe("startDevice Android offline-recovery lease classification", () => {
     deviceId: "emulator-5554",
   };
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     timer = new FakeTimer();
     deviceUtils = new FakeDeviceUtils();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -42,7 +42,19 @@ describe("startDevice Android offline-recovery lease classification", () => {
       timer,
     });
     registerDeviceTools();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     resetDeviceToolsDependencies();
@@ -71,17 +83,17 @@ describe("startDevice Android offline-recovery lease classification", () => {
     return ownsOfflineRecovery;
   }
 
-  test("name-only warm reuse leaves the startup lease non-owning", async () => {
+  arranged("name-only warm reuse leaves the startup lease non-owning", async () => {
     deviceUtils.setBootedDevices("android", [running]);
     expect(await captureLeaseOwnership({ platform: "android", name: running.name })).toBe(false);
   });
 
-  test("exact AVD cold boot without an adb serial owns offline recovery", async () => {
+  arranged("exact AVD cold boot without an adb serial owns offline recovery", async () => {
     deviceUtils.setBootedDevices("android", []);
     expect(await captureLeaseOwnership({ platform: "android", avdName: running.name })).toBe(true);
   });
 
-  test("timed-out AVD image-name lookup leaves the startup lease non-owning", async () => {
+  arranged("timed-out AVD image-name lookup leaves the startup lease non-owning", async () => {
     deviceUtils.setListDeviceImagesHangs("android", true);
     expect(
       await captureLeaseOwnership({ platform: "android", deviceId: running.name }, async () => {
@@ -98,23 +110,26 @@ describe("startDevice Android offline-recovery lease classification", () => {
     ).toBe(false);
   });
 
-  test("timed-out booted-device lookup reserves a non-owning startup lease after five seconds", async () => {
-    deviceUtils.setBootedDevicesDetailedHangs("android", true);
-    expect(
-      await captureLeaseOwnership({ platform: "android", avdName: running.name }, async () => {
-        for (
-          let attempt = 0;
-          deviceUtils.getBootedDevicesDetailedCalls().length === 0 && attempt < 50;
-          attempt++
-        ) {
-          await Promise.resolve();
-        }
-        const calls = deviceUtils.getBootedDevicesDetailedCalls();
-        expect(calls).toHaveLength(1);
-        expect(calls[0]?.options.bypassAndroidDeviceListCache).toBe(true);
-        timer.advanceTime(5_000);
-        expect(calls[0]?.options.signal?.aborted).toBe(true);
-      }),
-    ).toBe(false);
-  });
+  arranged(
+    "timed-out booted-device lookup reserves a non-owning startup lease after five seconds",
+    async () => {
+      deviceUtils.setBootedDevicesDetailedHangs("android", true);
+      expect(
+        await captureLeaseOwnership({ platform: "android", avdName: running.name }, async () => {
+          for (
+            let attempt = 0;
+            deviceUtils.getBootedDevicesDetailedCalls().length === 0 && attempt < 50;
+            attempt++
+          ) {
+            await Promise.resolve();
+          }
+          const calls = deviceUtils.getBootedDevicesDetailedCalls();
+          expect(calls).toHaveLength(1);
+          expect(calls[0]?.options.bypassAndroidDeviceListCache).toBe(true);
+          timer.advanceTime(5_000);
+          expect(calls[0]?.options.signal?.aborted).toBe(true);
+        }),
+      ).toBe(false);
+    },
+  );
 });

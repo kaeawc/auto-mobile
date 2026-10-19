@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../../../src/features/observe/shared/types";
 import {
   afterAll,
   afterEach,
@@ -8,6 +9,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -374,10 +376,10 @@ describe("AndroidCtrlProxyClient", function () {
     // until we trigger `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: factory,
@@ -425,9 +427,9 @@ describe("AndroidCtrlProxyClient", function () {
     gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, gatedAdb, {
       webSocketFactory: factory,
@@ -1130,11 +1132,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
 
       expect(checkedPorts).toEqual([8765, 8767]);
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1160,21 +1158,12 @@ describe("AndroidCtrlProxyClient", function () {
       });
       unavailablePorts.add(8765);
 
-      await (
-        accessibilityServiceClient as unknown as {
-          setupPortForwarding: () => Promise<void>;
-          getWebSocketUrl: () => string;
-        }
-      ).setupPortForwarding();
+      await accessibilityServiceClient.setupPortForwarding();
 
       expect(checkedPorts).toEqual([8765, 8765, 8765, 8765, 8765, 8767]);
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1489,9 +1478,7 @@ describe("AndroidCtrlProxyClient", function () {
     stubForwardLifecycleCommands(() => "");
     const debug = spyOn(logger, "debug");
     try {
-      const client = accessibilityServiceClient as unknown as {
-        removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-      };
+      const client = accessibilityServiceClient.testHooks;
       expect(await client.removeCtrlProxyPortForward(8765)).toBe(true);
       expect(PortManager.isPortAvailable(8765)).toBe(true);
       expect(
@@ -1511,9 +1498,7 @@ describe("AndroidCtrlProxyClient", function () {
       );
       const warning = spyOn(logger, "warn");
       try {
-        const client = accessibilityServiceClient as unknown as {
-          removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-        };
+        const client = accessibilityServiceClient.testHooks;
         expect(await client.removeCtrlProxyPortForward(8765)).toBe(false);
         expect(PortManager.isPortAvailable(8765)).toBe(true);
         expect(
@@ -1929,19 +1914,9 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("forward ownership across coordination directories (#10690)", function () {
-    const coordinationDirs: string[] = [];
+    const scratch = useScratchRoot("ctrlproxy-forward-owner-");
 
-    afterEach(function () {
-      for (const dir of coordinationDirs.splice(0)) {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    const newCoordinationDir = (): string => {
-      const dir = mkdtempSync(join(tmpdir(), "ctrlproxy-forward-owner-"));
-      coordinationDirs.push(dir);
-      return dir;
-    };
+    const newCoordinationDir = (): string => scratch.next();
 
     /** One daemon's lease, as seen from its own coordination directory. */
     const daemonLease = (dir: string, pid: number = process.pid): FileCtrlProxyForwardLease =>
@@ -3062,6 +3037,45 @@ describe("AndroidCtrlProxyClient", function () {
         return { client, timer, socket, getSocket, push, pushes, backoff, requestIds, request };
       };
 
+      test("pushes a domain-shaped ViewHierarchyResult to the observation stream, not the wire frame", async () => {
+        const h = await createSuppressionHarness();
+        try {
+          const bounds = { left: 0, top: 0, right: 1080, bottom: 2340 };
+          h.socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              timestamp: h.timer.now(),
+              data: {
+                ...hierarchyWithScreenSize(1080, 2340),
+                updatedAt: 4242,
+                hierarchy: {
+                  className: "android.widget.FrameLayout",
+                  bounds,
+                  node: [
+                    { className: "android.widget.TextView", text: "one", bounds },
+                    { className: "android.widget.Button", text: "two", bounds },
+                  ],
+                },
+              },
+            }),
+          );
+          expect(h.pushes).toHaveBeenCalledTimes(1);
+          const pushed = h.pushes.mock.calls[0]![1];
+          const root = pushed.hierarchy as { class?: string; node?: Array<{ class?: string }> };
+          // The domain converter emits `class` (wire carries only `className`) and keeps `node` an array.
+          expect(root.class).toBe("android.widget.FrameLayout");
+          expect(Array.isArray(root.node)).toBe(true);
+          expect(root.node?.map((child) => child.class)).toEqual([
+            "android.widget.TextView",
+            "android.widget.Button",
+          ]);
+          expect(pushed.updatedAt).toBe(4242);
+          expect(pushed.sources).toEqual(["control-proxy"]);
+        } finally {
+          await h.client.close();
+        }
+      });
+
       test("debounced push stays live and the later explicit response stays suppressed", async () => {
         const h = await createSuppressionHarness();
         try {
@@ -4165,7 +4179,7 @@ describe("AndroidCtrlProxyClient", function () {
         expect(pkgSpy).toHaveBeenCalledTimes(1); // cached — no re-resolution
 
         // Connection drops (app may be replaced unobserved), then a later event arrives.
-        (testClient as unknown as { onConnectionClosed: () => void }).onConnectionClosed();
+        testClient.onConnectionClosed();
 
         navEvent("Home2");
         await settle();

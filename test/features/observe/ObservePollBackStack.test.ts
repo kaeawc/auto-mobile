@@ -3,11 +3,7 @@ import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
-import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
-import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
-import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
-import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
@@ -22,10 +18,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeTimer } from "../../fakes/FakeTimer";
-
-class NoOpAuditor {
-  async run(): Promise<void> {}
-}
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 
 function createHarness(
   options: {
@@ -64,15 +57,6 @@ function createHarness(
       wakefulness: "Awake",
     } as ViewHierarchyResult;
   };
-  const iosHierarchy = Object.assign(hierarchy, {
-    reconcileScreenDimensions(
-      result: ViewHierarchyResult,
-      size: { width: number; height: number },
-    ): void {
-      result.screenWidth = size.width;
-      result.screenHeight = size.height;
-    },
-  });
   const state = new FakeDeviceStateCollector();
   state.collectBackStack = async (result): Promise<void> => {
     state.backStackCalls++;
@@ -113,14 +97,12 @@ function createHarness(
     {
       viewHierarchy,
       hierarchyCapture: options.hierarchyCapture,
-      hierarchyCollector: iosHierarchy as unknown as HierarchyCollector,
-      deviceStateCollector: state as unknown as DeviceStateCollector,
+      hierarchyCollector: hierarchy,
+      deviceStateCollector: state,
       cacheStore: cache,
       screenshotStateStore: new FakeScreenshotStateStore(timer),
       screenshotRecorder: new FakeScreenshotRecorder(),
-      performanceAuditor: new NoOpAuditor() as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as AccessibilityStateDetector,
+      ...noopObserveAudits(),
     },
     timer,
   );

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeGestureExecutor } from "../../fakes/FakeGestureExecutor";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -308,15 +309,10 @@ describe("typed explicit-display fences G", () => {
         });
       }
       const run = async () => {
-        const target = await prepareTargetDisplayAction(
-          h.targetDevice,
-          "inner",
-          h.observe,
-          h.adb,
-          previous,
-          undefined,
-          h.transitions,
-        );
+        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, h.adb, {
+          lastRenderedObservation: previous,
+          transitions: h.transitions,
+        });
         if (site === "dispatch" && scenario.count) {
           h.transitions.transition(scenario.count);
         }
@@ -349,15 +345,10 @@ describe("typed explicit-display fences G", () => {
   test("G still requires observation of the requested panel", async () => {
     const h = harness(cases[4]);
     await expect(
-      prepareTargetDisplayAction(
-        device,
-        "inner",
-        h.observe,
-        h.adb,
-        () => undefined,
-        undefined,
-        h.transitions,
-      ),
+      prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+        lastRenderedObservation: () => undefined,
+        transitions: h.transitions,
+      }),
     ).rejects.toThrow(
       'Coordinates for display "inner" require a prior observation of that panel. Re-observe display "inner" and retry.',
     );
@@ -647,9 +638,9 @@ describe("selector tools retry once after a fold", () => {
   const restores: Array<{ mockRestore(): void }> = [];
   beforeEach(() => {
     restores.push(
-      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager),
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
+      ),
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy()),
     );
   });
@@ -760,9 +751,9 @@ describe("swipeOn lookFor and auto-target retry once after a fold", () => {
     h.observe.setObserveResult(fresh);
     restores.push(
       spyOn(h.observe, "getMostRecentCachedObserveResult").mockImplementation(async () => h.screen),
-      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-        isAvailable: async () => true,
-      } as unknown as AndroidCtrlProxyManager),
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+        FakeCtrlProxyManager.withAvailability(true),
+      ),
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(h.timer)),
     );
     const gesture = new FakeGestureExecutor();

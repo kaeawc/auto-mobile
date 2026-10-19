@@ -4,6 +4,9 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * The acceptance harness uses a fresh client for each destructive operation.

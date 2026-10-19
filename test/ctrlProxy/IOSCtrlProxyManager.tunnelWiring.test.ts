@@ -48,7 +48,7 @@ function fakeFixture() {
     fake,
     new FakeProcessExecutor(),
   );
-  manager.setStateForTesting({ servicePort: 8765 });
+  manager.testHooks.setState({ servicePort: 8765 });
   return { timer, fake, manager };
 }
 function realFixture(remoteMode = false) {
@@ -109,7 +109,7 @@ function realFixture(remoteMode = false) {
     remote,
     { isAvailable: async () => true },
   );
-  manager.setStateForTesting({ servicePort: 8765 });
+  manager.testHooks.setState({ servicePort: 8765 });
   const isRunning = manager.isProcessRunning.bind(manager);
   keep(
     spyOn(manager, "isProcessRunning").mockImplementation((pid) => {
@@ -148,7 +148,7 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
   test("start, explicit undefined device port, restart and stop keep their arguments and order", async () => {
     const { manager, fake } = fakeFixture();
     await manager.startIproxyTunnel({ devicePort: undefined });
-    manager.setStateForTesting({ servicePort: 8766 });
+    manager.testHooks.setState({ servicePort: 8766 });
     await manager.restartIproxyTunnel();
     await manager.stopIproxyTunnel({ clearDevicePort: true });
     expect(fake.calls).toEqual(["start", "start", "stop"]);
@@ -169,7 +169,7 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
     keep(spyOn(manager, "useRemoteRunner").mockReturnValue(true));
     fake.devicePort = 9100;
     await manager.startIproxyTunnel({ devicePort: undefined });
-    manager.setStateForTesting({ servicePort: 8766 });
+    manager.testHooks.setState({ servicePort: 8766 });
     await manager.restartIproxyTunnel();
     expect(fake.calls).toEqual(["start", "start"]);
     expect(fake.starts).toEqual([
@@ -263,7 +263,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     async (remoteMode) => {
       const { manager, client, children, events } = realFixture(remoteMode);
       await manager.startIproxyTunnel({ devicePort: 9100 });
-      manager.setStateForTesting({ servicePort: 8766 });
+      manager.testHooks.setState({ servicePort: 8766 });
       // The supervisor clears PID/child tracking before invoking the manager restart callback.
       if (remoteMode) {
         client.setStateForTesting({ processId: null });
@@ -445,7 +445,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     async (stopping) => {
       const { manager, children, timer, events } = realFixture();
       await manager.startIproxyTunnel();
-      manager.setStateForTesting({ isStopping: stopping });
+      manager.testHooks.setState({ isStopping: stopping });
       events.length = 0;
       children[0].emit("exit", 1, null);
       await flush();
@@ -556,7 +556,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     async (remoteMode) => {
       const { manager, client, children, events, remote } = realFixture(remoteMode);
       await manager.startIproxyTunnel();
-      manager.setStateForTesting({ xcTestProcessId: 456 });
+      manager.testHooks.setState({ xcTestProcessId: 456 });
       keep(
         spyOn(PortManager, "release").mockImplementation(() => {
           expect(client.localPort).toBeNull();

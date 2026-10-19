@@ -38,6 +38,9 @@ describe("countDaemonStateGetInstanceCalls", () => {
     "(DaemonState.getInstance)();",
     "DaemonState.getInstance().getSessionManager();",
     "DaemonState.getInstance!();",
+    'import { DaemonState as State } from "../daemon/daemonState";\nState.getInstance();',
+    'import * as ds from "../daemon/daemonState";\nds.DaemonState.getInstance();',
+    "const S = DaemonState;\nconst T = S;\nT.getInstance();",
   ])("counts a call: %s", (source) => {
     expect(countDaemonStateGetInstanceCalls("fixture.ts", source)).toBe(1);
   });

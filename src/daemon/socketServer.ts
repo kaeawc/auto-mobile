@@ -21,6 +21,7 @@ import {
 } from "./socketServer/controlRoutes";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
+import type { IdeMutationCall } from "./socketServer/ideMutationCall";
 import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
 import {
   DISPATCH_HELD_INPUT_METHODS,
@@ -33,6 +34,14 @@ import {
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
 import { idleReleaseField } from "./releaseReasons";
+import {
+  applyResourceSubscription,
+  broadcastListChanged as fanOutListChanged,
+  broadcastResourceUpdated as fanOutResourceUpdated,
+  broadcastSessionReleased as fanOutSessionReleased,
+  pushProgressNotification as fanOutProgress,
+  type NotificationTransport,
+} from "./socketServer/notificationFanOut";
 import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
@@ -40,7 +49,7 @@ import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
-import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -66,7 +75,6 @@ import {
   DaemonNotification,
   DaemonRequest,
   DaemonResponse,
-  PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
   SessionContext,
@@ -119,15 +127,10 @@ import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../utils/fileLock
 import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
-  RESOURCE_UPDATED_NOTIFICATION_METHOD,
   type ResourceUpdateTargets,
-  LIST_CHANGED_NOTIFICATION_METHODS,
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
-import {
-  SessionReleaseBroadcaster,
-  SESSION_RELEASED_NOTIFICATION_METHOD,
-} from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   toolSelectionProfileUuidFromResponse,
   IDE_SET_SESSION_TOOL_ENABLED_METHOD,
@@ -226,7 +229,6 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { indeterminateTapError } from "../features/action/coordinateTapDispatch";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type {
   KeyValueType,
@@ -261,6 +263,8 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import type { UnixSocketServerTestHooks } from "./socketServer/unixSocketServerTestHooks";
+import { indeterminateInputError } from "./socketServer/forwardFailures";
 import { isTaskRelayMethod, parseTaskRelayFrame } from "../server/tasks/taskRelay";
 import {
   callForwardedTool,
@@ -626,7 +630,7 @@ const MCP_FORWARD_DEVICE_KEY_PREFIX = "device:";
 /** How long a closed socket's late executions may still write bindings that are then forgotten. */
 const LATE_BINDING_FORGET_WINDOW_MS = 15 * 60 * 1000;
 
-interface McpForwardRoute {
+export interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
   executionKey: string;
   /** Owns the loopback MCP transport and its session-local tool-selection profile. */
@@ -656,25 +660,6 @@ interface McpForwardContext {
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
-
-/** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
-interface IdeMutationCall {
-  /**
-   * Keep `execution` in flight until the route settles. The holder's own call (`asHolder`) is also
-   * cut by a release of its session; a forced call acts for no session and runs to its end.
-   */
-  track(execution: ActiveExecution, asHolder: boolean): void;
-  /** The holder's session admission passed for `execution`: its dispatch will be session use. */
-  admit(execution: ActiveExecution): void;
-  /**
-   * The SDK write was sent successfully, or the direct-file fallback passed its abort check and
-   * is about to act on the device: only now is the holder's call session use (#11596, #11750).
-   * A route refused or cancelled while connecting ends unstamped.
-   */
-  dispatching(): void;
-  /** The socket session that sent the frame: a managed connection mutates only its binding devices. */
-  readonly socketSessionId: string | undefined;
-}
 
 /**
  * One `input/*` frame's device work. It calls `dispatching` once every pre-dispatch check passed
@@ -906,25 +891,25 @@ export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
   private closing = false;
-  private acceptingRequests = false;
+  protected acceptingRequests = false;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
-  private readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
+  protected readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private readonly adbClientFactory: AdbClientFactory;
-  private sessions: Map<string, SessionContext> = new Map();
+  protected sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
-  private clientSockets: Map<string, Socket> = new Map();
+  protected clientSockets: Map<string, Socket> = new Map();
   private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
   private readonly controlConnections = new WeakMap<Socket, ControlConnection>();
   /** Request handlers that can continue after their client socket is destroyed. */
-  private activeRequestHandlers: Set<Promise<void>> = new Set();
+  protected activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
-  private pendingSocketRequests = new PendingRequestTracker();
+  protected pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
-  private notificationSubscribers: Set<string> = new Set();
-  private readonly resourceSubscriptions = new Map<string, Set<string>>();
+  protected notificationSubscribers: Set<string> = new Set();
+  protected readonly resourceSubscriptions = new Map<string, Set<string>>();
   /**
    * The session that owned each resolved input target at resolution time, so a rebind between
    * resolution and execution cannot leave the input running as an unowned call (#9958).
@@ -942,9 +927,9 @@ export class UnixSocketServer {
    * device session. Follow-up requests can omit their session UUID, so reuse
    * this client to preserve the selected tool-selection profile.
    */
-  private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
+  protected boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP forwards only within the same execution target. */
-  private mcpForwardTails: Map<string, Promise<void>> = new Map();
+  protected mcpForwardTails: Map<string, Promise<void>> = new Map();
   /** Direct device forwards that need cleanup after every successor tail has settled. */
   private mcpForwardIdleCloseKeys: Map<string, Set<string>> = new Map();
   /** Execution keys whose chain drained, timed for the append-helper idle eviction. */
@@ -1048,7 +1033,7 @@ export class UnixSocketServer {
    * registry entry live indefinitely; {@link GestureOwnershipRegistry} issues a cancelling end for
    * each on socket teardown, and for a start acked after its socket already closed (#10005).
    */
-  private readonly ownedGestures = new GestureOwnershipRegistry({
+  protected readonly ownedGestures = new GestureOwnershipRegistry({
     isSocketLive: (socketSessionId) => this.clientSockets.has(socketSessionId),
     cancelGesture: (targetDevice, gestureId) => this.cancelGestureOnDevice(targetDevice, gestureId),
   });
@@ -1291,7 +1276,7 @@ export class UnixSocketServer {
   /**
    * Handle a new client connection
    */
-  private handleConnection(socket: Socket): void {
+  protected handleConnection(socket: Socket): void {
     if (!this.acceptingRequests) {
       // An accept callback can already be queued when quiesce closes the
       // listener. End that late connection before it can bind or issue work.
@@ -1555,7 +1540,7 @@ export class UnixSocketServer {
     }
   }
 
-  private releaseSocketSession(sessionId: string, socket: Socket): void {
+  protected releaseSocketSession(sessionId: string, socket: Socket): void {
     // Session IDs are expected to be unique, but teardown must still be
     // incarnation-safe: a delayed close/error from an older socket must not
     // remove or abort work registered by a newer socket with the same ID.
@@ -1618,7 +1603,7 @@ export class UnixSocketServer {
     );
   }
 
-  private abortMcpRequests(sessionId: string): void {
+  protected abortMcpRequests(sessionId: string): void {
     this.abortRequestControllers(
       sessionId,
       this.mcpRequestAbortControllers,
@@ -1641,7 +1626,7 @@ export class UnixSocketServer {
     }
   }
 
-  private mcpRequestSignal(
+  protected mcpRequestSignal(
     sessionId: string,
     ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
     cancelSignal?: AbortSignal,
@@ -1687,63 +1672,29 @@ export class UnixSocketServer {
     return !signal.aborted && socket !== undefined && !socket.destroyed;
   }
 
-  /**
-   * Push a list-changed notification frame to every subscribed client socket
-   * (issue #3223). Best-effort per socket: a dead/mid-teardown socket is
-   * skipped or destroyed by the write helper, never thrown.
-   */
-  private broadcastListChanged(kind: ListChangedKind): void {
-    const notification: DaemonNotification = {
-      type: "daemon_notification",
-      method: LIST_CHANGED_NOTIFICATION_METHODS[kind],
+  /** The fan-out's view of the live client sockets (#11815). */
+  private get notificationTransport(): NotificationTransport {
+    return {
+      hasSocket: (sessionId) => this.clientSockets.has(sessionId),
+      write: (sessionId, frame, onFlushed) => {
+        const socket = this.clientSockets.get(sessionId);
+        if (socket) {
+          this.writeFrame(socket, sessionId, frame, onFlushed);
+        }
+      },
     };
-    for (const sessionId of this.notificationSubscribers) {
-      const socket = this.clientSockets.get(sessionId);
-      if (!socket) {
-        continue;
-      }
-      this.writeFrame(socket, sessionId, notification);
-    }
   }
 
-  private broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
-    for (const [sessionId, subscriptions] of this.resourceSubscriptions) {
-      const socket = this.clientSockets.get(sessionId);
-      if (!socket) {
-        continue;
-      }
-      for (const uri of resolveTargets(subscriptions)) {
-        this.writeFrame(socket, sessionId, {
-          type: "daemon_notification",
-          method: RESOURCE_UPDATED_NOTIFICATION_METHOD,
-          uri,
-        });
-      }
-    }
+  private broadcastListChanged(kind: ListChangedKind): void {
+    fanOutListChanged(this.notificationSubscribers, this.notificationTransport, kind);
+  }
+
+  protected broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
+    fanOutResourceUpdated(this.resourceSubscriptions, this.notificationTransport, resolveTargets);
   }
 
   private handleResourceSubscription(sessionId: string, request: DaemonRequest): DaemonResponse {
-    const uri = request.params?.uri;
-    if (typeof uri !== "string" || uri.length === 0) {
-      return {
-        id: request.id,
-        type: "mcp_response",
-        success: false,
-        error: "Resource subscription requires params.uri",
-      };
-    }
-    if (request.method === RESOURCE_SUBSCRIBE_METHOD) {
-      const subscriptions = this.resourceSubscriptions.get(sessionId) ?? new Set<string>();
-      subscriptions.add(uri);
-      this.resourceSubscriptions.set(sessionId, subscriptions);
-    } else {
-      const subscriptions = this.resourceSubscriptions.get(sessionId);
-      subscriptions?.delete(uri);
-      if (subscriptions?.size === 0) {
-        this.resourceSubscriptions.delete(sessionId);
-      }
-    }
-    return { id: request.id, type: "mcp_response", success: true, result: {} };
+    return applyResourceSubscription(this.resourceSubscriptions, sessionId, request);
   }
 
   /**
@@ -1760,52 +1711,16 @@ export class UnixSocketServer {
     release?: DaemonNotification["release"],
     recordingIds?: string[],
   ): void {
-    const notification: DaemonNotification = {
-      type: "daemon_notification",
-      method: SESSION_RELEASED_NOTIFICATION_METHOD,
-      sessionId: releasedSessionId,
-      ...(reason !== undefined ? { reason } : {}),
-      ...idleReleaseField(reason),
-      ...(release !== undefined ? { release } : {}),
-      ...(recordingIds && recordingIds.length > 0 ? { recordingIds } : {}),
-    };
-    for (const sessionId of this.notificationSubscribers) {
-      const socket = this.clientSockets.get(sessionId);
-      if (!socket) {
-        continue;
-      }
-      const pending = Promise.withResolvers<void>();
-      this.pendingSessionReleaseWrites.add(pending.promise);
-      this.writeFrame(socket, sessionId, notification, () => {
-        this.pendingSessionReleaseWrites.delete(pending.promise);
-        pending.resolve();
-      });
-    }
+    fanOutSessionReleased(
+      this.notificationSubscribers,
+      this.notificationTransport,
+      this.pendingSessionReleaseWrites,
+      { releasedSessionId, reason, release, recordingIds },
+    );
   }
 
-  /**
-   * Push one `notifications/progress` tick to the SINGLE socket session that
-   * requested it (issue #6205), carrying the SAME `progressToken` that
-   * session's `tools/call` request declared. Unlike the broadcast helpers
-   * above, this targets exactly one socket rather than every subscriber — the
-   * request id identifies the originating call even if another call on the
-   * same connection uses the same token.
-   *
-   * Deliberately NOT gated on the opt-in general-notification subscription
-   * (unlike the broadcast helpers above). A progress tick is a directed reply
-   * to something THIS session explicitly asked for by putting a
-   * `progressToken` on its OWN in-flight request -- that is itself the
-   * opt-in, independent of whether `daemon/subscribe-notifications` was ever
-   * sent or whether it succeeded. `DaemonMcpProxy.doConnect` deliberately
-   * continues without a subscription when it fails (best-effort degradation),
-   * and gating progress on it too would silently strand a long-running
-   * progress-emitting call: the daemon keeps applying work under its own
-   * extended deadline while the client's independent local timer -- which
-   * only extends on a progress tick it actually receives -- times out
-   * underneath it, a split-brain where the daemon succeeds but the client
-   * reports failure (#6222 review, P2). Only a torn-down socket is skipped.
-   */
-  private pushProgressNotification(
+  /** Pushes one progress tick to the single socket that requested it (#6205); see the fan-out. */
+  protected pushProgressNotification(
     sessionId: string,
     requestId: string,
     progressToken: string | number,
@@ -1813,20 +1728,13 @@ export class UnixSocketServer {
     total?: number,
     message?: string,
   ): void {
-    const socket = this.clientSockets.get(sessionId);
-    if (!socket) {
-      return;
-    }
-    const notification: DaemonNotification = {
-      type: "daemon_notification",
-      method: PROGRESS_NOTIFICATION_METHOD,
+    fanOutProgress(this.notificationTransport, sessionId, {
       requestId,
       progressToken,
       progress,
-      ...(total !== undefined ? { total } : {}),
-      ...(message !== undefined ? { message } : {}),
-    };
-    this.writeFrame(socket, sessionId, notification);
+      total,
+      message,
+    });
   }
 
   private writeFrame(
@@ -1860,7 +1768,7 @@ export class UnixSocketServer {
     this.writeFrameData(socket, sessionId, frame, onFlushed);
   }
 
-  private writeFrameData(
+  protected writeFrameData(
     socket: Socket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
@@ -1915,7 +1823,7 @@ export class UnixSocketServer {
   /**
    * Handle a request from a client
    */
-  private async handleRequest(
+  protected async handleRequest(
     sessionId: string,
     ownerSocket: Socket,
     request: DaemonRequest,
@@ -2356,7 +2264,7 @@ export class UnixSocketServer {
       : { id: request.id, type: "mcp_response", success: true, result: outcome };
   }
 
-  private mcpForwardFailureResponse({
+  protected mcpForwardFailureResponse({
     error,
     request,
     sessionId,
@@ -2480,7 +2388,7 @@ export class UnixSocketServer {
     return { id: request.id, type: "mcp_response", success: true, result: { cancelled: true } };
   }
 
-  private requireRemainingMcpForwardBudget(
+  protected requireRemainingMcpForwardBudget(
     request: DaemonRequest,
     totalTimeoutMs: number,
     deadline: ProgressExtendableDeadline,
@@ -2684,7 +2592,7 @@ export class UnixSocketServer {
     };
   }
 
-  private getMcpForwardRoute(
+  protected getMcpForwardRoute(
     request: DaemonRequest,
     socketSessionId: string,
   ): McpForwardRoute | Promise<McpForwardRoute> {
@@ -2940,7 +2848,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
+  protected async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
     const token = this.ownedSessionsOwnerToken(args);
     // A queued call must not recreate its closed connection's identity (#11999).
     if (token !== undefined && this.clientSockets.has(socketSessionId)) {
@@ -3311,7 +3219,7 @@ export class UnixSocketServer {
     };
   }
 
-  private recordBoundMcpClientKey(
+  protected recordBoundMcpClientKey(
     request: DaemonRequest,
     socketSessionId: string,
     route: McpForwardRoute,
@@ -3523,7 +3431,7 @@ export class UnixSocketServer {
     return toolSelectionProfileUuidFromResponse(response);
   }
 
-  private clearBoundMcpClientKey(socketSessionId: string): void {
+  protected clearBoundMcpClientKey(socketSessionId: string): void {
     const boundClient = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
     if (!boundClient) {
       return;
@@ -3553,7 +3461,7 @@ export class UnixSocketServer {
    * the socket session as its MCP session key, closed (cancelling what it left running) when the
    * forward ends.
    */
-  private async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
+  protected async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
     const mcpClient = await runWithForwardSessionKey(
       context.socketSessionId,
@@ -3621,7 +3529,7 @@ export class UnixSocketServer {
     }
   }
 
-  private remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {
+  protected remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {
     return input.deadline.value - this.timer.now();
   }
 
@@ -3970,7 +3878,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async handleLocalSocketRequest(
+  protected async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
     signal?: AbortSignal,
@@ -4104,7 +4012,7 @@ export class UnixSocketServer {
    * The `ide/*` and acceptance routes. `ideMutation` is set for the routes that mutate a device
    * ({@link IDE_DEVICE_MUTATION_METHODS}): their ownership gate tracks the call under it.
    */
-  private async handleIdeSocketRequest(
+  protected async handleIdeSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
     ideMutation?: IdeMutationCall,
@@ -4171,6 +4079,7 @@ export class UnixSocketServer {
     const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
       args.platform,
       args.deviceId,
+      ideMutation?.signal,
     );
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
@@ -4192,7 +4101,7 @@ export class UnixSocketServer {
       ideMutation,
     );
     if (args.platform === "android") {
-      getAbortSignal()?.throwIfAborted();
+      ideMutation?.signal.throwIfAborted();
       ideMutation?.dispatching();
       AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
       const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
@@ -4208,7 +4117,7 @@ export class UnixSocketServer {
       };
     } else {
       const manager = IOSCtrlProxyManager.getInstance(targetDevice);
-      getAbortSignal()?.throwIfAborted();
+      ideMutation?.signal.throwIfAborted();
       ideMutation?.dispatching();
       IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
       await manager.forceRestart();
@@ -4245,7 +4154,7 @@ export class UnixSocketServer {
         appId,
         fileName,
         {
-          dispatching: () => ideMutation?.dispatching(),
+          ideMutation,
           viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
           viaDirectFile: (adb) =>
             removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
@@ -4264,7 +4173,7 @@ export class UnixSocketServer {
         appId,
         fileName,
         {
-          dispatching: () => ideMutation?.dispatching(),
+          ideMutation,
           viaSdk: (onDispatch) =>
             client.setPreference(appId, fileName, key, value, type, { onDispatch }),
           viaDirectFile: (adb) =>
@@ -4309,7 +4218,7 @@ export class UnixSocketServer {
       appId,
       fileName,
       {
-        dispatching: () => ideMutation?.dispatching(),
+        ideMutation,
         viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
         viaDirectFile: (adb) =>
           removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
@@ -4348,7 +4257,7 @@ export class UnixSocketServer {
       appId,
       fileName,
       {
-        dispatching: () => ideMutation?.dispatching(),
+        ideMutation,
         viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
         viaDirectFile: (adb) =>
           clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
@@ -4487,8 +4396,10 @@ export class UnixSocketServer {
     let tracked: ActiveExecution | undefined;
     let cutByRelease: ActiveExecution | undefined;
     let admitted: ActiveExecution | undefined;
+    const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
     const call: IdeMutationCall = {
       socketSessionId,
+      signal,
       admit: (execution) => {
         admitted = execution;
       },
@@ -4513,7 +4424,6 @@ export class UnixSocketServer {
       },
     };
     try {
-      const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
       signal.throwIfAborted();
       return await runWithAbortSignal(signal, () => run(call));
     } catch (error) {
@@ -4536,8 +4446,9 @@ export class UnixSocketServer {
   private async listBootedDevicesForIdeAction(
     platform: "android" | "ios",
     serial: string,
+    signal?: AbortSignal,
   ): Promise<BootedDevice[]> {
-    getAbortSignal()?.throwIfAborted();
+    signal?.throwIfAborted();
     const manager = PlatformDeviceManagerFactory.getInstance();
     const discovery = expectingPooledSources(
       await manager.getBootedDevicesDetailed(platform),
@@ -4555,7 +4466,7 @@ export class UnixSocketServer {
         ? new AndroidBootedDeviceDiscoveryIncompleteError(discoveryError)
         : new BootedDeviceDiscoveryIncompleteError(platform, discoveryError);
     }
-    getAbortSignal()?.throwIfAborted();
+    signal?.throwIfAborted();
     return discovery.devices;
   }
 
@@ -4566,10 +4477,11 @@ export class UnixSocketServer {
   private async resolveIdeActionDevices(
     platform: "android" | "ios",
     serial: string,
+    signal?: AbortSignal,
   ): Promise<CanonicalFrameDiscovery & { deviceId: string }> {
     const canonical = await this.canonicalFrameDiscovery(
       platform,
-      await this.listBootedDevicesForIdeAction(platform, serial),
+      await this.listBootedDevicesForIdeAction(platform, serial, signal),
       serial,
     );
     return { devices: canonical.devices, deviceId: canonical.deviceId ?? serial };
@@ -4646,7 +4558,7 @@ export class UnixSocketServer {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
     const { devices: bootedDevices, deviceId: canonicalDeviceId } =
-      await this.resolveIdeActionDevices(platform, deviceId);
+      await this.resolveIdeActionDevices(platform, deviceId, ideMutation?.signal);
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
     this.assertDeviceActionable(canonicalDeviceId, "to mutate stored values");
@@ -4655,7 +4567,7 @@ export class UnixSocketServer {
       throw new Error(`Device not found: ${deviceId}`);
     }
     await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
-    getAbortSignal()?.throwIfAborted();
+    ideMutation?.signal.throwIfAborted();
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)
@@ -4674,13 +4586,13 @@ export class UnixSocketServer {
    * fallback abort check before direct-file work. Connecting alone never stamps.
    * Returns the SDK resolution and whether the fallback ran, for store and warning reporting.
    */
-  private async runIdeKeyValueMutation(
+  protected async runIdeKeyValueMutation(
     platform: "android" | "ios",
     device: BootedDevice,
     appId: string,
     fileName: string,
     mutation: {
-      dispatching: () => void;
+      ideMutation: IdeMutationCall | undefined;
       viaSdk: (onDispatch: () => void) => Promise<PreferenceStoreResolution | void>;
       viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
     },
@@ -4694,10 +4606,10 @@ export class UnixSocketServer {
         return;
       }
       dispatched = true;
-      mutation.dispatching();
+      mutation.ideMutation?.dispatching();
     };
     if (platform !== "android") {
-      getAbortSignal()?.throwIfAborted();
+      mutation.ideMutation?.signal.throwIfAborted();
       const resolution = (await mutation.viaSdk(onDispatch)) || undefined;
       return { usedDirectFileFallback: false, resolution };
     }
@@ -4707,12 +4619,12 @@ export class UnixSocketServer {
       fileName,
       () => this.adbClientFactory.create(device),
       async () => {
-        getAbortSignal()?.throwIfAborted();
+        mutation.ideMutation?.signal.throwIfAborted();
         resolution = (await mutation.viaSdk(onDispatch)) || undefined;
       },
       // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
       (adb) => {
-        getAbortSignal()?.throwIfAborted();
+        mutation.ideMutation?.signal.throwIfAborted();
         onDispatch();
         return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
       },
@@ -4810,7 +4722,7 @@ export class UnixSocketServer {
     return remaining;
   }
 
-  private async toIosRunnerCoordinates(
+  protected async toIosRunnerCoordinates(
     client: IOSCtrlProxyClient,
     deviceId: string,
     coordinates: number[],
@@ -4984,7 +4896,7 @@ export class UnixSocketServer {
     return { targetDevice, result };
   }
 
-  private async handleInputTap(
+  protected async handleInputTap(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5087,7 +4999,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async handleInputSwipe(
+  protected async handleInputSwipe(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5198,7 +5110,7 @@ export class UnixSocketServer {
    * mid-drag cannot reject an in-flight gesture as stale. Each frame is serialized through the same
    * per-device keyed forward as taps/swipes, so gesture ordering is preserved.
    */
-  private async handleInputGesture(
+  protected async handleInputGesture(
     request: DaemonRequest,
     kind: GestureFrameKind,
     socketSessionId?: string,
@@ -5345,7 +5257,7 @@ export class UnixSocketServer {
    * incarnation (a released session re-created under the same id is a different holder), or no
    * holder for a start on a device no session held.
    */
-  private captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
+  protected captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {
     const executionId = getToolSelectionContext()?.execution?.executionId;
     const holderSessionId = executionId
       ? executionTracker.getAdmittedSessionUse(executionId)
@@ -5364,7 +5276,7 @@ export class UnixSocketServer {
    * has the same holder incarnation, or still none. Synchronous, so a caller that records the
    * stroke in the same turn cannot be overtaken by a release or an acquisition.
    */
-  private strokeAdmissionStillHolds(admission: StrokeAdmission): boolean {
+  protected strokeAdmissionStillHolds(admission: StrokeAdmission): boolean {
     if (admission.signal?.aborted) {
       return false;
     }
@@ -5431,7 +5343,7 @@ export class UnixSocketServer {
    * gesture are separate control calls, so a release between two of them cuts no call and nothing
    * else would lift the pointer until the pane's socket closed. Best-effort; never throws.
    */
-  private liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
+  protected liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
     return this.ownedGestures.cancelAllHeldBy(releasedSessionId);
   }
 
@@ -5468,7 +5380,7 @@ export class UnixSocketServer {
     }
   }
 
-  private async handleInputTypeText(
+  protected async handleInputTypeText(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5570,7 +5482,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async handleInputPressButton(
+  protected async handleInputPressButton(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -5635,7 +5547,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async handleInputKey(
+  protected async handleInputKey(
     request: DaemonRequest,
     socketSessionId?: string,
     input?: InputRequestContext,
@@ -6212,7 +6124,7 @@ export class UnixSocketServer {
    * device still reports that exact context. Missing context fails closed: a caller can re-observe
    * and retry, whereas executing against an unproven screen could actuate the wrong UI.
    */
-  private requireCurrentFrameContext(
+  protected requireCurrentFrameContext(
     deviceId: string,
     frameContext: string | undefined,
     action: string,
@@ -6253,7 +6165,7 @@ export class UnixSocketServer {
     };
   }
 
-  private async resolveInputTargetDevice(
+  protected async resolveInputTargetDevice(
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
@@ -6329,7 +6241,7 @@ export class UnixSocketServer {
     }
   }
 
-  private captureInputTargetOwner(targetDevice: BootedDevice): void {
+  protected captureInputTargetOwner(targetDevice: BootedDevice): void {
     if (!this.daemonState.isInitialized()) {
       return;
     }
@@ -6386,7 +6298,7 @@ export class UnixSocketServer {
     throw new Error(`${action} requires deviceId when multiple ${platform} devices are booted`);
   }
 
-  private async runTrackedKeyedDeviceInput<T>(
+  protected async runTrackedKeyedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
@@ -6470,7 +6382,7 @@ export class UnixSocketServer {
       return result;
     } catch (error) {
       if (dispatched && signal?.aborted) {
-        throw this.indeterminateInputError(method, error);
+        throw indeterminateInputError(method, error);
       }
       // Keep the existing plain cancellation for an unlabelled caller abort.
       if (signal?.reason instanceof DOMException && signal.reason.name === "AbortError") {
@@ -6481,35 +6393,7 @@ export class UnixSocketServer {
     }
   }
 
-  private indeterminateInputError(method: string, error: unknown): Error {
-    const label =
-      method === "input/key"
-        ? "Key"
-        : method === "input/tap"
-          ? "Tap"
-          : method === "input/swipe"
-            ? "Swipe"
-            : "Button press";
-    if (
-      error instanceof Error &&
-      (("requestDispatched" in error && error.requestDispatched === true) ||
-        error.message.startsWith(`${label} outcome is indeterminate:`))
-    ) {
-      return Object.assign(error, { requestDispatched: true });
-    }
-    const reason = errorMessage(error);
-    const failure =
-      method === "input/key"
-        ? InputKey.indeterminateError(error)
-        : method === "input/tap"
-          ? indeterminateTapError(reason)
-          : new ActionableError(
-              `${method === "input/swipe" ? "Swipe" : "Button press"} outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
-            );
-    return Object.assign(failure, { requestDispatched: true });
-  }
-
-  private dispatchFencedInput<T>(
+  protected dispatchFencedInput<T>(
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
@@ -6578,7 +6462,7 @@ export class UnixSocketServer {
     });
   }
 
-  private async runTrackedDeviceInput<T>(
+  protected async runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
@@ -6696,7 +6580,7 @@ export class UnixSocketServer {
    * cancelled it, answer the typed terminal refusal the MCP path gives, whatever the interrupted
    * operation threw (#11381). The thrown release carries its wire fields to the failure frame.
    */
-  private async answeringSessionRelease<T>(
+  protected async answeringSessionRelease<T>(
     execution: Pick<ActiveExecution, "cancelReason"> & Partial<Pick<ActiveExecution, "toolName">>,
     run: () => Promise<T>,
   ): Promise<T> {
@@ -6782,7 +6666,7 @@ export class UnixSocketServer {
     return ownerSignal ? AbortSignal.any([ownerSignal, timeoutSignal]) : timeoutSignal;
   }
 
-  private async handleIdeRequest(
+  protected async handleIdeRequest(
     mcpClient: Client,
     request: DaemonRequest,
     timeoutMs: number,
@@ -7001,7 +6885,7 @@ export class UnixSocketServer {
     };
   }
 
-  private withSocketSessionAutolockKey(
+  protected withSocketSessionAutolockKey(
     args: unknown,
     socketSessionId: string,
     timeoutMs: number,
@@ -7088,7 +6972,7 @@ export class UnixSocketServer {
     });
   }
 
-  private scheduleForwardKeyIdle(key: string): void {
+  protected scheduleForwardKeyIdle(key: string): void {
     this.clearForwardKeyIdleTimer(key);
     const timer = this.timer.setTimeout(() => {
       this.onForwardKeyIdle(key);
@@ -7096,7 +6980,7 @@ export class UnixSocketServer {
     this.forwardKeyIdleTimers.set(key, timer);
   }
 
-  private clearForwardKeyIdleTimer(key: string): void {
+  protected clearForwardKeyIdleTimer(key: string): void {
     const timer = this.forwardKeyIdleTimers.get(key);
     if (!timer) {
       return;
@@ -7455,6 +7339,18 @@ export class UnixSocketServer {
       logger.debug(`src/daemon/socketServer.ts fallback failed: ${error}`, error);
       return null;
     }
+  }
+
+  /** Typed access to the MCP forward-routing internals for daemon integration tests. */
+  get testHooks(): UnixSocketServerTestHooks {
+    return {
+      restoreSelectorSessions: (args, id) => this.restoreSelectorSessions(args, id),
+      getMcpForwardRoute: (request, id) => this.getMcpForwardRoute(request, id),
+      withSocketSessionAutolockKey: (args, id, timeoutMs) =>
+        this.withSocketSessionAutolockKey(args, id, timeoutMs),
+      recordBoundMcpClientKey: (request, id, route, active, response) =>
+        this.recordBoundMcpClientKey(request, id, route, active, response),
+    };
   }
 
   private isOwnedSocketFile(): boolean {

@@ -3,9 +3,12 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type {
   BootedDevice,
   Element,
+  NodeAttributes,
   ObserveResult,
   OpenURLResult,
   TapOnElementResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
 } from "../../src/models";
 import {
   type InteractionToolDependencies,
@@ -141,18 +144,26 @@ test("registered openLink waits for a known lone panel after a stub activeDispla
   }
 });
 
-const appOpenAlertObservation = {
+/** A hierarchy node in the CtrlProxy shape: attributes under `$`, children under `node`. */
+const treeNode = (attrs: NodeAttributes, children?: ViewHierarchyNode[]): ViewHierarchyNode => ({
+  $: attrs,
+  ...(children && { node: children }),
+});
+const treeOf = (root: ViewHierarchyNode, packageName?: string): ViewHierarchyResult => ({
+  hierarchy: { node: root },
+  ...(packageName && { packageName }),
+});
+
+const appOpenAlertObservation: ObserveResult = {
   ...makeObservation("system-alert"),
-  viewHierarchy: {
-    hierarchy: {
-      text: 'Open in "Slack Debug"?',
-      node: [{ text: "Cancel" }, { text: "Open", clickable: true }],
-    },
-  },
-} as unknown as ObserveResult;
-const noAlertHierarchy = {
-  hierarchy: { text: "Home" },
-} as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+  viewHierarchy: treeOf(
+    treeNode({ text: 'Open in "Slack Debug"?' }, [
+      treeNode({ text: "Cancel" }),
+      treeNode({ text: "Open", clickable: true }),
+    ]),
+  ),
+};
+const noAlertHierarchy = treeOf(treeNode({ text: "Home" }));
 
 describe("openLinkSchema waitFor / settled", () => {
   test("accepts exact Android chooser package selection in the public tool", () => {
@@ -292,34 +303,26 @@ test("openLink accepts a device-seconds chooser capture in the tap's coarse seco
   const adb = new FakeAdbExecutor();
   adb.setDeviceTimestampMs(1000);
   adb.setDeviceTimestampSource("device-seconds");
-  const chooser = {
+  const chooser: ViewHierarchyResult = {
     updatedAt: 100,
     hierarchy: {
-      node: {
-        class: "com.android.internal.app.ChooserActivity",
-        node: [
-          {
-            "resource-id": "android:id/resolver_list",
-            node: [
-              {
-                clickable: true,
-                bounds: { left: 0, top: 100, right: 100, bottom: 140 },
-                node: [{ text: "Example" }],
-              },
-            ],
-          },
-        ],
-      },
+      node: treeNode({ class: "com.android.internal.app.ChooserActivity" }, [
+        treeNode({ "resource-id": "android:id/resolver_list" }, [
+          treeNode({ clickable: true, bounds: { left: 0, top: 100, right: 100, bottom: 140 } }, [
+            treeNode({ text: "Example" }),
+          ]),
+        ]),
+      ]),
     },
   };
   const manager = new DeepLinkManager(device, adb, null, null, undefined, undefined, {
     getLabel: async () => "Example",
     getFreshHierarchy: async (_device, _factory, floor) =>
-      (floor < 2000
+      floor < 2000
         ? { ...chooser, updatedAt: floor }
-        : { hierarchy: { node: {} }, packageName: "com.example.app", updatedAt: 1000 }) as any,
+        : { hierarchy: { node: {} }, packageName: "com.example.app", updatedAt: 1000 },
   });
-  const selection = await manager.handleIntentChooser(chooser as any, "custom", "com.example.app");
+  const selection = await manager.handleIntentChooser(chooser, "custom", "com.example.app");
   expect(selection.success).toBe(true);
   const observation = {
     ...makeObservation("selected-app"),
@@ -407,10 +410,8 @@ describe("openLink iOS app-open alert acceptance", () => {
     expect(
       isIosAppOpenAlert({
         ...makeObservation("ordinary"),
-        viewHierarchy: {
-          hierarchy: { text: "Open channel", node: [{ text: "Open" }] },
-        },
-      } as unknown as ObserveResult),
+        viewHierarchy: treeOf(treeNode({ text: "Open channel" }, [treeNode({ text: "Open" })])),
+      }),
     ).toBe(false);
   });
 
@@ -555,20 +556,16 @@ describe("openLink iOS app-open alert acceptance", () => {
   test("uses the locale-independent live system action for localized alerts", async () => {
     let refreshCalls = 0;
     let systemTapCalls = 0;
-    const localizedObservation = {
+    const localizedObservation: ObserveResult = {
       ...makeObservation("localized-system-alert"),
-      viewHierarchy: {
-        packageName: "com.apple.springboard",
-        hierarchy: {
-          className: "UIAlertController",
-          text: "In „Slack Debug“ öffnen?",
-          node: [
-            { className: "UIButton", role: "button", text: "Abbrechen" },
-            { className: "UIButton", role: "button", text: "Öffnen", clickable: true },
-          ],
-        },
-      },
-    } as unknown as ObserveResult;
+      viewHierarchy: treeOf(
+        treeNode({ className: "UIAlertController", text: "In „Slack Debug“ öffnen?" }, [
+          treeNode({ className: "UIButton", role: "button", text: "Abbrechen" }),
+          treeNode({ className: "UIButton", role: "button", text: "Öffnen", clickable: true }),
+        ]),
+        "com.apple.springboard",
+      ),
+    };
 
     const result = await acceptIosAppOpenAlert(
       iosDevice,
@@ -596,16 +593,13 @@ describe("openLink iOS app-open alert acceptance", () => {
   });
 
   test("does not treat an unchanged localized dialog as verified dismissal", async () => {
-    const localizedHierarchy = {
-      packageName: "com.apple.springboard",
-      hierarchy: {
-        className: "UIActionSheet",
-        node: [
-          { className: "UIButton", role: "button", text: "Abbrechen" },
-          { className: "UIButton", role: "button", text: "Öffnen" },
-        ],
-      },
-    } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+    const localizedHierarchy = treeOf(
+      treeNode({ className: "UIActionSheet" }, [
+        treeNode({ className: "UIButton", role: "button", text: "Abbrechen" }),
+        treeNode({ className: "UIButton", role: "button", text: "Öffnen" }),
+      ]),
+      "com.apple.springboard",
+    );
     let refreshCalls = 0;
 
     await expect(
@@ -715,7 +709,10 @@ describe("buildOpenLinkPayload", () => {
 
   test("surfaces the awaited observation and await fields when a wait occurred", () => {
     const awaited = makeObservation("home");
-    const awaitedElement = { "resource-id": "home_tab_bar" } as unknown as Element;
+    const awaitedElement: Element = {
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      "resource-id": "home_tab_bar",
+    };
     const payload = buildOpenLinkPayload("slack://open", openResult, {
       observation: awaited,
       awaitedElement,

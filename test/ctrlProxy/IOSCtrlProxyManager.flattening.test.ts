@@ -543,7 +543,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
   test("remote hung-runner stop rejection still clears ownership and rearms supervision before timeout", async () => {
     const remote = remoteRunner();
     const manager = makeManager(simulator, remote);
-    manager.setStateForTesting({ xcTestProcessId: 123 });
+    manager.testHooks.setState({ xcTestProcessId: 123 });
     const events: string[] = [];
     const alive = spyOn(manager, "isCtrlProxyProcessAlive").mockResolvedValue(false);
     const running = spyOn(manager, "isRunning").mockResolvedValue(false);

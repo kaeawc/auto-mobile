@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { FailureEventRepository } from "../../src/db/failureEventRepository";
@@ -51,29 +51,30 @@ describe("FailureEventRepository", () => {
   });
 
   test("primes independent crash and ANR sweeps for each repository lifetime", async () => {
+    const cap = 2;
+    const countRows = async () => ({
+      crashes: (await db.selectFrom("crashes").selectAll().execute()).length,
+      anrs: (await db.selectFrom("anrs").selectAll().execute()).length,
+    });
     for (let lifetime = 0; lifetime < 2; lifetime++) {
-      const fresh = new FailureEventRepository(db, timer);
-      const crashes = spyOn(fresh as any, "pruneCrashesToRowCap");
-      const anrs = spyOn(fresh as any, "pruneAnrsToRowCap");
-      try {
-        await fresh.saveCrash(makeCrashEvent());
-        await fresh.saveAnr(makeAnrEvent());
-        expect(crashes).toHaveBeenCalledTimes(1);
-        expect(anrs).toHaveBeenCalledTimes(1);
-        for (let index = 0; index < 255; index++) {
-          await fresh.saveCrash(makeCrashEvent());
-          await fresh.saveAnr(makeAnrEvent());
-        }
-        expect(crashes).toHaveBeenCalledTimes(1);
-        expect(anrs).toHaveBeenCalledTimes(1);
-        await fresh.saveCrash(makeCrashEvent());
-        await fresh.saveAnr(makeAnrEvent());
-        expect(crashes).toHaveBeenCalledTimes(2);
-        expect(anrs).toHaveBeenCalledTimes(2);
-      } finally {
-        crashes.mockRestore();
-        anrs.mockRestore();
+      await db.deleteFrom("crashes").execute();
+      await db.deleteFrom("anrs").execute();
+      for (let index = 0; index < 10; index++) {
+        await repo.saveCrash(makeCrashEvent());
+        await repo.saveAnr(makeAnrEvent());
       }
+      const fresh = new FailureEventRepository(db, timer, { crashMaxRows: cap, anrMaxRows: cap });
+      await fresh.saveCrash(makeCrashEvent());
+      await fresh.saveAnr(makeAnrEvent());
+      expect(await countRows()).toEqual({ crashes: cap, anrs: cap });
+      for (let index = 0; index < 255; index++) {
+        await fresh.saveCrash(makeCrashEvent());
+        await fresh.saveAnr(makeAnrEvent());
+      }
+      expect(await countRows()).toEqual({ crashes: cap + 255, anrs: cap + 255 });
+      await fresh.saveCrash(makeCrashEvent());
+      await fresh.saveAnr(makeAnrEvent());
+      expect(await countRows()).toEqual({ crashes: cap, anrs: cap });
     }
   });
 
@@ -717,7 +718,7 @@ describe("FailureEventRepository", () => {
         await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
       }
 
-      await (repo as any).pruneCrashesToRowCap(5);
+      await repo.testHooks.pruneCrashesToRowCap(5);
 
       const crashes = await repo.getCrashes();
       expect(crashes).toHaveLength(5);
@@ -729,7 +730,7 @@ describe("FailureEventRepository", () => {
         await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
       }
 
-      await (repo as any).pruneCrashesToRowCap(10);
+      await repo.testHooks.pruneCrashesToRowCap(10);
 
       const crashes = await repo.getCrashes();
       expect(crashes).toHaveLength(3);
@@ -740,7 +741,7 @@ describe("FailureEventRepository", () => {
         await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
       }
 
-      await (repo as any).pruneAnrsToRowCap(5);
+      await repo.testHooks.pruneAnrsToRowCap(5);
 
       const anrs = await repo.getAnrs();
       expect(anrs).toHaveLength(5);
@@ -752,7 +753,7 @@ describe("FailureEventRepository", () => {
         await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
       }
 
-      await (repo as any).pruneAnrsToRowCap(10);
+      await repo.testHooks.pruneAnrsToRowCap(10);
 
       const anrs = await repo.getAnrs();
       expect(anrs).toHaveLength(3);
@@ -768,7 +769,7 @@ describe("FailureEventRepository", () => {
         await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
       }
 
-      await (repo as any).pruneCrashesToRowCap(2);
+      await repo.testHooks.pruneCrashesToRowCap(2);
 
       const crashes = await repo.getCrashes();
       const anrs = await repo.getAnrs();

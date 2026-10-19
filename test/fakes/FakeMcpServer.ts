@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import type { ToolRegistryHost, ResourceRegistryHost } from "../../src/server/registryHost";
 import { FakeUnderlyingServer } from "./FakeUnderlyingServer";
 
 type ToolHandler = (
@@ -13,7 +14,9 @@ interface RegisteredMcpTool {
 }
 
 /** High-level server observer for tool and resource registration tests. */
-export class FakeMcpServer implements Pick<McpServer, "sendToolListChanged"> {
+export class FakeMcpServer
+  implements Pick<McpServer, "sendToolListChanged">, ToolRegistryHost, ResourceRegistryHost
+{
   readonly server = new FakeUnderlyingServer();
   readonly registeredTools: RegisteredMcpTool[] = [];
   calls = 0;

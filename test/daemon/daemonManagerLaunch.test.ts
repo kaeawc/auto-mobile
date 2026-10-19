@@ -1,7 +1,8 @@
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
+
 import { join, resolve } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { PassThrough } from "node:stream";
@@ -12,7 +13,7 @@ import { TOOL_OUTPUTS_DIR_ENV, TOOL_OUTPUTS_DIR_FLAG } from "../../src/utils/too
 import { EVENT_ALL_MARKERS_ENV, EVENT_ALL_MARKERS_FLAG } from "../../src/utils/eventAllMarkers";
 
 describe("DaemonManager launch", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemonManagerLaunch-");
   const originalCwd = process.cwd();
   let previousDirs: NodeJS.ProcessEnv;
   beforeEach(() => {
@@ -22,15 +23,13 @@ describe("DaemonManager launch", () => {
       AUTO_MOBILE_LOG_DIR: process.env.AUTO_MOBILE_LOG_DIR,
     };
     // Exercise data-derived launch logs without discarding the caller's isolation.
-    process.env.AUTOMOBILE_DATA_DIR = createTempDir("daemon-launch-default-");
+    process.env.AUTOMOBILE_DATA_DIR = createTempDir();
     delete process.env.AUTOMOBILE_LOG_DIR;
     delete process.env.AUTO_MOBILE_LOG_DIR;
   });
 
-  function createTempDir(prefix: string): string {
-    const dir = mkdtempSync(join(tmpdir(), prefix));
-    tempDirs.push(dir);
-    return dir;
+  function createTempDir(): string {
+    return scratch.next();
   }
 
   afterEach(() => {
@@ -49,10 +48,6 @@ describe("DaemonManager launch", () => {
     delete process.env.AUTOMOBILE_DISABLED_TOOLS;
     delete process.env.AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT;
     delete process.env[EVENT_ALL_MARKERS_ENV];
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
   });
 
   test("relays piped daemon stderr without sharing the host descriptor", () => {
@@ -75,8 +70,8 @@ describe("DaemonManager launch", () => {
   });
 
   test("writes stable logs and forwards daemon-wide tool defaults to the child", async () => {
-    const stateDir = createTempDir("daemon-launch-state-");
-    const dataDir = createTempDir("daemon-data-dir-");
+    const stateDir = createTempDir();
+    const dataDir = createTempDir();
     process.env.AUTOMOBILE_DATA_DIR = dataDir;
     process.env.AUTOMOBILE_ENABLED_TOOLS = "observe";
     process.env.AUTOMOBILE_DISABLED_TOOLS = "tapOn";
@@ -148,7 +143,7 @@ describe("DaemonManager launch", () => {
   });
 
   test("pipes stderr without a launch capture when structured stderr logging is enabled", async () => {
-    const stateDir = createTempDir("daemon-launch-state-");
+    const stateDir = createTempDir();
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
     process.env.AUTOMOBILE_LOG_FORMAT = "json";
     process.env.AUTOMOBILE_LOG_SINK = "stderr";
@@ -199,9 +194,9 @@ describe("DaemonManager launch", () => {
   });
 
   test("writes the daemon launch log to AUTOMOBILE_LOG_DIR without moving data paths", async () => {
-    const stateDir = createTempDir("daemon-launch-state-");
-    const dataDir = createTempDir("daemon-data-dir-");
-    const logDir = join(createTempDir("daemon-log-dir-"), "logs");
+    const stateDir = createTempDir();
+    const dataDir = createTempDir();
+    const logDir = join(createTempDir(), "logs");
     process.env.AUTOMOBILE_DATA_DIR = dataDir;
     process.env.AUTOMOBILE_LOG_DIR = logDir;
 
@@ -254,8 +249,8 @@ describe("DaemonManager launch", () => {
   });
 
   test("spawns detached daemon from a stable cwd instead of inheriting the spawner cwd", async () => {
-    const spawnerCwd = createTempDir("daemon-spawner-cwd-");
-    const stateDir = createTempDir("daemon-launch-state-");
+    const spawnerCwd = createTempDir();
+    const stateDir = createTempDir();
     process.chdir(spawnerCwd);
     // Keep the daemon launch log inside this test's temp tree, not the real
     // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
@@ -309,8 +304,8 @@ describe("DaemonManager launch", () => {
   });
 
   test("passes original launch cwd to the daemon for relative user paths", async () => {
-    const spawnerCwd = createTempDir("daemon-spawner-cwd-");
-    const stateDir = createTempDir("daemon-launch-state-");
+    const spawnerCwd = createTempDir();
+    const stateDir = createTempDir();
     process.chdir(spawnerCwd);
     // Keep the daemon launch log inside this test's temp tree, not the real
     // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
@@ -362,7 +357,7 @@ describe("DaemonManager launch", () => {
   });
 
   test("passes tool outputs directory option to the daemon child env to preserve spaces", async () => {
-    const stateDir = createTempDir("daemon-launch-state-");
+    const stateDir = createTempDir();
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
 
     let capturedArgs: string[] | undefined;
@@ -415,7 +410,7 @@ describe("DaemonManager launch", () => {
   });
 
   test("serializes explicit empty event-all marker override so daemon env fallback stays disabled", async () => {
-    const stateDir = createTempDir("daemon-launch-state-");
+    const stateDir = createTempDir();
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
     process.env[EVENT_ALL_MARKERS_ENV] = "@";
 
@@ -466,7 +461,7 @@ describe("DaemonManager launch", () => {
   });
 
   test("does not serialize absent event-all marker config as an empty override", async () => {
-    const stateDir = createTempDir("daemon-launch-state-");
+    const stateDir = createTempDir();
     process.env.AUTOMOBILE_DATA_DIR = stateDir;
 
     let capturedArgs: string[] | undefined;
@@ -516,7 +511,7 @@ describe("DaemonManager launch", () => {
   });
 
   test("resolves relative daemon state paths before changing daemon cwd", async () => {
-    const spawnerCwd = createTempDir("daemon-spawner-cwd-");
+    const spawnerCwd = createTempDir();
     process.chdir(spawnerCwd);
     // Keep the daemon launch log inside this test's temp tree, not the real
     // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).

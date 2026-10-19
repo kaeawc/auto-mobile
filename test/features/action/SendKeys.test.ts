@@ -1,8 +1,6 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import {
-  runWithTextRequestContext,
-  TextIndeterminateError,
-} from "../../../src/features/action/textTransportTimeout";
+import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
+import { TextIndeterminateError } from "../../../src/features/action/TextIndeterminateError";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -2283,7 +2281,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
         createAdbFactory(adb),
-        createObserver(focusedAndroidObservation()),
+        createObserver(focusedAndroidObservation(longRun)),
         { textClient: createTextClient().client, timer },
       );
 
@@ -4967,9 +4965,9 @@ describe("Android insertion stops mixed typing after an unconfirmed suffix or ru
 describe("Android clear, eventLast caret and eventAll case read-backs", () => {
   function sequencedObserver(texts: Array<string | undefined>, order: string[] = []) {
     const options: Array<Parameters<SendKeysObserver["execute"]>[0]> = [];
-    const observer = {
-      captureScreenshot: async () => null,
-      execute: async (callOptions: Parameters<SendKeysObserver["execute"]>[0]) => {
+    const observer: SendKeysObserver = {
+      captureScreenshot: async () => {},
+      execute: async (callOptions) => {
         options.push(callOptions);
         order.push("read");
         const text = texts[Math.min(options.length - 1, texts.length - 1)];
@@ -4977,7 +4975,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           ? ({ timestamp: 0 } as ObserveResult)
           : focusedAndroidObservation(text, {}, 0);
       },
-    } as unknown as SendKeysObserver;
+    };
     return { observer, options, reads: () => options.length };
   }
 

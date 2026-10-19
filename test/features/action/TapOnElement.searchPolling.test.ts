@@ -5,6 +5,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ResultFaker } from "../../fakes/ResultFaker";
+import type { ViewHierarchyResult } from "../../../src/models";
 
 function setup(platform: "android" | "ios") {
   const timer = new FakeTimer();
@@ -12,19 +13,19 @@ function setup(platform: "android" | "ios") {
   const selector = new FakeElementSelector();
   const command = new TapOnElement(
     { name: "test", platform, deviceId: "test" } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     { timer, elementSelector: selector },
   );
-  const hierarchy = { hierarchy: { node: [] } };
+  const hierarchy: ViewHierarchyResult = { hierarchy: {} };
   const requests: number[] = [];
-  const refresh = spyOn(command as any, "refreshViewHierarchy").mockImplementation(async () => {
+  const refresh = spyOn(command, "refreshViewHierarchy").mockImplementation(async () => {
     requests.push(timer.now());
     // Bound the broken implementation too, so the red test cannot spin forever.
     timer.advanceTime(1);
     return hierarchy;
   });
   const search = (duration = 1500, signal?: AbortSignal) =>
-    (command as any).searchForElement(
+    command.searchForElement(
       { action: "tap", text: "missing", searchUntil: { duration } },
       { viewHierarchy: hierarchy, screenSize: { width: 400, height: 800 } },
       signal,

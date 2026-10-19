@@ -132,7 +132,7 @@ function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {
           accessibilityService,
         });
   if (action instanceof TapAnyElement) {
-    action.setRefreshViewHierarchyForTesting(async () => null);
+    action.testHooks.setRefreshViewHierarchy(async () => null);
   }
   action.observedInteraction = (callback) =>
     callback(
@@ -279,7 +279,7 @@ test("tapAny re-resolves the full scoped unique selector on retry", async () => 
   if (!(h.action instanceof TapAnyElement)) {
     throw new Error("Expected tapAny");
   }
-  h.action.setRefreshViewHierarchyForTesting(async () => hierarchy);
+  h.action.testHooks.setRefreshViewHierarchy(async () => hierarchy);
   const result = await h.execute();
   expect(result.success).toBe(true);
   expect(h.selector.clickableOptions).toHaveLength(2);
@@ -493,7 +493,7 @@ for (const action of ["tap", "longPress"] as const) {
     h.detector.setDefaultResult(true, "talkback");
     if (h.action instanceof TapAnyElement) {
       let captures = 0;
-      h.action.setRefreshViewHierarchyForTesting(async () => (++captures === 1 ? capture() : null));
+      h.action.testHooks.setRefreshViewHierarchy(async () => (++captures === 1 ? capture() : null));
     }
     expect((await h.execute({ action })).success).toBe(true);
     expect(h.talkBack.directActivationCalls).toHaveLength(0);

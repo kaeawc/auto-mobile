@@ -45,7 +45,6 @@ import {
 import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { DaemonState } from "../daemon/daemonState";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -651,14 +650,12 @@ export interface RecordingRequesterResolver {
 
 const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
   async assertFanoutTargetAllowed(device, requester) {
-    const daemon = DaemonState.getInstance();
-    if (!daemon.isInitialized()) {
+    const pool = defaultDaemonContext.devicePool();
+    if (!pool) {
       return;
     }
     const held = requester.mcpSessionId
-      ? daemon
-          .getDevicePool()
-          .resolveOwnedDeviceSessionForMcpSession(requester.mcpSessionId, device.deviceId)
+      ? pool.resolveOwnedDeviceSessionForMcpSession(requester.mcpSessionId, device.deviceId)
       : undefined;
     const effectiveRequester = held ? { ...requester, sessionUuid: held } : requester;
     const input = { toolName: "videoRecording", device, requester: effectiveRequester };
@@ -673,19 +670,15 @@ const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
     return resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) ?? sessionUuid;
   },
   connectionOwnsDeviceSession(mcpSessionId, deviceId, ownerBaseSessionUuid) {
-    if (!DaemonState.getInstance().isInitialized()) {
-      return false;
-    }
-    const held = DaemonState.getInstance()
-      .getDevicePool()
-      .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
+    const held = defaultDaemonContext
+      .devicePool()
+      ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
     return held !== undefined && this.baseSessionUuid(held) === ownerBaseSessionUuid;
   },
   resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId) {
-    const daemon = DaemonState.getInstance();
-    return daemon.isInitialized()
-      ? daemon.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
-      : undefined;
+    return defaultDaemonContext
+      .devicePool()
+      ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
   },
   isDeviceHeld(deviceId) {
     const owner = defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId);

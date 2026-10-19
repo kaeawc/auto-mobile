@@ -1,5 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import {
@@ -10,9 +9,9 @@ import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { getStructuredField } from "../../src/utils/toolUtils";
-import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
+import { installInMemoryNavManager } from "../helpers/navigationTestHarness";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 const interactionDeps: InteractionToolDependencies = {};
@@ -95,9 +94,7 @@ describe("identifyInteractions on the read-only device path (#10965)", () => {
   async function identify(watcher: boolean) {
     const observation = loadAndroidHomeObserve().observe as ObserveResult;
     const calls: string[] = [];
-    const navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-    );
+    const navigation = await installInMemoryNavManager();
     try {
       registerObserveTools({
         timer: new FakeTimer(),
@@ -123,7 +120,7 @@ describe("identifyInteractions on the read-only device path (#10965)", () => {
       await (watcher ? watching(run) : run());
       return calls;
     } finally {
-      navigation.mockRestore();
+      await navigation.dispose();
       ToolRegistry.clearTools();
     }
   }

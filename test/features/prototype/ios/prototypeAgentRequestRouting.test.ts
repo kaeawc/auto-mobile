@@ -144,6 +144,7 @@ describe("iOS prototype agent request routing (#12529)", () => {
             resolve({ ok: false, error: { code: "cancelled", message: "x" }, durationMs: 0 });
         }),
       cancelConnection: () => undefined,
+      cancelRequest: () => false,
     });
     client.attachRequestHost?.(slow);
     socket.push(frame);

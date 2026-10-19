@@ -1,39 +1,22 @@
 #!/usr/bin/env bats
 # bats file_tags=serial
-# The fixture and baseline are restored after every test; run serially with source scans.
+# The fixture is removed after every test; run serially with source scans.
 
 SCRIPT="scripts/check-utils-import-direction.ts"
 FIXTURE="src/utils/UtilsImportDirectionFixture.ts"
-BASELINE="scripts/utils-import-direction-baseline.txt"
-
-setup() {
-  SAVED_BASELINE="$(mktemp)"
-  cp "$BASELINE" "$SAVED_BASELINE"
-}
 
 teardown() {
   rm -f "$FIXTURE"
-  cp "$SAVED_BASELINE" "$BASELINE"
-  rm -f "$SAVED_BASELINE"
 }
 
-@test "allows the current utils import baseline" {
+@test "passes with no upward imports" {
   run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no new upward imports"* ]]
+  [[ "$output" == *"no upward imports"* ]]
 }
 
-@test "allows the current utils import baseline with CRLF line endings" {
-  awk '{ printf "%s\r\n", $0 }' "$SAVED_BASELINE" > "$BASELINE"
-
-  run bun "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"no new upward imports"* ]]
-}
-
-@test "rejects a new upward import edge" {
+@test "rejects an upward import edge" {
   printf '%s\n' 'import type { NewThing } from "../daemon/somethingNew";' > "$FIXTURE"
 
   run bun "$SCRIPT"
@@ -61,27 +44,4 @@ teardown() {
   [[ "$output" == *"src/db/requireNew"* ]]
   [[ "$output" != *"src/ctrlProxy/futureModule"* ]]
   [[ "$output" != *"src/devices/futureModule"* ]]
-}
-
-@test "update removes stale edges from the baseline" {
-  printf '%s\n' 'src/utils/OldFixture.ts -> src/daemon/oldTarget' >> "$BASELINE"
-
-  run bun "$SCRIPT" --update
-
-  [ "$status" -eq 0 ]
-  ! grep -q 'src/utils/OldFixture.ts' "$BASELINE"
-}
-
-@test "update refuses growth unless explicitly allowed" {
-  printf '%s\n' 'const { x } = require("../daemon/somethingNew");' > "$FIXTURE"
-  before="$(cat "$BASELINE")"
-
-  run bun "$SCRIPT" --update
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"src/utils/UtilsImportDirectionFixture.ts -> src/daemon/somethingNew"* ]]
-  [ "$(cat "$BASELINE")" = "$before" ]
-
-  run bun "$SCRIPT" --update --allow-grow
-  [ "$status" -eq 0 ]
-  grep -q 'src/utils/UtilsImportDirectionFixture.ts -> src/daemon/somethingNew' "$BASELINE"
 }

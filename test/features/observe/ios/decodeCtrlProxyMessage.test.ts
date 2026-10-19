@@ -1,3 +1,9 @@
+function decodeRawMessage(raw: unknown) {
+  if (typeof raw !== "object" || raw === null || !("type" in raw) || typeof raw.type !== "string") {
+    throw new Error("Expected raw CtrlProxy message");
+  }
+  return decodeCtrlProxyMessage({ ...raw, type: raw.type });
+}
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -10,7 +16,7 @@ import type { WebSocketMessage } from "../../../../src/features/observe/ios/type
 const REQ = "req-1";
 
 /** Helper to build a WebSocketMessage with a requestId. */
-const msg = (partial: Partial<WebSocketMessage> & { type: string }): WebSocketMessage => ({
+const msg = <T extends { type: string }>(partial: T) => ({
   requestId: REQ,
   ...partial,
 });
@@ -551,7 +557,7 @@ describe("decodeCtrlProxyMessage", () => {
       valueType: "STRING",
       redacted: true,
     } as const;
-    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({
+    expect(decodeRawMessage(msg(response))?.result).toMatchObject({
       entry: { key: "token", value: "hunter2", type: "STRING", redacted: true },
     });
   });
@@ -1291,7 +1297,7 @@ describe("preference store resolution decoding", () => {
       `${type} preserves boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             resolvedStore: "standard",
             effectiveValueDiffers,
@@ -1303,7 +1309,7 @@ describe("preference store resolution decoding", () => {
       `${type} ignores non-boolean effectiveValueDiffers: %s`,
       (effectiveValueDiffers) => {
         expect(
-          decodeCtrlProxyMessage({
+          decodeRawMessage({
             ...msg({ type, success: true }),
             effectiveValueDiffers,
           })?.result,
@@ -1312,8 +1318,7 @@ describe("preference store resolution decoding", () => {
     );
     test(`${type} forwards only string resolvedStore values`, () => {
       expect(
-        decodeCtrlProxyMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })
-          ?.result,
+        decodeRawMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })?.result,
       ).toMatchObject({ resolvedStore: "standard" });
       for (const payload of [
         msg({ type, success: true }),

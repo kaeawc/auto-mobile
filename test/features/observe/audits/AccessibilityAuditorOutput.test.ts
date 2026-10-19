@@ -1,3 +1,4 @@
+import { wireCapture } from "../../../helpers/wireCapture";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { AccessibilityAuditor } from "../../../../src/features/observe/audits/AccessibilityAuditor";
@@ -164,7 +165,12 @@ describe("AccessibilityAuditor: bounded violations", () => {
     // Stress the cap with four copies of captured nodes in memory. Keyboard violations no longer
     // belong to the app, so the single capture alone no longer reaches the cap.
     const nodes = hierarchy.hierarchy.node ?? [];
-    hierarchy.hierarchy.node = Array.from({ length: 4 }, () => structuredClone(nodes)).flat();
+    hierarchy.hierarchy = wireCapture({
+      hierarchy: {
+        ...hierarchy.hierarchy,
+        node: Array.from({ length: 4 }, () => structuredClone(nodes)).flat(),
+      },
+    }).hierarchy;
     return {
       updatedAt: "2026-01-01T00:00:00.000Z",
       screenSize: { width: hierarchy.screenWidth ?? 1080, height: hierarchy.screenHeight ?? 2400 },

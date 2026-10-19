@@ -1967,7 +1967,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                 expect(calls).toHaveLength(
                   gesture === "doubleTapOn" && (!failure || fallsBack) ? 2 : 1,
                 );
-                const tapRequest = tap.mock.calls[0]?.[0];
+                const tapRequest = tap.mock.calls[0]?.[0] ?? pinch.mock.calls[0]?.[0];
                 if (tapRequest) {
                   expect(tapRequest.displayId).toBe(panel === "external" ? 2 : undefined);
                   expect(tapRequest.beforeSend).toBeFunction();
@@ -2009,7 +2009,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                   }
                 }
                 if (gesture === "pinch") {
-                  expect(pinch.mock.calls[0].slice(0, 2)).toEqual([100, 100]);
+                  expect(pinch.mock.calls[0][0]).toMatchObject({ centerX: 100, centerY: 100 });
                 }
               } else if (gesture === "pinch") {
                 expect(result.error).toBe(

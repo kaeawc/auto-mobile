@@ -240,7 +240,9 @@ describe("sanitizeObserveResult", () => {
 
     test("perf-audit strip truncates diagnostics to the summary above the GFXINFO DUMP marker", () => {
       const { observe } = loadAndroidHomeObserve();
-      delete observe.performanceAudit!.violations;
+      const partialAudit: Partial<NonNullable<ObserveResult["performanceAudit"]>> =
+        observe.performanceAudit!;
+      delete partialAudit.violations;
       const original = observe.performanceAudit!.diagnostics!;
       expect(original).toContain(GFXINFO_DUMP_MARKER);
       const expectedSummary = original.slice(0, original.indexOf(GFXINFO_DUMP_MARKER)).trimEnd();
@@ -365,7 +367,7 @@ describe("sanitizeObserveResult", () => {
 
       const out = sanitizeObserveResult(observe, DROP_NONE);
 
-      expect(out.gfxMetrics).toEqual({
+      expect<unknown>(out.gfxMetrics).toEqual({
         packageName: "com.example.app",
         pollCount: 7,
         stabilityWaitMs: 350,
@@ -937,25 +939,25 @@ describe("sanitizeObserveResult", () => {
     test("flattens elements[].bounds across all four element buckets", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const e = out.elements!;
-      expect(Reflect.get(e.clickable[0], "bounds")).toEqual([20, 21, 22, 23]);
-      expect(Reflect.get(e.scrollable[0], "bounds")).toEqual([30, 31, 32, 33]);
-      expect(Reflect.get(e.text[0], "bounds")).toEqual([40, 41, 42, 43]);
-      expect(Reflect.get(e.media[0], "bounds")).toEqual([50, 51, 52, 53]);
+      expect<unknown>(e.clickable[0]?.bounds).toEqual([20, 21, 22, 23]);
+      expect<unknown>(e.scrollable[0]?.bounds).toEqual([30, 31, 32, 33]);
+      expect<unknown>(e.text[0]?.bounds).toEqual([40, 41, 42, 43]);
+      expect<unknown>(e.media[0]?.bounds).toEqual([50, 51, 52, 53]);
     });
 
     test("flattens the Hierarchy root, window, and content-hidden-region bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const vh = out.viewHierarchy!;
-      expect(Reflect.get(vh.hierarchy, "bounds")).toEqual([0, 0, 1080, 2400]);
-      expect(Reflect.get(vh.windows![0], "bounds")).toEqual([70, 71, 72, 73]);
-      expect(Reflect.get(vh.contentHiddenRegions![0], "bounds")).toEqual([80, 81, 82, 83]);
+      expect<unknown>(vh.hierarchy?.bounds).toEqual([0, 0, 1080, 2400]);
+      expect<unknown>(vh.windows![0]?.bounds).toEqual([70, 71, 72, 73]);
+      expect<unknown>(vh.contentHiddenRegions![0]?.bounds).toEqual([80, 81, 82, 83]);
     });
 
     test("flattens focused / accessibility-focused / awaited element bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
-      expect(Reflect.get(out.focusedElement, "bounds")).toEqual([1, 2, 3, 4]);
-      expect(Reflect.get(out.accessibilityFocusedElement, "bounds")).toEqual([9, 10, 11, 12]);
-      expect(Reflect.get(out.awaitedElement, "bounds")).toEqual([13, 14, 15, 16]);
+      expect<unknown>(out.focusedElement?.bounds).toEqual([1, 2, 3, 4]);
+      expect<unknown>(out.accessibilityFocusedElement?.bounds).toEqual([9, 10, 11, 12]);
+      expect<unknown>(out.awaitedElement?.bounds).toEqual([13, 14, 15, 16]);
     });
 
     test("NEVER compacts systemInsets (a {top,bottom,left,right} object, not bounds)", () => {
@@ -983,7 +985,7 @@ describe("sanitizeObserveResult", () => {
 
       expect(JSON.stringify(out.rawViewHierarchy)).toBe(rawBefore);
       // ...while the processed hierarchy WAS compacted (proves the skip is targeted).
-      expect(Reflect.get(out.viewHierarchy!.hierarchy.node, "bounds")).toEqual([60, 61, 62, 63]);
+      expect<unknown>(out.viewHierarchy!.hierarchy.node?.bounds).toEqual([60, 61, 62, 63]);
     });
 
     test("is output-only across every site (input object never mutated)", () => {
@@ -1100,7 +1102,9 @@ describe("sanitizeObserveResult", () => {
         windows[0].truncationReasons = [reason];
         observe.viewHierarchy!.truncationReasons = [reason, "cancelled"];
         const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
-        expect(out.windowTruncations).toEqual([{ windowId: windows[0].id, reasons: [reason] }]);
+        expect<unknown>(out.windowTruncations).toEqual([
+          { windowId: windows[0].id, reasons: [reason] },
+        ]);
         expect(out.truncationReasons).toEqual([reason, "cancelled"]);
         expect(windows[1].truncationReasons).toBeUndefined();
       },
@@ -1118,7 +1122,7 @@ describe("sanitizeObserveResult", () => {
         "",
       ];
       const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
-      expect(out.windowTruncations).toEqual([
+      expect<unknown>(out.windowTruncations).toEqual([
         {
           windowId: observe.viewHierarchy!.windows![1].id,
           reasons: ["future_code", "max_depth", "cancelled", "max_nodes"],
@@ -1301,19 +1305,19 @@ describe("sanitizeObserveResult", () => {
       );
     }
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s='false' (string default) is dropped", (key) => {
       expect(trimmedNode({ [key]: "false" })).not.toHaveProperty(key);
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=false (boolean default) is dropped", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s=false (boolean default) is dropped", (key) => {
       expect(trimmedNode({ [key]: false })).not.toHaveProperty(key);
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='true' (non-default) is kept", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s='true' (non-default) is kept", (key) => {
       expect(trimmedNode({ [key]: "true" })[key]).toBe("true");
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=true (boolean non-default) is kept", (key) => {
+    test.each([...DEFAULT_FALSE_BOOLEAN_KEYS])("%s=true (boolean non-default) is kept", (key) => {
       expect(trimmedNode({ [key]: true })[key]).toBe(true);
     });
 
@@ -1511,7 +1515,9 @@ describe("sanitizeObserveResult", () => {
   describe("GFXINFO diagnostics-marker boundaries (A6)", () => {
     function strippedDiagnostics(diagnostics: string): string {
       const { observe } = loadAndroidHomeObserve();
-      delete observe.performanceAudit!.violations;
+      const partialAudit: Partial<NonNullable<ObserveResult["performanceAudit"]>> =
+        observe.performanceAudit!;
+      delete partialAudit.violations;
       observe.performanceAudit!.diagnostics = diagnostics;
       return sanitizeObserveResult(observe, DROP_NONE).performanceAudit!.diagnostics!;
     }
@@ -1714,9 +1720,9 @@ test("panel fingerprints stay internal in every output projection while unique i
     device: { deviceId: "fingerprint", platform: "android" },
   };
   for (const cfg of [
-    { project: "full" },
-    { project: "full", trimNodes: false, compact: false },
-    { project: "skeleton" },
+    { dropElements: false, project: "full" },
+    { dropElements: false, project: "full", trimNodes: false, compact: false },
+    { dropElements: false, project: "skeleton" },
   ] satisfies SanitizeObserveConfig[]) {
     const out = sanitizeObserveResult(obs, cfg);
     expect(JSON.stringify(out)).not.toContain("panelFingerprint");

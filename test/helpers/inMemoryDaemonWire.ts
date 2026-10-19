@@ -4,7 +4,6 @@ import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { Duplex } from "node:stream";
 import type { Socket } from "node:net";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -187,14 +186,6 @@ class SocketEnd extends EventEmitter {
 export type InMemoryClientSocket = Pick<SocketEnd, "destroyed" | "write" | "destroy" | "on">;
 
 /** What a killed process takes with it. Teardown only, never wiring. */
-interface SocketServerTeardown {
-  acceptingRequests: boolean;
-  closing: boolean;
-  listChangedUnsubscribe: (() => void) | null;
-  resourceUpdatedUnsubscribe: (() => void) | null;
-  sessionReleaseUnsubscribe: (() => void) | null;
-}
-
 /** The ids of the connections the server accepts next, in order. */
 export interface ConnectionIdQueue extends IdGenerator {
   enqueue(id: string): void;
@@ -269,38 +260,11 @@ export class InMemoryControlSocket {
   /** The daemon process is gone: every connection drops and nothing is accepted or pushed. */
   kill(): void {
     this.open = false;
-    const internals = this.server as unknown as SocketServerTeardown;
-    internals.acceptingRequests = false;
-    internals.closing = true;
-    for (const fanOut of [
-      "listChangedUnsubscribe",
-      "resourceUpdatedUnsubscribe",
-      "sessionReleaseUnsubscribe",
-    ] as const) {
-      internals[fanOut]?.();
-      internals[fanOut] = null;
-    }
+    this.server.stopAcceptingAndFanOut();
     for (const end of Array.from(this.daemonEnds)) {
       end.destroy();
     }
   }
-}
-
-interface DaemonClientInternals {
-  connected: boolean;
-  socket: unknown;
-  closedSockets: WeakSet<object>;
-  handleSocketClosed(socket: InMemoryClientSocket): void;
-  pendingRequests: Map<
-    string,
-    {
-      reject(error: Error): void;
-      timeout: NodeJS.Timeout;
-      removeAbortListener?: () => void;
-      disconnectCause?: unknown;
-    }
-  >;
-  timer: Timer;
 }
 
 /**
@@ -309,6 +273,8 @@ interface DaemonClientInternals {
  * the real `connect()` installs on its socket.
  */
 export class InMemoryDaemonClient extends DaemonClient {
+  private attached: InMemoryClientSocket | undefined;
+
   constructor(
     private readonly dial: () => InMemoryClientSocket | undefined,
     timer: Timer,
@@ -329,7 +295,7 @@ export class InMemoryDaemonClient extends DaemonClient {
   }
 
   override async connect(): Promise<void> {
-    if ((this as unknown as DaemonClientInternals).connected) {
+    if (this.testHooks.connection().connected) {
       return;
     }
     const socket = this.dial();
@@ -337,37 +303,18 @@ export class InMemoryDaemonClient extends DaemonClient {
       throw new DaemonUnavailableError(`Daemon socket not found: ${IN_MEMORY_SOCKET_PATH}`);
     }
     socket.on("data", (data: Buffer) => this.testHooks.simulateIncomingData(data));
-    socket.on("close", () => this.socketClosed(socket));
-    this.testHooks.attachSocket(socket as unknown as Duplex);
+    socket.on("close", () => this.testHooks.socketClosed(socket));
+    this.attached = socket;
+    this.testHooks.attachSocket(socket);
   }
 
   /** The socket this client is connected on now, if it is. */
   get liveSocket(): InMemoryClientSocket | undefined {
-    const internals = this as unknown as DaemonClientInternals;
-    const socket = internals.socket as InMemoryClientSocket | null;
-    return internals.connected && socket && !socket.destroyed ? socket : undefined;
-  }
-
-  /** `DaemonClient.connectOnce`'s `close` listener. */
-  private socketClosed(socket: InMemoryClientSocket): void {
-    const internals = this as unknown as DaemonClientInternals;
-    if (
-      (internals.socket !== null && internals.socket !== socket) ||
-      internals.closedSockets.has(socket)
-    ) {
-      return;
-    }
-    internals.handleSocketClosed(socket);
-    for (const pending of internals.pendingRequests.values()) {
-      internals.timer.clearTimeout(pending.timeout);
-      pending.removeAbortListener?.();
-      pending.reject(
-        new DaemonUnavailableError("Daemon socket connection lost: connection closed", {
-          cause: pending.disconnectCause,
-        }),
-      );
-    }
-    internals.pendingRequests.clear();
+    const { connected, socket } = this.testHooks.connection();
+    const attached = this.attached;
+    return connected && attached && socket === attached && !attached.destroyed
+      ? attached
+      : undefined;
   }
 }
 

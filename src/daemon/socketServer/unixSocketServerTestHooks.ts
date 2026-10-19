@@ -1,5 +1,6 @@
 import type { DaemonRequest } from "../types";
-import type { McpForwardRoute } from "../socketServer";
+import type { ListChangedKind, McpForwardRoute } from "../socketServer";
+import type { InterceptableMethod } from "../interceptableMethod";
 
 /**
  * Typed view of the MCP forward-routing internals that daemon integration tests drive directly
@@ -21,4 +22,5 @@ export interface UnixSocketServerTestHooks {
     response: unknown,
   ): void;
   requireCurrentFrameContext(deviceId: string, frameContext: string, action: string): void;
+  broadcastListChanged: InterceptableMethod<(kind: ListChangedKind) => void>;
 }

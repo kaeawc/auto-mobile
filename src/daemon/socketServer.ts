@@ -53,7 +53,7 @@ import { runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
@@ -122,6 +122,7 @@ import {
   type DaemonSocketReachabilityLike,
 } from "./daemonSocketReachability";
 import { isProcessRunning, readPidFileDataSync } from "./daemonFiles";
+import { interceptableMethod } from "./interceptableMethod";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../utils/fileLock";
 import {
   ListChangedBroadcaster,
@@ -263,6 +264,7 @@ import {
   requestFailureCause,
 } from "./socketServer/errorFrames";
 import type { UnixSocketServerTestHooks } from "./socketServer/unixSocketServerTestHooks";
+import { isOwnedSocketFile, readSocketFileIdentity } from "./socketServer/socketFileIdentity";
 import { indeterminateInputError } from "./socketServer/forwardFailures";
 import { isTaskRelayMethod, parseTaskRelayFrame } from "./tasks/taskRelay";
 import {
@@ -523,7 +525,7 @@ function resolveSocketBindGuard(
  * run concurrently. Each forward runs in process (#11820): its own MCP client and stateless
  * server, named by the socket session id as its MCP session key.
  */
-interface SocketFileIdentity {
+export interface SocketFileIdentity {
   dev: number;
   ino: number;
 }
@@ -535,6 +537,7 @@ interface SocketFileIdentity {
  * leaving forwarding dead but the suite green).
  */
 export type { McpClientFactory };
+export type { ListChangedKind };
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -1185,7 +1188,7 @@ export class UnixSocketServer {
 
       await new Promise<void>((resolve, reject) => {
         this.server!.listen(this.socketPath, () => {
-          this.socketFileIdentity = this.readSocketFileIdentity();
+          this.socketFileIdentity = readSocketFileIdentity(this.socketPath);
           logger.info(`Unix socket server listening on ${this.socketPath}`);
           // Restrict the bound socket to the owner (0o600) before start() resolves,
           // so no client can connect while it is still world-accessible. listen()
@@ -1214,6 +1217,18 @@ export class UnixSocketServer {
   startDetached(): (socket: Socket) => void {
     this.beginAccepting();
     return this.connectionHandlerWithFanOut();
+  }
+
+  /** Counterpart of {@link startDetached}: refuse requests and drop the list/resource/release fan-out. */
+  stopAcceptingAndFanOut(): void {
+    this.closing = true;
+    this.acceptingRequests = false;
+    this.listChangedUnsubscribe?.();
+    this.listChangedUnsubscribe = null;
+    this.resourceUpdatedUnsubscribe?.();
+    this.resourceUpdatedUnsubscribe = null;
+    this.sessionReleaseUnsubscribe?.();
+    this.sessionReleaseUnsubscribe = null;
   }
 
   private beginAccepting(): void {
@@ -7150,7 +7165,7 @@ export class UnixSocketServer {
     // subscribers alive long enough to receive session-release frames. Any
     // connection that has not opted in cannot receive the shutdown reason, so
     // close it now and let its proxy reconnect to the successor daemon.
-    void this.closeListeningServer(this.isOwnedSocketFile());
+    void this.closeListeningServer(isOwnedSocketFile(this.socketPath, this.socketFileIdentity));
     for (const [sessionId, socket] of this.clientSockets) {
       if (!this.notificationSubscribers.has(sessionId) && !socket.destroyed) {
         socket.end();
@@ -7193,25 +7208,14 @@ export class UnixSocketServer {
    */
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
-    this.closing = true;
-    this.acceptingRequests = false;
+    this.stopAcceptingAndFanOut();
     this.lifecycleGeneration += 1;
     this.restartAdmission.releaseAll();
-
-    // Stop receiving list-changed events (mirrors the subscribe in start()).
-    this.listChangedUnsubscribe?.();
-    this.listChangedUnsubscribe = null;
-    this.resourceUpdatedUnsubscribe?.();
-    this.resourceUpdatedUnsubscribe = null;
-
-    // Stop receiving session-release events (mirrors the subscribe in start()).
-    this.sessionReleaseUnsubscribe?.();
-    this.sessionReleaseUnsubscribe = null;
 
     // Keep sockets and session bookkeeping alive while handlers finish and write.
     // The listener stops new connections now; existing requests get the bounded drain.
     const clientSockets = Array.from(this.clientSockets.values());
-    const ownsSocketPath = this.isOwnedSocketFile();
+    const ownsSocketPath = isOwnedSocketFile(this.socketPath, this.socketFileIdentity);
     const serverClosed = this.closeListeningServer(ownsSocketPath);
 
     // Queued requests have not started device work and must not begin during shutdown.
@@ -7326,18 +7330,6 @@ export class UnixSocketServer {
     }
   }
 
-  private readSocketFileIdentity(): SocketFileIdentity | null {
-    try {
-      const stats = statSync(this.socketPath);
-      return { dev: stats.dev, ino: stats.ino };
-    } catch (error) {
-      // statSync fails if the socket file was removed/replaced concurrently; callers
-      // treat a null identity as "can't confirm ownership" rather than a hard error.
-      logger.debug(`src/daemon/socketServer.ts fallback failed: ${error}`, error);
-      return null;
-    }
-  }
-
   /** Typed access to the MCP forward-routing internals for daemon integration tests. */
   get testHooks(): UnixSocketServerTestHooks {
     return {
@@ -7346,17 +7338,12 @@ export class UnixSocketServer {
       withSocketSessionAutolockKey: (...args) => this.withSocketSessionAutolockKey(...args),
       recordBoundMcpClientKey: (...args) => this.recordBoundMcpClientKey(...args),
       requireCurrentFrameContext: (...args) => this.requireCurrentFrameContext(...args),
+      broadcastListChanged: interceptableMethod(
+        () => this.broadcastListChanged.bind(this),
+        (replacement) => {
+          this.broadcastListChanged = replacement;
+        },
+      ),
     };
-  }
-
-  private isOwnedSocketFile(): boolean {
-    if (!this.socketFileIdentity || !existsSync(this.socketPath)) {
-      return false;
-    }
-    const currentIdentity = this.readSocketFileIdentity();
-    return (
-      currentIdentity?.dev === this.socketFileIdentity.dev &&
-      currentIdentity.ino === this.socketFileIdentity.ino
-    );
   }
 }

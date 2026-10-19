@@ -30,8 +30,7 @@
 5	test/helpers/directFrameRig.ts
 1	test/helpers/fakeDeviceManagerSimctl.ts
 1	test/helpers/hostCommandGuard.ts
-7	test/helpers/inMemoryDaemonWire.ts
-1	test/helpers/livenessScenarioHarness.test.ts
+2	test/helpers/inMemoryDaemonWire.ts
 9	test/helpers/livenessScenarioHarness.ts
 3	test/helpers/restartEndToEndScenario.ts
 3	test/helpers/restartScenarioHarness.ts

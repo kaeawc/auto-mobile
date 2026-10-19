@@ -513,6 +513,8 @@ export class DaemonClient {
       /** Checks whether a request remains pending. */
       hasPendingRequest: (requestId: string): boolean => this.pendingRequests.has(requestId),
       connection: () => ({ connected: this.connected, socket: this.socket }),
+      /** Runs the close listener `connect()` installs on its socket. */
+      socketClosed: (socket: Duplex): void => this.onSocketClosed(socket),
       declaredIdentity: () => this.clientIdentity,
       socketPathObservable: () => this.socketPathObservable(),
     };
@@ -758,20 +760,6 @@ export class DaemonClient {
       let settled = false;
       let removeAbortListener = () => {};
 
-      const rejectPendingRequests = (error: Error, preserveRequestCause: boolean = false) => {
-        for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
-          .pendingRequests) {
-          this.timer.clearTimeout(timeout);
-          removeAbortListener?.();
-          reject(
-            preserveRequestCause
-              ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
-              : error,
-          );
-        }
-        this.pendingRequests.clear();
-      };
-
       const fail = (error: Error) => {
         if (isStaleSocket()) {
           return;
@@ -785,7 +773,7 @@ export class DaemonClient {
         // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
         // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
         const failure = toDaemonTransportError(error);
-        rejectPendingRequests(failure, true);
+        this.rejectPendingRequests(failure, true);
         if (!settled) {
           settled = true;
           reject(failure);
@@ -842,28 +830,39 @@ export class DaemonClient {
         fail(error);
       });
 
-      socket.once("close", () => {
-        // fail() clears this.socket before destroy emits close. Preserve that
-        // notification path; only a different installed socket makes this stale.
-        if (isStaleSocket() || this.closedSockets.has(socket)) {
-          return;
-        }
-        this.handleSocketClosed(socket);
-        // A daemon restart/crash closes the socket. Over a Unix domain socket
-        // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
-        // event, so any in-flight request would otherwise hang until its request
-        // timeout. Reject pending requests with a recoverable transport error so
-        // the proxy reconnects to the restarted daemon and retries (#2599/#2737).
-        // After fail() the pending map is already cleared, so this is a no-op on
-        // the error path.
-        if (this.pendingRequests.size > 0) {
-          rejectPendingRequests(
-            new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
-            true,
-          );
-        }
-      });
+      socket.once("close", () => this.onSocketClosed(socket));
     });
+  }
+
+  private rejectPendingRequests(error: Error, preserveRequestCause: boolean = false): void {
+    for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
+      .pendingRequests) {
+      this.timer.clearTimeout(timeout);
+      removeAbortListener?.();
+      reject(
+        preserveRequestCause
+          ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
+          : error,
+      );
+    }
+    this.pendingRequests.clear();
+  }
+
+  private onSocketClosed(socket: Socket | Duplex): void {
+    // fail() clears this.socket before destroy emits close; only a different installed socket is stale.
+    if ((this.socket !== null && this.socket !== socket) || this.closedSockets.has(socket)) {
+      return;
+    }
+    this.handleSocketClosed(socket);
+    // A dying daemon over a Unix socket delivers EOF -> "close" with no "error" (no TCP RST), so
+    // in-flight requests would hang to their timeout. Reject them with a recoverable transport
+    // error so the proxy reconnects and retries (#2599/#2737); a no-op after fail() cleared them.
+    if (this.pendingRequests.size > 0) {
+      this.rejectPendingRequests(
+        new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+        true,
+      );
+    }
   }
 
   /** Handle incoming data from daemon */

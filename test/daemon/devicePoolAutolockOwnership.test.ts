@@ -336,8 +336,8 @@ test.each(["agent-B", "agent-A"])(
       matcher.setBootedResult(device);
       matcher.setImageResult(image);
       const kill = deviceUtils.killDevice.bind(deviceUtils);
-      deviceUtils.killDevice = async (target, options) => {
-        await kill(target, options);
+      deviceUtils.killDevice = async (target) => {
+        await kill(target);
         deviceUtils.setBootedDevices("android", []);
       };
       let readinessAttempts = 0;
@@ -474,8 +474,8 @@ test.each([false, true])(
       matcher.setBootedResult(device);
       matcher.setImageResult(image);
       const kill = deviceUtils.killDevice.bind(deviceUtils);
-      deviceUtils.killDevice = async (target, options) => {
-        await kill(target, options);
+      deviceUtils.killDevice = async (target) => {
+        await kill(target);
         deviceUtils.setBootedDevices("android", []);
       };
       let readinessAttempts = 0;

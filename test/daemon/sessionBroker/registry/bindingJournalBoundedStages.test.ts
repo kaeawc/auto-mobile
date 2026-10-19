@@ -61,6 +61,7 @@ async function harness() {
   if (scope.kind !== "ready") {
     throw new Error("scope not ready");
   }
+  const { scopeKey } = scope.scope;
   const deps = {
     registry,
     inventory,
@@ -79,7 +80,7 @@ async function harness() {
     phase: "deleting" | "created" = "deleting",
     present = false,
   ) {
-    const key = { scopeKey: scope.scope.scopeKey, bindingIndex };
+    const key = { scopeKey, bindingIndex };
     const id = `device-${bindingIndex}`;
     await registry.initBinding(key, { role: "app", platform, requestedSpec: SPEC });
     const bound = await registry.commitBinding(

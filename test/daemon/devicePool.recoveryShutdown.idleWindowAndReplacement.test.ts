@@ -10,6 +10,7 @@ import {
   LaggingShutdownManager,
   KillTrackingShutdownManager,
   setup,
+  setupWith,
   setupPassiveRestart,
   setupAwaitingOwner,
   flush,
@@ -209,7 +210,7 @@ test("a resolved old-serial replacement keeps recovery pending despite another u
 });
 
 test("active emulator loss adopts a same-AVD replacement at a new serial", async () => {
-  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  const { sessions, manager, pool, captured } = await setupWith(new KillTrackingShutdownManager());
   try {
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
@@ -228,7 +229,7 @@ test("active emulator loss adopts a same-AVD replacement at a new serial", async
 });
 
 test("active emulator loss rebinds a pooled same-AVD replacement at a new serial", async () => {
-  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  const { sessions, manager, pool, captured } = await setupWith(new KillTrackingShutdownManager());
   try {
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
@@ -245,7 +246,7 @@ test("active emulator loss rebinds a pooled same-AVD replacement at a new serial
 });
 
 test("active emulator loss adopts a new serial after its tracked process exits", async () => {
-  const { sessions, manager, pool, captured } = await setup(new KillTrackingShutdownManager());
+  const { sessions, manager, pool, captured } = await setupWith(new KillTrackingShutdownManager());
   try {
     const exitedProcess = new ExitedChildProcess();
     pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);

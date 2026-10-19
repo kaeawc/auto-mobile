@@ -1,3 +1,4 @@
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { EmulatorProcessLifecycle } from "../../src/daemon/emulatorProcessLifecycle";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
@@ -207,7 +208,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "busy";
+        patchDeviceBinding(unavailable, { status: "busy" });
       });
 
       await expect(
@@ -225,7 +226,7 @@ describe("DevicePool", () => {
         if (!unavailable) {
           throw new Error("expected second pooled device");
         }
-        unavailable.status = "busy";
+        patchDeviceBinding(unavailable, { status: "busy" });
         fakeTimer.advanceTime(1001);
       });
 
@@ -816,6 +817,7 @@ describe("DevicePool", () => {
           }
           return false;
         },
+        clear(): void {},
       };
       devicePool = makePool({
         deviceManager: manager,

@@ -140,7 +140,7 @@ describe("binding registry schema compatibility", () => {
       );
       expect(acquire).toHaveBeenCalledTimes(1);
       expect(release).toHaveBeenCalledTimes(1);
-      expect(snapshot(peer.sqlite)).toEqual(before);
+      expect<unknown>(snapshot(peer.sqlite)).toEqual(before);
       expect(error).toMatchObject({
         name: "BindingRegistrySchemaUnsupportedError",
         unknownMigrations: [FUTURE],

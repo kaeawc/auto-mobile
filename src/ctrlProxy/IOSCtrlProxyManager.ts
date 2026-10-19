@@ -32,7 +32,7 @@ import type { IosCtrlProxyBuilderSurface } from "./IosCtrlProxyBuilderSurface";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
-import { type ChildProcess } from "child_process";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../utils/PortManager";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../utils/HostCommandExecutor";
 import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
@@ -201,7 +200,7 @@ describe("DevicePool", () => {
             isRunning: true,
             source: "local",
           },
-          childProcess: new FakeChildProcess() as unknown as ChildProcess,
+          childProcess: new FakeChildProcess(),
           allowSessionRebind: false,
           mcpSessionId: "cli-connection-2",
           oneShotCli: true,

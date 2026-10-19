@@ -821,7 +821,7 @@ describe("TestExecutionRepository retention (#3440)", () => {
       await repo.recordExecution(makeExecution({ timestamp: base + i }));
     }
 
-    await repo.pruneToRowCap(5);
+    await repo.testHooks.pruneToRowCap(5);
 
     const rows = await db
       .selectFrom("test_executions")
@@ -843,7 +843,7 @@ describe("TestExecutionRepository retention (#3440)", () => {
       await repo.recordExecution(makeExecution({ timestamp: base + i }));
     }
 
-    await repo.pruneToRowCap(10);
+    await repo.testHooks.pruneToRowCap(10);
 
     const rows = await db.selectFrom("test_executions").selectAll().execute();
     expect(rows).toHaveLength(3);

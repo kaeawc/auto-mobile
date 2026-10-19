@@ -100,59 +100,21 @@ internal class NodeActionController(
       if (selector != null && owner == null) {
         throw IllegalStateException("Selected link owner is no longer present")
       }
-      var matched = 0
-      var activated = false
-      var activationError: String? = null
-      fun visit(node: AccessibilityNodeInfo?) {
-        if (node == null || activated) return
-        val nodeText = node.text as? Spanned
-        if (nodeText != null) {
-          nodeText
-            .getSpans(0, nodeText.length, ClickableSpan::class.java)
-            .sortedBy { nodeText.getSpanStart(it) }
-            .forEach { span ->
-              if (activated) return@forEach
-              val start = nodeText.getSpanStart(span)
-              val end = nodeText.getSpanEnd(span)
-              val spanText = nodeText.subSequence(start, end).toString()
-              if (spanText.equals(text, ignoreCase = true)) {
-                if (matched++ == occurrence) {
-                  try {
-                    // Accessibility exposes ClickableSpan only from API 26. Invoke its public
-                    // contract; no coordinate, reflection, or whole-node fallback is permitted.
-                    span.onClick(host.createView())
-                    activated = true
-                  } catch (error: Exception) {
-                    activationError = error.message ?: error.javaClass.simpleName
-                  }
-                }
-              }
-            }
-        }
-        for (index in 0 until node.childCount) {
-          node.getChild(index)?.let { child ->
-            try {
-              visit(child)
-            } finally {
-              child.recycle()
-            }
-          }
-        }
-      }
-      visit(owner ?: root)
+      val activation = SemanticLinkActivation(text, occurrence)
+      activation.visit(owner ?: root)
       owner?.recycle()
 
       val error =
         when {
-          activated -> null
-          activationError != null -> "Semantic link activation failed: $activationError"
+          activation.activated -> null
+          activation.error != null -> "Semantic link activation failed: ${activation.error}"
           else -> "No actionable semantic link matching '$text' at occurrence $occurrence"
         }
       host.launchRequestScope(requestId) {
         host.sendActionResult(
           requestId,
           "activate_accessibility_link",
-          activated,
+          activation.activated,
           error,
           timeProvider.currentTimeMillis() - startTime,
         )
@@ -168,6 +130,58 @@ internal class NodeActionController(
           timeProvider.currentTimeMillis() - startTime,
         )
       }
+    }
+  }
+
+  private fun activateSemanticSpan(span: ClickableSpan): String? =
+    try {
+      // Accessibility exposes ClickableSpan only from API 26. Invoke its public
+      // contract; no coordinate, reflection, or whole-node fallback is permitted.
+      span.onClick(host.createView())
+      null
+    } catch (error: Exception) {
+      Log.w(TAG, "Semantic accessibility span activation failed", error)
+      error.message ?: error.javaClass.simpleName
+    }
+
+  private inner class SemanticLinkActivation(
+    private val text: String,
+    private val occurrence: Int,
+  ) {
+    private var matched = 0
+    var activated = false
+      private set
+
+    var error: String? = null
+      private set
+
+    fun visit(node: AccessibilityNodeInfo?) {
+      if (node == null || activated) return
+      (node.text as? Spanned)?.let { activateSpans(it) }
+      for (index in 0 until node.childCount) {
+        val child = node.getChild(index) ?: continue
+        try {
+          visit(child)
+        } finally {
+          child.recycle()
+        }
+      }
+    }
+
+    private fun activateSpans(nodeText: Spanned) {
+      nodeText
+        .getSpans(0, nodeText.length, ClickableSpan::class.java)
+        .sortedBy { nodeText.getSpanStart(it) }
+        .forEach { span ->
+          if (activated) return@forEach
+          val start = nodeText.getSpanStart(span)
+          val end = nodeText.getSpanEnd(span)
+          val spanText = nodeText.subSequence(start, end).toString()
+          if (spanText.equals(text, ignoreCase = true) && matched++ == occurrence) {
+            error = activateSemanticSpan(span)
+            activated = error == null
+          }
+        }
     }
   }
 

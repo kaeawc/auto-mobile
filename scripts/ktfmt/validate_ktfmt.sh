@@ -7,7 +7,7 @@ ONLY_CHANGED_SINCE_SHA=${ONLY_CHANGED_SINCE_SHA:-""}
 
 # Pinned ktfmt version -- single source of truth shared with install_ktfmt.sh so
 # the installer and this validator's fingerprint gate can never drift apart.
-# shellcheck source=scripts/ktfmt/ktfmt_version.sh disable=SC1091
+# shellcheck source=scripts/ktfmt/ktfmt_version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/ktfmt_version.sh"
 
 # Shared VCS file-selection + install-when-missing helpers (issue #2823).

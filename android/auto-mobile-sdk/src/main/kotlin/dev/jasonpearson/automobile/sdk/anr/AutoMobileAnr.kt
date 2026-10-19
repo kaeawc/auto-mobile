@@ -21,6 +21,7 @@ import dev.jasonpearson.automobile.sdk.events.AckPackageInfoReader
 import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.events.SdkEventAckCapability
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
+import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicBoolean
@@ -157,7 +158,7 @@ object AutoMobileAnr {
         }
         capped = trace.length == maxChars && reader.read() != -1
       }
-    } catch (e: Exception) {
+    } catch (e: IOException) {
       AutoMobileSDK.logger.w(TAG, e) {
         "Failed to read or close ANR trace after ${trace.length} chars"
       }

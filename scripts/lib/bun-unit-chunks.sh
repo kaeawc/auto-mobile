@@ -22,7 +22,7 @@
 set -euo pipefail
 root="$1" runner_os="$2" chunk_files="$3" report_dir="$4" shard="$5"
 shift 5
-# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
+# shellcheck source=scripts/lib/bun-unit-test.sh
 source "$root/scripts/lib/bun-unit-test.sh"
 
 has_separator=0

@@ -1,6 +1,8 @@
+import { toolPayload } from "../helpers/toolResponse";
 import { SKELETON_OBSERVATION } from "../../src/server/toolRegistryTypes";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect } from "bun:test";
+import { warmedTests } from "../helpers/warmedTests";
 import { z } from "zod/v4";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -11,7 +13,7 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -31,7 +33,7 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
  *
  * These exercise the real wrapped-handler → finalize path end-to-end.
  */
-const payloadOf = (result: Parameters<typeof getStructuredPayload>[0]) =>
+const payloadOf = (result: unknown) =>
   z
     .looseObject({
       observation: z
@@ -49,7 +51,7 @@ const payloadOf = (result: Parameters<typeof getStructuredPayload>[0]) =>
         .optional(),
       observationDiff: z.looseObject({ mode: z.string(), reason: z.string() }).optional(),
     })
-    .parse(getStructuredPayload(result));
+    .parse(toolPayload(result));
 
 describe("ToolRegistry internal no-diff guard (#3053)", () => {
   const androidA: BootedDevice = {
@@ -83,6 +85,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   function sameScreenObserve(): ObserveResult {
     return {
       updatedAt: 1,
+      observationId: "same-screen",
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
@@ -176,7 +180,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     );
   }
 
-  beforeEach(() => {
+  function setup(): void {
     ToolRegistry.clearTools();
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -203,9 +207,9 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     // against a fake device. The shared test preload (test/setup/testPreload.ts)
     // installs a no-op readiness driver so that setup cannot block on real
     // `adb`/network.
-  });
+  }
 
-  afterEach(() => {
+  function reset(): void {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDeviceSessionManager });
@@ -218,7 +222,19 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     serverConfig.setActionsCompactMetadataEnabled(originalCompact);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
-  });
+  }
+
+  const warmedTest = warmedTests(() => {});
+  function test(name: string, scenario: () => Promise<void>): void {
+    warmedTest(name, async () => {
+      setup();
+      try {
+        await scenario();
+      } finally {
+        reset();
+      }
+    });
+  }
 
   test("compact metadata uses the actual session cache through the wrapped handler", async () => {
     serverConfig.setActionsCompactMetadataEnabled(true);
@@ -234,12 +250,12 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     const handler = ToolRegistry.getTool("tapOn")!.handler;
     const args = { platform: "android", __mcpSessionId: "mcp-session-1" };
     const output = z.object({ observation: z.record(z.string(), z.unknown()) });
-    const first = output.parse(getStructuredPayload(await handler(args))).observation;
+    const first = output.parse(toolPayload(await handler(args))).observation;
     expect(first).toHaveProperty("systemInsets");
     expect(daemonSessionManager?.getLastActionMetadata(uuid, androidA.deviceId)).toHaveProperty(
       "systemInsets",
     );
-    const second = output.parse(getStructuredPayload(await handler(args))).observation;
+    const second = output.parse(toolPayload(await handler(args))).observation;
     expect(second).not.toHaveProperty("systemInsets");
   });
 

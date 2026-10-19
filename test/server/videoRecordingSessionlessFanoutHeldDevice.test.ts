@@ -274,8 +274,6 @@ describe("sessionless videoRecording fan-out reaches a device another session ho
               holder: "session_broker",
               scopeKey: "scope",
               bindingIndex: 0,
-              scopeState: "valid",
-              execSessionUuid: HOLDER,
             });
           }
         },

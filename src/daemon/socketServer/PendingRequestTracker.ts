@@ -1,11 +1,11 @@
-import type { Socket } from "node:net";
+import type { ControlSocket } from "./ControlConnection";
 import type { ProgressExtendableDeadline } from "../mcpRequestTimeout";
 
 /** One in-flight control-socket request awaiting its terminal response frame. */
 export interface PendingSocketRequest {
   id: string;
   sessionId: string;
-  socket: Socket;
+  socket: ControlSocket;
   admitted: boolean;
   terminal: boolean;
   /** Control frames do not earn an idle exemption; ordinary work has a bounded live deadline. */
@@ -33,7 +33,7 @@ export class PendingRequestTracker implements Iterable<PendingSocketRequest> {
   }
 
   /** Forget every request that belongs to a socket that has closed. */
-  deleteForSocket(socket: Socket): void {
+  deleteForSocket(socket: ControlSocket): void {
     for (const request of this.pending) {
       if (request.socket === socket) {
         this.pending.delete(request);
@@ -42,7 +42,7 @@ export class PendingRequestTracker implements Iterable<PendingSocketRequest> {
   }
 
   /** True while any request on the socket still has an unexpired idle deadline. */
-  hasLiveRequest(socket: Socket, nowMs: number): boolean {
+  hasLiveRequest(socket: ControlSocket, nowMs: number): boolean {
     for (const request of this.pending) {
       if (
         request.socket === socket &&

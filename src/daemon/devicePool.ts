@@ -170,8 +170,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { TTLCache } from "../utils/cache/Cache";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import type { InstalledAppsStore } from "../db/installedAppsRepository";
-import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import { InstalledAppsRepository, type InstalledAppsStore } from "../db/installedAppsRepository";
 import { type RetryExecutor, DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
@@ -8660,11 +8659,7 @@ export class DevicePool {
       deferredDeviceReleases: this.deferredDeviceReleases,
       mcpSessionRecoveryDevices: this.mcpSessionRecoveryDevices,
       deviceHealthMarkers: this.deviceHealthMarkers,
-      /**
-       * Swap in the device manager and foreign-ownership collaborators for a pool built by a
-       * caller that takes no injection (the Daemon); the idle-device reaper captured the old
-       * manager, so it is rebuilt over the new one.
-       */
+      /** Swap in the device manager and ownership collaborators; rebuilds the reaper. */
       replaceDeviceDiscovery: (replacement: {
         deviceManager: PlatformDeviceManager;
         foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
@@ -8676,6 +8671,8 @@ export class DevicePool {
         this.iosForeignDeviceOwnership = replacement.iosForeignDeviceOwnership;
       },
       recoveryCoordinator: this.recoveryCoordinator,
+      intentionalShutdowns: this.intentionalShutdowns,
+      isReservedForShutdown: (device: PooledDevice) => this.isReservedForShutdown(device),
       androidRecoveryRecordLedger: this.androidRecoveryRecordLedger,
       emulatorLossLedger: this.emulatorLossLedger,
       startedDeviceProcesses: this.startedDeviceProcesses,

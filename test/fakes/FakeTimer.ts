@@ -11,6 +11,39 @@ const AUTO_ADVANCE_EVENTS_PER_BURST = 100;
 // of them starved whole CI unit shards past the wall-clock watchdog.
 const AUTO_ADVANCE_BURSTS_BEFORE_THROTTLE = 10;
 
+/** The handle a fake timeout or interval returns: structurally a Node timer, identified by its id. */
+class FakeTimerHandle implements NodeJS.Timeout {
+  constructor(private readonly id: number) {}
+
+  close(): this {
+    return this;
+  }
+
+  hasRef(): boolean {
+    return true;
+  }
+
+  ref(): this {
+    return this;
+  }
+
+  refresh(): this {
+    return this;
+  }
+
+  unref(): this {
+    return this;
+  }
+
+  [Symbol.toPrimitive](): number {
+    return this.id;
+  }
+
+  [Symbol.dispose](): void {}
+
+  _onTimeout(): void {}
+}
+
 /**
  * Pending sleep call information
  */
@@ -411,7 +444,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: fires asynchronously at its scheduled fake time (but can be cancelled).
    */
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextTimeoutId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextTimeoutId);
     this.nextTimeoutId++;
     this.pendingTimeouts.push({
       id,
@@ -437,7 +470,7 @@ export class FakeTimer implements Timer {
    * In auto-advance mode: reschedules itself at each fake interval until cancelled.
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
-    const id = this.nextIntervalId as unknown as NodeJS.Timeout;
+    const id = new FakeTimerHandle(this.nextIntervalId);
     this.nextIntervalId++;
     this.pendingIntervals.push({
       id,

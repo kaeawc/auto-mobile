@@ -1,7 +1,6 @@
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { expect, spyOn } from "bun:test";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
+import type { ControlSocket } from "../../src/daemon/socketServer/ControlConnection";
 import { UnixSocketServer, type AppendTextInput } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -10,6 +9,9 @@ import { InputText } from "../../src/features/action/InputText";
 import type { BootedDevice } from "../../src/models";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeFrameSocket } from "../fakes/FakeControlSocket";
+
+export { FakeFrameSocket };
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "./fakeTimerStepping";
 export interface Harness {
@@ -156,44 +158,14 @@ export function runner(ignoreAbort = false) {
     },
   };
 }
-interface FrameSocket {
-  destroyed: boolean;
-  writableLength: number;
-  responses: DaemonResponse[];
-  setTimeout(): FrameSocket;
-  write(data: string, callback?: (error?: Error | null) => void): boolean;
-  destroy(): FrameSocket;
-  send(frame: DaemonRequest): void;
-}
-export class FakeFrameSocket extends EventEmitter implements FrameSocket {
-  destroyed = false;
-  writableLength = 0;
-  responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
-  }
-  send(frame: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(frame)}\n`));
-  }
-}
 export interface SocketHarness extends Harness {
   handleRequest(
     sessionId: string,
-    socket: Socket,
+    socket: ControlSocket,
     request: DaemonRequest,
   ): Promise<DaemonResponse | undefined>;
   acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
+  handleConnection(socket: ControlSocket): void;
   activeRequestHandlers: Set<Promise<void>>;
 }
 export function socketHarness(state?: DaemonStateAccess) {
@@ -217,8 +189,8 @@ export function socketHarness(state?: DaemonStateAccess) {
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
   const socket = new FakeFrameSocket();
   const other = new FakeFrameSocket();
-  server.handleConnection(socket as unknown as Socket);
-  server.handleConnection(other as unknown as Socket);
+  server.handleConnection(socket);
+  server.handleConnection(other);
   return { server, timer, stamps, client, socket, other };
 }
 export function cancel(socket: FakeFrameSocket, requestId: string) {

@@ -1,4 +1,5 @@
-import type { Socket } from "node:net";
+import type { ControlSocket } from "../../../src/daemon/socketServer/ControlConnection";
+import type { ListChangedKind } from "../../../src/server/listChangedBroadcast";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
@@ -16,12 +17,12 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     this.acceptingRequests = true;
   }
 
-  connect(socket: Socket): void {
+  connect(socket: ControlSocket): void {
     this.handleConnection(socket);
   }
 
   writeFrameTo(
-    socket: Socket,
+    socket: ControlSocket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: (error?: Error | null) => void,
@@ -38,7 +39,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   set requestHandler(
     handler: (
       sessionId: string,
-      socket: Socket,
+      socket: ControlSocket,
       request: DaemonRequest,
       receivedAtMs: number,
       onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
@@ -50,6 +51,50 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   /** Skip the device-stream frame-context check (no stream server runs in these tests). */
   stubFrameContextCheck(): void {
     this.requireCurrentFrameContext = () => {};
+  }
+
+  /** Run the real frame-context check (refuses a stale or unavailable context). */
+  checkFrameContext(deviceId: string, frameContext: string | undefined, action: string): void {
+    this.requireCurrentFrameContext(deviceId, frameContext, action);
+  }
+
+  /** Every list-changed fan-out this server was asked to make, in order. */
+  readonly listChangedBroadcasts: ListChangedKind[] = [];
+
+  protected override broadcastListChanged(kind: ListChangedKind): void {
+    this.listChangedBroadcasts.push(kind);
+    super.broadcastListChanged(kind);
+  }
+
+  /** The request handlers still running for accepted connections. */
+  get activeHandlers(): Promise<void>[] {
+    return [...this.activeRequestHandlers];
+  }
+
+  /** Whether forwarded work is queued behind the key (`device:<id>` for a device's input). */
+  isForwardQueued(key: string): boolean {
+    return this.mcpForwardTails.has(key);
+  }
+
+  /** Lift the strokes a released session still holds. */
+  liftHeldStrokes(releasedSessionId: string): Promise<void> {
+    return this.liftStrokesHeldBy(releasedSessionId);
+  }
+
+  /** The daemon process died: nothing is accepted or pushed again, and `close()`'s drain never runs. */
+  abandon(): void {
+    this.acceptingRequests = false;
+    this.closing = true;
+    for (const unsubscribe of [
+      this.listChangedUnsubscribe,
+      this.resourceUpdatedUnsubscribe,
+      this.sessionReleaseUnsubscribe,
+    ]) {
+      unsubscribe?.();
+    }
+    this.listChangedUnsubscribe = null;
+    this.resourceUpdatedUnsubscribe = null;
+    this.sessionReleaseUnsubscribe = null;
   }
 
   get pendingRequestCount(): number {

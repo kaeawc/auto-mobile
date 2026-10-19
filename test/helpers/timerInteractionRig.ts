@@ -141,9 +141,7 @@ export async function sessionInfo(
   sessionId: string,
 ): Promise<Record<string, unknown>> {
   const envelope = await scenario.daemonMethod("daemon/sessionInfo", { sessionId });
-  return envelope.success
-    ? (envelope.result as Record<string, unknown>)
-    : (envelope as unknown as Record<string, unknown>);
+  return envelope.success ? (envelope.result as Record<string, unknown>) : { ...envelope };
 }
 
 /** The persisted row's status and reason. */

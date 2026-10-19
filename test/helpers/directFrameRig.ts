@@ -1,8 +1,4 @@
-import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
-import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   hasActiveSessionExecution,
@@ -16,13 +12,14 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeFrameSocket } from "../fakes/FakeControlSocket";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "./fakeTimerStepping";
-import {
-  createFakeDaemonState,
-  createFakeDeviceManager,
-} from "../daemon/helpers/inputSocketHarness";
+import { createHarnessServer } from "../daemon/helpers/UnixSocketServerHarness";
+import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
 
 /**
  * Rig for direct socket frame ownership and cancellation regressions (#11667).
@@ -37,44 +34,7 @@ import {
  * release that lifts a released holder's strokes.
  */
 
-export class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-  answer(id: string): DaemonResponse | undefined {
-    return this.responses.find((frame) => frame.id === id);
-  }
-}
-
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  mcpForwardTails: Map<string, Promise<void>>;
-  liftStrokesHeldBy(releasedSessionId: string): Promise<void>;
-  liftSessionlessStrokesOn(deviceId: string): void;
-}
+export class FakeSocket extends FakeFrameSocket {}
 
 export interface DeviceClientFake {
   onRead?: () => void;
@@ -105,6 +65,23 @@ export function android(deviceId: string): BootedDevice {
   return { deviceId, name: deviceId, platform: "android" };
 }
 
+/** Device discovery that waits on the rig's discovery hook before it answers. */
+class DiscoveryHookDeviceManager extends FakeDeviceManager {
+  constructor(
+    devices: BootedDevice[],
+    private readonly client: DeviceClientFake,
+  ) {
+    super([], devices);
+  }
+
+  override async getBootedDevicesDetailed(
+    ...args: Parameters<FakeDeviceManager["getBootedDevicesDetailed"]>
+  ) {
+    await this.client.discovery?.();
+    return super.getBootedDevicesDetailed(...args);
+  }
+}
+
 export function createDirectFrameRig(
   devices: BootedDevice[],
   client: DeviceClientFake = {},
@@ -118,15 +95,7 @@ export function createDirectFrameRig(
   );
   const unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 
-  const discovered = createFakeDeviceManager(devices);
-  PlatformDeviceManagerFactory.setInstance({
-    getBootedDevicesDetailed: async (
-      ...args: Parameters<typeof discovered.getBootedDevicesDetailed>
-    ) => {
-      await client.discovery?.();
-      return discovered.getBootedDevicesDetailed(...args);
-    },
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+  PlatformDeviceManagerFactory.setInstance(new DiscoveryHookDeviceManager(devices, client));
   spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
     const called = (what: string) => {
       deviceCalls.push(`${device.deviceId}:${what}`);
@@ -172,16 +141,19 @@ export function createDirectFrameRig(
   });
 
   const updateServiceSpy = client.updateService
-    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-        (device) =>
-          ({
-            ensureCompatibleVersion: async () => {
-              deviceCalls.push(`${device.deviceId}:updateService`);
-              await client.updateService?.();
-              return { status: "compatible" };
-            },
-          }) as unknown as AndroidCtrlProxyManager,
-      )
+    ? spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation((device) => {
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          device,
+          new FakeAdbExecutor(),
+          new FakeTimer(),
+        );
+        spyOn(manager, "ensureCompatibleVersion").mockImplementation(async () => {
+          deviceCalls.push(`${device.deviceId}:updateService`);
+          await client.updateService?.();
+          return { status: "compatible" };
+        });
+        return manager;
+      })
     : undefined;
 
   const fakePool = {
@@ -190,13 +162,13 @@ export function createDirectFrameRig(
       await client.ownershipGate?.();
     },
   };
-  const server = createTestUnixSocketServer(
+  const server = createHarnessServer(
     "unused",
     {
-      isInitialized: () => true,
+      ...createFakeDaemonState(),
       getSessionManager: () => sessionManager,
       getDevicePool: () => fakePool,
-    } as unknown as DaemonStateAccess,
+    },
     new FakeTimer(),
     {
       listFlags: async () => {
@@ -213,19 +185,18 @@ export function createDirectFrameRig(
     // The storage tools are enabled, so an `ide/*` storage frame reaches its ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
-  const internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  server.allowRequests();
   // daemon.ts: a session acquiring a device cancels the sessionless work admitted on it.
   sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
     executionTracker.cancelSessionlessDeviceUse(deviceId);
-    internals.liftSessionlessStrokesOn(deviceId);
+    server.liftSessionlessStrokesOn(deviceId);
   });
   // daemon.ts: queue holder strokes on the old device synchronously at unbind.
   sessionManager.onSessionDeviceUnbound((sessionId, deviceId) =>
     server.liftStrokesHeldByOn(sessionId, deviceId),
   );
   // socketServer.start(): a released session's strokes are lifted.
-  sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
+  sessionManager.onSessionRelease((sessionId) => void server.liftHeldStrokes(sessionId));
 
   async function settle(): Promise<void> {
     // Negative assertions include queued no-ops and deliberately pending calls; drain their
@@ -237,11 +208,11 @@ export function createDirectFrameRig(
     sessionManager,
     deviceCalls,
     settle,
-    isDeviceWorkQueued: (deviceId) => internals.mcpForwardTails.has(`device:${deviceId}`),
+    isDeviceWorkQueued: (deviceId) => server.isForwardQueued(`device:${deviceId}`),
     connect() {
       const socket = new FakeSocket();
       sockets.push(socket);
-      internals.handleConnection(socket as unknown as Socket);
+      server.connect(socket);
       return socket;
     },
     async request(socket, request) {
@@ -254,7 +225,7 @@ export function createDirectFrameRig(
         socket.destroy();
       }
       await settle();
-      await Promise.allSettled([...internals.activeRequestHandlers]);
+      await Promise.allSettled(server.activeHandlers);
       unsubscribeActivity();
       updateServiceSpy?.mockRestore();
       spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();

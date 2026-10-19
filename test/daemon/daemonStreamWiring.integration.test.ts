@@ -11,7 +11,7 @@ import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamS
 import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { InitialObservationFrame } from "../../src/daemon/observationInitialFrame";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { installDeviceDataStreamSocketServerForTesting } from "../../src/daemon/deviceDataStreamSocketServer";
 import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -450,7 +450,7 @@ describe("Daemon stream wiring", () => {
           stream.subscribe(pane);
           const hierarchy = { hierarchy: { node: { $: { class: "Root", text: "unchanged" } } } };
           stream.pushHierarchyUpdate("emulator-5554", hierarchy, "static-context");
-          const inputServer = new UnixSocketServer(
+          const inputServer = new UnixSocketServerHarness(
             "/fake/input.sock",
             createFakeDaemonState(),
             timer,
@@ -499,7 +499,7 @@ describe("Daemon stream wiring", () => {
           expect(stream.getLiveFrameGeneration("emulator-5554")).toBeGreaterThan(generation);
           if (event.generationOnly) {
             expect(() =>
-              input.requireCurrentFrameContext("emulator-5554", "static-context", "input/tap"),
+              input.checkFrameContext("emulator-5554", "static-context", "input/tap"),
             ).not.toThrow();
           } else {
             expect(stream.getCurrentFrameContext("emulator-5554")).toBeUndefined();
@@ -550,7 +550,7 @@ describe("Daemon stream wiring", () => {
                 .at(-1)?.hierarchyDiff,
             ).toMatchObject({ hasBaseline: true, changed: 0 });
             expect(() =>
-              input.requireCurrentFrameContext("emulator-5554", "static-context", "input/tap"),
+              input.checkFrameContext("emulator-5554", "static-context", "input/tap"),
             ).not.toThrow();
           } else {
             expect(

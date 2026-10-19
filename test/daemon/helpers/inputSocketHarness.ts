@@ -113,6 +113,7 @@ export function createFakeDaemonState(
         return session?.platform === platform ? session.sessionId : undefined;
       },
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
   };
 }
 

@@ -4,9 +4,8 @@ import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
-import { SessionManager, type RehydrationDeviceReservation } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice, Platform } from "../../src/models";
@@ -28,6 +27,7 @@ import { warmedTests } from "./warmedTests";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -41,26 +41,6 @@ const originalLoggerWarn = logger.warn;
 const originalAvdResolver = getDeviceToolsDependencies().resolveRunningAndroidAvdName;
 const originalIosManagerGetInstance = IOSCtrlProxyManager.getInstance;
 const originalIosClientRetireInstance = IOSCtrlProxyClient.retireInstance;
-
-interface RestartHoldInternals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    sessionId: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<
-    string,
-    RehydrationDeviceReservation["target"] & {
-      restartHandoff?: boolean;
-      daemonRehydration?: boolean;
-      scheduledDeadlineMs?: number;
-      expiryTimer?: NodeJS.Timeout;
-      ownerMcpSessionIds?: ReadonlySet<string>;
-    }
-  >;
-  intentionalShutdowns: Map<string, number>;
-  isReservedForShutdown(device: PooledDevice): boolean;
-}
 
 class StoppingDeviceManager extends FakeDeviceUtils {
   readonly killed: string[] = [];
@@ -154,9 +134,14 @@ export function restartStopHarness() {
       timer.reset();
       expect(timer.getPendingTimeoutCount()).toBe(0);
     });
-    const iosStop = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      stop: async () => {},
-    } as unknown as IOSCtrlProxyManager);
+    const iosManager = IOSCtrlProxyManager.createForTestingWithDeps(
+      { deviceId: "ios-stop-hold", platform: "ios", name: "iPhone" },
+      timer,
+      undefined,
+      new FakeProcessExecutor(),
+    );
+    spyOn(iosManager, "stop").mockResolvedValue(undefined);
+    const iosStop = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue(iosManager);
     const iosRetire = spyOn(IOSCtrlProxyClient, "retireInstance").mockResolvedValue(undefined);
     cleanups.push(() => {
       iosStop.mockRestore();
@@ -209,7 +194,7 @@ export function restartStopHarness() {
     if (publishLabels) {
       sessions.setDeviceLabels(BASE, { phone: LABEL, tablet: SIBLING });
     }
-    const internals = pool as unknown as RestartHoldInternals;
+    const internals = pool.testHooks;
     if (platform === "ios") {
       manager.beforeKill = () => expect(internals.intentionalShutdowns.size).toBe(0);
     }

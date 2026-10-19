@@ -1,9 +1,12 @@
 import type { DeviceManagerSimCtl } from "../../src/devices/deviceUtils";
 
-type Operation = Exclude<keyof DeviceManagerSimCtl, "getSimulatorListingChecked">;
+/** The stubs a test supplies; each is checked against the real simctl signature. */
+type Overrides = Partial<Omit<DeviceManagerSimCtl, "getSimulatorListingChecked">>;
 
-/** Stubs may be looser than the real signatures (fewer params, `null` for a process handle). */
-type LooseOverrides = Partial<Record<keyof DeviceManagerSimCtl, (...args: never[]) => unknown>>;
+/** A required operation the test left out: it throws when called, like an absent method. */
+const unstubbed = (name: string) => (): never => {
+  throw new TypeError(`fakeDeviceManagerSimctl.${name} is not stubbed`);
+};
 
 /**
  * Build the simctl handle a MultiPlatformDeviceManager test needs from only the operations it
@@ -11,24 +14,16 @@ type LooseOverrides = Partial<Record<keyof DeviceManagerSimCtl, (...args: never[
  * the partial objects this replaces. The optional `getSimulatorListingChecked` is never filled in:
  * the manager branches on its presence.
  */
-export function fakeDeviceManagerSimctl(overrides: LooseOverrides = {}): DeviceManagerSimCtl {
-  const operations: Operation[] = [
-    "isAvailable",
-    "listSimulatorImages",
-    "getBootedSimulators",
-    "getBootedSimulatorsChecked",
-    "startSimulator",
-    "deleteSimulator",
-    "killSimulator",
-    "waitForSimulatorReady",
-  ];
-  const notStubbed = Object.fromEntries(
-    operations.map((name) => [
-      name,
-      () => {
-        throw new TypeError(`fakeDeviceManagerSimctl.${name} is not stubbed`);
-      },
-    ]),
-  ) as unknown as DeviceManagerSimCtl;
-  return { ...notStubbed, ...overrides } as DeviceManagerSimCtl;
+export function fakeDeviceManagerSimctl(overrides: Overrides = {}): DeviceManagerSimCtl {
+  return {
+    isAvailable: unstubbed("isAvailable"),
+    listSimulatorImages: unstubbed("listSimulatorImages"),
+    getBootedSimulators: unstubbed("getBootedSimulators"),
+    getBootedSimulatorsChecked: unstubbed("getBootedSimulatorsChecked"),
+    startSimulator: unstubbed("startSimulator"),
+    deleteSimulator: unstubbed("deleteSimulator"),
+    killSimulator: unstubbed("killSimulator"),
+    waitForSimulatorReady: unstubbed("waitForSimulatorReady"),
+    ...overrides,
+  };
 }

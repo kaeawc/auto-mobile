@@ -1,11 +1,10 @@
-import type { Client } from "@modelcontextprotocol/client";
 import { ErrorCode, McpError } from "../../src/server/mcpError";
-import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "../daemon/helpers/UnixSocketServerHarness";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { Duplex } from "node:stream";
-import type { Socket } from "node:net";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -15,7 +14,10 @@ import {
   LOCK_FILE_PATH,
 } from "../../src/daemon/constants";
 import { type UnixSocketServer, type McpClientFactory } from "../../src/daemon/socketServer";
+import type { ForwardMcpClient } from "../../src/daemon/socketServer/forwardSessionKey";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { ControlSocket } from "../../src/daemon/socketServer/ControlConnection";
+import { FakeControlSocket } from "../fakes/FakeControlSocket";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -150,33 +152,20 @@ export class ProcessTimer implements Timer {
 }
 
 /** One end of an in-process connection; what it writes arrives as `data` on its peer. */
-class SocketEnd extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
+class SocketEnd extends FakeControlSocket {
   peer!: SocketEnd;
 
-  setTimeout(): this {
-    return this;
-  }
-
-  write(data: string | Uint8Array, callback?: (error?: Error | null) => void): boolean {
+  protected transmit(data: string | Uint8Array): Error | undefined {
     if (this.destroyed || this.peer.destroyed) {
-      callback?.(new Error("in-memory socket is closed"));
-      return false;
+      return new Error("in-memory socket is closed");
     }
     this.peer.emit("data", Buffer.from(data));
-    callback?.();
-    return true;
+    return undefined;
   }
 
-  end(): this {
-    return this.destroy();
-  }
-
-  destroy(): this {
+  override destroy(): this {
     if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
+      super.destroy();
       this.peer.destroy();
     }
     return this;
@@ -184,16 +173,10 @@ class SocketEnd extends EventEmitter {
 }
 
 /** The client's end of a connection to the in-memory control socket. */
-export type InMemoryClientSocket = Pick<SocketEnd, "destroyed" | "write" | "destroy" | "on">;
-
-/** What a killed process takes with it. Teardown only, never wiring. */
-interface SocketServerTeardown {
-  acceptingRequests: boolean;
-  closing: boolean;
-  listChangedUnsubscribe: (() => void) | null;
-  resourceUpdatedUnsubscribe: (() => void) | null;
-  sessionReleaseUnsubscribe: (() => void) | null;
-}
+export type InMemoryClientSocket = Pick<
+  SocketEnd,
+  "destroyed" | "write" | "destroy" | "on" | "once" | "off"
+>;
 
 /** The ids of the connections the server accepts next, in order. */
 export interface ConnectionIdQueue extends IdGenerator {
@@ -206,10 +189,10 @@ export class InMemoryControlSocket {
   private open = true;
 
   private constructor(
-    readonly server: UnixSocketServer,
+    readonly server: UnixSocketServerHarness,
     private readonly connectionIds: ConnectionIdQueue,
     /** The handler the server's own start gives every accepted connection. */
-    private readonly accept: (socket: Socket) => void,
+    private readonly accept: (socket: ControlSocket) => void,
   ) {}
 
   /**
@@ -238,7 +221,7 @@ export class InMemoryControlSocket {
               return typeof value === "function" ? value.bind(target) : value;
             },
           });
-    const server = createTestUnixSocketServer(
+    const server = createHarnessServer(
       assertNotHostDaemonPath("control socket path", IN_MEMORY_SOCKET_PATH),
       daemonState,
       deps.timer,
@@ -262,45 +245,18 @@ export class InMemoryControlSocket {
     this.daemonEnds.add(daemonEnd);
     daemonEnd.on("close", () => this.daemonEnds.delete(daemonEnd));
     this.connectionIds.enqueue(connectionId);
-    this.accept(daemonEnd as unknown as Socket);
+    this.accept(daemonEnd);
     return clientEnd;
   }
 
   /** The daemon process is gone: every connection drops and nothing is accepted or pushed. */
   kill(): void {
     this.open = false;
-    const internals = this.server as unknown as SocketServerTeardown;
-    internals.acceptingRequests = false;
-    internals.closing = true;
-    for (const fanOut of [
-      "listChangedUnsubscribe",
-      "resourceUpdatedUnsubscribe",
-      "sessionReleaseUnsubscribe",
-    ] as const) {
-      internals[fanOut]?.();
-      internals[fanOut] = null;
-    }
+    this.server.abandon();
     for (const end of Array.from(this.daemonEnds)) {
       end.destroy();
     }
   }
-}
-
-interface DaemonClientInternals {
-  connected: boolean;
-  socket: unknown;
-  closedSockets: WeakSet<object>;
-  handleSocketClosed(socket: InMemoryClientSocket): void;
-  pendingRequests: Map<
-    string,
-    {
-      reject(error: Error): void;
-      timeout: NodeJS.Timeout;
-      removeAbortListener?: () => void;
-      disconnectCause?: unknown;
-    }
-  >;
-  timer: Timer;
 }
 
 /**
@@ -309,6 +265,8 @@ interface DaemonClientInternals {
  * the real `connect()` installs on its socket.
  */
 export class InMemoryDaemonClient extends DaemonClient {
+  private attached: InMemoryClientSocket | undefined;
+
   constructor(
     private readonly dial: () => InMemoryClientSocket | undefined,
     timer: Timer,
@@ -329,7 +287,7 @@ export class InMemoryDaemonClient extends DaemonClient {
   }
 
   override async connect(): Promise<void> {
-    if ((this as unknown as DaemonClientInternals).connected) {
+    if (this.connected) {
       return;
     }
     const socket = this.dial();
@@ -338,36 +296,16 @@ export class InMemoryDaemonClient extends DaemonClient {
     }
     socket.on("data", (data: Buffer) => this.simulateIncomingDataForTesting(data));
     socket.on("close", () => this.socketClosed(socket));
-    this.attachSocketForTesting(socket as unknown as Duplex);
+    this.attached = socket;
+    this.attachSocketForTesting(socket);
   }
 
   /** The socket this client is connected on now, if it is. */
   get liveSocket(): InMemoryClientSocket | undefined {
-    const internals = this as unknown as DaemonClientInternals;
-    const socket = internals.socket as InMemoryClientSocket | null;
-    return internals.connected && socket && !socket.destroyed ? socket : undefined;
-  }
-
-  /** `DaemonClient.connectOnce`'s `close` listener. */
-  private socketClosed(socket: InMemoryClientSocket): void {
-    const internals = this as unknown as DaemonClientInternals;
-    if (
-      (internals.socket !== null && internals.socket !== socket) ||
-      internals.closedSockets.has(socket)
-    ) {
-      return;
-    }
-    internals.handleSocketClosed(socket);
-    for (const pending of internals.pendingRequests.values()) {
-      internals.timer.clearTimeout(pending.timeout);
-      pending.removeAbortListener?.();
-      pending.reject(
-        new DaemonUnavailableError("Daemon socket connection lost: connection closed", {
-          cause: pending.disconnectCause,
-        }),
-      );
-    }
-    internals.pendingRequests.clear();
+    const socket = this.attached;
+    return this.connected && socket && this.socket === socket && !socket.destroyed
+      ? socket
+      : undefined;
   }
 }
 
@@ -458,61 +396,63 @@ export function loopbackMcpClientFactory(
   callTool: LoopbackToolCall,
   timer: Timer,
 ): McpClientFactory {
-  return async (boundSessionUuid) =>
-    ({
-      callTool: async (
-        params: { name: string; arguments?: Record<string, unknown> },
-        options?: { signal?: AbortSignal; timeout?: number },
-      ) => {
-        const args = { ...params.arguments };
-        if (args.sessionUuid === undefined && boundSessionUuid !== undefined) {
-          args.sessionUuid = boundSessionUuid;
-        }
-        const signal = options?.signal;
-        signal?.throwIfAborted();
-        // The MCP client gives up on a request two ways: the daemon aborts it (the caller's
-        // cancel, or a progress-capable call's deadline), or its own request timeout passes
-        // (every other call's deadline). Either way it rejects at once and tells the server,
-        // whose handler sees its request signal abort and may still be running.
-        const request = new AbortController();
-        let stop = () => {};
-        const gaveUp = new Promise<never>((_resolve, reject) => {
-          const giveUp = (reason: unknown) => {
-            request.abort(reason);
-            reject(reason);
-          };
-          const abort = () => giveUp(signal?.reason);
-          signal?.addEventListener("abort", abort, { once: true });
-          const timeoutMs = options?.timeout;
-          const timeout =
-            timeoutMs === undefined
-              ? undefined
-              : timer.setTimeout(
-                  () =>
-                    giveUp(
-                      new McpError(ErrorCode.RequestTimeout, "Request timed out", {
-                        timeout: timeoutMs,
-                      }),
-                    ),
-                  timeoutMs,
-                );
-          stop = () => {
-            signal?.removeEventListener("abort", abort);
-            if (timeout !== undefined) {
-              timer.clearTimeout(timeout);
-            }
-          };
-        });
-        try {
-          return await Promise.race([callTool(params.name, args, request.signal), gaveUp]);
-        } finally {
-          stop();
-        }
-      },
-      listTools: async () => ({ tools: [] }),
-      listResources: async () => ({ resources: [] }),
-      listResourceTemplates: async () => ({ resourceTemplates: [] }),
-      readResource: async () => ({ contents: [] }),
-      close: async () => {},
-    }) as unknown as Client;
+  return async (boundSessionUuid): Promise<ForwardMcpClient> => ({
+    callTool: async (
+      params: { name: string; arguments?: Record<string, unknown> },
+      options?: { signal?: AbortSignal; timeout?: number },
+    ) => {
+      const args = { ...params.arguments };
+      if (args.sessionUuid === undefined && boundSessionUuid !== undefined) {
+        args.sessionUuid = boundSessionUuid;
+      }
+      const signal = options?.signal;
+      signal?.throwIfAborted();
+      // The MCP client gives up on a request two ways: the daemon aborts it (the caller's
+      // cancel, or a progress-capable call's deadline), or its own request timeout passes
+      // (every other call's deadline). Either way it rejects at once and tells the server,
+      // whose handler sees its request signal abort and may still be running.
+      const request = new AbortController();
+      let stop = () => {};
+      const gaveUp = new Promise<never>((_resolve, reject) => {
+        const giveUp = (reason: unknown) => {
+          request.abort(reason);
+          reject(reason);
+        };
+        const abort = () => giveUp(signal?.reason);
+        signal?.addEventListener("abort", abort, { once: true });
+        const timeoutMs = options?.timeout;
+        const timeout =
+          timeoutMs === undefined
+            ? undefined
+            : timer.setTimeout(
+                () =>
+                  giveUp(
+                    new McpError(ErrorCode.RequestTimeout, "Request timed out", {
+                      timeout: timeoutMs,
+                    }),
+                  ),
+                timeoutMs,
+              );
+        stop = () => {
+          signal?.removeEventListener("abort", abort);
+          if (timeout !== undefined) {
+            timer.clearTimeout(timeout);
+          }
+        };
+      });
+      try {
+        return await Promise.race([callTool(params.name, args, request.signal), gaveUp]);
+      } finally {
+        stop();
+      }
+    },
+    listTools: async () => ({ tools: [] }),
+    listResources: async () => ({ resources: [] }),
+    listResourceTemplates: async () => ({ resourceTemplates: [] }),
+    readResource: async () => ({ contents: [] }),
+    request: async () => {
+      throw new Error("task requests are not exercised through the in-memory loopback");
+    },
+    close: async () => {},
+  });
 }

@@ -1,3 +1,4 @@
+import type { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -20,11 +21,21 @@ export function isExpectedPeerClose(error: Error): boolean {
   );
 }
 
-/** The slice of `net.Socket` a connection drives; tests pass a plain emitter. */
-export type ControlConnectionSocket = Pick<
-  Socket,
-  "on" | "setTimeout" | "destroy" | "destroyed" | "writableLength"
->;
+/**
+ * The slice of `net.Socket` a connection drives; tests pass a plain emitter. The chaining methods
+ * answer `unknown` because no caller chains them.
+ */
+export interface ControlConnectionSocket
+  extends Pick<EventEmitter, "on">, Pick<Socket, "destroyed" | "writableLength"> {
+  setTimeout(timeout: number, callback?: () => void): unknown;
+  destroy(error?: Error): unknown;
+}
+
+/** What the server itself does with a client socket, beyond what its connection drives. */
+export interface ControlSocket
+  extends ControlConnectionSocket, Pick<EventEmitter, "once">, Pick<Socket, "write"> {
+  end(callback?: () => void): unknown;
+}
 
 export type ControlConnectionTraceEvent =
   | "socket_drain"

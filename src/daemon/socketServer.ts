@@ -50,7 +50,7 @@ import {
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 import { runWithAbortSignal } from "../utils/AbortContext";
-import { createServer, Server as NetServer, Socket } from "node:net";
+import { createServer, Server as NetServer } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
@@ -151,7 +151,7 @@ import { isDaemonRequestEnvelope, readFramePlatformHint } from "./daemonRequestE
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
-import { ControlConnection } from "./socketServer/ControlConnection";
+import { ControlConnection, type ControlSocket } from "./socketServer/ControlConnection";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagAdmin } from "../features/featureFlags/FeatureFlagService";
 import {
@@ -889,7 +889,7 @@ type IdeServerRouteHandler = (
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
-  private closing = false;
+  protected closing = false;
   protected acceptingRequests = false;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
   private readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
@@ -898,10 +898,10 @@ export class UnixSocketServer {
   private readonly adbClientFactory: AdbClientFactory;
   protected sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
-  private clientSockets: Map<string, Socket> = new Map();
+  private clientSockets: Map<string, ControlSocket> = new Map();
   private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
-  private readonly controlConnections = new WeakMap<Socket, ControlConnection>();
+  private readonly controlConnections = new WeakMap<ControlSocket, ControlConnection>();
   /** Request handlers that can continue after their client socket is destroyed. */
   protected activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
@@ -914,11 +914,11 @@ export class UnixSocketServer {
    * resolution and execution cannot leave the input running as an unowned call (#9958).
    */
   private readonly inputTargetOwners = new WeakMap<BootedDevice, string>();
-  private resourceUpdatedUnsubscribe: (() => void) | null = null;
+  protected resourceUpdatedUnsubscribe: (() => void) | null = null;
   /** Session-release frames written but not yet flushed to their client sockets. */
   private pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
-  private listChangedUnsubscribe: (() => void) | null = null;
-  private sessionReleaseUnsubscribe: (() => void) | null = null;
+  protected listChangedUnsubscribe: (() => void) | null = null;
+  protected sessionReleaseUnsubscribe: (() => void) | null = null;
   private socketPath: string;
   private daemonState: SocketDaemonStateAccess;
   /**
@@ -928,7 +928,7 @@ export class UnixSocketServer {
    */
   private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
   /** Promise tails that serialize MCP forwards only within the same execution target. */
-  private mcpForwardTails: Map<string, Promise<void>> = new Map();
+  protected mcpForwardTails: Map<string, Promise<void>> = new Map();
   /** Direct device forwards that need cleanup after every successor tail has settled. */
   private mcpForwardIdleCloseKeys: Map<string, Set<string>> = new Map();
   /** Execution keys whose chain drained, timed for the append-helper idle eviction. */
@@ -1210,7 +1210,7 @@ export class UnixSocketServer {
    * connection handler, with the caller handing each connection to the returned handler instead
    * of a bound listener. For an in-process harness; nothing touches the file system.
    */
-  startDetached(): (socket: Socket) => void {
+  startDetached(): (socket: ControlSocket) => void {
     this.beginAccepting();
     return this.connectionHandlerWithFanOut();
   }
@@ -1223,7 +1223,7 @@ export class UnixSocketServer {
   }
 
   /** Subscribe the broadcast fan-out and return the handler every accepted connection goes to. */
-  private connectionHandlerWithFanOut(): (socket: Socket) => void {
+  private connectionHandlerWithFanOut(): (socket: ControlSocket) => void {
     // Fan list-changed events out to subscribed socket clients (issue #3223).
     // Subscribed here (not in the daemon) so a socket-server recreation during
     // recovery re-wires itself; close() unsubscribes symmetrically.
@@ -1275,7 +1275,7 @@ export class UnixSocketServer {
   /**
    * Handle a new client connection
    */
-  protected handleConnection(socket: Socket): void {
+  protected handleConnection(socket: ControlSocket): void {
     if (!this.acceptingRequests) {
       // An accept callback can already be queued when quiesce closes the
       // listener. End that late connection before it can bind or issue work.
@@ -1322,7 +1322,7 @@ export class UnixSocketServer {
   }
 
   /** The socket's connection transport, created on first use (writers may precede `start`). */
-  private connectionFor(socket: Socket, sessionId: string): ControlConnection {
+  private connectionFor(socket: ControlSocket, sessionId: string): ControlConnection {
     let connection = this.controlConnections.get(socket);
     if (!connection) {
       connection = new ControlConnection(socket, sessionId, this.timer, this.maxInboundFrameBytes);
@@ -1337,7 +1337,7 @@ export class UnixSocketServer {
    * completed), then drop the connection once the reply is flushed. Other
    * sockets are unaffected.
    */
-  private rejectOversizedFrame(sessionId: string, socket: Socket): void {
+  private rejectOversizedFrame(sessionId: string, socket: ControlSocket): void {
     logger.warn(
       `Daemon RPC socket ${sessionId} sent a frame over ${this.maxInboundFrameBytes} bytes; rejecting`,
     );
@@ -1355,13 +1355,13 @@ export class UnixSocketServer {
     });
   }
 
-  private hasLiveSocketRequest(socket: Socket): boolean {
+  private hasLiveSocketRequest(socket: ControlSocket): boolean {
     return this.pendingSocketRequests.hasLiveRequest(socket, this.timer.now());
   }
 
   private async processSocketRequestLine(
     sessionId: string,
-    socket: Socket,
+    socket: ControlSocket,
     line: string,
     receivedAtMs: number,
   ): Promise<void> {
@@ -1539,7 +1539,7 @@ export class UnixSocketServer {
     }
   }
 
-  private releaseSocketSession(sessionId: string, socket: Socket): void {
+  private releaseSocketSession(sessionId: string, socket: ControlSocket): void {
     // Session IDs are expected to be unique, but teardown must still be
     // incarnation-safe: a delayed close/error from an older socket must not
     // remove or abort work registered by a newer socket with the same ID.
@@ -1627,7 +1627,7 @@ export class UnixSocketServer {
 
   private mcpRequestSignal(
     sessionId: string,
-    ownerSocket: Socket | undefined = this.clientSockets.get(sessionId),
+    ownerSocket: ControlSocket | undefined = this.clientSockets.get(sessionId),
     cancelSignal?: AbortSignal,
   ): { signal: AbortSignal; dispose: () => void } {
     const controller = new AbortController();
@@ -1684,7 +1684,7 @@ export class UnixSocketServer {
     };
   }
 
-  private broadcastListChanged(kind: ListChangedKind): void {
+  protected broadcastListChanged(kind: ListChangedKind): void {
     fanOutListChanged(this.notificationSubscribers, this.notificationTransport, kind);
   }
 
@@ -1737,7 +1737,7 @@ export class UnixSocketServer {
   }
 
   private writeFrame(
-    socket: Socket,
+    socket: ControlSocket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: () => void,
@@ -1768,7 +1768,7 @@ export class UnixSocketServer {
   }
 
   protected writeFrameData(
-    socket: Socket,
+    socket: ControlSocket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: (error?: Error | null) => void,
@@ -1824,7 +1824,7 @@ export class UnixSocketServer {
    */
   protected async handleRequest(
     sessionId: string,
-    ownerSocket: Socket,
+    ownerSocket: ControlSocket,
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
     onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
@@ -2132,7 +2132,7 @@ export class UnixSocketServer {
   /** A request answered without waiting in the socket's admission queue, if this is one. */
   private unqueuedRequest(
     session: SessionContext,
-    ownerSocket: Socket,
+    ownerSocket: ControlSocket,
     request: DaemonRequest,
     context: RequestContext,
   ): DaemonResponse | Promise<DaemonResponse | undefined> | undefined {
@@ -2154,7 +2154,7 @@ export class UnixSocketServer {
    */
   private async relayTaskRequest(
     session: SessionContext,
-    ownerSocket: Socket,
+    ownerSocket: ControlSocket,
     request: DaemonRequest,
     context: RequestContext,
   ): Promise<DaemonResponse | undefined> {
@@ -2273,7 +2273,7 @@ export class UnixSocketServer {
     error: unknown;
     request: DaemonRequest;
     sessionId: string;
-    ownerSocket: Socket;
+    ownerSocket: ControlSocket;
     signal?: AbortSignal;
   }): DaemonResponse | undefined {
     const errorMsg = errorMessage(error);
@@ -2930,7 +2930,7 @@ export class UnixSocketServer {
 
   private releaseBindingsIfSocketDisconnected(
     socketSessionId: string,
-    ownerSocket: Socket | undefined,
+    ownerSocket: ControlSocket | undefined,
     pool: ReturnType<DaemonStateAccess["getDevicePool"]>,
   ): boolean {
     if (!ownerSocket || this.clientSockets.get(socketSessionId) === ownerSocket) {
@@ -3848,7 +3848,7 @@ export class UnixSocketServer {
   private async runLocalSocketRequest(
     request: DaemonRequest,
     sessionId: string,
-    ownerSocket: Socket,
+    ownerSocket: ControlSocket,
     cancelSignal: AbortSignal,
     receivedAtMs: number,
     {
@@ -5342,7 +5342,7 @@ export class UnixSocketServer {
    * gesture are separate control calls, so a release between two of them cuts no call and nothing
    * else would lift the pointer until the pane's socket closed. Best-effort; never throws.
    */
-  private liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
+  protected liftStrokesHeldBy(releasedSessionId: string): Promise<void> {
     return this.ownedGestures.cancelAllHeldBy(releasedSessionId);
   }
 
@@ -6123,7 +6123,7 @@ export class UnixSocketServer {
    * device still reports that exact context. Missing context fails closed: a caller can re-observe
    * and retry, whereas executing against an unproven screen could actuate the wrong UI.
    */
-  requireCurrentFrameContext(
+  protected requireCurrentFrameContext(
     deviceId: string,
     frameContext: string | undefined,
     action: string,
@@ -7081,7 +7081,7 @@ export class UnixSocketServer {
   private socketAdmissionCancellation(
     request: DaemonRequest,
     sessionId: string,
-    ownerSocket: Socket,
+    ownerSocket: ControlSocket,
     cancelSignal: AbortSignal,
   ): { signal: AbortSignal; dispose: () => void } {
     if (!DISPATCH_HELD_INPUT_METHODS.has(request.method)) {
@@ -7311,7 +7311,7 @@ export class UnixSocketServer {
     return this.serverClosePromise;
   }
 
-  private destroyClientSockets(clientSockets: Socket[]): void {
+  private destroyClientSockets(clientSockets: ControlSocket[]): void {
     for (const socket of clientSockets) {
       if (!socket.destroyed) {
         // `destroy()` may discard a just-flushed session-release frame and reset

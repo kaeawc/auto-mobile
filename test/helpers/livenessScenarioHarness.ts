@@ -650,7 +650,7 @@ export class LivenessScenario {
    * (#11441). Its constructor and its start sequence do all the wiring; this method only supplies
    * the device boundary, the in-memory "disk" and the steps of `start()` that touch the machine.
    */
-  private async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
+  async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
     this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
     const repository = this.repository;
@@ -1659,7 +1659,7 @@ export class LivenessScenario {
   }
 
   /** The process is gone: its connections drop and none of its timers fires again. */
-  private killDaemonSide(side: DaemonSide): void {
+  killDaemonSide(side: DaemonSide): void {
     this.loopbackTransports.clear();
     side.socket.kill();
     side.clock.kill();

@@ -36,17 +36,24 @@ export function currentForwardTaskOwnerKey(): string | undefined {
   return forwardSessionKey.getStore()?.taskOwnerKey;
 }
 
+/** A forwarded call's result is relayed to the socket as it arrived, so it is `unknown` here. */
+type Relayed<Method> = Method extends (...args: infer Args) => Promise<unknown>
+  ? (...args: Args) => Promise<unknown>
+  : never;
+
 /** The slice of the loopback MCP client a forward uses; the SDK `Client` satisfies it. */
-export type ForwardMcpClient = Pick<
-  Client,
-  | "callTool"
-  | "request"
-  | "listTools"
-  | "listResources"
-  | "readResource"
-  | "listResourceTemplates"
-  | "close"
->;
+export type ForwardMcpClient = {
+  [
+    Method in
+      | "callTool"
+      | "request"
+      | "listTools"
+      | "listResources"
+      | "readResource"
+      | "listResourceTemplates"
+      | "close"
+  ]: Relayed<Client[Method]>;
+};
 
 /** Opens the MCP client one control-socket forward runs through; closed when the forward ends. */
 export type McpClientFactory = (

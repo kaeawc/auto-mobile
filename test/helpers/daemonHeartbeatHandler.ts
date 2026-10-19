@@ -3,6 +3,7 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
+import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 
 /**
@@ -16,10 +17,10 @@ import type { SessionManager } from "../../src/daemon/sessionManager";
 export function daemonHeartbeatHandler(
   sessionManager: SessionManager,
 ): (method: string, params: Record<string, unknown>) => Promise<unknown> {
-  const state = {
-    isInitialized: () => true,
+  const state: DaemonStateAccess = {
+    ...createFakeDaemonState(),
     getSessionManager: () => sessionManager,
-  } as unknown as DaemonStateAccess;
+  };
   return async (method, params) => {
     if (method !== "daemon/heartbeat") {
       return undefined;

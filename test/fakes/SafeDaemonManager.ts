@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import { DaemonManager, type DaemonManagerOptions } from "../../src/daemon/manager";
 import { FakeDaemonSpawner } from "./FakeDaemonSpawner";
 import { FakeTimer } from "./FakeTimer";
@@ -40,11 +39,7 @@ export class SafeDaemonManager extends DaemonManager {
         // Lock ownership still needs to recognize this test process.
         isProcessRunning: (pid) => pid === process.pid,
       },
-      processSpawner: options.processSpawner ?? {
-        // The manager's legacy spawner seam uses ChildProcess; the launcher only
-        // consumes the process interface implemented by FakeDaemonProcess.
-        spawn: (...spawnArgs) => spawner.spawn(...spawnArgs) as unknown as ChildProcess,
-      },
+      processSpawner: options.processSpawner ?? spawner,
       processSignaler: options.processSignaler ?? {
         signal: (pid, signal) => {
           signals.push({ pid, signal });

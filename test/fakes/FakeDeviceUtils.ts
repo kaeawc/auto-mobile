@@ -1,3 +1,4 @@
+import { FakeChildProcess } from "./FakeChildProcess";
 import type { AndroidEmulatorReadinessOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { HostChildProcess as ChildProcess } from "../../src/utils/HostCommandExecutor";
 import { BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../src/models";
@@ -15,6 +16,15 @@ import {
   discoverySourceFor,
   sourcesForPlatform,
 } from "../../src/utils/discoverySource";
+
+/** A running device process that exits as soon as it is killed, with no timer to advance. */
+class ExitsOnKillProcess extends FakeChildProcess {
+  override kill(): boolean {
+    this.killed = true;
+    this.emit("exit", null, "SIGTERM");
+    return true;
+  }
+}
 
 /**
  * Fake implementation of PlatformDeviceManager for testing
@@ -460,17 +470,10 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       return this.mockChildProcesses.get(device.name) ?? null;
     }
 
-    // Return a minimal mock ChildProcess
-    return {
-      on: () => null,
-      once: () => null,
-      off: () => null,
-      kill: () => false,
-      stdout: null,
-      stderr: null,
-      stdin: null,
-      pid: 12345,
-    } as any as ChildProcess;
+    // The default process is still running; killing it ends it at once.
+    const running = new ExitsOnKillProcess();
+    running.pid = 12345;
+    return running;
   }
 
   async killDevice(device: BootedDevice): Promise<void> {

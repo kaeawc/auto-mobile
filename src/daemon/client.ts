@@ -1,5 +1,6 @@
-import { createConnection, Socket } from "node:net";
+import { createConnection } from "node:net";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { EventEmitter } from "node:events";
 import type { Duplex } from "node:stream";
 import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
@@ -412,8 +413,14 @@ export interface DaemonMethodCallOptions {
  * - Receive and parse responses
  * - Handle timeouts and errors
  */
+/** The slice of a duplex socket the client drives; tests attach an in-memory pair. */
+export interface DaemonClientSocket
+  extends Pick<EventEmitter, "on" | "once" | "off">, Pick<Duplex, "write" | "destroyed"> {
+  destroy(error?: Error): unknown;
+}
+
 export class DaemonClient {
-  socket: Socket | Duplex | null = null;
+  socket: DaemonClientSocket | null = null;
   private socketPath: string;
   private connectionTimeout: number;
   private timer: Timer;
@@ -451,7 +458,7 @@ export class DaemonClient {
   private readonly cancelledRequestIds = new Set<string>();
   private framer: LineFramer;
   private inboundClosed = false;
-  private readonly closedSockets = new WeakSet<Socket | Duplex>();
+  private readonly closedSockets = new WeakSet<DaemonClientSocket>();
   connected: boolean = false;
   private connectInFlight: Promise<void> | null = null;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
@@ -494,7 +501,7 @@ export class DaemonClient {
   }
 
   /** Test-only seam for attaching an in-memory socket. */
-  attachSocketForTesting(socket: Duplex): void {
+  attachSocketForTesting(socket: DaemonClientSocket): void {
     this.socket = socket;
     this.connected = true;
     this.inboundClosed = false;
@@ -763,20 +770,6 @@ export class DaemonClient {
       let settled = false;
       let removeAbortListener = () => {};
 
-      const rejectPendingRequests = (error: Error, preserveRequestCause: boolean = false) => {
-        for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
-          .pendingRequests) {
-          this.timer.clearTimeout(timeout);
-          removeAbortListener?.();
-          reject(
-            preserveRequestCause
-              ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
-              : error,
-          );
-        }
-        this.pendingRequests.clear();
-      };
-
       const fail = (error: Error) => {
         if (isStaleSocket()) {
           return;
@@ -790,7 +783,7 @@ export class DaemonClient {
         // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
         // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
         const failure = toDaemonTransportError(error);
-        rejectPendingRequests(failure, true);
+        this.rejectPendingRequests(failure, true);
         if (!settled) {
           settled = true;
           reject(failure);
@@ -847,28 +840,41 @@ export class DaemonClient {
         fail(error);
       });
 
-      socket.once("close", () => {
-        // fail() clears this.socket before destroy emits close. Preserve that
-        // notification path; only a different installed socket makes this stale.
-        if (isStaleSocket() || this.closedSockets.has(socket)) {
-          return;
-        }
-        this.handleSocketClosed(socket);
-        // A daemon restart/crash closes the socket. Over a Unix domain socket
-        // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
-        // event, so any in-flight request would otherwise hang until its request
-        // timeout. Reject pending requests with a recoverable transport error so
-        // the proxy reconnects to the restarted daemon and retries (#2599/#2737).
-        // After fail() the pending map is already cleared, so this is a no-op on
-        // the error path.
-        if (this.pendingRequests.size > 0) {
-          rejectPendingRequests(
-            new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
-            true,
-          );
-        }
-      });
+      socket.once("close", () => this.socketClosed(socket));
     });
+  }
+
+  private rejectPendingRequests(error: Error, preserveRequestCause: boolean = false): void {
+    for (const [, { reject, timeout, removeAbortListener, disconnectCause }] of this
+      .pendingRequests) {
+      this.timer.clearTimeout(timeout);
+      removeAbortListener?.();
+      reject(
+        preserveRequestCause
+          ? new DaemonUnavailableError(error.message, { cause: disconnectCause })
+          : error,
+      );
+    }
+    this.pendingRequests.clear();
+  }
+
+  /** The socket's `close` listener; public so a socket attached for a test can drive it. */
+  socketClosed(socket: DaemonClientSocket): void {
+    // fail() clears this.socket before destroy emits close; only another installed socket is stale.
+    if ((this.socket !== null && this.socket !== socket) || this.closedSockets.has(socket)) {
+      return;
+    }
+    this.handleSocketClosed(socket);
+    // A daemon restart/crash delivers EOF -> "close" with no "error" (no TCP RST over a Unix
+    // socket), so an in-flight request would hang until its timeout. Reject pending requests with
+    // a recoverable transport error so the proxy reconnects and retries (#2599/#2737). After fail()
+    // the pending map is already cleared, so this is a no-op on the error path.
+    if (this.pendingRequests.size > 0) {
+      this.rejectPendingRequests(
+        new DaemonUnavailableError("Daemon socket connection lost: connection closed"),
+        true,
+      );
+    }
   }
 
   /**
@@ -978,7 +984,7 @@ export class DaemonClient {
     }
   }
 
-  private handleSocketClosed(socket: Socket | Duplex | null): void {
+  private handleSocketClosed(socket: DaemonClientSocket | null): void {
     if (socket) {
       this.closedSockets.add(socket);
     }
@@ -1597,13 +1603,7 @@ export class DaemonClient {
     // Reject before destroy emits "close", preserving each request's own
     // request context instead of replacing all diagnostics with one generic
     // transport message.
-    for (const [, { timeout, reject, removeAbortListener, disconnectCause }] of this
-      .pendingRequests) {
-      this.timer.clearTimeout(timeout);
-      removeAbortListener?.();
-      reject(new DaemonUnavailableError("Socket connection closed", { cause: disconnectCause }));
-    }
-    this.pendingRequests.clear();
+    this.rejectPendingRequests(new DaemonUnavailableError("Socket connection closed"), true);
     const socket = this.socket;
     if (socket) {
       await new Promise<void>((resolve) => {

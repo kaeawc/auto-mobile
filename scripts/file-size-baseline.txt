@@ -4,12 +4,12 @@
 1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
-1588	src/daemon/client.ts
+1586	src/daemon/client.ts
 4139	src/daemon/daemon.ts
 6029	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
-8291	src/daemon/devicePool.ts
+8288	src/daemon/devicePool.ts
 1004	src/daemon/deviceRuntimeIdentity.ts
 3913	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts

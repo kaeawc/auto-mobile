@@ -201,14 +201,11 @@ describe("the harness's control socket is opened by the socket server's own star
       ]);
 
       // A dead process's server is off the process-wide broadcasters: nothing is written for it.
-      const dead = scenario.daemon.socket.server as unknown as {
-        broadcastListChanged(kind: string): void;
-      };
+      const dead = scenario.daemon.socket.server;
       await scenario.daemonRestart();
-      const deadFanOut = spyOn(dead, "broadcastListChanged");
+      const fanOutsBeforeEmit = dead.listChangedBroadcasts.length;
       ListChangedBroadcaster.emit("tools");
-      expect(deadFanOut).not.toHaveBeenCalled();
-      deadFanOut.mockRestore();
+      expect(dead.listChangedBroadcasts).toHaveLength(fanOutsBeforeEmit);
     },
   );
 });

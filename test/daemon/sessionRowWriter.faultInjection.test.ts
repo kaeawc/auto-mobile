@@ -14,6 +14,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FaultPlan, type FaultKind } from "../fakes/FaultPlan";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 
 const UUID = "fault-uuid";
 const DEVICE = "fake-android";
@@ -204,7 +205,7 @@ class Run {
     await flush();
   }
 
-  async force(reason = "heartbeat-timeout"): Promise<void> {
+  async force(reason: SessionReleaseReason = "heartbeat-timeout"): Promise<void> {
     const teardown = Promise.withResolvers<Promise<void>[]>();
     Reflect.set(
       Reflect.get(this.manager, "stateRestore") as object,

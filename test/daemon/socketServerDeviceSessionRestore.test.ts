@@ -20,6 +20,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
@@ -81,7 +82,7 @@ async function boundRecoveryHarness() {
   const discoverySeeds: { method: string; sessionUuid: string | undefined }[] = [];
   server.mcpClientFactory = async (seed) => {
     const binding = new SessionToolBinding(seed);
-    return {
+    return new StubMcpClient({
       callTool: async ({ arguments: args }) => {
         forwarded.push(args ?? {});
         const sessionUuid = binding.effectiveSessionUuid("loopback", args)!;
@@ -111,7 +112,7 @@ async function boundRecoveryHarness() {
         return { resourceTemplates: [] };
       },
       close: async () => {},
-    };
+    });
   };
   await manager.createSession("bound", "emulator-5554", "android", { stableDeviceId: "Pixel" });
   const call = (
@@ -192,6 +193,9 @@ test("bound call inside restart window reaches session_recovery_pending and keep
     );
     expect(h.forwarded.at(-1)?.sessionUuid).toBeUndefined();
     const bindingBeforeExplicit = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
+    if (!bindingBeforeExplicit) {
+      throw new Error("Expected the first call to bind an MCP client");
+    }
     const explicit = await h.call(false);
     expect(explicit?.result).toEqual(response?.result);
     const explicitBinding = h.server["boundMcpClientKeysBySocketSession"].get(h.socketId);
@@ -552,6 +556,7 @@ test("a failed token declaration is logged and does not stop owned-session resto
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const pool = {
     refreshDevices: async () => 0,
+    releaseDevice: async () => {},
     getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
     declareMcpSessionLivenessOwnerToken: () => {
       throw failure;
@@ -563,7 +568,17 @@ test("a failed token declaration is logged and does not stop owned-session resto
   };
   const server = createTestUnixSocketServer(
     "/tmp/never-listened.sock",
-    { isInitialized: () => true, getDevicePool: () => pool },
+    {
+      isInitialized: () => true,
+      getSessionManager: () => ({
+        hasSession: () => false,
+        getSession: () => null,
+        getDeviceLabels: () => undefined,
+        releaseSession: async () => null,
+      }),
+      getDevicePool: () => pool,
+      getDeviceSessionRegistry: () => ({ list: () => [] }),
+    },
     new FakeTimer(),
   );
   const socket = new FakeSocket();

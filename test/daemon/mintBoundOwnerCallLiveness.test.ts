@@ -256,6 +256,7 @@ for (const outcome of [
     let ends = 0;
     const pool = {
       refreshDevices: async () => 0,
+      releaseDevice: async () => {},
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       declareMcpSessionLivenessOwnerToken: () => {
         events.push("declare");
@@ -286,7 +287,14 @@ for (const outcome of [
       "/fake/owner-call.sock",
       {
         isInitialized: () => outcome !== "uninitialized",
+        getSessionManager: () => ({
+          hasSession: () => false,
+          getSession: () => null,
+          getDeviceLabels: () => undefined,
+          releaseSession: async () => null,
+        }),
         getDevicePool: () => pool,
+        getDeviceSessionRegistry: () => ({ list: () => [] }),
       },
       new FakeTimer(),
     );

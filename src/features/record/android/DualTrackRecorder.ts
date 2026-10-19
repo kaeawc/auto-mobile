@@ -11,7 +11,8 @@ import type {
 import { GESTURE_THRESHOLDS } from "./types";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
-import { discoverTouchNode } from "./TouchNodeDiscovery";
+import { discoverInputNodes } from "./InputNodeDiscovery";
+import type { TouchInputNode } from "./TouchNodeDiscovery";
 import { queryDensity, queryDisplaySize } from "./AxisRanges";
 import { normalizedAxis } from "../normalizedAxis";
 import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
@@ -667,10 +668,13 @@ export class DualTrackRecorder {
 
   private async createGetEventReader(): Promise<GestureEmitter> {
     const adb = defaultAdbClientFactory.create(this.device);
-    const node = await discoverTouchNode(adb);
+    const { touch, pen } = await discoverInputNodes(adb);
+    // A pen-only device records through its first digitizer.
+    const node = touch ?? pen[0];
     if (!node) {
       throw new Error("[DualTrackRecorder] No multitouch input device found on this device");
     }
+    const penNodes = touch ? pen : pen.slice(1);
     const density = await queryDensity(adb);
     const probe = createAdbGeometryProbe(adb);
     const display = await queryDisplaySize(adb);
@@ -682,10 +686,18 @@ export class DualTrackRecorder {
       caveats,
     );
     this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
+    const penReaders = followWithPenTimelines(
+      timeline,
+      penNodes,
+      { rotation, display },
+      this.timer.now(),
+      caveats,
+    );
 
     const reader = new GetEventReader({
       adb,
       touchNode: node,
+      penNodes: penReaders,
       // Each touch is mapped with the geometry in force at its DOWN, not at recording start.
       scaler: timeline,
       density,
@@ -693,6 +705,29 @@ export class DualTrackRecorder {
     });
     return withTimelineGeometry(reader, timeline, this.timer);
   }
+}
+
+/**
+ * Pen digitizers have their own raw ranges but share the display geometry, so each gets a
+ * timeline that mirrors the primary one.
+ */
+function followWithPenTimelines(
+  primary: ScreenGeometryTimeline,
+  penNodes: ReadonlyArray<TouchInputNode>,
+  initial: { rotation: number; display: { width: number; height: number } },
+  startedAt: number,
+  caveats: readonly string[],
+): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline }> {
+  return penNodes.map((node) => {
+    const penTimeline = new ScreenGeometryTimeline(
+      { xMin: node.axisXMin, xMax: node.axisXMax, yMin: node.axisYMin, yMax: node.axisYMax },
+      initial,
+      startedAt,
+      caveats,
+    );
+    primary.follow(penTimeline);
+    return { node, scaler: penTimeline };
+  });
 }
 
 /**

@@ -3481,7 +3481,7 @@ jobs:
           # :playground:app:compileDebugUnitTestKotlin keeps the app's unit-test
           # sources compiling as its own PR signal alongside the emulator lane (#10890; it
           # moved here from the removed Android Emulator Compile Smoke).
-          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
+          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest :playground:demos:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true

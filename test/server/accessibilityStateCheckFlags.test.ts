@@ -1,3 +1,5 @@
+import { createExecResult } from "../../src/utils/execResult";
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { registerAccessibilityTools } from "../../src/server/accessibilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -54,7 +56,7 @@ async function flagService(flags: {
 
 function androidWith(services: string) {
   const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("enabled_accessibility_services", { stdout: services, stderr: "" });
+  adb.setCommandResponse("enabled_accessibility_services", createExecResult(services, ""));
   return adb;
 }
 
@@ -103,29 +105,29 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
   test("auto-detect off with TalkBack on reports enabled: true and names the override", async () => {
     const response = await checkAndroid(TALKBACK, { autoDetect: false, force: false });
 
-    expect(response.structuredContent).toEqual({
+    expect(toolStructured(response)).toEqual({
       enabled: true,
       service: "talkback",
       detectionOverride: { mode: "auto-detect-off", effectiveEnabled: false },
     });
-    expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(accessibilityStateSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 
   test("force mode with TalkBack off reports enabled: false and names the override", async () => {
     const response = await checkAndroid("null", { autoDetect: true, force: true });
 
-    expect(response.structuredContent).toEqual({
+    expect(toolStructured(response)).toEqual({
       enabled: false,
       service: "unknown",
       detectionOverride: { mode: "forced-on", effectiveEnabled: true },
     });
-    expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(accessibilityStateSchema.safeParse(toolStructured(response)).success).toBe(true);
   });
 
   test("force wins when both overrides apply, like the detector", async () => {
     const response = await checkAndroid(TALKBACK, { autoDetect: false, force: true });
 
-    expect(response.structuredContent).toMatchObject({
+    expect(toolStructured(response)).toMatchObject({
       enabled: true,
       detectionOverride: { mode: "forced-on", effectiveEnabled: true },
     });
@@ -133,11 +135,11 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
 
   test("default flags: no override field, enabled is the device reading", async () => {
     const on = await checkAndroid(TALKBACK, { autoDetect: true, force: false });
-    expect(on.structuredContent).toEqual({ enabled: true, service: "talkback" });
+    expect(toolStructured(on)).toEqual({ enabled: true, service: "talkback" });
 
     accessibilityDetector.clearAllCache();
     const off = await checkAndroid("null", { autoDetect: true, force: false });
-    expect(off.structuredContent).toEqual({ enabled: false, service: "unknown" });
+    expect(toolStructured(off)).toEqual({ enabled: false, service: "unknown" });
   });
 
   test("an unreadable device state is still the existing error, with the override named", async () => {
@@ -152,7 +154,7 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
 
     const response = await accessibilityHandler()(ANDROID_DEVICE, {});
 
-    expect(response.structuredContent).toEqual({
+    expect(toolStructured(response)).toEqual({
       service: "unknown",
       reason: "could not determine TalkBack state: device accessibility settings read unavailable",
       detectionOverride: { mode: "auto-detect-off", effectiveEnabled: false },
@@ -176,13 +178,13 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
     const toggled = await accessibilityHandler()(ANDROID_DEVICE, { talkback: true });
     const checked = await accessibilityHandler()(ANDROID_DEVICE, {});
 
-    expect(toggled.structuredContent).toMatchObject({ enabled: true, service: "talkback" });
-    expect(checked.structuredContent).toMatchObject({ enabled: true, service: "talkback" });
+    expect(toolStructured(toggled)).toMatchObject({ enabled: true, service: "talkback" });
+    expect(toolStructured(checked)).toMatchObject({ enabled: true, service: "talkback" });
     // The tap path is flag-adjusted by design: with auto-detect off it does not adapt, and the
     // check's `detectionOverride.effectiveEnabled` reports exactly that answer.
     const strategy = new AndroidTapStrategy(ANDROID_DEVICE, adb, accessibilityDetector, service);
     expect(await strategy.isAccessibilityServiceEnabled()).toBe(false);
-    expect(checked.structuredContent).toMatchObject({
+    expect(toolStructured(checked)).toMatchObject({
       detectionOverride: { effectiveEnabled: false },
     });
   });
@@ -190,7 +192,7 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
   test("iOS: auto-detect off with VoiceOver on reports enabled: true", async () => {
     const response = await checkIos(true, { autoDetect: false, force: false });
 
-    expect(response.structuredContent).toEqual({
+    expect(toolStructured(response)).toEqual({
       enabled: true,
       service: "voiceover",
       detectionOverride: { mode: "auto-detect-off", effectiveEnabled: false },
@@ -200,7 +202,7 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
   test("iOS: force mode with VoiceOver off reports enabled: false", async () => {
     const response = await checkIos(false, { autoDetect: true, force: true });
 
-    expect(response.structuredContent).toEqual({
+    expect(toolStructured(response)).toEqual({
       enabled: false,
       service: "unknown",
       detectionOverride: { mode: "forced-on", effectiveEnabled: true },

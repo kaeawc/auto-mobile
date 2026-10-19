@@ -36,7 +36,6 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     deviceId: "emulator-5554",
     name: "Pixel_8_API_34",
     platform: "android",
-    isEmulator: true,
   };
   let timer: FakeTimer;
   /** The client's own clock, so stepping through restart backoff does not idle the holder out. */

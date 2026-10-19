@@ -2777,6 +2777,16 @@ describe("ToolExecutionContext", () => {
       session_timeout_ms: 10,
       heartbeat_timeout_ms: 5,
       has_received_heartbeat: 1,
+      activity_seq: 0,
+      stable_identity_generation: 0,
+      heartbeat_timeout_source: null,
+      liveness_contract_generation: 0,
+      liveness_owner_token: null,
+      liveness_policy: null,
+      pre_cli_heartbeat_timeout_ms: null,
+      pre_cli_heartbeat_timeout_source: null,
+      pre_cli_session_timeout_ms: null,
+
       created_at: "2026-09-03T00:00:00.000Z",
       updated_at: "2026-09-03T00:00:00.000Z",
     });

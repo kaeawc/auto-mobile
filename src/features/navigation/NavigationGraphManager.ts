@@ -1,14 +1,7 @@
-import { edgeActionKey, edgePairKey, storedEdgeActionKey } from "../../db/edgeReplayKey";
 import type { NavigationEdgeTarget } from "../../db/navigationRepository";
 import { NavigationRepository } from "../../db/navigationRepository";
 import { TestCoverageRepository } from "../../db/testCoverageRepository";
-import type { NavigationEdge as DBNavigationEdge, TestCoverageSession } from "../../db/types";
-import {
-  NavigationGraphRecorder,
-  assertNavigationWriteCurrent,
-  type NavigationRecordingState,
-} from "./NavigationGraphRecorder";
-import { NavigationToolCallHistory } from "./NavigationToolCallHistory";
+import type { TestCoverageSession } from "../../db/types";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   ExportedGraph,
@@ -32,7 +25,14 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { NavigationGraphQueries } from "./NavigationGraphQueries";
+import {
+  NavigationGraphRecorder,
+  assertNavigationWriteCurrent,
+  type NavigationRecordingState,
+} from "./NavigationGraphRecorder";
 import { recordNodeProvenance, type ResolvedProvenance } from "./navigationGraphWrites";
+import { NavigationReplayFailures } from "./NavigationReplayFailures";
+import { NavigationToolCallHistory } from "./NavigationToolCallHistory";
 
 import type {
   NavigationBuildContext,
@@ -41,14 +41,18 @@ import type {
   RecordedBackStack,
 } from "./NavigationGraphService";
 
-export type { NavigationEvent, IncomingNavigationEvent, NavigationEdge, UIState };
-export type { NavigationBuildContext, NavigationBuildContextChange, NavigationGraphService };
+export type {
+  IncomingNavigationEvent,
+  NavigationBuildContext,
+  NavigationBuildContextChange,
+  NavigationEdge,
+  NavigationEvent,
+  NavigationGraphService,
+  UIState,
+};
 
 /** Above SQLite's 5s busy timeout and normal loaded writes; callers only log failures, while 15s bounds a wedged tracking queue. */
 const NAVIGATION_WRITE_TIMEOUT_MS = 15_000;
-
-/** Consecutive navigateTo calls whose scroll search missed an edge's target before it is demoted (#10154). */
-const EDGE_TARGET_MISS_DEMOTION_THRESHOLD = 2;
 
 /** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
 export const LEGACY_PROVENANCE_SENTINEL = "legacy";
@@ -118,18 +122,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   private buildContextUpdateListener: ((change: NavigationBuildContextChange) => void) | null =
     null;
 
-  // Edge actions whose replay by navigateTo did not reach the edge's target (#10031),
-  // per (app, from, to) pair. In-memory on purpose: it is advisory ranking state that
-  // a daemon restart may forget (the edge is simply tried again), not graph data, so it
-  // needs no column or migration. Cleared when the edge works or is re-recorded.
-  private failedEdgeReplays: Map<string, Set<string>> = new Map();
-
-  // Consecutive navigateTo calls whose replay of an edge found its target missing even
-  // after a bounded scroll search (#10154), per (app, from, to) pair then action. One
-  // miss may only mean the list is positioned differently; repeated misses promote the
-  // edge into `failedEdgeReplays` so later calls stop paying for the search. A replay
-  // that reaches its target clears the count.
-  private edgeTargetMisses: Map<string, Map<string, number>> = new Map();
+  private readonly replayFailures = new NavigationReplayFailures();
 
   constructor(
     repository?: NavigationRepository,
@@ -158,14 +151,14 @@ export class NavigationGraphManager implements NavigationGraphService {
         retireToolCalls: (matches) => this.toolCalls.retireToolCalls(matches),
         notifyGraphUpdated: () => this.notifyGraphUpdated(),
         forgetFailedEdgeReplay: (pairKey, actionKey) =>
-          this.forgetFailedEdgeReplay(pairKey, actionKey),
+          this.replayFailures.forgetFailedEdgeReplay(pairKey, actionKey),
       },
     );
     this.queries = new NavigationGraphQueries(this.repository, {
       getCurrentAppId: () => this.recordingState.currentAppId,
       getCurrentScreen: () => this.recordingState.currentScreen,
       getToolCallHistorySize: () => this.toolCalls.size,
-      isEdgeReplayFailed: (appId, edge) => this.isEdgeReplayFailed(appId, edge),
+      isEdgeReplayFailed: (appId, edge) => this.replayFailures.isEdgeReplayFailed(appId, edge),
     });
   }
 
@@ -773,89 +766,18 @@ export class NavigationGraphManager implements NavigationGraphService {
    * forgets the failure. Edges with no tool call (replayed as Back) are tracked too.
    */
   public recordEdgeReplayOutcome(edge: NavigationEdge, reached: boolean): void {
-    if (!this.recordingState.currentAppId) {
-      return;
-    }
-    const pairKey = edgePairKey(this.recordingState.currentAppId, edge.from, edge.to);
-    const actionKey = edgeActionKey(edge.interaction?.toolName, edge.interaction?.args);
-    if (reached) {
-      this.forgetFailedEdgeReplay(pairKey, actionKey);
-      this.forgetEdgeTargetMisses(pairKey, actionKey);
-      return;
-    }
-    this.addFailedEdgeReplay(pairKey, actionKey);
+    this.replayFailures.recordEdgeReplayOutcome(this.recordingState.currentAppId, edge, reached);
   }
 
-  private addFailedEdgeReplay(pairKey: string, actionKey: string): void {
-    const actions = this.failedEdgeReplays.get(pairKey) ?? new Set<string>();
-    actions.add(actionKey);
-    this.failedEdgeReplays.set(pairKey, actions);
-  }
-
-  /** Whether `edge`'s action is currently remembered as failed (ranked last by findPath). */
   public hasEdgeReplayFailure(edge: NavigationEdge): boolean {
-    if (!this.recordingState.currentAppId) {
-      return false;
-    }
-    const actions = this.failedEdgeReplays.get(
-      edgePairKey(this.recordingState.currentAppId, edge.from, edge.to),
-    );
-    return actions?.has(edgeActionKey(edge.interaction?.toolName, edge.interaction?.args)) ?? false;
+    return this.replayFailures.hasEdgeReplayFailure(this.recordingState.currentAppId, edge);
   }
 
-  /**
-   * End of a navigateTo call in which replaying `edge` failed only because its target
-   * was not on screen, and the call remembered that as a failure so the fallback edge
-   * would rank first (#10154). The call-scoped failure is forgotten unless this was
-   * the edge's `EDGE_TARGET_MISS_DEMOTION_THRESHOLD`th consecutive call whose scroll
-   * `searched` for the target without finding it, which keeps the failure so later
-   * calls try the edge last until it next reaches its target. A failure without a
-   * search (the search was refused or skipped) never counts towards demotion.
-   */
   public settleTransientEdgeFailure(edge: NavigationEdge, searched: boolean): void {
-    if (!this.recordingState.currentAppId) {
-      return;
-    }
-    const pairKey = edgePairKey(this.recordingState.currentAppId, edge.from, edge.to);
-    const actionKey = edgeActionKey(edge.interaction?.toolName, edge.interaction?.args);
-    const misses = searched ? this.countEdgeTargetMiss(pairKey, actionKey) : 0;
-    if (misses < EDGE_TARGET_MISS_DEMOTION_THRESHOLD) {
-      this.forgetFailedEdgeReplay(pairKey, actionKey);
-    }
-  }
-
-  private countEdgeTargetMiss(pairKey: string, actionKey: string): number {
-    const actions = this.edgeTargetMisses.get(pairKey) ?? new Map<string, number>();
-    const count = (actions.get(actionKey) ?? 0) + 1;
-    actions.set(actionKey, count);
-    this.edgeTargetMisses.set(pairKey, actions);
-    return count;
-  }
-
-  private forgetEdgeTargetMisses(pairKey: string, actionKey: string): void {
-    const actions = this.edgeTargetMisses.get(pairKey);
-    if (actions?.delete(actionKey) && actions.size === 0) {
-      this.edgeTargetMisses.delete(pairKey);
-    }
-  }
-
-  private forgetFailedEdgeReplay(pairKey: string, actionKey: string): void {
-    const actions = this.failedEdgeReplays.get(pairKey);
-    if (actions?.delete(actionKey) && actions.size === 0) {
-      this.failedEdgeReplays.delete(pairKey);
-    }
-  }
-
-  private isEdgeReplayFailed(appId: string | null, edge: DBNavigationEdge): boolean {
-    if (!appId || this.failedEdgeReplays.size === 0) {
-      return false;
-    }
-    const actions = this.failedEdgeReplays.get(
-      edgePairKey(appId, edge.from_screen, edge.to_screen),
-    );
-    // Only pairs with a remembered failure pay for parsing the stored tool args.
-    return (
-      actions !== undefined && actions.has(storedEdgeActionKey(edge.tool_name, edge.tool_args))
+    this.replayFailures.settleTransientEdgeFailure(
+      this.recordingState.currentAppId,
+      edge,
+      searched,
     );
   }
 
@@ -914,8 +836,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.recordingState.currentScreen = null;
       this.lastKnownScreens.delete(appId);
-      this.failedEdgeReplays.clear();
-      this.edgeTargetMisses.clear();
+      this.replayFailures.clear();
       logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${appId}`);
       this.notifyGraphUpdated();
     }

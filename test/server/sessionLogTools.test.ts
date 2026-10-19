@@ -1,3 +1,4 @@
+import { schemaProperty } from "../helpers/toolResponse";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import type { BootedDevice } from "../../src/models";
@@ -20,9 +21,9 @@ describe("resetAppLogs tool (#7006)", () => {
       (tool) => tool.name === "resetAppLogs",
     );
     expect(definition).toBeDefined();
-    expect(definition!.inputSchema.properties.appId).toBeDefined();
-    expect(definition!.inputSchema.properties.paths).toBeDefined();
-    expect(definition!.inputSchema.properties.container).toBeDefined();
+    expect(schemaProperty(definition!.inputSchema.properties, "appId")).toBeDefined();
+    expect(schemaProperty(definition!.inputSchema.properties, "paths")).toBeDefined();
+    expect(schemaProperty(definition!.inputSchema.properties, "container")).toBeDefined();
 
     const validate = compileAjv2020(definition!.inputSchema);
     expect(validate({ appId: "com.example.app", paths: ["logs/app.log"] })).toBe(true);

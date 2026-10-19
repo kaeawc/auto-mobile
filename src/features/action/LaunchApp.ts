@@ -1,169 +1,88 @@
-import { IosLaunchProcess, type IosLaunchProcessOptions } from "./IosLaunchProcess";
-import { LaunchObservation } from "./LaunchObservation";
-import { AndroidLaunchActivity } from "./AndroidLaunchActivity";
-import { LaunchForegroundWait } from "./LaunchForegroundWait";
-import { IosLaunchHierarchy } from "./IosLaunchHierarchy";
-import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
-import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
-import { BaseVisualChange } from "./BaseVisualChange";
-import {
-  BootedDevice,
-  ClearAppDataResult,
-  LaunchAppResult,
-  ObserveResult,
-  TerminateAppResult,
-} from "../../models";
-import { ActionableError } from "../../models";
-import {
-  DefaultDeviceWindowCacheInvalidator,
-  DeviceWindowCacheInvalidator,
-  TerminateApp,
-} from "./TerminateApp";
-import { ClearAppData } from "./ClearAppData";
-import { logger } from "../../utils/logger";
-import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { InstalledAppsRepository } from "../../db/installedAppsRepository";
-import {
-  confirmAndroidPackageInstalledLive,
-  type InstalledAppsCacheStaleMarker,
-} from "./confirmAndroidPackageInstalledLive";
-import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { ActionableError, BootedDevice, LaunchAppResult, ObserveResult } from "../../models";
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { logger } from "../../utils/logger";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
+import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { serverConfig } from "../../utils/ServerConfig";
+import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
 import {
   getPerformanceMonitor,
   setLastTtiMs,
   type PerformanceSamplingCoordinator,
 } from "../performance/PerformanceMonitor";
-import { serverConfig } from "../../utils/ServerConfig";
-import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
-import { errorMessage } from "../../utils/describeUnknownError";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
-import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
-import type { ActionCall } from "./ActionCall";
+import { AndroidLaunchActivity } from "./AndroidLaunchActivity";
+import { waitForAndroidPreflight } from "./AndroidLaunchPreflight";
+import { BaseVisualChange } from "./BaseVisualChange";
+import { ClearAppData } from "./ClearAppData";
+import {
+  confirmAndroidPackageInstalledLive,
+  type InstalledAppsCacheStaleMarker,
+} from "./confirmAndroidPackageInstalledLive";
+import { IosLaunchHierarchy } from "./IosLaunchHierarchy";
+import { IosLaunchProcess, type IosLaunchProcessOptions } from "./IosLaunchProcess";
+import {
+  type AndroidClearAppDataAction,
+  type AndroidColdBootAction,
+  type AndroidLaunchOptions,
+  type DeviceAppLauncher,
+  type InstalledAppsProvider,
+  type IosClearAppDataRunner,
+  type LaunchAppCall,
+  type LaunchAppDependencies,
+  type LaunchAppPositionalTail,
+  type LaunchAppSimctl,
+  type TargetUserDetector,
+} from "./LaunchAppTypes";
+import { LaunchForegroundWait } from "./LaunchForegroundWait";
+import { LaunchObservation } from "./LaunchObservation";
 import {
   LaunchPackageRemovedError,
   PACKAGE_NOT_INSTALLED_ERROR,
 } from "./LaunchPackageRemovedError";
 import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  DeviceWindowCacheInvalidator,
+  TerminateApp,
+} from "./TerminateApp";
+export { amStartReportedFailure } from "./AndroidLaunchActivity";
+export {
+  type AndroidClearAppDataAction,
+  type AndroidColdBootAction,
+  type DeviceAppLauncher,
+  type InstalledAppsProvider,
+  type IosClearAppDataRunner,
+  type LaunchAppCall,
+  type LaunchAppSimctl,
+  type TargetUserDetector,
+} from "./LaunchAppTypes";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 
-const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
-
 const ANDROID_COLD_FRAME_TIMEOUT_MS = 2_500;
 const ANDROID_COLD_FRAME_POLL_MS = 150;
-export { amStartReportedFailure } from "./AndroidLaunchActivity";
-
-export interface TargetUserDetector {
-  detectTargetUserId(packageName: string, userId?: number, signal?: AbortSignal): Promise<number>;
-}
-
-export interface InstalledAppsProvider {
-  listInstalledApps(
-    signal?: AbortSignal,
-  ): Promise<{ apps: string[]; successful: boolean; error?: unknown }>;
-}
-
-export interface IosClearAppDataRunner {
-  execute(bundleId: string): Promise<ClearAppDataResult>;
-}
-
-export interface AndroidClearAppDataAction {
-  execute(packageName: string, userId?: number): Promise<ClearAppDataResult>;
-}
-
-export interface AndroidColdBootAction {
-  execute(
-    packageName: string,
-    options?: { skipObservation?: boolean; userId?: number },
-  ): Promise<TerminateAppResult>;
-}
-
-/**
- * Launch an app on a physical iOS device via devicectl. Narrow injection point
- * so tests never shell out; parallels `DeviceAppUninstaller` in UninstallApp.
- * Implemented by `DeviceAppManager`. `terminateExisting` provides cold-boot
- * relaunch (terminate + fresh process); there is no standalone device terminate
- * here because devicectl cannot reliably resolve a PID by bundle id (deferred).
- */
-/** The narrow simctl surface LaunchApp consumes; lets tests pass a typed fake (#11865). */
-export type LaunchAppSimctl = Pick<
-  SimCtlClient,
-  "launchApp" | "terminateApp" | "executeCommandArgs" | "listAppsOrThrow"
->;
-
-export interface DeviceAppLauncher {
-  launchApp(
-    deviceUdid: string,
-    bundleId: string,
-    options?: { terminateExisting?: boolean; launchArguments?: string[] },
-  ): Promise<{ success: boolean; pid?: number; error?: string }>;
-}
-
-interface LaunchAppDependencies {
-  targetUserDetector?: TargetUserDetector;
-  installedAppsProvider?: InstalledAppsProvider;
-  /** Marks the installed-apps cache stale when a live check contradicts it (#9976). */
-  installedAppsCacheStaleMarker?: InstalledAppsCacheStaleMarker;
-  performanceTrackerFactory?: () => PerformanceTracker;
-  deviceAppLauncher?: DeviceAppLauncher;
-  clearAppDataFactory?: (device: BootedDevice, simctl: LaunchAppSimctl) => IosClearAppDataRunner;
-  createAndroidClearAppData?: (device: BootedDevice) => AndroidClearAppDataAction;
-  createAndroidColdBoot?: (device: BootedDevice) => AndroidColdBootAction;
-  cacheInvalidator?: DeviceWindowCacheInvalidator;
-  performanceSamplingCoordinator?: PerformanceSamplingCoordinator;
-}
 
 function resolvePerformanceSamplingCoordinator(
   dependencies: LaunchAppDependencies,
 ): PerformanceSamplingCoordinator {
   return dependencies.performanceSamplingCoordinator ?? getPerformanceMonitor();
 }
-
-interface AndroidLaunchOptions {
-  packageName: string;
-  clearAppData: boolean;
-  coldBoot: boolean;
-  activityName?: string;
-  userId?: number;
-  skipUiStability?: boolean;
-  signal?: AbortSignal;
-}
-
-/** Launch request for {@link LaunchApp.execute}: what to launch and how, beside the call context. */
-export interface LaunchAppCall extends ActionCall {
-  clearAppData: boolean;
-  coldBoot: boolean;
-  /** Activity name to launch (Android only). */
-  activityName?: string;
-  /** Android user ID (auto-detected if not provided). */
-  userId?: number;
-  skipUiStability?: boolean;
-  launchArguments?: string[];
-  /** `SIMCTL_CHILD_*` variables for a fresh iOS simulator process. */
-  launchEnvironment?: Record<string, string>;
-}
-
-/** The deprecated positional parameters of {@link LaunchApp.execute} after `clearAppData`. */
-type LaunchAppPositionalTail = [
-  coldBoot?: boolean,
-  activityName?: string,
-  userId?: number,
-  skipUiStability?: boolean,
-  signal?: AbortSignal,
-  launchArguments?: string[],
-  launchEnvironment?: Record<string, string>,
-];
 
 export class LaunchApp extends BaseVisualChange {
   readonly simctl: LaunchAppSimctl;
@@ -594,9 +513,10 @@ export class LaunchApp extends BaseVisualChange {
         return this.installedAppsProvider.listInstalledApps(signal);
       }),
     ]);
-    const [targetUserResult, installedAppsResult] = await this.waitForAndroidPreflight(
+    const [targetUserResult, installedAppsResult] = await waitForAndroidPreflight(
       preflight,
       signal,
+      this.timer,
     );
     signal?.throwIfAborted();
 
@@ -1035,49 +955,6 @@ export class LaunchApp extends BaseVisualChange {
       }
     }
     logger.warn(`[LaunchApp] Android cold frame readiness timed out for ${packageName}`);
-  }
-
-  private async waitForAndroidPreflight<T>(
-    preflight: Promise<T>,
-    signal: AbortSignal | undefined,
-  ): Promise<T> {
-    if (!signal) {
-      return await preflight;
-    }
-    try {
-      signal.throwIfAborted();
-      return await raceWithDeadline(preflight, {
-        timer: this.timer,
-        signal,
-        label: "Android preflight",
-        relabelDefaultAbort: false,
-      });
-    } catch (error) {
-      await this.awaitAndroidPreflightSettlement(preflight);
-      throw error;
-    }
-  }
-
-  private async awaitAndroidPreflightSettlement(preflight: Promise<unknown>): Promise<void> {
-    const timeout = new Error("Android preflight settlement grace expired");
-    try {
-      await raceWithDeadline(
-        preflight.then(
-          () => undefined,
-          () => undefined,
-        ),
-        {
-          timer: this.timer,
-          timeoutMs: ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS,
-          label: "Android preflight settlement",
-          timeoutError: () => timeout,
-        },
-      );
-    } catch (error) {
-      if (error !== timeout) {
-        throw error;
-      }
-    }
   }
 
   private assertLaunchNotAborted(signal?: AbortSignal): void {

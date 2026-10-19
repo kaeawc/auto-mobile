@@ -34,12 +34,12 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
     const uri = buildAppFileResourceUri({
       deviceId: "emulator-5554",
       appId: "com.example",
-      container: "files",
+      container: "documents",
       path: `docs/na${LONE_SURROGATE}me.txt`,
     });
 
     expect(uri).toBe(
-      "automobile:devices/emulator-5554/apps/com.example/files/files/docs/na%EF%BF%BDme.txt",
+      "automobile:devices/emulator-5554/apps/com.example/files/documents/docs/na%EF%BF%BDme.txt",
     );
   });
 

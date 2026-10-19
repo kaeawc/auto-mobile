@@ -1,3 +1,5 @@
+import { z } from "zod/v4";
+import { toolJson } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -150,10 +152,10 @@ describe("recording release after serial identity replacement", () => {
       recordingId: active.recordingId,
       sessionUuid: "A",
     });
-    const parsed = JSON.parse(response.content[0].text);
+    const parsed = toolJson(response);
     expect(parsed.alreadyStopped).toBe(true);
     expect(parsed.recordings).toHaveLength(1);
-    expect(parsed.recordings[0]).toMatchObject({
+    expect(z.array(z.unknown()).parse(parsed.recordings)[0]).toMatchObject({
       recordingId: active.recordingId,
       metadata: {
         endedAt: interrupted?.endedAt,

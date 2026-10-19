@@ -1,4 +1,5 @@
 import { holderOf } from "./deviceBinding";
+import { DevicePoolError } from "./DevicePoolError";
 import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
@@ -16,7 +17,7 @@ import {
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
 } from "../devices/deviceIdentityEvidence";
-import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import { type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
 
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
@@ -55,9 +56,8 @@ export interface DeviceRuntimeIdentityPoolPort {
 
 /** Resolves and caches pooled runtime identity without deciding pool membership. */
 export class DeviceRuntimeIdentity {
-  // Quarantine still withholds identity trust during shutdown. Remember only
-  // its deferred cancellation, not another shutdown fence; the existing
-  // reservation decides when cancellation is safe. Removed entries are not held.
+  // Quarantine still withholds identity trust during shutdown. Remember only its deferred
+  // cancellation, not another shutdown fence; the reservation decides when it is safe.
   private readonly deferredQuarantineCancellations = new WeakSet<PooledDevice>();
   private readonly pendingIdentityReplacements = new Map<string, BootedDevice>();
   private readonly pendingIdentityReplacementUnresolvedObservations = new Map<

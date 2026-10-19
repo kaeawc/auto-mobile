@@ -1,4 +1,7 @@
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -19,10 +22,7 @@ import {
   DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
-  DaemonBoundSessionLostError,
   DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
   DaemonUnavailableError,
   type DaemonClientLike,
 } from "../../src/daemon/client";

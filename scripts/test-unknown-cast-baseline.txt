@@ -7,15 +7,7 @@
 1	test/daemon/daemonPromiseCallbacks.test.ts
 1	test/daemon/daemonShutdownIncumbentRestore.test.ts
 4	test/daemon/daemonShutdownSessionRelease.test.ts
-1	test/daemon/devicePool.assignMultipleDevices.test.ts
-1	test/daemon/devicePool.bindingExclusion.test.ts
-2	test/daemon/devicePool.iosRecovery.test.ts
-1	test/daemon/devicePool.recoveryOutsideMutex.test.ts
 2	test/daemon/devicePool.recoveryShutdown.adbResetAndDeferredRecovery.test.ts
-1	test/daemon/devicePool.recoveryShutdown.intentionalStopAndSessionless.test.ts
-1	test/daemon/devicePool.staleIdentityRefresh.test.ts
-2	test/daemon/devicePoolCreate.test.ts
-1	test/daemon/deviceRestartRecoveryReservation.test.ts
 3	test/daemon/hierarchyStreamDiff.test.ts
 1	test/db/sessionToolSelectionRepository.integration.test.ts
 1	test/devices/deviceUtils.test.ts
@@ -63,7 +55,6 @@
 2	test/server/derivedLabelSessionRestoreOwnership.test.ts
 1	test/server/deviceDescription.test.ts
 1	test/server/deviceTools.acquisitionWaitDeadlines.test.ts
-1	test/server/deviceTools.bootRollbackSparesHeldDevice.test.ts
 1	test/server/deviceTools.listDeviceImages.test.ts
 1	test/server/elementSelectorSchemas.property.test.ts
 1	test/server/explicitSessionUuidBinding.daemon.integration.test.ts

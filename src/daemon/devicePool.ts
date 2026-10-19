@@ -8712,6 +8712,34 @@ export class DevicePool {
       idleDeviceReaper: this.idleDeviceReaper,
       startedDeviceProcesses: this.startedDeviceProcesses,
       startedDeviceProcessOutput: this.startedDeviceProcessOutput,
+      rehydrationReservations: this.rehydrationReservations,
+      cancelOldDeviceWorkForSystemUiAnr: interceptableMethod(
+        () => this.cancelOldDeviceWorkForSystemUiAnr.bind(this),
+        (replacement) => {
+          this.cancelOldDeviceWorkForSystemUiAnr = replacement;
+        },
+      ),
+      tryAssignDevice: this.tryAssignDevice.bind(this),
+      getStartableDeviceImageCandidates: this.getStartableDeviceImageCandidates.bind(this),
+      getSessionPreservingRecoveryTarget: this.getSessionPreservingRecoveryTarget.bind(this),
+      retrySessionRelease: this.retrySessionRelease.bind(this),
+      foldObservationIntoPooledEntry: this.foldObservationIntoPooledEntry.bind(this),
+      releaseDisconnectedRecoverySessionWithRetry:
+        this.releaseDisconnectedRecoverySessionWithRetry.bind(this),
+      notifyRehydrationReservationChanged: interceptableMethod(
+        () => this.notifyRehydrationReservationChanged.bind(this),
+        (replacement) => {
+          this.notifyRehydrationReservationChanged = replacement;
+        },
+      ),
+      collaborators: {
+        timer: this.timer,
+        installedAppsRepository: this.installedAppsRepository,
+        deviceManager: this.deviceManager,
+        retryExecutor: this.retryExecutor,
+        criteriaMatcher: this.criteriaMatcher,
+        onDeviceReady: this.onDeviceReady,
+      },
       deferredDeviceReleases: this.deferredDeviceReleases,
       deviceHealthMarkers: this.deviceHealthMarkers,
       mcpSessionRecoveryDevices: this.mcpSessionRecoveryDevices,

@@ -133,15 +133,8 @@ describe("DevicePool.create", () => {
     };
     const factoryPool = DevicePool.create(deps);
     const directPool = new DevicePool(deps);
-    const factoryInternals = factoryPool as unknown as {
-      timer: FakeTimer;
-      installedAppsRepository: FakeInstalledAppsRepository;
-      deviceManager: FakeDeviceManager;
-      retryExecutor: DefaultRetryExecutor;
-      criteriaMatcher: DeviceCriteriaMatcher;
-      onDeviceReady: typeof onDeviceReady;
-    };
-    const directInternals = directPool as unknown as typeof factoryInternals;
+    const factoryInternals = factoryPool.testHooks.collaborators;
+    const directInternals = directPool.testHooks.collaborators;
 
     expect(factoryInternals.timer).toBe(deps.timer);
     expect(factoryInternals.installedAppsRepository).toBe(deps.installedAppsRepository);

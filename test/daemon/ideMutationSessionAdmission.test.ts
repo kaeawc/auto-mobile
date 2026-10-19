@@ -1,5 +1,7 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
+import {
+  createTestableUnixSocketServer,
+  type TestUnixSocketServer,
+} from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -26,12 +28,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * one; only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const SESSION = "ide-mutation-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
@@ -41,7 +37,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let internals: TestUnixSocketServer;
   let writes: string[];
 
   function stateFor(): DaemonStateAccess {
@@ -81,7 +77,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
     for (let i = 0; i < 6; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all(internals.inFlightRequestHandlers());
     return socket.responses.find((frame) => frame.id === "frame");
   }
 
@@ -143,7 +139,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
         }) as unknown as AndroidCtrlProxyManager,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
+    const server = createTestableUnixSocketServer(
       "unused",
       {
         isInitialized: () => true,
@@ -155,10 +151,10 @@ describe("mutating ide/* frames against a session that may not take a control ca
       // The storage tools are enabled, so the frame reaches the ownership gate.
       { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals.startAcceptingRequests();
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals.acceptConnection(socket);
   }
 
   function tearDown(): void {

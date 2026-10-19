@@ -188,7 +188,7 @@ import {
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { clearSessionAppearanceConfig } from "./appearanceManager";
-import { resolveAppearanceSessionKey } from "./appearanceSessionKey";
+import { appearanceSyncTargets } from "./appearanceSyncTargets";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../utils/NetworkState";
 import {} from "./networkStateSessionCleanup";
@@ -1303,24 +1303,8 @@ export class Daemon {
     });
   }
 
-  /** Devices host appearance sync may touch, each tagged with the session whose config applies. */
   private getAppearanceSyncTargets(): AppearanceSyncTarget[] {
-    return this.devicePool
-      .getAllDevices()
-      .filter(
-        (device) =>
-          device.platform === "android" &&
-          this.passiveWorkPolicy.allows("android", "appearance-sync", device.id),
-      )
-      .map((device) => ({
-        deviceId: device.id,
-        name: device.id,
-        platform: "android",
-        incarnation: device.incarnation,
-        sessionKey: resolveAppearanceSessionKey(
-          this.sessionManager.getSessionForDevice(device.id) ?? undefined,
-        ),
-      }));
+    return appearanceSyncTargets(this.devicePool, this.passiveWorkPolicy, this.sessionManager);
   }
 
   private applyRuntimeOptions(options: DaemonOptions): void {
@@ -3673,6 +3657,12 @@ export class Daemon {
       startThroughSocketBind: (): Promise<void> => this.startThroughSocketBind(),
       closeManagedExecutionRelease: (): Promise<void> => this.closeManagedExecutionRelease(),
       stopSessionTimers: (): void => this.stopSessionTimers(),
+      getAppearanceSyncTargets: (): AppearanceSyncTarget[] => this.getAppearanceSyncTargets(),
+      bindingJournalOwner: (): BindingJournalOwner => this.bindingJournalOwner(),
+      /** Installs a host-lifetime binding registry the way an earlier open of this process would. */
+      setBindingRegistry: (registry: Promise<SqliteBindingRegistry>): void => {
+        this.bindingRegistry = registry;
+      },
       /** Replaces start-sequence steps with doubles on this instance. */
       overrideStartSteps: (steps: {
         startThroughSocketBind?: () => Promise<void>;

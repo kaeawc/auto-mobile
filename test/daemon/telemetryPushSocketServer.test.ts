@@ -18,6 +18,7 @@ import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { logger } from "../../src/utils/logger";
 import { BODY_TRUNCATION_LIMIT } from "../../src/utils/truncateBodyText";
+import { telemetryEventPushFrameSchema } from "../helpers/wireMessageSchemas";
 
 class AuthTelemetryServer extends TelemetryPushSocketServer {
   private subscribed = 0;
@@ -101,7 +102,7 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     arguments: null,
     metadata: null,
   });
-  const messages = () => socket.getWrittenMessages<{ data: TelemetryEvent }>();
+  const messages = () => socket.getWrittenMessages(telemetryEventPushFrameSchema);
 
   beforeAll(async () => {
     // Warm the migrated in-memory template outside the per-test timing budget.

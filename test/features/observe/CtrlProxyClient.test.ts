@@ -70,6 +70,7 @@ import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/Sta
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { typedFrameSchema } from "../../helpers/wireMessageSchemas";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -563,7 +564,7 @@ describe("AndroidCtrlProxyClient", function () {
 
   const getScreenshotUpdates = async (socket: FakeSocket): Promise<ScreenshotUpdateMessage[]> =>
     socket
-      .getWrittenMessages<ScreenshotUpdateMessage>()
+      .getWrittenMessages(typedFrameSchema)
       .filter((message) => message.type === "screenshot_update");
 
   const expectSingleScreenshotUpdate = async (

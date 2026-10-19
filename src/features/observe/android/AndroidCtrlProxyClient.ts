@@ -1064,6 +1064,9 @@ export class AndroidCtrlProxyClient extends AndroidCtrlProxyServices implements 
       this.lateCancelledScreenshotRequestIds.clear();
       this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
       AndroidCtrlProxyClient.activeObservers.delete(this);
+      // A closed client never reconnects, so leaving it registered would hand a
+      // stale client to the next getInstance. Only evict if still current.
+      AndroidCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
     }
   }
 

@@ -62,6 +62,7 @@ const LEASE_MS = 10_000;
 const REFUSAL_REMAINING_MS = SUSPECT_GRACE_MS - 1_000;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
+  releaseDevice: async () => {},
   getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
 };
 const OBSERVED = { content: [{ type: "text", text: JSON.stringify({ observed: true }) }] };
@@ -146,10 +147,10 @@ describe("proxy liveness stalls (#10053)", () => {
   let latestClient: FakeDaemonClient;
   let heartbeatsSeen: number;
   let handovers: LivenessHandover[];
-  let infoSpy: ReturnType<typeof spyOn>;
-  let warnSpy: ReturnType<typeof spyOn>;
-  let errorSpy: ReturnType<typeof spyOn>;
-  let isAvailableSpy: ReturnType<typeof spyOn>;
+  let infoSpy: ReturnType<typeof spyOn<typeof logger, "info">>;
+  let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  let errorSpy: ReturnType<typeof spyOn<typeof logger, "error">>;
+  let isAvailableSpy: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">>;
   const proxies: DaemonMcpProxy[] = [];
 
   function daemonBackedClient(): FakeDaemonClient {
@@ -1666,7 +1667,7 @@ describe("proxy liveness stalls (#10053)", () => {
       await acquire(proxy, "getAndroid");
       // The emulator is killed: the daemon drops the live session into its recovery window.
       devicePending = true;
-      await sessionManager.releaseSession("android-session", "device-lost");
+      await sessionManager.releaseSession("android-session", "device-restart:emulator-5554");
       // A heartbeat is in flight when the socket drops under the call. The call reconnects first,
       // and the heartbeat's retry then meets that reconnect, which may manage the daemon's
       // lifecycle and so cannot be joined by observation-only liveness work.

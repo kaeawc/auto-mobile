@@ -1,6 +1,5 @@
 import { ProcessEnvironmentReader } from "./ProcessEnvironmentReader";
 import { ENV } from "../config/env";
-export { ProcessEnvironmentReader } from "./ProcessEnvironmentReader";
 /**
  * Opt-in gate for provisioning (creating) simulators/emulators.
  *

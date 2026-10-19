@@ -1,4 +1,5 @@
 import { makePool } from "../helpers/makePool";
+import type { SessionReleaseReason } from "../../src/models/releaseReasons";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import {
@@ -199,7 +200,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     }
 
     /** A session that ran a plan on SIM_A and was released by the plan's cleanup. */
-    async function runPlanOnSimA(reason: string = PLAN_AUTO_RELEASE_REASON): Promise<void> {
+    async function runPlanOnSimA(
+      reason: SessionReleaseReason = PLAN_AUTO_RELEASE_REASON,
+    ): Promise<void> {
       await pool.bindOrReuseDeviceSession({
         sessionId: SESSION,
         deviceId: SIM_A,

@@ -2274,7 +2274,7 @@ describe("not-found peer and retained handoff regressions", () => {
       results.set(name, world.violations);
     }
   });
-  test.each(cases)("%s", (name) => {
+  test.each([...cases])("%s", (name) => {
     expect(results.get(name)).toEqual([]);
   });
 });

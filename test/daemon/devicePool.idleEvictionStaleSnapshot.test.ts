@@ -1,7 +1,7 @@
 import { makePool } from "../helpers/makePool";
 import { statusOf } from "../../src/daemon/deviceBinding";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import type { IosLivenessSnapshot } from "../../src/daemon/idleDeviceReaper";
@@ -60,18 +60,43 @@ describe("idle eviction with a stale discovery snapshot", () => {
   let deviceManager: ParkingFakeDeviceManager;
   let pool: DevicePool;
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingFakeDeviceManager();
     pool = makePool(sessionManager, "repro-6393-daemon", { timer, deviceManager: deviceManager });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
+
+  function arrangedEach<T>(table: readonly T[]) {
+    return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
+      test.each(table)(
+        name,
+        async (row: T) => {
+          await arrangeHarness();
+          await fn(row);
+        },
+        timeout,
+      );
+    };
+  }
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
   });
 
-  test.each(["select", "prune", "bind"] as const)(
+  arrangedEach(["select", "prune", "bind"] as const)(
     "%s keeps a same-UDID replacement after stale iOS discovery",
     async (path) => {
       const udid = "11111111-2222-3333-4444-555555555555";
@@ -150,7 +175,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     },
   );
 
-  test("prune skips a newer incarnation before judging an older iOS snapshot", async () => {
+  arranged("prune skips a newer incarnation before judging an older iOS snapshot", async () => {
     const sim: BootedDevice = {
       name: "iPhone 16",
       platform: "ios",
@@ -174,7 +199,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     expect(pool.getDevice(sim.deviceId)).toBe(replacement);
   });
 
-  test.each(["retire", "replace"] as const)(
+  arrangedEach(["retire", "replace"] as const)(
     "%s uses its captured entry for shutdown removal",
     async (path) => {
       const sim: BootedDevice = {
@@ -208,7 +233,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     },
   );
 
-  test.each(["ios", "android"] as const)(
+  arrangedEach(["ios", "android"] as const)(
     "%s multi-allocation eviction holds assignmentMutex at removal",
     async (platform) => {
       const device: BootedDevice =
@@ -261,7 +286,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     },
   );
 
-  test.each(["count", "criteria"] as const)(
+  arrangedEach(["count", "criteria"] as const)(
     "%s device start publishes under assignmentMutex",
     async (path) => {
       const image: DeviceInfo = {
@@ -342,94 +367,100 @@ describe("idle eviction with a stale discovery snapshot", () => {
     },
   );
 
-  test("iOS: prune proceeds while bind discovery is parked and the old positive snapshot cannot claim", async () => {
-    const udid = "11111111-2222-3333-4444-555555555555";
-    const sim: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: udid };
-    deviceManager.bootedDevices = [sim];
-    await pool.initializeWithDevices([sim]);
-    // Connection B parks its exact-bind liveness snapshot outside the mutex.
-    deviceManager.parkNext = "ios";
-    const bind = pool
-      .bindOrReuseDeviceSession({ sessionId: "session-b", deviceId: udid, platform: "ios" })
-      .then(
-        (sessionId) => ({ ok: true as const, sessionId }),
-        (error: unknown) => ({ ok: false as const, error }),
-      );
-    await flushMicrotasks();
-    expect(deviceManager.parked).toHaveLength(1);
+  arranged(
+    "iOS: prune proceeds while bind discovery is parked and the old positive snapshot cannot claim",
+    async () => {
+      const udid = "11111111-2222-3333-4444-555555555555";
+      const sim: BootedDevice = { name: "iPhone 16", platform: "ios", deviceId: udid };
+      deviceManager.bootedDevices = [sim];
+      await pool.initializeWithDevices([sim]);
+      // Connection B parks its exact-bind liveness snapshot outside the mutex.
+      deviceManager.parkNext = "ios";
+      const bind = pool
+        .bindOrReuseDeviceSession({ sessionId: "session-b", deviceId: udid, platform: "ios" })
+        .then(
+          (sessionId) => ({ ok: true as const, sessionId }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+      await flushMicrotasks();
+      expect(deviceManager.parked).toHaveLength(1);
 
-    // Connection A can prune the idle entry while B's discovery is parked.
-    deviceManager.bootedDevices = [];
-    const allocation = pool.assignMultipleDevices([], 1_000, "ios");
-    await allocation;
-    expect(pool.getDevice(udid)).toBeNull();
+      // Connection A can prune the idle entry while B's discovery is parked.
+      deviceManager.bootedDevices = [];
+      const allocation = pool.assignMultipleDevices([], 1_000, "ios");
+      await allocation;
+      expect(pool.getDevice(udid)).toBeNull();
 
-    // B's old positive evidence cannot claim the removed incarnation.
-    deviceManager.parked[0].resolve();
-    const outcome = await bind;
-    await allocation;
+      // B's old positive evidence cannot claim the removed incarnation.
+      deviceManager.parked[0].resolve();
+      const outcome = await bind;
+      await allocation;
 
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) {
-      expect(outcome.error).toBeInstanceOf(ActionableError);
-      expect(String(outcome.error)).toContain("not available");
-    }
-    expect(sessionManager.getSession("session-b")).toBeNull();
-  });
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) {
+        expect(outcome.error).toBeInstanceOf(ActionableError);
+        expect(String(outcome.error)).toContain("not available");
+      }
+      expect(sessionManager.getSession("session-b")).toBeNull();
+    },
+  );
 
   // The issue's second verification case: an unlocked eviction must not remove
   // an entry a lock holder claimed after the eviction's discovery was taken.
-  test("Android: stale unlocked eviction must not release/remove a device bound meanwhile", async () => {
-    const serial = "R58M1234ABC"; // physical handset: no emulator recovery path
-    const handset: BootedDevice = { name: "SM-S911B", platform: "android", deviceId: serial };
-    deviceManager.bootedDevices = [handset];
-    await pool.initializeWithDevices([handset]);
+  arranged(
+    "Android: stale unlocked eviction must not release/remove a device bound meanwhile",
+    async () => {
+      const serial = "R58M1234ABC"; // physical handset: no emulator recovery path
+      const handset: BootedDevice = { name: "SM-S911B", platform: "android", deviceId: serial };
+      deviceManager.bootedDevices = [handset];
+      await pool.initializeWithDevices([handset]);
 
-    // Connection A: assignMultipleDevices' evictUnavailableIdleDevicesMatching
-    // takes an adb snapshot while the handset is briefly absent, then parks
-    // (no lock held) before acting on it.
-    deviceManager.bootedDevices = [];
-    deviceManager.parkNext = "android";
-    const allocation = pool
-      .assignMultipleDevices(["session-a"], 1_000, "android")
-      .catch((error: unknown) => error);
-    await flushMicrotasks();
-    expect(deviceManager.parked).toHaveLength(1);
+      // Connection A: assignMultipleDevices' evictUnavailableIdleDevicesMatching
+      // takes an adb snapshot while the handset is briefly absent, then parks
+      // (no lock held) before acting on it.
+      deviceManager.bootedDevices = [];
+      deviceManager.parkNext = "android";
+      const allocation = pool
+        .assignMultipleDevices(["session-a"], 1_000, "android")
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+      expect(deviceManager.parked).toHaveLength(1);
 
-    // Handset is back. Connection B binds it under the mutex, with its own
-    // fresher discovery confirming presence.
-    deviceManager.bootedDevices = [handset];
-    const sessionId = await pool.bindOrReuseDeviceSession({
-      sessionId: "session-b",
-      deviceId: serial,
-      platform: "android",
-    });
-    expect(sessionId).toBe("session-b");
-    const bound = pool.getDevice(serial);
-    expect(bound?.sessionId).toBe("session-b");
+      // Handset is back. Connection B binds it under the mutex, with its own
+      // fresher discovery confirming presence.
+      deviceManager.bootedDevices = [handset];
+      const sessionId = await pool.bindOrReuseDeviceSession({
+        sessionId: "session-b",
+        deviceId: serial,
+        platform: "android",
+      });
+      expect(sessionId).toBe("session-b");
+      const bound = pool.getDevice(serial);
+      expect(bound?.sessionId).toBe("session-b");
 
-    // A resumes on its stale "absent" snapshot.
-    deviceManager.parked[0].resolve();
-    await settleWithFakeTime(timer, allocation, {
-      stepMs: 1_000,
-      maxSteps: 2,
-      description: "stale preflight allocation timeout",
-    });
-    await flushMicrotasks();
+      // A resumes on its stale "absent" snapshot.
+      deviceManager.parked[0].resolve();
+      await settleWithFakeTime(timer, allocation, {
+        stepMs: 1_000,
+        maxSteps: 2,
+        description: "stale preflight allocation timeout",
+      });
+      await flushMicrotasks();
 
-    const diagnostic = {
-      poolEntryIsBound: pool.getDevice(serial) === bound,
-      boundSessionId: bound?.sessionId ?? null,
-      sessionBAssignedDevice: sessionManager.getSession("session-b")?.assignedDevice ?? null,
-    };
-    expect(diagnostic).toEqual({
-      poolEntryIsBound: true,
-      boundSessionId: "session-b",
-      sessionBAssignedDevice: serial,
-    });
-  });
+      const diagnostic = {
+        poolEntryIsBound: pool.getDevice(serial) === bound,
+        boundSessionId: bound?.sessionId ?? null,
+        sessionBAssignedDevice: sessionManager.getSession("session-b")?.assignedDevice ?? null,
+      };
+      expect(diagnostic).toEqual({
+        poolEntryIsBound: true,
+        boundSessionId: "session-b",
+        sessionBAssignedDevice: serial,
+      });
+    },
+  );
 
-  test("Android: a device still absent and unbound is evicted", async () => {
+  arranged("Android: a device still absent and unbound is evicted", async () => {
     const serial = "R58M1234ABC";
     const handset: BootedDevice = { name: "SM-S911B", platform: "android", deviceId: serial };
     deviceManager.bootedDevices = [handset];
@@ -442,7 +473,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     expect(sessionManager.getSessionForDevice(serial)).toBeNull();
   });
 
-  test("Android: idle emulator recovery does not hold the assignment lock", async () => {
+  arranged("Android: idle emulator recovery does not hold the assignment lock", async () => {
     const emulator: BootedDevice = {
       name: "Pixel_8_API_35",
       platform: "android",

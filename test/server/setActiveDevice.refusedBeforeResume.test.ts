@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { installFakeCtrlProxyManagers } from "../helpers/hermeticDeviceTools";
 import { maskRealCtrlProxyWebSocketOptIn } from "../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -88,7 +88,17 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     restoreFactory();
     restoreProviders();
   };
-  beforeEach(arrange);
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrange();
+        await fn();
+      },
+      timeout,
+    );
+  }
   afterEach(dispose);
 
   const budget = (): ForcedRestartBudget => client.forcedRestartBudget;
@@ -110,7 +120,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     await dispose();
   });
 
-  test("an exhausted forced-restart budget stays exhausted", async () => {
+  arranged("an exhausted forced-restart budget stays exhausted", async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       budget().recordFailure("service recovery failed", budget().tryBeginAttempt()!);
       clientTimer.advanceTime(600_000);
@@ -123,7 +133,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     expect(client.getRestartBudgetSnapshot()).toMatchObject({ state: "exhausted", attempts: 3 });
   });
 
-  test("the holder's admitted recovery attempt keeps its token", async () => {
+  arranged("the holder's admitted recovery attempt keeps its token", async () => {
     const token = budget().tryBeginAttempt()!;
 
     const refusal = await intruderSelects();
@@ -133,7 +143,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     expect(budget().recordSuccess(token)).toBe(true);
   });
 
-  test("the holder selecting its own device again still re-arms the budget", async () => {
+  arranged("the holder selecting its own device again still re-arms the budget", async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       budget().recordFailure("service recovery failed", budget().tryBeginAttempt()!);
       clientTimer.advanceTime(600_000);

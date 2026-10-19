@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -52,7 +52,7 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
   let deviceManager: ParkingBootDeviceManager;
   let pool: DevicePool;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingBootDeviceManager();
@@ -65,13 +65,25 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
     await pool.initializeWithDevices([handset]);
     await pool.addDevice(emulator, image);
     expect(pool.getRecoveryEligibility(emulator.deviceId).eligible).toBe(true);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("refresh prune does not block allocation while the emulator reboots", async () => {
+  arranged("refresh prune does not block allocation while the emulator reboots", async () => {
     // Discovery succeeds for Android but no longer lists the emulator.
     deviceManager.parkRecoveryStart = true;
     await pool.refreshDevices();
@@ -109,7 +121,7 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
     expect(await bind).toBe("unrelated");
   });
 
-  test("the detached recovery still reboots the missing emulator", async () => {
+  arranged("the detached recovery still reboots the missing emulator", async () => {
     deviceManager.parkRecoveryStart = true;
     await pool.refreshDevices();
     await pool.refreshDevices();

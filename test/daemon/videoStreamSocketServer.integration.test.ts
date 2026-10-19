@@ -119,7 +119,13 @@ interface Harness {
   cleanup: () => Promise<void>;
 }
 
-const harnesses: Harness[] = [];
+/** Socket data without `setEncoding` arrives as a Buffer; the listener type also admits a string. */
+function asBuffer(data: string | Buffer): Buffer {
+  return typeof data === "string" ? Buffer.from(data) : data;
+}
+
+/** What afterEach cleanup and the startup-race tests read back from a started server. */
+const harnesses: Array<Pick<Harness, "server" | "socketPath" | "cleanup">> = [];
 
 /** Accepts every request; auth enforcement is exercised in dedicated tests below. */
 const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} };
@@ -241,7 +247,7 @@ async function subscribe(
   await connectBounded(socket, socketPath);
 
   const chunks: Buffer[] = [];
-  socket.on("data", (data) => chunks.push(data));
+  socket.on("data", (data) => chunks.push(asBuffer(data)));
   socket.write(`${JSON.stringify(request)}\n`);
 
   // Wait for the newline-terminated acknowledgement.
@@ -321,7 +327,7 @@ describe("VideoStreamSocketServer", () => {
     const socket = new net.Socket();
     await connectBounded(socket, h.socketPath);
     const chunks: Buffer[] = [];
-    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("data", (chunk) => chunks.push(asBuffer(chunk)));
     const request = JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId });
     socket.write(`${request}\n${request}\n`);
 
@@ -1082,9 +1088,6 @@ describe("VideoStreamSocketServer", () => {
         harnesses.push({
           server,
           socketPath,
-          sources: [source],
-          emit: () => {},
-          emitRotation: () => {},
           cleanup: async () => {
             await server.close();
             rmSync(dir, { recursive: true, force: true });
@@ -1139,9 +1142,6 @@ describe("VideoStreamSocketServer", () => {
     harnesses.push({
       server,
       socketPath,
-      sources: [abandonedSource, replacementSource],
-      emit: () => {},
-      emitRotation: () => {},
       cleanup: async () => {
         await server.close();
         rmSync(dir, { recursive: true, force: true });
@@ -1785,7 +1785,7 @@ describe("VideoStreamSocketServer", () => {
     await connectBounded(socket, h.socketPath);
 
     const chunks: Buffer[] = [];
-    socket.on("data", (data) => chunks.push(data));
+    socket.on("data", (data) => chunks.push(asBuffer(data)));
     socket.write("{not json\n");
     await waitFor(() => Buffer.concat(chunks).includes("\n"));
 

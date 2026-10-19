@@ -2016,7 +2016,7 @@ describe("TapAtCoordinate", () => {
     };
 
     await expect(
-      dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, "frame-123"),
+      dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, { frameContext: "frame-123" }),
     ).rejects.toThrow("Stale frame context");
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });
@@ -2026,7 +2026,9 @@ describe("TapAtCoordinate", () => {
     const rejectedClient: CoordinateTapClient = {
       requestTapCoordinates: async () => ({ success: false, error: "gesture unavailable" }),
     };
-    await dispatchAndroidCoordinateTap(rejectedClient, adb, 1, 2, 750, "frame-123");
+    await dispatchAndroidCoordinateTap(rejectedClient, adb, 1, 2, 750, {
+      frameContext: "frame-123",
+    });
     expect(adb.wasCommandExecuted("shell input touchscreen swipe 1 2 1 2 750")).toBe(true);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });

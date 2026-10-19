@@ -1470,21 +1470,18 @@ export class BaseVisualChange {
     if ((remainingMs() ?? 1) <= 0) {
       return "expired";
     }
-    const activeWindow = await this.window.getActive(true, undefined, {
-      signal,
-      timeoutMs: remainingMs(),
-    });
+    const readBounds = () => ({ signal, timeoutMs: remainingMs() });
+    const activeWindow = await this.window.getActive(true, undefined, readBounds());
     if ((remainingMs() ?? 1) <= 0) {
       return "expired";
     }
+    const { deviceId } = this.device;
     const isLauncher = await isForegroundLauncher(
       activeWindow.appId,
       this.adb,
-      this.device.deviceId,
+      deviceId,
       this.timer,
-      deviceIncarnationToken(this.device.deviceId),
-      signal,
-      remainingMs(),
+      { ...readBounds(), incarnationToken: deviceIncarnationToken(deviceId) },
     );
     // A successful launcher lookup is evidence only while it remains within
     // the caller's deadline; a fast cached lookup must not accept success

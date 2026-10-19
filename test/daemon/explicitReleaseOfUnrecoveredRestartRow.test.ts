@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   handleDaemonRequest,
@@ -32,7 +32,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
   let pool: DevicePool;
   let state: DaemonStateAccess;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
     // The previous daemon held SESSION on SIM; this daemon's startup marked the row daemon-restart.
@@ -62,7 +62,19 @@ describe("explicit release of a restart-recoverable session the daemon has not r
       getDevicePool: () => pool,
       getDeviceSessionRegistry: () => ({ list: () => [] }),
     };
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessions.stopCleanupTimer();
@@ -80,28 +92,31 @@ describe("explicit release of a restart-recoverable session the daemon has not r
       state,
     );
 
-  test("the release is recorded, so a later call naming the UUID is refused as terminal", async () => {
-    expect(await explicitRelease()).toMatchObject({ success: true });
+  arranged(
+    "the release is recorded, so a later call naming the UUID is refused as terminal",
+    async () => {
+      expect(await explicitRelease()).toMatchObject({ success: true });
 
-    const rowReason = (await persistence.getSession(SESSION))?.release_reason;
-    // A device tool call naming the released UUID (requireIssuedSession) must not re-issue it.
-    const laterCall = await sessions
-      .getOrCreateSession(SESSION, pool, undefined, undefined, true)
-      .then(
-        (session) => `re-issued on ${session.assignedDevice}`,
-        (error: unknown) =>
-          error instanceof TerminalSessionError ? "refused as terminal" : String(error),
-      );
+      const rowReason = (await persistence.getSession(SESSION))?.release_reason;
+      // A device tool call naming the released UUID (requireIssuedSession) must not re-issue it.
+      const laterCall = await sessions
+        .getOrCreateSession(SESSION, pool, undefined, undefined, true)
+        .then(
+          (session) => `re-issued on ${session.assignedDevice}`,
+          (error: unknown) =>
+            error instanceof TerminalSessionError ? "refused as terminal" : String(error),
+        );
 
-    // The owner released it: the row is no longer a recoverable handoff, and the UUID is fenced.
-    expect({ rowReason, laterCall, holder: pool.getDevice(SIM)?.sessionId ?? null }).toEqual({
-      rowReason: "explicit-release",
-      laterCall: "refused as terminal",
-      holder: null,
-    });
-  });
+      // The owner released it: the row is no longer a recoverable handoff, and the UUID is fenced.
+      expect({ rowReason, laterCall, holder: pool.getDevice(SIM)?.sessionId ?? null }).toEqual({
+        rowReason: "explicit-release",
+        laterCall: "refused as terminal",
+        holder: null,
+      });
+    },
+  );
 
-  test("the follow-up rehydration sweep does not bring the released session back", async () => {
+  arranged("the follow-up rehydration sweep does not bring the released session back", async () => {
     // The startup deadline passed with the row unstarted: it is left to the follow-up sweep.
     const summary = await sessions.rehydratePersistedSessions(pool, { deadlineMs: 0 });
     expect(summary.skipped).toEqual([{ sessionUuid: SESSION, reason: "startup-deadline" }]);
@@ -116,7 +131,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
     expect(pool.getDevice(SIM)?.sessionId).toBeNull();
   });
 
-  test("the device's restart-recovery reservation is given up with the release", async () => {
+  arranged("the device's restart-recovery reservation is given up with the release", async () => {
     await pool.reserveDevicesForRehydration([
       { sessionId: SESSION, target: { platform: "ios", stableDeviceId: SIM, deviceId: SIM } },
     ]);
@@ -127,7 +142,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
     expect(pool.genericAvailability(SIM)).not.toBe("reserved");
   });
 
-  test("a row another live daemon took is not this daemon's to terminalize", async () => {
+  arranged("a row another live daemon took is not this daemon's to terminalize", async () => {
     sessions.attachDaemonSessionId("this-daemon");
     sessions.attachLiveDaemonSessionIds(() => new Set(["this-daemon", "peer-daemon"]));
     const row = await persistence.getSession(SESSION);
@@ -142,34 +157,37 @@ describe("explicit release of a restart-recoverable session the daemon has not r
     expect(sessions.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
   });
 
-  test("a recovery that claims the row during the release does not keep the session", async () => {
-    // A call naming the UUID recovers it between the release's read and its conditional write:
-    // the claim advances the row's generation, so that write misses.
-    const markReleased = persistence.markReleased.bind(persistence);
-    let raced = false;
-    persistence.markReleased = async (...args) => {
-      if (!raced) {
-        raced = true;
-        await sessions.getOrCreateSession(SESSION, pool, "ios", undefined, true);
-        expect(pool.getDevice(SIM)?.sessionId).toBe(SESSION);
-      }
-      await markReleased(...args);
-    };
+  arranged(
+    "a recovery that claims the row during the release does not keep the session",
+    async () => {
+      // A call naming the UUID recovers it between the release's read and its conditional write:
+      // the claim advances the row's generation, so that write misses.
+      const markReleased = persistence.markReleased.bind(persistence);
+      let raced = false;
+      persistence.markReleased = async (...args) => {
+        if (!raced) {
+          raced = true;
+          await sessions.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+          expect(pool.getDevice(SIM)?.sessionId).toBe(SESSION);
+        }
+        await markReleased(...args);
+      };
 
-    expect(await explicitRelease()).toMatchObject({
-      success: true,
-      result: { alreadyReleased: false, device: SIM },
-    });
+      expect(await explicitRelease()).toMatchObject({
+        success: true,
+        result: { alreadyReleased: false, device: SIM },
+      });
 
-    expect({
-      raced,
-      live: sessions.hasSession(SESSION),
-      rowReason: (await persistence.getSession(SESSION))?.release_reason,
-      holder: pool.getDevice(SIM)?.sessionId ?? null,
-    }).toEqual({ raced: true, live: false, rowReason: "explicit-release", holder: null });
-  });
+      expect({
+        raced,
+        live: sessions.hasSession(SESSION),
+        rowReason: (await persistence.getSession(SESSION))?.release_reason,
+        holder: pool.getDevice(SIM)?.sessionId ?? null,
+      }).toEqual({ raced: true, live: false, rowReason: "explicit-release", holder: null });
+    },
+  );
 
-  test("a repeated release answers already released", async () => {
+  arranged("a repeated release answers already released", async () => {
     expect(await explicitRelease()).toMatchObject({
       success: true,
       result: { alreadyReleased: false, device: SIM },

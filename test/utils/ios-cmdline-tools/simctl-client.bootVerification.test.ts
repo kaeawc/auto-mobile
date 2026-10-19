@@ -5,6 +5,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { ActionableError } from "../../../src/models";
 import { DeviceAlreadyRunningError } from "../../../src/models/DeviceAlreadyRunningError";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
@@ -14,14 +15,7 @@ const UDID = "11111111-2222-3333-4444-555555555555";
 const OTHER_UDID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
 
 function resetSimctlState(): void {
-  const simctlClass = SimCtlClient as unknown as {
-    simulatorBoots: Map<string, unknown>;
-    bootPresentationGenerations: Map<string, string>;
-    simulatorAppPresentations: Map<string, unknown>;
-  };
-  simctlClass.simulatorBoots.clear();
-  simctlClass.bootPresentationGenerations.clear();
-  simctlClass.simulatorAppPresentations.clear();
+  resetSimCtlSharedStateForTesting();
   // Drop any still-pending shared listing a previous test left behind (e.g. one
   // whose mock only settles on an abort that never fired within that test's own
   // FakeTimer). Without this a later test's caller-independent coalesced read

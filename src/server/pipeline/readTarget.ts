@@ -30,7 +30,7 @@ import { didSourceSucceedForDevice } from "../../utils/discoverySource";
 import { bindingPoolGate } from "../../daemon/sessionBroker/provisioning/poolGate";
 import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../../daemon/inputDeviceOwnership";
 import { DeviceAssignedToBindingError } from "../../daemon/sessionBroker/provisioning/refusal";
-import { DeviceOwnedByOtherDaemonError } from "../../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
 import {
   assertControlNotOnForeignDaemonDevice,
   deviceReservedForRestartRecoveryError,

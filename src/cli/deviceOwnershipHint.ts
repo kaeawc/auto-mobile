@@ -7,7 +7,7 @@ import {
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
-} from "../daemon/deviceAcquisitionRefusals";
+} from "../models/deviceAcquisitionRefusals";
 
 /** Tools that stop a device and therefore accept `force` to override a held-device refusal. */
 const FORCE_OVERRIDE_TOOLS: ReadonlySet<string> = new Set(["killDevice", "deleteDevice"]);

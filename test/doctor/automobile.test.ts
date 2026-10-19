@@ -83,7 +83,7 @@ describe("checkImageBackend", () => {
   test("reports active sharp backend and load status on macOS and Linux", async () => {
     const result = await checkImageBackend({
       platform: "linux",
-      sharpLoader: async () => ({}) as never,
+      sharpLoader: async () => ({}),
     });
 
     expect(result).toEqual({

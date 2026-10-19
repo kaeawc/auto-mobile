@@ -12,9 +12,5 @@ src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/toolSelectionT
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/undeliveredAcquisition
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingManager
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingTools
-src/features/navigation/DefaultUIStateSetup.ts -> src/server/toolRegistry
-src/features/navigation/Explore.ts -> src/server/toolRegistry
-src/features/navigation/NavigateTo.ts -> src/server/toolRegistry
 src/features/storage/storageCapabilities.ts -> src/server/appFileService
 src/features/storage/storageCapabilities.ts -> src/server/sharedStorageReadService
-src/features/toolSelection/SessionToolSelectionService.ts -> src/server/toolRegistry

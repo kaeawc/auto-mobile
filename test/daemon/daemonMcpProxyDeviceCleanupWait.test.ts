@@ -5,7 +5,7 @@ import { DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DeviceCleanupInProgressError,
   DeviceShuttingDownError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import type { BackoffInput } from "../../src/utils/Backoff";

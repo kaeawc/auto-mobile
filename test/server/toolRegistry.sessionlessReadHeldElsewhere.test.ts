@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { z } from "zod/v4";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { SessionManager } from "../../src/daemon/sessionManager";

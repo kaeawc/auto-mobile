@@ -5,7 +5,7 @@ import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import {
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { ActionableError, type BootedDevice } from "../../src/models";

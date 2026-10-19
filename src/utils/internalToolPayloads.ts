@@ -1,5 +1,5 @@
 import { ObserveToolPayload, SwipeOnToolPayload } from "../models";
-import { StructuredToolResponse } from "../utils/toolUtils";
+import { StructuredToolResponse } from "./toolUtils";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 
 /**

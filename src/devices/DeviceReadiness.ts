@@ -7,7 +7,7 @@ import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/de
 import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
-} from "../server/deviceExecutionBinding";
+} from "../utils/deviceExecutionBinding";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -85,7 +85,7 @@ import {
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
-import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
 import {
   DefaultDeviceClientProvider,

@@ -4,7 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
-import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import type { ObserveResult } from "../../src/models";

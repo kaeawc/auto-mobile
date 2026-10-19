@@ -18,7 +18,7 @@ import {
   DeviceShuttingDownError,
   SESSION_REBINDING_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
-} from "../../src/daemon/deviceAcquisitionRefusals";
+} from "../../src/models/deviceAcquisitionRefusals";
 import { typedTeardownRefusal } from "../../src/server/deviceToolsLifecycle";
 import type { BootedDevice } from "../../src/models";
 import {

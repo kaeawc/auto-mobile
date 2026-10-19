@@ -145,7 +145,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
     const mark = spyOn(
       daemon.getSessionManager(),
       "markDeviceNeedsRecorderTeardown",
-    ).mockImplementation(() => {});
+    ).mockImplementation(() => () => {});
     try {
       expect(await host.redriveRecorderTeardowns()).toBe(true);
       expect(mark.mock.calls.map((call) => call[0])).toEqual(["own-owner"]);
@@ -200,6 +200,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       lastUsedAt: 0,
       assignmentCount: 0,
       errorCount: 0,
+      incarnation: 1,
     });
     const confirm = spyOn(
       PlatformVideoCaptureBackend.prototype,

@@ -92,7 +92,7 @@ export function stubAndroidCtrlProxyManager(
   device: BootedDevice,
   ensureCompatibleVersion: () => Promise<unknown>,
 ): () => void {
-  const manager = AndroidCtrlProxyManager.getInstance(device, new FakeAdbClientFactory());
+  const manager = AndroidCtrlProxyManager.getInstanceForTesting(device, new FakeAdbClientFactory());
   const ensure = spyOn(manager, "ensureCompatibleVersion").mockImplementation(async () => {
     await ensureCompatibleVersion();
     return { status: "compatible" };

@@ -217,7 +217,7 @@ class FakeSimulatorHelper extends EventEmitter {
     event: E,
     listener: IosScreenCaptureHelperEvents[E],
   ): this {
-    return super.on(event, listener as (...args: never[]) => void);
+    return super.on(event, listener);
   }
 }
 

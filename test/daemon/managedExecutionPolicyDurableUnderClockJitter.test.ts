@@ -58,7 +58,6 @@ test("managed policy survives a lower second conversion and daemon rehydration",
         await reader.createSession(id, DEVICE, "android", {
           timeoutMs: target?.liveness?.sessionTimeoutMs,
           heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
-          hasReceivedHeartbeat: false,
           stableDeviceId: target?.stableDeviceId,
           recoveredLiveness: target?.liveness,
           initialOwnership: target?.initialOwnership,

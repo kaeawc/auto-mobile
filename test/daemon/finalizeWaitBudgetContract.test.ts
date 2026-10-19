@@ -71,7 +71,7 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
         unbound.push(callback);
       },
       registerPendingDeviceCleanup: (_deviceId, _cleanup, capMs) => {
-        caps.push(capMs);
+        caps.push(typeof capMs === "number" ? capMs : undefined);
       },
     },
     {

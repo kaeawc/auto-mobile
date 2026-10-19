@@ -14,7 +14,6 @@ import {
   TerminalSessionError,
   type KeepScreenAwakeRestorer,
 } from "../../src/daemon/sessionManager";
-import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import type { RotationRestoreState } from "../../src/features/action/Rotate";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -44,10 +43,6 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
   /** Release writes that fail outright before any is parked or lands. */
   failReleases = 0;
   readonly releaseWrites: string[] = [];
-
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
-    await super.upsertActiveSession(record);
-  }
 
   override async markReleased(
     sessionUuid: string,

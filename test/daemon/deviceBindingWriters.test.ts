@@ -57,6 +57,7 @@ describe("device binding writers current behavior (#11802)", () => {
   let utils: FakeDeviceUtils;
   let pool: DevicePool;
   let liveness: MissingDeviceLiveness;
+  let rebootOverride: boolean | undefined;
   let changes: StateChange[];
   let autolockEnv: string | undefined;
 
@@ -69,6 +70,7 @@ describe("device binding writers current behavior (#11802)", () => {
     utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [original, bystander]);
     changes = [];
+    rebootOverride = undefined;
     pool = makePool(manager, "binding-characterization", {
       timer,
       deviceManager: utils,
@@ -76,7 +78,11 @@ describe("device binding writers current behavior (#11802)", () => {
       recoveryPolicy: { onLoss: false, maxAttempts: 0 },
       deviceSessionContinuityEnabled: false,
       missingDeviceLivenessFactory: (port) => {
-        liveness = new MissingDeviceLiveness(port);
+        liveness = new MissingDeviceLiveness({
+          ...port,
+          shouldRebootDisconnectedAndroidDevice: (device) =>
+            rebootOverride ?? port.shouldRebootDisconnectedAndroidDevice(device),
+        });
         return liveness;
       },
       onDeviceStateChanged: (deviceId, platform) => {
@@ -603,9 +609,7 @@ describe("device binding writers current behavior (#11802)", () => {
           incidentStarted.resolve();
           return await incident.promise;
         });
-        const reboot = spyOn(pool, "shouldRebootDisconnectedAndroidDevice").mockReturnValue(
-          detached,
-        );
+        rebootOverride = detached;
         const disconnect = spyOn(pool, "removeDisconnectedDevice").mockResolvedValue();
         utils.setBootedDevices("android", [bystander]);
         const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
@@ -634,7 +638,7 @@ describe("device binding writers current behavior (#11802)", () => {
             );
           } finally {
             record.mockRestore();
-            reboot.mockRestore();
+            rebootOverride = undefined;
             disconnect.mockRestore();
           }
         }

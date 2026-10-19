@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
+import type {
+  AppearanceConfig,
+  AppearanceConfigInput,
+  AppearanceMode,
+  BootedDevice,
+} from "../../src/models";
+import { parseAppearanceConfig } from "../../src/features/appearance/AppearanceConfig";
 import {
   AppearanceSyncScheduler,
   type AppearanceSyncTarget,
@@ -36,10 +42,10 @@ class FakeConfigStore {
     this.rows.get(sessionKey ?? "") ?? DEFAULTS;
 
   update = async (
-    update: Partial<AppearanceConfig> | null,
+    update: AppearanceConfigInput | null,
     sessionKey?: string,
   ): Promise<AppearanceConfig> => {
-    const next = { ...(await this.get(sessionKey)), ...update } as AppearanceConfig;
+    const next = parseAppearanceConfig({ ...(await this.get(sessionKey)), ...update });
     this.rows.set(sessionKey ?? "", next);
     return next;
   };

@@ -169,6 +169,7 @@ async function heartbeat(w: World, sessionId: string, token: string, claim: bool
       getSessionManager: () => w.manager,
       getDevicePool: () => ({
         refreshDevices: async () => 0,
+        releaseDevice: async () => {},
         getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
       }),
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(w.timer),

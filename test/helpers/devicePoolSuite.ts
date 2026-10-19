@@ -413,9 +413,9 @@ export class FakeDeviceManagerWithStubbornProcess extends FakeDeviceManager {
   override async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  ): Promise<StubbornChildProcess> {
+  ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess;
+    return this.childProcess as unknown as ChildProcess;
   }
 }
 
@@ -558,10 +558,10 @@ export class DeferredLivenessRecoveryDeviceManager extends FakeDeviceManager {
     });
   }
 
-  override async startDevice(device: DeviceInfo): Promise<FakeChildProcess> {
+  override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
     this.startedDevices.push(device);
     this.resolveRecoveryStarted();
-    return this.childProcess;
+    return this.childProcess as unknown as ChildProcess;
   }
 
   override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
@@ -597,9 +597,9 @@ export class FakeDeviceManagerWithFailingReadiness extends FakeDeviceManager {
   async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  ): Promise<KillTrackingChildProcess> {
+  ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess;
+    return this.childProcess as unknown as ChildProcess;
   }
 
   async waitForDeviceReady(): Promise<BootedDevice> {
@@ -613,9 +613,9 @@ export class FakeDeviceManagerWithPendingReadiness extends FakeDeviceManager {
   override async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  ): Promise<KillTrackingChildProcess> {
+  ): Promise<ChildProcess> {
     await super.startDevice(device, timeoutMs);
-    return this.childProcess;
+    return this.childProcess as unknown as ChildProcess;
   }
 
   override async waitForDeviceReady(

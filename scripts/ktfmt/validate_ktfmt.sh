@@ -71,6 +71,7 @@ fi
 echo -e "${YELLOW}Starting ktfmt validation...${NC}"
 
 # Function to find all Kotlin files
+# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
 find_all_kotlin_files() {
     # Scope hidden-file exclusion to the project itself. A generic `*/.*`
     # pattern also matches hidden parent directories such as
@@ -98,29 +99,50 @@ if builtin help mapfile >/dev/null 2>&1; then
     supports_mapfile=true
 fi
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+    RUN_STATUS=0
+    "$@" || RUN_STATUS=$?
+}
+
+# Print the Kotlin files for a validated collection mode (changed|touched|all).
+# shellcheck disable=SC2329,SC2317 # invoked through run_capture_status
+collect_kotlin_files() {
+    local mode="$1"
+    local base_sha="$2"
+    case "$mode" in
+        changed)
+            collect_changed_since_sha "$PROJECT_ROOT" "$base_sha" "$KOTLIN_FILE_REGEX"
+            ;;
+        touched)
+            collect_touched_files "$PROJECT_ROOT" "$KOTLIN_FILE_REGEX"
+            ;;
+        all)
+            find_all_kotlin_files
+            ;;
+    esac
+}
+
 load_files_to_process() {
     local mode="$1"
     shift
 
-    local file_list
-    file_list="$(mktemp)"
-
-    if ! case "$mode" in
-        changed)
-            collect_changed_since_sha "$PROJECT_ROOT" "$1" "$KOTLIN_FILE_REGEX" > "$file_list"
-            ;;
-        touched)
-            collect_touched_files "$PROJECT_ROOT" "$KOTLIN_FILE_REGEX" > "$file_list"
-            ;;
-        all)
-            find_all_kotlin_files > "$file_list"
-            ;;
+    case "$mode" in
+        changed | touched | all) ;;
         *)
             echo -e "${RED}Unknown Kotlin file collection mode: $mode${NC}" >&2
             return 1
             ;;
     esac
-    then
+
+    local file_list
+    file_list="$(mktemp)"
+
+    run_capture_status collect_kotlin_files "$mode" "${1-}" > "$file_list"
+    if [[ "$RUN_STATUS" -ne 0 ]]; then
         rm -f "$file_list"
         echo -e "${RED}Failed to collect Kotlin files${NC}" >&2
         exit 1

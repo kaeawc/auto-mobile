@@ -37,16 +37,28 @@ scan_for_unified_references() {
   fi
 }
 
-if matches="$(scan_for_unified_references)"; then
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+  RUN_STATUS=0
+  "$@" || RUN_STATUS=$?
+}
+
+scan_output_file="$(mktemp)"
+run_capture_status scan_for_unified_references > "$scan_output_file"
+status="$RUN_STATUS"
+matches="$(<"$scan_output_file")"
+rm -f "$scan_output_file"
+
+if [[ "$status" -eq 0 ]]; then
   echo "desktop-core still references the deleted core.unified package:" >&2
   echo "$matches" >&2
   exit 1
-else
-  status=$?
-  if [[ "$status" -ne 1 ]]; then
-    echo "Unable to scan Android sources under $PROJECT_ROOT/android." >&2
-    exit "$status"
-  fi
+elif [[ "$status" -ne 1 ]]; then
+  echo "Unable to scan Android sources under $PROJECT_ROOT/android." >&2
+  exit "$status"
 fi
 
 echo "No desktop-core unified socket-client package or references found."

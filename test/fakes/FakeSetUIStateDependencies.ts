@@ -1,3 +1,4 @@
+import { buildObserveResult } from "../helpers/observeFixture";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { TapOnElementResult } from "../../src/models/TapOnElementResult";
 import { SendTextResult } from "../../src/models/SendTextResult";
@@ -275,12 +276,12 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
   }
 
   private createDefaultResult(): ObserveResult {
-    return {
+    return buildObserveResult({
       observationId: "fake-observation",
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    };
+    });
   }
 
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {

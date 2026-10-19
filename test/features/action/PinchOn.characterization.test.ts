@@ -1,3 +1,5 @@
+import { createFlatNodeForTest, type FlatHierarchyNode } from "../observe/flatHierarchyBuilders";
+import { buildObserveResult } from "../../helpers/observeFixture";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import type { ElementBounds, PinchOnOptions, ViewHierarchyResult } from "../../../src/models";
@@ -31,16 +33,22 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
   const adb = new FakeAdbExecutor();
   const observe = new FakeObserveScreen();
   const hierarchy: ViewHierarchyResult = {
-    hierarchy: { node: [{ "resource-id": "target", bounds, clickable: true }] },
+    hierarchy: {
+      node: createFlatNodeForTest({
+        node: [createFlatNodeForTest({ "resource-id": "target", bounds, clickable: true })],
+      }),
+    },
     screenWidth: 402,
     screenHeight: 874,
   };
-  observe.setObserveResult({
-    updatedAt: timer.now(),
-    screenSize: { width: 402, height: 874 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy,
-  });
+  observe.setObserveResult(
+    buildObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 402, height: 874 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy,
+    }),
+  );
   const window = new FakeWindow();
   window.configureCachedActiveWindow(null);
   window.configureActiveWindow({
@@ -251,7 +259,7 @@ for (const platform of ["android", "ios"] as const) {
         targetType: "container",
         container: { elementId: "target" },
         warning: undefined,
-        observation: observe.getConfiguredObserveResult(),
+        observation: observe.getConfiguredObserveResult() ?? undefined,
         a11yTotalTimeMs: duration,
         a11yGestureTimeMs: duration,
       });
@@ -262,7 +270,7 @@ for (const platform of ["android", "ios"] as const) {
 
 const autoCases: Array<{
   name: string;
-  nodes: ViewHierarchyResult["hierarchy"]["node"];
+  nodes: FlatHierarchyNode[];
   windows?: ViewHierarchyResult["windows"];
 }> = [
   { name: "empty", nodes: [] },
@@ -330,13 +338,15 @@ const autoCases: Array<{
     windows: [
       {
         windowLayer: 5,
-        hierarchy: {
-          node: {
-            "resource-id": "upper",
-            bounds: { left: 100, top: 100, right: 300, bottom: 300 },
-            clickable: true,
-          },
-        },
+        hierarchy: createFlatNodeForTest({
+          node: [
+            createFlatNodeForTest({
+              "resource-id": "upper",
+              bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+              clickable: true,
+            }),
+          ],
+        }),
       },
     ],
   },
@@ -376,7 +386,7 @@ const autoExpected: Record<string, ExpectedTarget> = {
 describe("PinchOn auto-target characterization", () => {
   test.each(autoCases)("$name", async ({ name, nodes, windows }) => {
     const { pinch, hierarchy, history, adb, observe } = harness("android", normal);
-    hierarchy.hierarchy.node = nodes;
+    hierarchy.hierarchy.node = createFlatNodeForTest({ node: nodes });
     hierarchy.windows = windows;
     const result = await pinch.execute({ direction: "out" });
     const [centerX, centerY, distanceStart, distanceEnd, scale, targetType, elementId, warning] =
@@ -405,7 +415,7 @@ describe("PinchOn auto-target characterization", () => {
       targetType,
       container: elementId ? { elementId } : undefined,
       warning: warning ?? undefined,
-      observation: observe.getConfiguredObserveResult(),
+      observation: observe.getConfiguredObserveResult() ?? undefined,
       a11yTotalTimeMs: 300,
       a11yGestureTimeMs: 300,
     });
@@ -424,10 +434,10 @@ describe("PinchOn validation characterization", () => {
     expect(await pinch.execute(options)).toStrictEqual({
       success: false,
       direction: "out",
-      distanceStart: options.distanceStart ?? 0,
-      distanceEnd: options.distanceEnd ?? 0,
+      distanceStart: "distanceStart" in options ? options.distanceStart : 0,
+      distanceEnd: "distanceEnd" in options ? options.distanceEnd : 0,
       duration: 0,
-      scale: options.scale,
+      scale: "scale" in options ? options.scale : undefined,
       rotationDegrees: undefined,
       centerX: 0,
       centerY: 0,

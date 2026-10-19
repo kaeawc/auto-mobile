@@ -61,6 +61,7 @@ function harness(after = gone) {
     timer,
     home,
     cacheInvalidator: {
+      retireAppProcess: () => {},
       invalidate: (value) => {
         invalidated.push(value);
       },
@@ -114,7 +115,7 @@ describe("AppLifecycle", () => {
       adb: h.adb,
       timer: h.timer,
       home,
-      cacheInvalidator: { invalidate: () => {} },
+      cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
     });
     expect(await action.execute(appId, "background")).toMatchObject({
       success: false,
@@ -209,7 +210,7 @@ describe("AppLifecycle", () => {
             adb: h.adb,
             timer: h.timer,
             home: h.home,
-            cacheInvalidator: { invalidate: () => {} },
+            cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
           },
         );
         expect(await ios.execute(appId, action)).toMatchObject({
@@ -287,7 +288,7 @@ describe("AppLifecycle", () => {
       adb,
       timer: h.timer,
       home: h.home,
-      cacheInvalidator: { invalidate: () => {} },
+      cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
     });
     expect((await action.execute(appId, "killBackgrounded")).processReclaimed).toBe(true);
     expect(h.timer.getSleepHistory()).toEqual([250]);
@@ -308,7 +309,7 @@ describe("AppLifecycle", () => {
       adb: h.adb,
       timer,
       home: h.home,
-      cacheInvalidator: { invalidate: () => {} },
+      cacheInvalidator: { retireAppProcess: () => {}, invalidate: () => {} },
     });
     const controller = new AbortController();
     const pending = action.execute(appId, "killBackgrounded", { signal: controller.signal });

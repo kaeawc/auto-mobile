@@ -91,6 +91,6 @@ describe("SwipeOnElement", () => {
     expect(await swipe.execute(element, "up")).toBe(gesture.result);
     expect(gesture.calls).toHaveLength(1);
     expect(gesture.calls[0]?.slice(0, 5)).toEqual([200, 700, 200, 200, {}]);
-    expect(gesture.calls[0]?.[6]).toBeUndefined();
+    expect(gesture.calls[0]?.slice(6)).toEqual([]);
   });
 });

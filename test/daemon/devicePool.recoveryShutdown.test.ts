@@ -277,7 +277,7 @@ test("a pool-allocated emulator without a recorded image still persists as devic
       pool.recoverSessionBoundAndroidDeviceAfterLoss(
         original.deviceId,
         undefined,
-        pool.getDevice(original.deviceId),
+        pool.getDevice(original.deviceId) ?? undefined,
       ),
     ).resolves.toBe("released");
     expect(manager.kills).toEqual([]);
@@ -327,7 +327,7 @@ test("onLoss recovery does not actively relaunch a pool-allocated emulator witho
       pool.recoverSessionBoundAndroidDeviceAfterLoss(
         original.deviceId,
         undefined,
-        pool.getDevice(original.deviceId),
+        pool.getDevice(original.deviceId) ?? undefined,
       ),
     ).resolves.toBe("released");
     // Active relaunch stays gated on a recorded configured image even though
@@ -598,7 +598,7 @@ test("last joined restart waiter aborts slow discovery and fences its late devic
   expect(String(await first)).toContain("Cannot safely recover session");
   expect(secondSettled).toBe(false);
   manager.bootedDevices = [original];
-  const lateDiscovery = await originalDiscovery();
+  const lateDiscovery = await originalDiscovery("android");
   timer.advanceTime(1_000);
   // Resolve in the same turn as the final deadline, before rejection cleanup runs.
   discovery.resolve(lateDiscovery);

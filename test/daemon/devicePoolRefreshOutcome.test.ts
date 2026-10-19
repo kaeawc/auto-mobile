@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { patchBinding } from "../helpers/patchBinding";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
@@ -53,7 +53,7 @@ describe("allocation after a partial refresh failure", () => {
           ...port,
           setDeviceSessionTracking: async () => {
             if (busy) {
-              patchBinding(port.getDevices().get(device.deviceId)!, { status: "busy" });
+              patchDeviceBinding(port.getDevices().get(device.deviceId)!, { status: "busy" });
             }
             if (persistentFailure || trackingAttempts++ === 0) {
               throw new Error(failure);
@@ -512,9 +512,9 @@ describe("Android discovery failure refresh outcome", () => {
           { deviceId: "emulator-5600", name: "Pixel", platform: "android" },
         ]);
         const pooled = pool.getDevice("emulator-5600")!;
-        patchBinding(pooled, { status });
+        patchDeviceBinding(pooled, { status });
         if (status === "busy") {
-          patchBinding(pooled, { sessionId: "held-session" });
+          patchDeviceBinding(pooled, { sessionId: "held-session" });
           await sessions.createSession("held-session", pooled.id, "android");
         }
         for (let refresh = 0; refresh < 4; refresh++) {

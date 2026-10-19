@@ -459,7 +459,7 @@ describe("session broker daemon handlers", () => {
 
     expect(response).toEqual({
       success: true,
-      result: result("request-1", "ready", SESSION),
+      result: { ...result("request-1", "ready", SESSION) },
     });
     expect(broker.prepareCalls).toEqual([
       { config: sessionConfig(), token: TOKEN, signal: controller.signal },
@@ -553,7 +553,7 @@ describe("session broker daemon handlers", () => {
       ),
     ).toEqual({
       success: true,
-      result: result("request-1", "failed"),
+      result: { ...result("request-1", "failed") },
     });
     expect(broker.abandonCalls).toEqual([{ requestId: "request-1", token: TOKEN }]);
 

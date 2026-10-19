@@ -42,6 +42,9 @@ const config = (requestId: string, platform: Platform): SessionConfig => ({
   device: { schemaVersion: 1, platform, hardware: { kind: "omitted" }, os: { kind: "omitted" } },
 });
 
+/** `BindingRegistryDatabase` as a type literal, which `withTables` requires of its table map. */
+type BindingRegistryTables = { [K in keyof BindingRegistryDatabase]: BindingRegistryDatabase[K] };
+
 describe("legacy product inventory through broker lifecycle", () => {
   let registry: SqliteBindingRegistry;
   let timer: FakeTimer;
@@ -62,7 +65,7 @@ describe("legacy product inventory through broker lifecycle", () => {
       for (const migration of Object.values(BINDING_REGISTRY_MIGRATIONS)) {
         await migration.up(db);
       }
-      databases.push(db.withTables<BindingRegistryDatabase>());
+      databases.push(db.withTables<BindingRegistryTables>());
     }
   });
 
@@ -90,7 +93,10 @@ describe("legacy product inventory through broker lifecycle", () => {
     const deleter = new WorkflowBindingDeviceDeleter(timer, () => async (args) => {
       deletions.push(args);
       inventory.remove(args.target.stableId);
-      return { content: [{ type: "text", text: JSON.stringify({ state: "destroyed" }) }] };
+      return {
+        isError: false,
+        content: [{ type: "text", text: JSON.stringify({ state: "destroyed" }) }],
+      };
     });
     const journal = new BindingJournal({
       registry,

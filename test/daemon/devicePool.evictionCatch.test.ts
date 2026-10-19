@@ -54,10 +54,6 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     );
   }
 
-  afterEach(() => {
-    timer.clearAllTimers?.();
-  });
-
   arranged("logs a warning and does not throw when eviction rejects on process exit", async () => {
     const warnSpy = spyOn(logger, "warn");
     const evictError = new Error("removeDevice failed");
@@ -179,14 +175,9 @@ describe("device identity replacement IME quarantine", () => {
 
   function arrangedEach2<T>(table: readonly T[]) {
     return (name: string, fn: (row: T) => void | Promise<void>, timeout?: number): void => {
-      it.each(table)(
-        name,
-        async (row: T) => {
-          await arrangeHarness2();
-          await fn(row);
-        },
-        timeout,
-      );
+      for (const row of table) {
+        arranged2(name.replace("%s", String(row)), () => fn(row), timeout);
+      }
     };
   }
 

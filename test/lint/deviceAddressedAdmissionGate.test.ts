@@ -70,6 +70,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const SCANNED = [
     "src/daemon/daemonStreamRouting.ts",
     "src/daemon/socketServer.ts",
+    "src/daemon/socketServer/ideDeviceRoutes.ts",
     "src/daemon/deviceDataStreamSocketServer.ts",
     "src/daemon/videoStreamSocketServer.ts",
     "src/daemon/webrtcStreamSocketServer.ts",
@@ -104,7 +105,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
         "gestureStart/Move/End stream — gated BEFORE the sessionless early return",
     },
     {
-      file: "src/daemon/socketServer.ts",
+      file: "src/daemon/socketServer/ideDeviceRoutes.ts",
       fn: "resolveKeyValueMutationClient",
       what: "ide/* SharedPreferences and key-value mutations",
     },

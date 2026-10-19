@@ -1,4 +1,5 @@
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -30,11 +31,7 @@ afterEach(() => {
   createConnectionSpy.mockRestore();
 });
 
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 
 function createClient() {
   return new DaemonClient(

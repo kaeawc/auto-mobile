@@ -23,6 +23,7 @@ import {
   type GenericAvailability,
   type PoolStatusBucket,
 } from "./deviceHold";
+import { DevicePoolError } from "./DevicePoolError";
 export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
 import {
   DeviceAllocation,
@@ -306,17 +307,6 @@ export interface ShutdownForeignClaim {
   force: boolean;
   /** What the refused caller can do instead. */
   remedy?: string;
-}
-
-export class DevicePoolError extends Error {
-  constructor(
-    message: string,
-    public readonly isRetryable: boolean,
-    public readonly refreshFailure?: string,
-  ) {
-    super(message);
-    this.name = "DevicePoolError";
-  }
 }
 
 export function refreshFailureContext(failure: string | Error | undefined): string {

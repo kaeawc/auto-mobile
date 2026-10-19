@@ -1,14 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import {
   DaemonBoundSessionExpiredError,
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

@@ -3,8 +3,9 @@ import type {
   DaemonMethodCallOptions,
   DaemonToolCallOptions,
 } from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import type { TaskRelayFrame, TaskRelayMethod } from "../../src/daemon/tasks/taskRelay";
-import { DaemonRequestNotDeliveredError, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";
 import { FakeIdGenerator } from "./FakeIdGenerator";

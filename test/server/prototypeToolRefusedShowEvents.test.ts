@@ -1,3 +1,4 @@
+import { toolStructured } from "../helpers/toolResponse";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -57,9 +58,9 @@ describe("refused show event ownership", () => {
     unsubscribe();
     restore();
   });
-  async function call(input: unknown) {
+  async function call(input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
-    return prototypeOutputSchema.parse(response.structuredContent);
+    return prototypeOutputSchema.parse(toolStructured(response));
   }
   test("a host refusal preserves events of a fresh show already dispatched", async () => {
     const request = client.requestShowPrototype.bind(client);

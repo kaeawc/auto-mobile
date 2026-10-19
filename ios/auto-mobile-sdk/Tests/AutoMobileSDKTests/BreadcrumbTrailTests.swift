@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import XCTest
 
@@ -93,12 +90,12 @@ final class BreadcrumbTrailTests: XCTestCase {
         XCTAssertEqual(trail.snapshot().count, iterations)
     }
 
-    func testMetadataPreserved() {
+    func testMetadataPreserved() throws {
         let trail = BreadcrumbTrail(maxSize: 10)
         let meta = ["key": "value", "screen": "home"]
         trail.add(Breadcrumb(category: .network, message: "GET /api", metadata: meta))
 
-        let crumb = trail.snapshot().first!
+        let crumb = try XCTUnwrap(trail.snapshot().first)
         XCTAssertEqual(crumb.metadata["key"], "value")
         XCTAssertEqual(crumb.metadata["screen"], "home")
     }

@@ -171,8 +171,10 @@ class StorageSubscriptionManager(
         }
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: IllegalArgumentException) {
+      Log.e(TAG, "SDK provider unavailable for $packageName", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error checking SDK availability for $packageName", e)
@@ -284,6 +286,7 @@ class StorageSubscriptionManager(
         }
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error getting preferences for $packageName:$fileName", e)
@@ -388,6 +391,7 @@ class StorageSubscriptionManager(
         }
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error getting data store for $packageName:$storeName (adapter=$adapterName)", e)
@@ -518,6 +522,7 @@ class StorageSubscriptionManager(
         )
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK subscription denied for $packageName (SDK not installed)", e)
       SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
     } catch (e: Exception) {
       Log.e(TAG, "Error subscribing to $packageName:$fileName", e)
@@ -656,6 +661,7 @@ class StorageSubscriptionManager(
         }
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error getting preference for $packageName:$fileName:$key", e)
@@ -707,6 +713,7 @@ class StorageSubscriptionManager(
         Result.success(Unit)
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error setting preference for $packageName:$fileName:$key", e)
@@ -748,6 +755,7 @@ class StorageSubscriptionManager(
         Result.success(Unit)
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error removing preference for $packageName:$fileName:$key", e)
@@ -787,6 +795,7 @@ class StorageSubscriptionManager(
         Result.success(Unit)
       }
     } catch (e: SecurityException) {
+      Log.e(TAG, "SDK access denied for $packageName (SDK not installed)", e)
       Result.failure(StorageError.SdkNotInstalled(packageName))
     } catch (e: Exception) {
       Log.e(TAG, "Error clearing preferences for $packageName:$fileName", e)

@@ -64,8 +64,6 @@ import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotReposit
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
-import type { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
-import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import type { DeviceSnapshotManifest } from "../../src/models";
 import {
   VideoRecordingRepository,
@@ -410,9 +408,9 @@ describe("videoRecordingManager", () => {
     });
     const listener = restoreListener();
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as DeviceSnapshotRepository,
+      snapshotRepository: repository,
       configRepository: new FakeDeviceSnapshotConfigRepository(),
-      snapshotStore: new FakeDeviceSnapshotStore() as DeviceSnapshotStore,
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: fakeTimer,
       deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
@@ -836,7 +834,7 @@ describe("videoRecordingManager", () => {
     test.each([
       ["ENOENT", 0],
       ["EACCES", 3],
-    ] as const)(
+    ] satisfies Array<[string, number]>)(
       "Android host-file monitor suppresses only expected missing-file warnings (%s)",
       async (code, expectedWarnings) => {
         const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
@@ -972,7 +970,7 @@ describe("videoRecordingManager", () => {
     expect(active.warning).toContain("without a pinned panel");
     expect(fakeBackend.startCalls[0]?.physicalDisplayId).toBeUndefined();
     const { metadata } = await stopVideoRecording(active.recordingId);
-    expect(metadata.warnings).toEqual([active.warning]);
+    expect<unknown>(metadata.warnings).toEqual([active.warning]);
     expect(metadata.transitions).toEqual([
       {
         atMs: 0,
@@ -1505,7 +1503,7 @@ describe("videoRecordingManager", () => {
     fakeBackend.start = async (config) => {
       signalStart?.();
       await new Promise<void>((resolve) => {
-        config.abortSignal?.addEventListener("abort", resolve, { once: true });
+        config.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
       });
       throw new Error("start aborted");
     };
@@ -2113,7 +2111,7 @@ describe("videoRecordingManager", () => {
     test.each([
       ["interrupted", 0],
       ["completed", 1024],
-    ] as const)(
+    ] satisfies Array<["interrupted" | "completed", number]>)(
       "reports the newest %s recording when no recording has a file",
       async (status, sizeBytes) => {
         await seed("only-interrupted", "interrupted", 1_000, 0);

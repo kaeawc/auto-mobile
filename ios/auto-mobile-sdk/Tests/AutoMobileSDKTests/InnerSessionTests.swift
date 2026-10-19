@@ -1,6 +1,3 @@
-// swiftlint:disable force_unwrapping
-// Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
-
 @testable import AutoMobileSDK
 import Network
 import os
@@ -52,7 +49,7 @@ private final class LoopbackHTTPServer: @unchecked Sendable {
             throw URLError(.cannotConnectToHost)
         }
         self.listener = listener
-        return URL(string: "http://127.0.0.1:\(port.rawValue)")!
+        return try XCTUnwrap(URL(string: "http://127.0.0.1:\(port.rawValue)"))
     }
 
     func stop() {
@@ -207,8 +204,13 @@ final class InnerSessionTests: XCTestCase {
     override func tearDown() {
         outerSession.invalidateAndCancel()
         server?.stop()
-        if let storage = HTTPCookieStorage.shared.cookies(for: URL(string: "http://127.0.0.1")!) {
-            storage.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+        do {
+            let cookieURL = try XCTUnwrap(URL(string: "http://127.0.0.1"))
+            if let storage = HTTPCookieStorage.shared.cookies(for: cookieURL) {
+                storage.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+            }
+        } catch {
+            XCTFail("Invalid cookie cleanup URL: \(error)")
         }
         AutoMobileURLProtocol.innerSessionHost = InnerSessionHost()
         AutoMobileNetwork.shared.reset()
@@ -398,15 +400,17 @@ final class InnerSessionTests: XCTestCase {
         XCTAssertEqual(response.statusCode, 401)
     }
 
-    func testForwardedChallengeKeepsProtectionSpaceAndSenderAnswersTheInnerChallenge() {
+    func testForwardedChallengeKeepsProtectionSpaceAndSenderAnswersTheInnerChallenge() throws {
         for method in [
             NSURLAuthenticationMethodClientCertificate,
             NSURLAuthenticationMethodServerTrust,
             NSURLAuthenticationMethodNTLM,
         ] {
             let client = ForwardingRecordingClient()
-            let proto = AutoMobileURLProtocol(
-                request: URLRequest(url: URL(string: "https://api.example.com/x")!), cachedResponse: nil, client: client
+            let proto = try AutoMobileURLProtocol(
+                request: URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/x"))),
+                cachedResponse: nil,
+                client: client
             )
             let space = URLProtectionSpace(
                 host: "api.example.com", port: 443, protocol: "https", realm: nil, authenticationMethod: method
@@ -420,14 +424,14 @@ final class InnerSessionTests: XCTestCase {
             proto.forwardChallenge(inner, completionHandler: outcome.complete)
 
             XCTAssertEqual(client.calls, ["challenge"], method)
-            let forwarded = try? XCTUnwrap(client.challenge)
-            XCTAssertEqual(forwarded?.protectionSpace.authenticationMethod, method)
-            XCTAssertEqual(forwarded?.protectionSpace.host, "api.example.com")
+            let forwarded = try XCTUnwrap(client.challenge)
+            XCTAssertEqual(forwarded.protectionSpace.authenticationMethod, method)
+            XCTAssertEqual(forwarded.protectionSpace.host, "api.example.com")
             XCTAssertTrue(outcome.outcomes.isEmpty, "the inner challenge waits for the app's answer")
 
             let credential = URLCredential(user: "u", password: "p", persistence: .none)
-            forwarded?.sender?.use(credential, for: forwarded!)
-            forwarded?.sender?.cancel(forwarded!) // second answer is ignored
+            forwarded.sender?.use(credential, for: forwarded)
+            forwarded.sender?.cancel(forwarded) // second answer is ignored
 
             XCTAssertEqual(outcome.outcomes.count, 1)
             XCTAssertEqual(outcome.outcomes.first?.0, .useCredential)
@@ -458,10 +462,11 @@ final class InnerSessionTests: XCTestCase {
         }
     }
 
-    func testStopLoadingCancelsAChallengeTheAppNeverAnswered() {
+    func testStopLoadingCancelsAChallengeTheAppNeverAnswered() throws {
         let client = ForwardingRecordingClient()
-        let proto = AutoMobileURLProtocol(
-            request: URLRequest(url: URL(string: "https://api.example.com/x")!), cachedResponse: nil, client: client
+        let proto = try AutoMobileURLProtocol(
+            request: URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/x"))), cachedResponse: nil,
+            client: client
         )
         let inner = URLAuthenticationChallenge(
             protectionSpace: URLProtectionSpace(
@@ -479,10 +484,11 @@ final class InnerSessionTests: XCTestCase {
         XCTAssertEqual(outcome.outcomes.map(\.0), [.cancelAuthenticationChallenge])
     }
 
-    func testChallengeArrivingAfterStopLoadingUsesDefaultHandling() {
+    func testChallengeArrivingAfterStopLoadingUsesDefaultHandling() throws {
         let client = ForwardingRecordingClient()
-        let proto = AutoMobileURLProtocol(
-            request: URLRequest(url: URL(string: "https://api.example.com/x")!), cachedResponse: nil, client: client
+        let proto = try AutoMobileURLProtocol(
+            request: URLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/x"))), cachedResponse: nil,
+            client: client
         )
         proto.stopLoading()
         let inner = URLAuthenticationChallenge(
@@ -503,14 +509,19 @@ final class InnerSessionTests: XCTestCase {
 
     /// After stopLoading() the URL loading system owns the outer task again; the inner session can
     /// still deliver callbacks it had already queued. Those late callbacks must never reach the client.
-    func testInnerCallbacksQueuedBeforeStopLoadingNeverReachTheClient() {
+    func testInnerCallbacksQueuedBeforeStopLoadingNeverReachTheClient() throws {
         let client = ForwardingRecordingClient()
-        let url = URL(string: "https://api.example.com/old")!
+        let url = try XCTUnwrap(URL(string: "https://api.example.com/old"))
         let proto = AutoMobileURLProtocol(request: URLRequest(url: url), cachedResponse: nil, client: client)
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         let task = session.dataTask(with: url) // never resumed
-        let response = HTTPURLResponse(url: url, statusCode: 302, httpVersion: nil, headerFields: ["Location": "/new"])!
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: url,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: ["Location": "/new"]
+        ))
         let disposition = OSAllocatedUnfairLock<[URLSession.ResponseDisposition]>(initialState: [])
 
         proto.stopLoading()
@@ -530,7 +541,7 @@ final class InnerSessionTests: XCTestCase {
     func testRequestsThatCannotBeRelayedAreDeclinedSoTheAppStackHandlesThem() throws {
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
-        let url = URL(string: "https://api.example.com/x")!
+        let url = try XCTUnwrap(URL(string: "https://api.example.com/x"))
         var upgrade = URLRequest(url: url)
         upgrade.setValue("websocket", forHTTPHeaderField: "Upgrade")
 
@@ -551,8 +562,8 @@ final class InnerSessionTests: XCTestCase {
                 .canInit(with: session.uploadTask(withStreamedRequest: URLRequest(url: url)))
         )
         XCTAssertFalse(
-            AutoMobileURLProtocol
-                .canInit(with: session.webSocketTask(with: URL(string: "wss://api.example.com/ws")!))
+            try AutoMobileURLProtocol
+                .canInit(with: session.webSocketTask(with: XCTUnwrap(URL(string: "wss://api.example.com/ws"))))
         )
         XCTAssertFalse(AutoMobileURLProtocol.canInit(with: session.streamTask(
             withHostName: "api.example.com",
@@ -571,8 +582,8 @@ final class InnerSessionTests: XCTestCase {
         XCTAssertTrue(AutoMobileURLProtocol.canInit(with: URLRequest(url: url)))
     }
 
-    func testHandledMarkerStillDeclinesInnerReplays() {
-        let marked = NSMutableURLRequest(url: URL(string: "https://api.example.com/x")!)
+    func testHandledMarkerStillDeclinesInnerReplays() throws {
+        let marked = try NSMutableURLRequest(url: XCTUnwrap(URL(string: "https://api.example.com/x")))
         URLProtocol.setProperty(true, forKey: AutoMobileURLProtocol.handledKey, in: marked)
 
         XCTAssertFalse(AutoMobileURLProtocol.canInit(with: marked as URLRequest))

@@ -1,8 +1,0 @@
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/appResources
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/bootedDeviceResources
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/deviceImageResources
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/resourceRegistry
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingManager
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingTools
-src/features/storage/storageCapabilities.ts -> src/server/appFileService
-src/features/storage/storageCapabilities.ts -> src/server/sharedStorageReadService

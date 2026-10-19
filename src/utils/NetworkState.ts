@@ -127,8 +127,12 @@ const defaultNotifier: ResourceNotifier = {
  * Wires the notifier a default-constructed NetworkState uses. The MCP server owns the
  * resource registry, so it registers itself here and this lower layer stays unaware of it.
  */
-export function setDefaultResourceNotifier(notifier: ResourceNotifier | undefined): void {
+export function setDefaultResourceNotifier(
+  notifier: ResourceNotifier | undefined,
+): ResourceNotifier | undefined {
+  const previous = registeredNotifier;
   registeredNotifier = notifier;
+  return previous;
 }
 
 export class NetworkState {

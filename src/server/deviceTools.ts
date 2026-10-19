@@ -1,3 +1,4 @@
+import "./deviceLifecycleHost";
 import { z } from "zod/v4";
 import { startDeviceOutputSchema } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";

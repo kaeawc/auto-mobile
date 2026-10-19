@@ -194,7 +194,7 @@ test/features/action/TargetDisplayAction.test.ts TS2741 7
 test/features/action/TargetDisplayAction.test.ts TS2769 3
 test/features/action/TargetDisplayPreDispatchCapture.test.ts TS2740 1
 test/features/action/androidDoubleTap.test.ts TS2322 8
-test/features/action/androidDoubleTap.test.ts TS2345 2
+test/features/action/androidDoubleTap.test.ts TS2345 1
 test/features/action/androidDoubleTap.test.ts TS2739 1
 test/features/action/containerFailure.test.ts TS2322 1
 test/features/action/swipeon/SwipeOn.iosChrome.test.ts TS2322 1
@@ -437,7 +437,6 @@ test/server/inventorySurfaceParity.test.ts TS2339 1
 test/server/inventorySurfaceParity.test.ts TS2571 1
 test/server/inventorySurfaceParity.test.ts TS7006 1
 test/server/iosUserFilesProvider.test.ts TS18048 2
-test/server/iosUserFilesProvider.test.ts TS2769 3
 test/server/navigationTools.test.ts TS18046 13
 test/server/navigationTools.test.ts TS2322 1
 test/server/navigationTools.test.ts TS2339 3

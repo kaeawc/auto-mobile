@@ -31,15 +31,9 @@ beforeEach(() => {
   });
   sockets.length = 0;
   timer = new FakeTimer();
-  client = new DaemonClient(
-    "/fake/socket",
-    1_000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    undefined,
-    "win32",
-  );
+  client = new DaemonClient("/fake/socket", 1_000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+    platformOverride: "win32",
+  });
 });
 
 afterEach(async () => {

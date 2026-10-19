@@ -15,7 +15,7 @@ import {
 } from "../../../src/server/toolCallRecordingManager";
 import { createJSONToolResponse } from "../../../src/utils/toolUtils";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../../src/server/planExecutorFactory";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
@@ -81,7 +81,7 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
       { tool: "resetKeychain", params: { appId: "com.example.app", confirm: false } },
     ]);
 
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
       plan,
       0,
       "ios",
@@ -102,7 +102,7 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
     const plan = recordResetKeychain();
     plan.steps[0].params!.confirm = true;
 
-    const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
       plan,
       0,
       "ios",
@@ -263,7 +263,7 @@ test("executor passes step geometry through the real tapAt handler", async () =>
       x: 2.125,
       y: 3.75,
     };
-    const executor = new DefaultPlanExecutor(new FakeTimer());
+    const executor = createDefaultPlanExecutor(new FakeTimer());
     const step = { tool: "tapAt", params: { x: geometry.x, y: geometry.y }, geometry };
     const compatible = await executor.executePlan(
       { name: "native", steps: [step] },

@@ -78,10 +78,16 @@ describe("Device Image Resources with Fakes", () => {
     const otherDevices = new FakeDeviceUtils();
     const otherAvdManager = new FakeAvdManager();
     fakeDeviceUtils.setDeviceImages("android", [
-      { name: "First", platform: "android", deviceId: "first", source: "local" },
+      { name: "First", platform: "android", isRunning: false, deviceId: "first", source: "local" },
     ]);
     otherDevices.setDeviceImages("android", [
-      { name: "Second", platform: "android", deviceId: "second", source: "local" },
+      {
+        name: "Second",
+        platform: "android",
+        isRunning: false,
+        deviceId: "second",
+        source: "local",
+      },
     ]);
     const first = createDeviceImageResourcesHandler({
       deviceManager: fakeDeviceUtils,
@@ -101,7 +107,7 @@ describe("Device Image Resources with Fakes", () => {
   test("notification invalidates cached Android images before subscribers re-read", async () => {
     const timer = new FakeTimer();
     fakeDeviceUtils.setDeviceImages("android", [
-      { name: "First", platform: "android", deviceId: "first", source: "local" },
+      { name: "First", platform: "android", isRunning: false, deviceId: "first", source: "local" },
     ]);
     const handler = createDeviceImageResourcesHandler({
       deviceManager: fakeDeviceUtils,
@@ -110,7 +116,13 @@ describe("Device Image Resources with Fakes", () => {
     });
     await handler.getDeviceImagesForPlatforms(["android"]);
     fakeDeviceUtils.setDeviceImages("android", [
-      { name: "Second", platform: "android", deviceId: "second", source: "local" },
+      {
+        name: "Second",
+        platform: "android",
+        isRunning: false,
+        deviceId: "second",
+        source: "local",
+      },
     ]);
     const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockImplementation(
       async () => {
@@ -514,6 +526,7 @@ describe("Device Image Resources with Fakes", () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       const availableImage = {
         packageName: "system-images;android-35;google_apis;x86_64",
+        apiIdentifier: "35",
         apiLevel: 35,
         tag: "google_apis",
         abi: "x86_64",
@@ -521,6 +534,7 @@ describe("Device Image Resources with Fakes", () => {
       };
       const installedOnlyImage = {
         packageName: "system-images;android-34;google_apis;arm64-v8a",
+        apiIdentifier: "34",
         apiLevel: 34,
         tag: "google_apis",
         abi: "arm64-v8a",
@@ -547,6 +561,7 @@ describe("Device Image Resources with Fakes", () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       const installedImage = {
         packageName: "system-images;android-34;google_apis;arm64-v8a",
+        apiIdentifier: "34",
         apiLevel: 34,
         tag: "google_apis",
         abi: "arm64-v8a",
@@ -554,6 +569,7 @@ describe("Device Image Resources with Fakes", () => {
       };
       const availableOnlyImage = {
         packageName: "system-images;android-35;google_apis_playstore;arm64-v8a",
+        apiIdentifier: "35",
         apiLevel: 35,
         tag: "google_apis_playstore",
         abi: "arm64-v8a",
@@ -585,6 +601,7 @@ describe("Device Image Resources with Fakes", () => {
       const accepted = [
         {
           packageName: "system-images;android-34;google_apis;arm64-v8a",
+          apiIdentifier: "34",
           apiLevel: 34,
           tag: "google_apis",
           abi: "arm64-v8a",
@@ -592,6 +609,7 @@ describe("Device Image Resources with Fakes", () => {
         },
         {
           packageName: "system-images;android-33;google_apis;x86_64",
+          apiIdentifier: "33",
           apiLevel: 33,
           tag: "google_apis",
           abi: "x86_64",
@@ -603,6 +621,7 @@ describe("Device Image Resources with Fakes", () => {
         ...accepted,
         {
           packageName: "system-images;android-35;android-tv;arm64-v8a",
+          apiIdentifier: "35",
           apiLevel: 35,
           tag: "android-tv",
           abi: "arm64-v8a",
@@ -731,7 +750,13 @@ describe("Device Image Resources with Fakes", () => {
       // emulator -list-avds) hangs. The read deadline is bounded while one shared
       // background fetch continues until reset or its independent hard cap.
       fakeDeviceUtils.setDeviceImages("android", [
-        { name: "Pixel_9", platform: "android", deviceId: "avd-late", source: "local" },
+        {
+          name: "Pixel_9",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-late",
+          source: "local",
+        },
       ]);
       fakeDeviceUtils.setListDeviceImagesHangs("android", true);
 
@@ -954,16 +979,40 @@ describe("Device Image Resources with Fakes", () => {
     test("should return correct image counts when there are images", async () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
-        { name: "Pixel_7_API_34", platform: "android", deviceId: "avd-2", source: "local" },
+        {
+          name: "Pixel_6_API_33",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-1",
+          source: "local",
+        },
+        {
+          name: "Pixel_7_API_34",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-2",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
       // Set up mock iOS devices
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
-        { name: "iPhone 15 Pro", platform: "ios", deviceId: "sim-2", source: "local" },
-        { name: "iPad Pro", platform: "ios", deviceId: "sim-3", source: "local" },
+        {
+          name: "iPhone 14",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          source: "local",
+        },
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-2",
+          source: "local",
+        },
+        { name: "iPad Pro", platform: "ios", isRunning: false, deviceId: "sim-3", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 
@@ -1142,10 +1191,22 @@ describe("Device Image Resources with Fakes", () => {
     test("should filter to android platform only", async () => {
       // Set up mock devices for both platforms
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
+        {
+          name: "Pixel_6_API_33",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-1",
+          source: "local",
+        },
       ];
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
+        {
+          name: "iPhone 14",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -1170,11 +1231,29 @@ describe("Device Image Resources with Fakes", () => {
     test("should filter to ios platform only", async () => {
       // Set up mock devices for both platforms
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
+        {
+          name: "Pixel_6_API_33",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-1",
+          source: "local",
+        },
       ];
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
-        { name: "iPhone 15", platform: "ios", deviceId: "sim-2", source: "local" },
+        {
+          name: "iPhone 14",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          source: "local",
+        },
+        {
+          name: "iPhone 15",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-2",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -1202,6 +1281,7 @@ describe("Device Image Resources with Fakes", () => {
         {
           name: "iPhone 15 Pro",
           platform: "ios",
+          isRunning: true,
           deviceId: "sim-15-pro",
           source: "local",
           state: "Booted",
@@ -1261,8 +1341,20 @@ describe("Device Image Resources with Fakes", () => {
     test("should include extended AVD metadata for Android images", async () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
-        { name: "Pixel_7_API_34", platform: "android", deviceId: "avd-2", source: "local" },
+        {
+          name: "Pixel_6_API_33",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-1",
+          source: "local",
+        },
+        {
+          name: "Pixel_7_API_34",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-2",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
@@ -1312,7 +1404,13 @@ describe("Device Image Resources with Fakes", () => {
     test("should handle AVD info with errors", async () => {
       // Set up mock Android device
       const androidDevices: DeviceInfo[] = [
-        { name: "Corrupted_AVD", platform: "android", deviceId: "avd-err", source: "local" },
+        {
+          name: "Corrupted_AVD",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-err",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
@@ -1345,6 +1443,7 @@ describe("Device Image Resources with Fakes", () => {
         {
           name: "Device_Without_AVD_Info",
           platform: "android",
+          isRunning: false,
           deviceId: "avd-1",
           source: "local",
         },
@@ -1372,7 +1471,13 @@ describe("Device Image Resources with Fakes", () => {
     test("should not include extended AVD metadata for iOS images", async () => {
       // Set up mock iOS devices
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
+        {
+          name: "iPhone 14",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 
@@ -1396,10 +1501,22 @@ describe("Device Image Resources with Fakes", () => {
   describe("getAllDeviceImages", () => {
     test("should return ResourceContent with all device images", async () => {
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6", platform: "android", deviceId: "avd-1", source: "local" },
+        {
+          name: "Pixel_6",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-1",
+          source: "local",
+        },
       ];
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
+        {
+          name: "iPhone 14",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -1426,7 +1543,13 @@ describe("Device Image Resources with Fakes", () => {
   describe("getDeviceImagesByPlatform", () => {
     test("should return android-specific images via platform param", async () => {
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6", platform: "android", deviceId: "avd-1", source: "local" },
+        {
+          name: "Pixel_6",
+          platform: "android",
+          isRunning: false,
+          deviceId: "avd-1",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", []);
@@ -1449,7 +1572,13 @@ describe("Device Image Resources with Fakes", () => {
 
     test("should return ios-specific images via platform param", async () => {
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
+        {
+          name: "iPhone 14",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", []);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -1491,7 +1620,13 @@ describe("Device Image Resources with Fakes", () => {
   describe("Partial dependency injection", () => {
     test("should allow providing only deviceManager", async () => {
       const iosDevices: DeviceInfo[] = [
-        { name: "Test iPhone", platform: "ios", deviceId: "sim-test", source: "local" },
+        {
+          name: "Test iPhone",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-test",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 

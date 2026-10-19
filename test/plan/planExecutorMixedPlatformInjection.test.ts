@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import type { Plan } from "../../src/models/Plan";
 import { getPreferenceSchema } from "../../src/server/preferenceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #10023: executePlan takes a single `platform`, but a plan may declare devices on both
@@ -27,11 +27,11 @@ const mixedDevices: Plan["devices"] = [
 ];
 
 describe("PlanExecutor per-label platform injection (#10023)", () => {
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let seen: Seen[];
 
   beforeEach(() => {
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     seen = [];
     ToolRegistry.register(
       recordTool,

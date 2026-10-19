@@ -5,7 +5,7 @@ import {
   type AppearanceDeviceSource,
   type AppearanceSocketServerDependencies,
 } from "../../src/daemon/appearanceSocketServer";
-import { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import { appearanceSocketResponseSchema } from "../helpers/wireMessageSchemas";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import {
@@ -158,7 +158,7 @@ describe("AppearanceSocketServer", () => {
         socket,
         JSON.stringify({ id: "sync-hint", command: "set_appearance_sync", params: { enabled } }),
       );
-      const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0];
+      const response = socket.getWrittenMessages(appearanceSocketResponseSchema)[0];
       expect(response.success).toBe(true);
       expect(response.result?.config?.syncWithHost).toBe(enabled);
       expect(response.result?.appliedMode).toBe("light");
@@ -201,7 +201,7 @@ describe("AppearanceSocketServer", () => {
         socket,
         JSON.stringify({ id: "mode-hint", command: "set_appearance", params: { mode } }),
       );
-      const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0];
+      const response = socket.getWrittenMessages(appearanceSocketResponseSchema)[0];
       const appliedMode = mode === "auto" ? "light" : mode;
       expect(response.success).toBe(true);
       expect(response.result?.config?.defaultMode).toBe(mode);
@@ -285,7 +285,7 @@ describe("AppearanceSocketServer", () => {
           ),
         );
         await flushMicrotasks();
-        expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+        expect(socket.getWrittenMessages(appearanceSocketResponseSchema)).toEqual([
           {
             id: "read",
             type: "appearance_response",
@@ -297,11 +297,10 @@ describe("AppearanceSocketServer", () => {
 
         applyGate.resolve();
         await Promise.all(pendingRequests);
-        expect(socket.getWrittenMessages<AppearanceSocketResponse>().map(({ id }) => id)).toEqual([
-          "read",
-          "set",
-        ]);
-        expect(socket.getWrittenMessages<AppearanceSocketResponse>()[1].success).toBe(true);
+        expect(
+          socket.getWrittenMessages(appearanceSocketResponseSchema).map(({ id }) => id),
+        ).toEqual(["read", "set"]);
+        expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[1].success).toBe(true);
       });
     }
 
@@ -330,7 +329,7 @@ describe("AppearanceSocketServer", () => {
         expect(applied).toEqual(["own:dark", "own:light"]);
         expect(
           socket
-            .getWrittenMessages<AppearanceSocketResponse>()
+            .getWrittenMessages(appearanceSocketResponseSchema)
             .map(({ id, success }) => ({ id, success })),
         ).toEqual([
           { id: "set", success: true },
@@ -350,7 +349,7 @@ describe("AppearanceSocketServer", () => {
         ),
       );
       await flushMicrotasks();
-      expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+      expect(socket.getWrittenMessages(appearanceSocketResponseSchema)).toEqual([
         {
           id: "failed-read",
           type: "appearance_response",
@@ -400,7 +399,7 @@ describe("AppearanceSocketServer", () => {
 
         applyGate.resolve();
         await Promise.all(pendingRequests);
-        expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+        expect(socket.getWrittenMessages(appearanceSocketResponseSchema)).toEqual([
           expect.objectContaining({ id: "set", success: true }),
           {
             id: "unsupported",
@@ -458,7 +457,7 @@ describe("AppearanceSocketServer", () => {
     expect(finished).toBe(true);
     await request;
     expect(triggered).toBe(true);
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()).toEqual([
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)).toEqual([
       {
         id: "bounded",
         type: "appearance_response",
@@ -528,7 +527,7 @@ describe("AppearanceSocketServer", () => {
       it(row.name, async () => {
         await server.simulateLine(socket, JSON.stringify(row.request));
 
-        const messages = socket.getWrittenMessages<AppearanceSocketResponse>();
+        const messages = socket.getWrittenMessages(appearanceSocketResponseSchema);
         expect(messages).toHaveLength(1);
         expect(messages[0]).toEqual({
           id: row.request.id as string,
@@ -554,8 +553,8 @@ describe("AppearanceSocketServer", () => {
         JSON.stringify({ id: "eq-params", command: "set_appearance", params: { mode: "zzz" } }),
       );
 
-      const topMsg = topLevel.getWrittenMessages<AppearanceSocketResponse>()[0];
-      const paramsMsg = params.getWrittenMessages<AppearanceSocketResponse>()[0];
+      const topMsg = topLevel.getWrittenMessages(appearanceSocketResponseSchema)[0];
+      const paramsMsg = params.getWrittenMessages(appearanceSocketResponseSchema)[0];
       expect(topMsg.error).toBe("set_appearance requires mode: light | dark | auto");
       expect(paramsMsg.error).toBe(topMsg.error);
     });
@@ -573,7 +572,7 @@ describe("AppearanceSocketServer", () => {
       socket,
       JSON.stringify({ id: "missing", command: "set_appearance", mode: "invalid" }),
     );
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].error).toContain(
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0].error).toContain(
       "requires an authenticated daemon session",
     );
   });
@@ -588,7 +587,7 @@ describe("AppearanceSocketServer", () => {
       socket,
       JSON.stringify({ id: "empty", command: "set_appearance_sync", sessionUuid: "  " }),
     );
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].error).toContain(
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0].error).toContain(
       "requires an authenticated daemon session",
     );
   });
@@ -618,7 +617,7 @@ describe("AppearanceSocketServer", () => {
       }),
     );
     expect(updates).toBe(0);
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].error).toContain(
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0].error).toContain(
       "not an active daemon session",
     );
   });
@@ -652,7 +651,7 @@ describe("AppearanceSocketServer", () => {
       const mode = command === "set_appearance" ? "dark" : "light";
       expect(applied).toEqual([`own:${mode}`]);
       expect(syncs).toBe(1);
-      expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
+      expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0]).toMatchObject({
         success: true,
         result: { appliedMode: mode },
       });
@@ -690,7 +689,7 @@ describe("AppearanceSocketServer", () => {
       expect(applied).toEqual([]);
       expect(await dependencies.getConfig()).toEqual(expectedConfig);
       expect(syncs).toBe(1);
-      expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toEqual({
+      expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0]).toEqual({
         id: "no-device",
         type: "appearance_response",
         success: true,
@@ -725,7 +724,7 @@ describe("AppearanceSocketServer", () => {
         }),
       );
       expect(applied).toEqual([expected]);
-      expect(callerSocket.getWrittenMessages<AppearanceSocketResponse>()[0].success).toBe(true);
+      expect(callerSocket.getWrittenMessages(appearanceSocketResponseSchema)[0].success).toBe(true);
     }
   });
 
@@ -749,7 +748,7 @@ describe("AppearanceSocketServer", () => {
       }),
     );
     expect(applied).toEqual(["own:dark"]);
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].success).toBe(true);
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0].success).toBe(true);
   });
 
   it("resolves both label callers and label owners to the base session's devices", async () => {
@@ -772,7 +771,7 @@ describe("AppearanceSocketServer", () => {
       }),
     );
     expect(applied).toEqual(["own:dark", "label-owned:dark"]);
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].success).toBe(true);
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0].success).toBe(true);
   });
 
   it("keeps get_appearance_config available without a session", async () => {
@@ -785,7 +784,7 @@ describe("AppearanceSocketServer", () => {
       socket,
       JSON.stringify({ id: "read", command: "get_appearance_config" }),
     );
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
+    expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0]).toMatchObject({
       success: true,
       result: { config: initialConfig },
     });
@@ -823,7 +822,7 @@ describe("AppearanceSocketServer", () => {
         }),
       );
       expect(applied).toEqual(["own:dark", "other:dark", "unowned:dark", "unowned-current:dark"]);
-      expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
+      expect(socket.getWrittenMessages(appearanceSocketResponseSchema)[0]).toMatchObject({
         success: true,
         result: { appliedMode: "dark" },
       });

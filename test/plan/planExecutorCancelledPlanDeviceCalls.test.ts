@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import type { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 
@@ -125,7 +125,7 @@ describe("PlanExecutor after its signal is aborted by a release (#9885)", () => 
       ],
     };
     let settled = false;
-    const run = new DefaultPlanExecutor(timer)
+    const run = createDefaultPlanExecutor(timer)
       .executePlan(plan, 0, "android", "emulator-5554", undefined, release.signal)
       .finally(() => {
         settled = true;
@@ -162,7 +162,7 @@ describe("PlanExecutor after its signal is aborted by a release (#9885)", () => 
       steps: [{ tool: "cancelFailStep", params: {} }],
     };
     let settled = false;
-    const run = new DefaultPlanExecutor(timer)
+    const run = createDefaultPlanExecutor(timer)
       .executePlan(plan, 0, "android", "emulator-5554", undefined, release.signal)
       .finally(() => {
         settled = true;
@@ -197,7 +197,7 @@ describe("PlanExecutor after its signal is aborted by a release (#9885)", () => 
       ],
     };
     let settled = false;
-    const run = new DefaultPlanExecutor(timer)
+    const run = createDefaultPlanExecutor(timer)
       .executePlan(plan, 0, "android", undefined, undefined, release.signal)
       .finally(() => {
         settled = true;
@@ -220,7 +220,7 @@ describe("PlanExecutor after its signal is aborted by a release (#9885)", () => 
       steps: [{ tool: "cancelFailStep", params: {} }],
     };
 
-    const result = await new DefaultPlanExecutor(timer).executePlan(
+    const result = await createDefaultPlanExecutor(timer).executePlan(
       plan,
       0,
       "android",

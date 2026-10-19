@@ -8,7 +8,7 @@ import {
   ToolRegistryClass,
   type PlanLifecycleInput,
 } from "../../src/server/toolRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -82,7 +82,7 @@ describe("PlanExecutor nested lifecycle", () => {
           events.push("nested");
           return createStructuredToolResponse({ success: true });
         }
-        const result = await new DefaultPlanExecutor(timer).executePlan(
+        const result = await createDefaultPlanExecutor(timer).executePlan(
           plan,
           0,
           "android",

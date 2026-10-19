@@ -9,10 +9,8 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import {
-  DefaultPlanExecutor,
-  UNEVALUATED_EXPECTATIONS_WARNING,
-} from "../../src/utils/plan/PlanExecutor";
+import { UNEVALUATED_EXPECTATIONS_WARNING } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -32,7 +30,7 @@ const interactionDeps: InteractionToolDependencies = {};
 // (#9927). Real tapOn registration + the fake element factory, no device I/O.
 describe("criticalSection sub-steps get the plan path's migration and schema parse (#9927)", () => {
   const device = { platform: "android" as const, deviceId: "fake-device", name: "Fake" };
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let coordinator: CriticalSectionCoordinator;
   let restoreTools: () => void;
   let restoreCoordinator: () => void;
@@ -50,7 +48,7 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
 
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
-    executor = new DefaultPlanExecutor(new FakeTimer());
+    executor = createDefaultPlanExecutor(new FakeTimer());
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     tappedTexts = [];

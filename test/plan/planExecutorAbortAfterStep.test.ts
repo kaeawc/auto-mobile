@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from "bun:test";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { z } from "zod/v4";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
@@ -14,11 +14,11 @@ const toolSchema = z.object({
 });
 
 describe("PlanExecutor - abort signal checked after each step", () => {
-  let planExecutor: DefaultPlanExecutor;
+  let planExecutor: ReturnType<typeof createDefaultPlanExecutor>;
   let toolCallCount: number;
 
   beforeEach(() => {
-    planExecutor = new DefaultPlanExecutor();
+    planExecutor = createDefaultPlanExecutor();
     toolCallCount = 0;
   });
 

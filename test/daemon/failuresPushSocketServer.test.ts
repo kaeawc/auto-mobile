@@ -6,6 +6,7 @@ import {
   type FailureNotificationPush,
 } from "../../src/daemon/failuresPushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { FailureSeverity, FailureType } from "../../src/models/failureAnalytics";
 import type { Socket } from "node:net";
 import { FakeListeningNetServer, FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
@@ -31,8 +32,8 @@ class TestableFailuresPushSocketServer extends FailuresPushSocketServer {
   }
 
   simulateSubscription(options: {
-    type?: string;
-    severity?: string;
+    type?: FailureType;
+    severity?: FailureSeverity;
     deviceSessionUuid?: string | null;
   }): { socket: FakeSocket; subscriptionId: string } {
     const socket = new FakeSocket();

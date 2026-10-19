@@ -193,7 +193,7 @@ test("a suspect-session refusal is the retryable suspect refusal on the frame", 
     details: { sessionUuid: "quiet-session", remainingMs: 2_500 },
   });
   // The MCP error is the same fields plus the message, which the frame carries as `error`.
-  expect({ ...frameFields(error), message: error.message }).toEqual(mcp.error);
+  expect(mcp.error).toEqual({ ...frameFields(error), message: error.message });
 });
 
 test("a terminal-session refusal is session_ownership_lost on the frame", () => {

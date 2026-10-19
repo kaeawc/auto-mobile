@@ -597,7 +597,7 @@ describe("HTTP heartbeat on a proxy-owned session", () => {
       expect(response.body).toBe('{"status":"ok"}');
       expect(session.lastHeartbeat).toBe(records ? h.timer.now() : before);
       expect(session.hasReceivedHeartbeat).toBe(records);
-      expect(session.livenessOwnerToken).toBe(owner ?? token);
+      expect(session.livenessOwnerToken).toBe<unknown>(owner ?? token);
       expect(session.livenessOwnershipClaims?.size ?? 0).toBe(0);
     } finally {
       h.dispose();

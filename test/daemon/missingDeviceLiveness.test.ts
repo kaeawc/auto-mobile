@@ -8,6 +8,7 @@ import {
 } from "../../src/daemon/missingDeviceLiveness";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import type { PooledDevice } from "../../src/daemon/devicePool";
+import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
 import type {
   PlatformDeviceManager,
   BootedDeviceDiscovery,
@@ -15,12 +16,24 @@ import type {
 } from "../../src/devices/deviceUtils";
 import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../src/models";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
 const deviceId = "emulator-5554";
 
-function pooled(): PooledDevice {
+// Answers every discovery with whatever the scenario currently scripts.
+class ScriptedDiscoveryManager extends FakeDeviceManager {
+  constructor(private readonly current: () => BootedDeviceDiscovery) {
+    super();
+  }
+
+  override async getBootedDevicesDetailed(): Promise<BootedDeviceDiscovery> {
+    return this.current();
+  }
+}
+
+function pooled(): MutablePooledDevice {
   return {
     id: deviceId,
     name: "Pixel",
@@ -60,9 +73,7 @@ function harness() {
     devices: [],
     succeededPlatforms: new Set(["android"]),
   };
-  const manager = {
-    getBootedDevicesDetailed: async () => discovery,
-  } as PlatformDeviceManager;
+  const manager = new ScriptedDiscoveryManager(() => discovery);
   const port: MissingDeviceLivenessPoolPort = {
     getDevices: () => devices,
     getRefreshMissingDeviceMisses: () => misses,

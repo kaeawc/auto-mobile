@@ -107,6 +107,7 @@ const subscribeFrame: DaemonRequest = {
   id: "subscribe",
   type: "mcp_request",
   method: DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+  params: {},
 };
 
 let server: LifecycleInputServer;

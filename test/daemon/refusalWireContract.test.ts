@@ -6,7 +6,8 @@ import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
+import { parseSync, Visitor, type Class } from "oxc-parser";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -218,7 +219,7 @@ interface ScannedClass {
   exported: boolean;
 }
 
-type ScannedClassNode = ClassDeclaration | ClassExpression;
+type ScannedClassNode = Class;
 
 function declaresCode(node: ScannedClassNode): boolean {
   return node.body.body.some((member) => {
@@ -269,7 +270,9 @@ function scanClasses(module: string, source: string): ScannedClass[] {
       }
       if (!node.source && node.exportKind !== "type") {
         for (const specifier of node.specifiers) {
-          exportedNames.add(specifier.local.name);
+          exportedNames.add(
+            specifier.local.type === "Literal" ? specifier.local.value : specifier.local.name,
+          );
         }
       }
     },
@@ -373,7 +376,7 @@ beforeAll(() => {
   const root = join(import.meta.dir, "..", "..", "src");
   codedErrorInventory = Object.freeze(
     codedErrorModules(
-      readdirSync(root, { recursive: true })
+      readdirSync(root, { recursive: true, encoding: "utf8" })
         .filter((file) => file.endsWith(".ts"))
         .map((file) => ({
           module: file.split(sep).join("/").slice(0, -3),
@@ -411,10 +414,12 @@ function missingErrorClasses(
  */
 /** The codes a payload names on the wire, outermost first. */
 function wireCodes(payload: WirePayload): string[] {
-  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code];
+  const codes = [typeof payload.error === "object" ? payload.error.code : payload.code].filter(
+    (code): code is string => code !== undefined,
+  );
   const nested =
     typeof payload.error === "object" ? payload.error.acquisitionFailure?.code : undefined;
-  return nested ? [...codes, nested] : codes.filter((code): code is string => code !== undefined);
+  return nested ? [...codes, nested] : codes;
 }
 
 const WAIT_CODES: ReadonlySet<string> = new Set([
@@ -616,12 +621,18 @@ const surfaceExpectations = readSurfaceExpectations(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
 );
 
+type ToolsCallHandler = (request: unknown, ctx: ServerContext) => Promise<unknown>;
+
+function isToolsCallHandler(value: unknown): value is ToolsCallHandler {
+  return typeof value === "function";
+}
+
 // Capture private production builders through their registered public handlers, using only fakes.
 const ownedSurfaceFixtures: RefusalSurfaceFixture[] = [];
 beforeAll(async () => {
   const registration = spyOn(Server.prototype, "setRequestHandler");
   let harness: ReturnType<typeof createProxyMcpServer>;
-  let registrations: typeof registration.mock.calls;
+  let registrations: ReadonlyArray<readonly unknown[]>;
   try {
     harness = createProxyMcpServer({
       proxyConfig: {
@@ -636,10 +647,10 @@ beforeAll(async () => {
   } finally {
     registration.mockRestore();
   }
-  const handler = registrations.findLast(([schema]) => schema === "tools/call")?.[1];
+  const handler = registrations.findLast(([method]) => method === "tools/call")?.[1];
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    if (!handler) {
+    if (!isToolsCallHandler(handler)) {
       throw new Error("Missing tools/call handler");
     }
     const cases = [

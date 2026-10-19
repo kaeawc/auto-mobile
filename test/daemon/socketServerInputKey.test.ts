@@ -1,3 +1,4 @@
+import { createExecResult } from "../../src/utils/execResult";
 import { expect, spyOn, test } from "bun:test";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
@@ -96,6 +97,7 @@ test.each([undefined, "frame-1"])(
       "validateFrameContext",
     ).mockResolvedValue({
       success: true,
+      totalTimeMs: 0,
     });
     try {
       const result = handler.handleInputKey(keyRequest(frameContext));
@@ -171,13 +173,13 @@ test.each([false, true])(
       timer.advanceTime(1234);
       // Settle the in-flight command after the deadline: the real timeout helper
       // retains the device queue until it settles, without starting a real socket.
-      finish({ stdout: "", stderr: "" });
+      finish(createExecResult("", ""));
       await expect(result).rejects.toBeInstanceOf(dispatched ? ActionableError : McpTimeoutError);
       await expect(result).rejects.toThrow(
         dispatched ? "Key outcome is indeterminate" : "operation exceeded remaining budget",
       );
     } finally {
-      finish({ stdout: "", stderr: "" });
+      finish(createExecResult("", ""));
       factory.mockRestore();
     }
   },

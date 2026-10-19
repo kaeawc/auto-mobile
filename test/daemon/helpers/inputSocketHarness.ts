@@ -56,6 +56,7 @@ export function createFakeSession(
     platform,
     createdAt: 0,
     lastUsedAt: 0,
+    activityGeneration: 0,
     expiresAt: 60_000,
     cacheData: {},
     lastHeartbeat: 0,
@@ -63,6 +64,8 @@ export function createFakeSession(
     heartbeatTimeoutMs: 10_000,
     heartbeatTimeoutSource: "default",
     hasReceivedHeartbeat: false,
+    ownership: "owned",
+    livenessPolicy: "heartbeat",
   };
 }
 
@@ -113,7 +116,9 @@ export function createFakeDaemonState(
         }
         const sessionId = mcpAutolockSessions.get(mcpSessionId);
         const session = sessionId ? autolockSessions.get(sessionId) : undefined;
-        return session?.platform === platform ? session.sessionId : undefined;
+        return session !== undefined && session.platform === platform
+          ? session.sessionId
+          : undefined;
       },
     }),
   };
@@ -173,15 +178,18 @@ export async function openPersistentConnection(socketPath: string): Promise<Pers
         continue;
       }
       const frame: unknown = JSON.parse(line);
-      if (!isDaemonResponse(frame) || frame.id === null) {
+      if (!isDaemonResponse(frame)) {
         continue;
       }
-      const response = frame;
-      const entry = pending.get(response.id);
+      const { id } = frame;
+      if (id === null) {
+        continue;
+      }
+      const entry = pending.get(id);
       if (entry) {
-        pending.delete(response.id);
+        pending.delete(id);
         defaultTimer.clearTimeout(entry.deadline);
-        entry.resolve(response);
+        entry.resolve(frame);
       }
     }
   });

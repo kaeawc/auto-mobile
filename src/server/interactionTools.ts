@@ -59,7 +59,7 @@ import {
 } from "../features/action/tapAtGesture";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { pointerSchema } from "./pointerSchema";
-import { validateCoordinateRange } from "./coordinateRangeValidation";
+import { coordinatePointInputSchema, validateCoordinateRange } from "./coordinateRangeValidation";
 import {
   DRAG_DURATION_MAX_MS,
   DRAG_DURATION_MIN_MS,
@@ -460,38 +460,10 @@ export const tapOnSchema = withJsonSchemaOverride(
   },
 );
 
-const coordinatePointInputSchema = () =>
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        display: z.string().optional().describe("Target panel key, role, or active"),
-        snapshotId: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(
-            "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
-          ),
-        x: z
-          .number()
-          .describe("Screen x coordinate in the selected coordinateSpace (native by default)"),
-        y: z
-          .number()
-          .describe("Screen y coordinate in the selected coordinateSpace (native by default)"),
-        coordinateSpace: z
-          .enum(["absolute", "normalized", "percent"])
-          .optional()
-          .describe(
-            "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
-          ),
-        ...responseShapeControlFields,
-      })
-      .strict(),
-  );
-
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
+      includeExtras: responseShapeControlFields.includeExtras,
       x: coordinatePointInputSchema().shape.x.optional(),
       y: coordinatePointInputSchema().shape.y.optional(),
       image: imageRelativePointSchema

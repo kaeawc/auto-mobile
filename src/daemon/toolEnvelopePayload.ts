@@ -17,7 +17,7 @@ const HOISTED_ENVELOPE_FIELDS = {
   error: "string",
 } as const;
 
-/** Rewrite every representation from the same object so they cannot diverge. */
+/** Rewrite payload and compact text together, synchronizing the hoisted fields. */
 export function writeToolEnvelopePayload(
   view: ToolEnvelopeView,
   payload: Record<string, unknown>,

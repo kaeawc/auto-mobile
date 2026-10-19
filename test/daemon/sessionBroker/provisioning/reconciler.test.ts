@@ -7,6 +7,7 @@ import {
   bindingDeviceName,
   type BindingReconcileRequest,
   type BindingReconcileResult,
+  type BindingRequestedSpec,
   chooseIosDeviceType,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
 import type {
@@ -126,7 +127,7 @@ describe("BindingReconciler", () => {
   });
 
   function request(
-    spec: ExactDeviceSpecification = SPEC_18,
+    spec: BindingRequestedSpec = SPEC_18,
     overrides: Partial<BindingReconcileRequest> = {},
   ): BindingReconcileRequest {
     return {
@@ -153,7 +154,7 @@ describe("BindingReconciler", () => {
     return result;
   }
 
-  async function seedAssigned(spec = SPEC_18): Promise<string> {
+  async function seedAssigned(spec: BindingRequestedSpec = SPEC_18): Promise<string> {
     const result = expectReady(await reconciler.reconcile(request(spec)));
     provisioner.calls.length = 0;
     return result.device.stableId;
@@ -791,7 +792,8 @@ describe("BindingReconciler", () => {
               name: `${bindingDeviceName(key, 1, "orphan")}orphan`,
               deviceType: "simulator",
               state: "Shutdown",
-              platformVersion: "18.0",
+              isRunning: false,
+              isRunningStateKnown: false,
             },
           ];
           const findDeviceHolder = registry.findDeviceHolder.bind(registry);
@@ -907,7 +909,6 @@ describe("BindingReconciler", () => {
           } else {
             timer.advanceTime(60_001);
           }
-          return [];
         };
         const failed = expectFailed(await reconciler.reconcile(pending));
         expect(failed.failure).toEqual({
@@ -1016,7 +1017,7 @@ describe("BindingReconciler", () => {
           orphaned: 0,
         },
         charged: [],
-        retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+        retained: [{ platform: "ios", stableDeviceId: "held", reason: "session_holds_device" }],
         evictionFailures: [],
       };
       budget = { admitCreation: async () => admission };
@@ -1055,7 +1056,7 @@ describe("BindingReconciler", () => {
             orphaned: 0,
           },
           charged: [],
-          retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+          retained: [{ platform: "ios", stableDeviceId: "held", reason: "session_holds_device" }],
           evictionFailures: [],
         },
       });
@@ -1170,7 +1171,7 @@ describe("BindingReconciler", () => {
           orphaned: 0,
         },
         charged: [],
-        retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+        retained: [{ platform: "ios", stableDeviceId: "held", reason: "session_holds_device" }],
         evictionFailures: [],
       });
       expect(await registry.listOpenBindingJournal(key)).toEqual([]);

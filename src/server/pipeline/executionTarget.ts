@@ -371,7 +371,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // live session; never-issued IDs are rejected before assignment.
       const admittedSession =
         readSession ??
-        (await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution));
+        (await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution, { signal }));
       if (execution && !readSession) {
         // Only an admitted control call's end is session use (#10824, #10964).
         executionTracker.markSessionAdmitted(execution.executionId);

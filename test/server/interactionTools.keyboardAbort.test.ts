@@ -1,3 +1,4 @@
+import { createExecResult } from "../../src/utils/execResult";
 import { warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
@@ -23,7 +24,8 @@ test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME sw
   let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
-      keyboardHandler = args[3];
+      keyboardHandler = (device, input, progress, signal) =>
+        args[3](device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
@@ -62,7 +64,8 @@ test("registered keyboard setIme completes verification after cancellation follo
   let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
-      keyboardHandler = args[3];
+      keyboardHandler = (device, input, progress, signal) =>
+        args[3](device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
@@ -70,11 +73,11 @@ test("registered keyboard setIme completes verification after cancellation follo
   const oldIme = "com.example/.OldIme";
   const newIme = "com.example/.NewIme";
   adb.setThrowOnAbortedSignal();
-  adb.setCommandResponse("shell ime list -a -s", { stdout: `${oldIme}\n${newIme}\n`, stderr: "" });
-  adb.setCommandResponse("shell ime list -s", { stdout: `${oldIme}\n${newIme}\n`, stderr: "" });
+  adb.setCommandResponse("shell ime list -a -s", createExecResult(`${oldIme}\n${newIme}\n`, ""));
+  adb.setCommandResponse("shell ime list -s", createExecResult(`${oldIme}\n${newIme}\n`, ""));
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-    { stdout: oldIme, stderr: "" },
-    { stdout: newIme, stderr: "" },
+    createExecResult(oldIme, ""),
+    createExecResult(newIme, ""),
   ]);
   const controller = new AbortController();
   adb.abortAfterCommand(`shell ime set ${newIme}`, controller);
@@ -122,7 +125,8 @@ async function openKeyboardWithAbortedFailure(failure: Error) {
   let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
-      keyboardHandler = args[3];
+      keyboardHandler = (device, input, progress, signal) =>
+        args[3](device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });

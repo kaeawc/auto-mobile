@@ -375,9 +375,15 @@ describe("stdio client-gone silence (#11951)", () => {
     const bytes = rig.byteCount();
     let writes = 0;
     const write = rig.stdout.write.bind(rig.stdout);
-    rig.stdout.write = (...args: Parameters<typeof write>) => {
+    rig.stdout.write = (
+      chunk: Uint8Array | string,
+      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+      callback?: (error?: Error | null) => void,
+    ) => {
       writes++;
-      return write(...args);
+      return typeof encodingOrCallback === "string"
+        ? write(chunk, encodingOrCallback, callback)
+        : write(chunk, encodingOrCallback);
     };
     rig.stdout.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
     rig.client.emitNotification("notifications/tools/list_changed");

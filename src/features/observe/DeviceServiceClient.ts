@@ -40,6 +40,10 @@ import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectSt
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import type { CtrlSocket, DelegateContext } from "./shared/types";
+import {
+  createConnectionTestHooks,
+  type DeviceServiceClientConnectionTestHooks,
+} from "./DeviceServiceClientConnectionTestHooks";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 import { RealCtrlProxyWebSocketInTestError } from "./RealCtrlProxyWebSocketInTestError";
 import { ObserverPendingRequestTimeoutError } from "./ObserverPendingRequestTimeoutError";
@@ -175,6 +179,18 @@ export abstract class DeviceServiceClient {
   }
   // Connection state
   protected ws: CtrlSocket | null = null;
+
+  /** @internal Typed socket view for unit tests; production code must not use it. */
+  get connectionTestHooks(): DeviceServiceClientConnectionTestHooks {
+    return createConnectionTestHooks({
+      getSocket: () => this.ws,
+      setSocket: (socket) => {
+        this.ws = socket;
+      },
+      requestManager: this.requestManager,
+      deliverMessage: (data) => this.handleMessage(data),
+    });
+  }
   /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */
   private lifecycleSocket: CtrlSocket | null = null;
   protected isConnecting: boolean = false;

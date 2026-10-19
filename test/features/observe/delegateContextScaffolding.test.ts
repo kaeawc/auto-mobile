@@ -85,7 +85,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
       expect(ctx.requestManager).toBe(client["requestManager"]);
       expect(ctx.timer).toBe(client["timer"]);
       // Not connected yet: the WebSocket accessor mirrors the client's null socket.
-      expect(ctx.getWebSocket()).toBe(client["ws"]);
+      expect(ctx.getWebSocket()).toBe(client.connectionTestHooks.socket);
       expect(typeof ctx.ensureConnected).toBe("function");
       expect(typeof ctx.isCommandSupported).toBe("function");
       expect(typeof ctx.getSupportedCommands).toBe("function");
@@ -146,7 +146,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
       const ctx = client["createDelegateContext"]();
       expect(ctx.requestManager).toBe(client["requestManager"]);
       expect(ctx.timer).toBe(client["timer"]);
-      expect(ctx.getWebSocket()).toBe(client["ws"]);
+      expect(ctx.getWebSocket()).toBe(client.connectionTestHooks.socket);
       expect(typeof ctx.ensureConnected).toBe("function");
       expect(typeof ctx.cancelScreenshotBackoff).toBe("function");
       expect(typeof ctx.getReconnectStatus).toBe("function");

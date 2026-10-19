@@ -42,7 +42,7 @@ async function harness() {
   );
   await Promise.resolve();
   timer.advanceTime(123);
-  client["ws"] = socket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     "discover_keystore",
     "get_sdk_capabilities",
@@ -310,7 +310,7 @@ for (const method of methods) {
           h.client.ensureConnected = async () => false;
         }
         if (failure === "socket") {
-          h.client["ws"] = null;
+          h.client.connectionTestHooks.socket = null;
         }
         if (failure === "send") {
           h.socket.sendError = new Error("send failed");

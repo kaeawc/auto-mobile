@@ -40,7 +40,7 @@ async function harness() {
     },
   );
   await Promise.resolve();
-  client["ws"] = socket;
+  client.connectionTestHooks.socket = socket;
   client["supportedCommands"] = new Set([
     ...ANDROID_CAPABILITY_GATED_COMMANDS,
     "request_activate_accessibility_link",

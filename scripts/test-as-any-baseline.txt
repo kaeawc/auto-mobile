@@ -21,7 +21,6 @@
 9	test/features/action/TapOnElement.visionFallback.test.ts
 30	test/features/action/TapOnElement.voiceover.test.ts
 1	test/features/observe/android/CtrlProxyGestures.test.ts
-1	test/features/observe/android/CtrlProxyPackages.test.ts
 4	test/features/observe/android/CtrlProxyText.test.ts
 2	test/features/observe/ios/CtrlProxyClientRestartThreshold.test.ts
 1	test/features/observe/ios/CtrlProxyGestures.test.ts

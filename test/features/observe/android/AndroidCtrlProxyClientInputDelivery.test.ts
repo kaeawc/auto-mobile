@@ -26,7 +26,7 @@ describe("AndroidCtrlProxyClient input delivery", () => {
       transientObserver: false,
     });
     closedSpy = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
-    client["ws"] = socket;
+    client.connectionTestHooks.socket = socket;
     client["autoReconnectEnabled"] = false;
     socket.on("message", (data: string) => {
       void client["handleMessage"](data);
@@ -60,7 +60,7 @@ describe("AndroidCtrlProxyClient input delivery", () => {
         dispatched = true;
       };
       if (scenario === "not connected") {
-        client["ws"] = null;
+        client.connectionTestHooks.socket = null;
         connectionSpy.mockResolvedValue(false);
       }
       const send = spyOn(socket, "send").mockImplementation((data: unknown) => {

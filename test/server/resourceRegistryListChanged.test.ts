@@ -10,7 +10,7 @@ import { getRequestedResourceUri, ResourceRegistry } from "../../src/server/reso
 import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
-} from "../../src/server/listChangedBroadcast";
+} from "../../src/daemon/listChangedBroadcast";
 import { InstalledAppsRepository } from "../../src/db/installedAppsRepository";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

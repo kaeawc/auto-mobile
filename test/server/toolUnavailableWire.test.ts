@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DAEMON_TOOL_UNAVAILABLE_CODE, DAEMON_UNKNOWN_TOOL_CODE } from "../../src/daemon/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { isToolUnavailableWireError } from "../../src/server/toolUnavailableError";
+import { isToolUnavailableWireError } from "../../src/daemon/toolUnavailableError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 

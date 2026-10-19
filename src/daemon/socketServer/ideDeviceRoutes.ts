@@ -21,7 +21,10 @@ import {
   type CanonicalFrameDiscovery,
   type FrameDeviceIdentityPool,
 } from "../frameDeviceIdentity";
-import { preferenceSetWarning, validateTypeForPlatform } from "../../server/storageTools";
+import {
+  preferenceSetWarning,
+  validateTypeForPlatform,
+} from "../../features/storage/storageChecks";
 import {
   clearAndroidKeyValueFileDirect,
   directFileFallbackRelaunchWarning,

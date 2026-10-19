@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ListChangedKind } from "../../server/listChangedBroadcast";
+import type { ListChangedKind } from "../listChangedBroadcast";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";

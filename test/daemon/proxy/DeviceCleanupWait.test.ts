@@ -6,7 +6,7 @@ import {
 } from "../../../src/daemon/proxy/DeviceCleanupWait";
 import type { ForwardedToolCall } from "../../../src/daemon/proxy/ToolCallForwarder";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { readDeviceCleanupInProgressRefusal } from "../../../src/server/deviceSessionResult";
+import { readDeviceCleanupInProgressRefusal } from "../../../src/daemon/deviceSessionResult";
 
 const ok: ForwardedToolCall = { result: { content: [{ type: "text", text: "{}" }] } };
 

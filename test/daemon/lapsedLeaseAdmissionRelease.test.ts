@@ -11,7 +11,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
-import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
+import { sessionReleasedDuringCallPayload } from "../../src/daemon/deviceSessionResult";
 import { executionTracker, type ActiveExecution } from "../../src/daemon/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";

@@ -22,7 +22,7 @@ import {
   type ObservationBaselineStore,
 } from "../finalizeToolResponse";
 import { getStructuredField, observationOfPayload } from "../../utils/toolUtils";
-import { readToolEnvelopePayload } from "../toolEnvelopePayload";
+import { readToolEnvelopePayload } from "../../daemon/toolEnvelopePayload";
 import { isMarkedToolFailure } from "../../utils/toolFailureSignal";
 import { narrowInternalToolEnvelope } from "../../utils/internalToolPayloads";
 import {

@@ -4,7 +4,7 @@ import {
   ResourceUpdatedBroadcaster,
   LIST_CHANGED_NOTIFICATION_METHODS,
   listChangedKindForMethod,
-} from "../../src/server/listChangedBroadcast";
+} from "../../src/daemon/listChangedBroadcast";
 
 describe("listChangedKindForMethod", () => {
   test("round-trips both kinds through the shared method map", () => {

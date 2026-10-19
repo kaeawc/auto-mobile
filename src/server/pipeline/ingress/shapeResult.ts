@@ -18,7 +18,7 @@ import {
 import {
   sessionOwnershipLostPayload,
   sessionReleasedDuringCallPayload,
-} from "../../deviceSessionResult";
+} from "../../../daemon/deviceSessionResult";
 import { executionTracker } from "../../../daemon/executionTracker";
 import { forwardingLeaseConflictCause } from "../../forwardingLeaseConflictOutcome";
 import { shapeToolCallError } from "../../shapeToolCallError";

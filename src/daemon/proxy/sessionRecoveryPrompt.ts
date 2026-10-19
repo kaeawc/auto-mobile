@@ -1,1 +1,1 @@
-export { DEVICE_SESSION_RECOVERY_PROMPT } from "../../server/deviceSessionResult";
+export { DEVICE_SESSION_RECOVERY_PROMPT } from "../deviceSessionResult";

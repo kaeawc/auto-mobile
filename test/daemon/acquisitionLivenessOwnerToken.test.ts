@@ -9,7 +9,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import { getDeviceSessionIdFromResult } from "../../src/daemon/deviceSessionResult";
 import {
   DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS,
   type Session,

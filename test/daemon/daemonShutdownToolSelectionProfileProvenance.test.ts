@@ -6,7 +6,7 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarr
 import {
   PersistentToolSelectionProfileRegistry,
   type ToolSelectionProfileProvenanceStore,
-} from "../../src/server/toolSelectionProfileRegistry";
+} from "../../src/daemon/toolSelectionProfileRegistry";
 import { logger } from "../../src/utils/logger";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";

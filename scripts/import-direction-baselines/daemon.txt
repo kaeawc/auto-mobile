@@ -1,5 +1,4 @@
 src/daemon/childProcessCleanup.ts -> src/server/videoRecordingManager
-src/daemon/daemon.ts -> src/server/appearanceSessionKey
 src/daemon/daemon.ts -> src/server/bootedDeviceResources
 src/daemon/daemon.ts -> src/server/recordingSessionCleanup
 src/daemon/daemon.ts -> src/server/recordingTeardownRedrive
@@ -10,7 +9,6 @@ src/daemon/daemonHttpIngress.ts -> src/server/daemonSessionToolBindingStore
 src/daemon/daemonMcpProxy.ts -> src/server/deviceOutsideBoundSessionRefusal
 src/daemon/daemonMcpProxy.ts -> src/server/deviceSessionResult
 src/daemon/daemonMcpProxy.ts -> src/server/listChangedBroadcast
-src/daemon/daemonSessionLifecycleWiring.ts -> src/server/appearanceSessionKey
 src/daemon/daemonSessionLifecycleWiring.ts -> src/server/recordingSessionCleanup
 src/daemon/deviceDisconnectHandler.ts -> src/server/bootedDeviceResources
 src/daemon/deviceDisconnectHandler.ts -> src/server/deviceImageResources

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ActiveDeviceSelection } from "../../src/devices/ActiveDeviceSelection";
-import { DeviceReadiness } from "../../src/devices/DeviceReadiness";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import type { BootedDevice } from "../../src/models";
 

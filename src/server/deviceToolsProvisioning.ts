@@ -38,7 +38,7 @@ import { acquireUndoneIfUndelivered, undoUndeliveredAcquisition } from "../daemo
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
-import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
+import type { DeviceReadinessLevel } from "../daemon/readiness/DeviceReadiness";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
 import {

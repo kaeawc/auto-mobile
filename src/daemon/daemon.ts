@@ -187,7 +187,7 @@ import {
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { clearSessionAppearanceConfig } from "./appearanceManager";
-import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
+import { resolveAppearanceSessionKey } from "./appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../utils/NetworkState";
 import {} from "./networkStateSessionCleanup";
@@ -290,7 +290,7 @@ import {
   type TerminalReleaseJournal,
 } from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
 import {

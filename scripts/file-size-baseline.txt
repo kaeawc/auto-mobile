@@ -13,6 +13,7 @@
 1011	src/daemon/deviceRuntimeIdentity.ts
 1186	src/daemon/executionTracker.ts
 3913	src/daemon/manager.ts
+1286	src/daemon/readiness/DeviceReadiness.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
 2555	src/daemon/sessionBroker/provisioning/reconciler.ts
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
@@ -25,7 +26,6 @@
 1145	src/db/deviceSessionRepository.ts
 1082	src/db/failureAnalyticsRepository.ts
 1401	src/db/navigationRetention.ts
-1286	src/devices/DeviceReadiness.ts
 1416	src/devices/deviceBootService.ts
 1354	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts

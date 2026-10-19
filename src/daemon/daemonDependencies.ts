@@ -1,6 +1,6 @@
 import { createServer as createHttpServer } from "http";
 import type { HttpListener } from "./daemonHttpIngress";
-import { DeviceReadiness } from "../devices/DeviceReadiness";
+import { DeviceReadiness } from "./readiness/DeviceReadiness";
 import {
   createDefaultBindingExclusion,
   type BindingExclusion,

@@ -3,9 +3,9 @@ import type {
   DeviceClientSimctl,
   ResolvedDeviceIdentity,
 } from "./DeviceReadiness";
-import { ActionableError, BootedDevice } from "../models";
-import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
-import { logger } from "../utils/logger";
+import { ActionableError, BootedDevice } from "../../models";
+import { checkIosCtrlProxyOverride } from "../../utils/iosCtrlProxyOverride";
+import { logger } from "../../utils/logger";
 
 export function assertUsableIosOverride(
   iosOverride: Awaited<ReturnType<typeof checkIosCtrlProxyOverride>>,

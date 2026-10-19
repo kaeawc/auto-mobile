@@ -1,16 +1,16 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ActiveDeviceSelection } from "./ActiveDeviceSelection";
-import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
-import { CtrlProxyForwardOwnershipUnreadableError } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { describeDevices } from "./runningReadTarget";
-import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
+import { ActiveDeviceSelection } from "../../devices/ActiveDeviceSelection";
+import { ctrlProxyClientLifecycle } from "../../features/observe/ctrlProxyClientLifecycle";
+import { CtrlProxyForwardOwnershipUnreadableError } from "../../features/observe/android/foreignCtrlProxyForwardEvidence";
+import { describeDevices } from "../../devices/runningReadTarget";
+import { daemonDeviceAdmissionGate, DeviceAdmissionGate } from "../../utils/deviceAdmissionGate";
 import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
-} from "../utils/deviceExecutionBinding";
-import { errorMessage } from "../utils/describeUnknownError";
-import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
-import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
+} from "../../utils/deviceExecutionBinding";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { isIosSimulatorAlreadyStoppedError } from "../../utils/ios-cmdline-tools/simulatorStateErrors";
+import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
 import {
   ActionableError,
   BootedDevice,
@@ -18,75 +18,75 @@ import {
   Platform,
   SomePlatform,
   toActionableError,
-} from "../models";
+} from "../../models";
 import {
   assertAndroidImageRunningStateKnown,
   type DeviceManagerSimCtl,
   PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
-} from "./deviceUtils";
+} from "../../devices/deviceUtils";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
-} from "../utils/android-cmdline-tools/AdbClientFactory";
-import type { SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
-import type { IosPhysicalDeviceLister } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
-import { type DiscoverySource } from "../utils/discoverySource";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
-import { Window as WindowImpl } from "../features/observe/Window";
-import type { Window } from "../features/observe/interfaces/Window";
-import { logger } from "../utils/logger";
-import type { CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
-import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
-import { BootedDeviceDiscoveryIncompleteError } from "./deviceBootService";
-import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
-import { getDeviceCreationGate } from "./deviceCreationGate";
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import type { IosPhysicalDeviceLister } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { type DiscoverySource } from "../../utils/discoverySource";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { Window as WindowImpl } from "../../features/observe/Window";
+import type { Window } from "../../features/observe/interfaces/Window";
+import { logger } from "../../utils/logger";
+import type { CtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
+import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../ctrlProxy/IOSCtrlProxyManager";
+import { BootedDeviceDiscoveryIncompleteError } from "../../devices/deviceBootService";
+import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { PlatformDeviceManager } from "../../utils/interfaces/DeviceUtils";
+import { getDeviceCreationGate } from "../../devices/deviceCreationGate";
 import {
   createDefaultDeviceProvisioner,
   type IosSimulatorCreator,
   type ProvisionedDevice,
-} from "./deviceProvisioning";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
-import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
-import type { IOSCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import type { ObserveScreenCache } from "../models/ObserveScreenCache";
+} from "../../devices/deviceProvisioning";
+import { AndroidCtrlProxyClient } from "../../features/observe/android";
+import type { AndroidCtrlProxy } from "../../features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../features/observe/ios";
+import type { IOSCtrlProxy } from "../../features/observe/ios/IOSCtrlProxyClient";
+import { RealObserveScreen } from "../../features/observe/ObserveScreen";
+import type { ObserveScreenCache } from "../../models/ObserveScreenCache";
 import {
   createPerformanceTracker,
   createGlobalPerformanceTracker,
-} from "../utils/PerformanceTracker";
-import { storeSetupTiming } from "../server/ToolExecutionContext";
+} from "../../utils/PerformanceTracker";
+import { storeSetupTiming } from "../setupTiming";
 import {
   applyAppearanceOnConnect,
   type AppearanceOnConnectDependencies,
-} from "../server/applyAppearanceOnConnect";
-import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
-import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
-import { RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
-import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
-import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
-import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
-import { serverConfig } from "../utils/ServerConfig";
-import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
-import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
+} from "../applyAppearanceOnConnect";
+import { resolveAppearanceSessionKey } from "../appearanceSessionKey";
+import { checkIosCtrlProxyOverride } from "../../utils/iosCtrlProxyOverride";
+import { RunnerReadinessService } from "../../ctrlProxy/RunnerReadinessService";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
+import { getSharedBootAdmissionGates } from "../../features/bootAdmission/sharedBootAdmissionGates";
+import { createDefaultIosBootInstrumentation } from "../../features/iosSimFleet/defaultIosBootInstrumentation";
+import type { IosBootInstrumentation } from "../../features/iosSimFleet/IosBootInstrumentation";
+import { serverConfig } from "../../utils/ServerConfig";
+import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../utils/runnerReadinessConfig";
+import { trackProcess, waitForExit } from "../../utils/ChildProcessTracker";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
   type VirtualDeviceLifecycleLease,
-} from "./virtualDeviceLifecycleCoordinator";
-import { runWithAbortSignal } from "../utils/AbortContext";
-import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
-import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
-import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusals";
-import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
+} from "../../devices/virtualDeviceLifecycleCoordinator";
+import { runWithAbortSignal } from "../../utils/AbortContext";
+import { isEmulatorLaunchCancelledError } from "../../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
+import { terminateOwnedEmulatorProcess } from "../../devices/coldBootProcessTermination";
+import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
+import { deviceReadinessLockKey, withDeviceReadinessLock } from "../../utils/deviceReadinessLock";
 import {
   DefaultDeviceClientProvider,
   type ObserveClientFactories,

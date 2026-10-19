@@ -172,6 +172,13 @@ describe("daemonBuildIdentityStatusLines", () => {
   });
 });
 
+interface RestartToolSideCase {
+  name: string;
+  requested: DaemonOptions;
+  recorded: DaemonOptions;
+  expected: DaemonOptions;
+}
+
 describe("DaemonManager restart", () => {
   test("preserves PID-recorded global and daemon-wide tool options", async () => {
     const timer = new FakeTimer();
@@ -198,7 +205,7 @@ describe("DaemonManager restart", () => {
       options: recordedOptions,
     });
     const stopSpy = spyOn(manager, "stop").mockResolvedValue(undefined);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     await manager.restart();
 
@@ -218,7 +225,7 @@ describe("DaemonManager restart", () => {
     });
   });
 
-  test.each([
+  test.each<RestartToolSideCase>([
     {
       name: "bare restart",
       requested: {},
@@ -269,14 +276,14 @@ describe("DaemonManager restart", () => {
         running: false,
         options: recorded,
       });
-      const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+      const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
       try {
         await manager.restart(requested);
         expect(startSpy).toHaveBeenCalledWith({ ...expected, strictPort: true });
-        const restarted = startSpy.mock.calls[0][0];
+        const restarted = startSpy.mock.calls[0]?.[0];
         expect(
-          restarted.enabledTools?.filter((name) => restarted.disabledTools?.includes(name)),
+          restarted?.enabledTools?.filter((name) => restarted.disabledTools?.includes(name)),
         ).toEqual([]);
       } finally {
         startSpy.mockRestore();
@@ -319,7 +326,7 @@ describe("DaemonManager restart", () => {
       entryScript: "/new/dist/src/index.js",
     };
     const statusSpy = spyOn(manager, "status").mockResolvedValue(successorStatus);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       const result = await manager.restart(
@@ -366,7 +373,7 @@ describe("DaemonManager restart", () => {
       },
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await expect(manager.restart({}, expected)).resolves.toBe("joined");
@@ -472,7 +479,7 @@ describe("DaemonManager restart", () => {
       entryScript: "/old/dist/src/index.js",
     };
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await expect(manager.restart({}, expected)).rejects.toMatchObject({
@@ -522,7 +529,7 @@ describe("DaemonManager restart", () => {
       portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await expect(manager.restartAdmitted({}, "")).rejects.toThrow("maintenance admission token");
@@ -622,7 +629,7 @@ describe("DaemonManager restart", () => {
       buildId: "legacy-build",
       entryScript: "/legacy/dist/src/index.js",
     };
-    const client = new FakeDaemonClient();
+    const client = new FakeDaemonClient({});
     const signaler = new FakeDaemonProcessSignaler();
     const manager = new DaemonManager({
       clientFactory: () => client,
@@ -634,7 +641,7 @@ describe("DaemonManager restart", () => {
       processSignaler: signaler,
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await expect(manager.restart({}, expected)).rejects.toMatchObject({
@@ -4020,7 +4027,6 @@ describe("Daemon manager process detection", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const client = new FakeDaemonClient({});
-    client.shouldFailConnect = true;
     const connectSpy = spyOn(client, "connect");
     const processFinder = new FakeDaemonProcessFinder([
       { pid: 301, ppid: 1, command: "bun /worktree-b/dist/src/index.js --daemon-mode" },
@@ -4861,7 +4867,7 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO: new FakeAbsentDaemonIdentity(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await manager.restart();
@@ -4906,7 +4912,7 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO: new FakeAbsentDaemonIdentity(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       // A foreign daemon reusing the PID is not this namespace's replacement, so the
@@ -4975,7 +4981,7 @@ describe("Daemon manager process detection", () => {
       portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await expect(manager.restart()).resolves.toBe("restarted");
@@ -5023,7 +5029,7 @@ describe("Daemon manager process detection", () => {
       portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await manager.restart();
@@ -5077,7 +5083,7 @@ describe("Daemon manager process detection", () => {
     const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
       livePids.delete(recordedPid);
     });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await manager.restart();
@@ -5142,7 +5148,7 @@ describe("Daemon manager process detection", () => {
       processStartedAt: recordedPid * 1_000,
       processGenerationToken: `generation-${recordedPid}`,
     });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
     const killSpy = spyOn(process, "kill").mockImplementation((_pid, signal) => {
       if (signal === "SIGKILL") {
         fakeTimer.setTimeout(() => {
@@ -5269,7 +5275,7 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO: new FakeAbsentDaemonIdentity(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
     const restart = manager.restart();
     let restartSettled = false;
     void restart.then(
@@ -5333,7 +5339,7 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO: new FakeAbsentDaemonIdentity(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await manager.restart();
@@ -5385,7 +5391,7 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO: new FakeAbsentDaemonIdentity(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       let caught: unknown;
@@ -5435,7 +5441,7 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO: new FakeAbsentDaemonIdentity(),
     });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await expect(manager.restart()).rejects.toThrow("port 3000");
@@ -5475,7 +5481,7 @@ describe("Daemon manager process detection", () => {
     const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
       livePids.delete(recordedPid);
     });
-    const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
+    const startSpy = spyOn(manager, "start").mockResolvedValue("started");
 
     try {
       await manager.restart();

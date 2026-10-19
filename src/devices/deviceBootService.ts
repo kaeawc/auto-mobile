@@ -32,7 +32,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
+import { bootAdmissionServices } from "./bootAdmissionServices";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -977,7 +977,7 @@ export class DeviceBootService {
     const checkBootCapacity =
       this.dependencies.checkBootCapacity ??
       ((platform: Platform, signal?: AbortSignal) =>
-        assertBootCapacityAvailable(platform, { signal }));
+        bootAdmissionServices.assertBootCapacityAvailable(platform, { signal }));
     await this.execution.runPhase(context, "checking boot capacity", (signal) =>
       checkBootCapacity(criteria.platform, signal),
     );

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { InMemoryToolSelectionProfileRegistry } from "../../src/server/toolSelectionProfileRegistry";
+import { InMemoryToolSelectionProfileRegistry } from "../../src/server/InMemoryToolSelectionProfileRegistry";
 import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { INTERNAL_ACTIONS_COMPACT_METADATA_PARAM } from "../../src/daemon/constants";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";

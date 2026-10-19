@@ -399,6 +399,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private performanceTiming: AndroidPerfTiming[] | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
+  private waitForConnectionResult: boolean | undefined;
+  private lastConnectionFailure: { forwardingLeaseConflict: boolean; message?: string } | undefined;
 
   // Failure modes
   private failureMap: Map<string, Error> = new Map();
@@ -1413,10 +1415,28 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     throw new Error("FakeCtrlProxy.getSupportedCommands is not scripted");
   }
 
-  waitForConnection(
+  /** Result {@link waitForConnection} reports; defaults to the {@link setConnected} state. */
+  setWaitForConnectionResult(connected: boolean): void {
+    this.waitForConnectionResult = connected;
+  }
+
+  async waitForConnection(
     ..._args: Parameters<AndroidCtrlProxy["waitForConnection"]>
   ): ReturnType<AndroidCtrlProxy["waitForConnection"]> {
-    throw new Error("FakeCtrlProxy.waitForConnection is not scripted");
+    return this.waitForConnectionResult ?? this.isConnectedState;
+  }
+
+  /** Record the most recent connect failure a real client would report. */
+  setLastConnectionFailure(failure: { forwardingLeaseConflict: boolean; message?: string }): void {
+    this.lastConnectionFailure = failure;
+  }
+
+  isLastConnectionFailureForwardingLeaseConflict(): boolean {
+    return this.lastConnectionFailure?.forwardingLeaseConflict ?? false;
+  }
+
+  getLastConnectionFailureMessage(): string | undefined {
+    return this.lastConnectionFailure?.message;
   }
 
   async verifyServiceReady(): Promise<boolean> {

@@ -1,3 +1,4 @@
+import { wireCapture } from "../../helpers/wireCapture";
 import { expect, test } from "bun:test";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
@@ -75,14 +76,19 @@ test("folded padded row label is identical in observe, exact resolution and cont
       },
     },
   };
-  const row = observed(hierarchy).find((entry) => entry.affordances.includes("tap"))!;
+  const row = observed(wireCapture(hierarchy)).find((entry) => entry.affordances.includes("tap"))!;
   expect(row.label).toBe("8:30 AM  Alarm");
   expect(row.label).toBe(row.label?.trim());
   const resolver = new ElementResolver();
   expect(
-    resolver.resolve(project(hierarchy), { text: row.label }, { action: "tap" }).chosen?.bounds,
+    resolver.resolve(project(wireCapture(hierarchy)), { text: row.label }, { action: "tap" }).chosen
+      ?.bounds,
   ).toEqual(bounds);
-  const partial = resolver.resolve(project(hierarchy), { text: "8:30" }, { action: "tap" });
+  const partial = resolver.resolve(
+    project(wireCapture(hierarchy)),
+    { text: "8:30" },
+    { action: "tap" },
+  );
   expect(partial.matchMode).toBe("contains");
   expect(partial.chosen?.bounds).toEqual(bounds);
 });
@@ -108,8 +114,8 @@ test("tap and highlight agree on scoped default target and ranked explicit indic
   };
   const container = { elementId: "scope" };
   const selector = new ResolverElementSelector();
-  const tap = selector.selectByText(hierarchy, "Save", { container });
-  const highlight = selector.selectByText(hierarchy, "Save", {
+  const tap = selector.selectByText(wireCapture(hierarchy), "Save", { container });
+  const highlight = selector.selectByText(wireCapture(hierarchy), "Save", {
     container,
     intentAction: "highlight",
   });
@@ -117,6 +123,8 @@ test("tap and highlight agree on scoped default target and ranked explicit indic
   expect(tap.element?.["resource-id"]).toBe("label");
   expect(highlight.element?.["resource-id"]).toBe("label");
   expect(
-    selector.selectByText(hierarchy, "Save", { container, index: 0 }).element?.["resource-id"],
+    selector.selectByText(wireCapture(hierarchy), "Save", { container, index: 0 }).element?.[
+      "resource-id"
+    ],
   ).toBe("label");
 });

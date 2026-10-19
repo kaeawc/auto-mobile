@@ -8,7 +8,7 @@ import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import {
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
-} from "../../../daemon/daemonRestartAdmission";
+} from "../../../daemon/daemonRestartPending";
 import { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";

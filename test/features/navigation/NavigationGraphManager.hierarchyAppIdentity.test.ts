@@ -62,7 +62,7 @@ describe("hierarchy app identity", () => {
   ): Promise<void> {
     timer.setCurrentTime(SDK_TIME + gap);
     await manager.recordHierarchyNavigation({
-      packageName,
+      packageName: packageName ?? undefined,
       fromFingerprint: null,
       toFingerprint: hash,
       timestamp: timer.now(),

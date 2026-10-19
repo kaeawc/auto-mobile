@@ -9,7 +9,7 @@ import type {
 } from "../../src/daemon/webrtcStreamSocketTypes";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
 import { ActionableError } from "../../src/models/ActionableError";
 
 const request: WebRtcStreamSocketRequest = { action: "status", id: "request-1" };

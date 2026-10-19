@@ -57,7 +57,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
+import { forgetDaemonSessionBindingScope } from "./daemonSessionBindingScopes";
 import {} from "./toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
@@ -188,7 +188,7 @@ import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../features/deviceLifecycle
 
 /** Slack after the handler's settlement wait for it to finish rollback and build its result. */
 const PROVISION_CANCELLATION_OUTCOME_GRACE_MS = 2_000;
-import { preferenceSetWarning, validateTypeForPlatform } from "../server/storageTools";
+import { preferenceSetWarning, validateTypeForPlatform } from "../features/storage/storageChecks";
 import {
   clearAndroidKeyValueFileDirect,
   directFileFallbackRelaunchWarning,
@@ -992,7 +992,7 @@ export class UnixSocketServer {
    * the daemon-scoped store would otherwise keep one entry per connection forever.
    */
   forgetSessionToolBindings: (socketSessionId: string) => void = (socketSessionId) =>
-    daemonSessionToolBindingStore().forget(socketSessionId);
+    forgetDaemonSessionBindingScope(socketSessionId);
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.

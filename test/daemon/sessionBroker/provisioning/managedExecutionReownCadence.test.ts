@@ -895,6 +895,56 @@ for (const elapsed of [MAX_UNCONFIRMED_MS, MAX_UNCONFIRMED_MS + 1]) {
   });
 }
 
+test("direct confirmations leave a fresh retry window for later foreign ownership", async () => {
+  const h = await harness();
+  for (let attempt = 0; attempt < MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS; attempt++) {
+    await h.reowner.reown(["a"]);
+  }
+  await h.step(MAX_UNCONFIRMED_MS);
+  const read = spyOn(h.faulty, "findExecutionAssignments").mockResolvedValue([h.assignmentA]);
+  try {
+    h.behavior.retry = true;
+    await h.reowner.reown(["a"]);
+    expect(h.reowner.ownershipState("a")).toBe("unconfirmed");
+    expect(h.reowner.automationRefusal("a")).toMatchObject({ retryAfterMs: 1_000 });
+    await h.step(MAX_UNCONFIRMED_MS - 1);
+    expect(h.lost).toEqual([]);
+    await h.step(1);
+    expect(h.lost).toEqual([2 * MAX_UNCONFIRMED_MS]);
+    expect(h.calls.length).toBeGreaterThanOrEqual(1 + MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+  } finally {
+    read.mockRestore();
+  }
+});
+
+test("a second recovery resets the active retry episode and its deadline", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  const firstRecovery = Promise.withResolvers<void>();
+  h.reowner.noteRecovering("a", firstRecovery.promise);
+  firstRecovery.resolve();
+  await h.step(75);
+  expect(h.calls).toHaveLength(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+
+  const recovery = Promise.withResolvers<void>();
+  h.reowner.noteRecovering("a", recovery.promise);
+  await h.step(2 * MAX_UNCONFIRMED_MS);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  expect(h.calls).toHaveLength(MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+  expect(h.lost).toEqual([]);
+
+  const recoveredAt = h.timer.now();
+  recovery.resolve();
+  await h.step(0);
+  expect(h.calls.map((call) => call.at)).toEqual([0, 25, 75, recoveredAt]);
+  expect(h.reowner.automationRefusal("a")).toMatchObject({ retryAfterMs: 1_000 });
+  await h.step(MAX_UNCONFIRMED_MS - 1);
+  expect(h.lost).toEqual([]);
+  await h.step(1);
+  expect(h.lost).toEqual([recoveredAt + MAX_UNCONFIRMED_MS]);
+  expect(h.calls.length).toBeGreaterThanOrEqual(2 * MANAGED_EXECUTION_REOWN_MIN_ATTEMPTS);
+});
+
 test("recovery beyond the bound leaves a full attempt budget after recovery", async () => {
   const h = await harness();
   const recovery = Promise.withResolvers<void>();

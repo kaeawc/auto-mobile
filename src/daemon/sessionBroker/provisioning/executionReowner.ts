@@ -164,6 +164,7 @@ export class ManagedExecutionReowner {
       return;
     }
     this.isPresent(sessionUuid);
+    this.resetEpisode(sessionUuid);
     this.recovering.set(sessionUuid, recovered);
     this.recoveredSessions.add(sessionUuid);
     this.ownership.set(sessionUuid, "unconfirmed");
@@ -307,6 +308,12 @@ export class ManagedExecutionReowner {
       (this.deps.timer ?? defaultTimer).clearTimeout(episode.deadline);
       episode.deadline = undefined;
     }
+  }
+
+  private resetEpisode(id: string): void {
+    this.clearDeadline(id);
+    this.episodes.get(id)?.stop.abort();
+    this.episodes.delete(id);
   }
 
   private logUnconfirmed(id: string, message: string, error?: unknown): void {
@@ -502,21 +509,23 @@ export class ManagedExecutionReowner {
   }
 
   private settleOwnership(id: string, outcome: ReownAttempt["outcome"]): void {
-    if (this.closed || !this.isPresent(id) || this.ownership.get(id) !== "unconfirmed") {
+    if (this.closed || !this.isPresent(id)) {
       return;
     }
+    const episode = this.episode(id);
     if (outcome !== "retry") {
-      this.clearDeadline(id);
+      this.resetEpisode(id);
+    }
+    if (this.ownership.get(id) !== "unconfirmed") {
+      return;
     }
     if (outcome === "confirmed") {
       this.forgetRegistrySteps(id);
       this.ownership.delete(id);
       logger.info(
-        `[Bindings] Session ${id} ownership confirmed after ${(this.deps.timer ?? defaultTimer).now() - this.episode(id).sinceMs} ms (${this.episode(id).attempts} attempts); re-owned by daemon ${this.deps.owner().daemonId}.`,
+        `[Bindings] Session ${id} ownership confirmed after ${(this.deps.timer ?? defaultTimer).now() - episode.sinceMs} ms (${episode.attempts} attempts); re-owned by daemon ${this.deps.owner().daemonId}.`,
       );
       this.resolveHold(id, "teardown");
-      this.episodes.get(id)?.stop.abort();
-      this.episodes.delete(id);
       this.notifyOwnership(id, "confirmed");
     }
     if (outcome === "lost") {
@@ -526,7 +535,6 @@ export class ManagedExecutionReowner {
         `[Bindings] Session '${id}' no longer owns its broker binding; acquire a new session.`,
       );
       this.resolveHold(id, "skip-device-writes");
-      this.episodes.get(id)?.stop.abort();
       this.notifyOwnership(id, "lost");
     }
   }

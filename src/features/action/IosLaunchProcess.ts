@@ -413,7 +413,7 @@ export class IosLaunchProcess {
         requestAbortController.abort(signal.reason);
         // The request may ignore cancellation; the settlement grace remains a hard bound.
         void retarget.catch((lateError) =>
-          logger.warn("[LaunchApp] Retarget failed after cancellation", lateError),
+          logger.debug("[LaunchApp] Retarget failed after cancellation", lateError),
         );
       }
       throw error;

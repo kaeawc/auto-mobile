@@ -1,4 +1,4 @@
-import { drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
@@ -3707,10 +3707,14 @@ describe("LaunchApp", () => {
         bundleId: userBundleId,
         launchSuccess: true,
       });
+      const lateReply =
+        Promise.withResolvers<Awaited<ReturnType<typeof fakeCtrlProxy.requestLaunchApp>>>();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
       let receivedSignal: AbortSignal | undefined;
       fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
         receivedSignal = signal;
-        return await new Promise(() => {});
+        return await lateReply.promise;
       };
       let settled = false;
       const pending = iosLaunchApp
@@ -3735,7 +3739,20 @@ describe("LaunchApp", () => {
         expect(settled).toBe(true);
         expect(await pending).toBe(cancellation);
         expect(receivedSignal?.aborted).toBe(true);
+        lateReply.reject(cancellation);
+        await drainMicrotasks(100);
+        expect(
+          warn.mock.calls.filter(([message]) =>
+            message.includes("Retarget failed after cancellation"),
+          ),
+        ).toHaveLength(0);
+        expect(debug).toHaveBeenCalledWith(
+          "[LaunchApp] Retarget failed after cancellation",
+          cancellation,
+        );
       } finally {
+        warn.mockRestore();
+        debug.mockRestore();
         cleanup();
       }
     });

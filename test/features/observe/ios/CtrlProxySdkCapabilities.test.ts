@@ -92,6 +92,185 @@ const timeoutFailure = {
 };
 
 describe("SDK capability transport uncertainty", () => {
+  test.each(["abort", "deadline"] as const)(
+    "the owner's %s leaves a longer-budget joiner alive",
+    async (boundary) => {
+      const h = createHarness(undefined, false);
+      const controller = new AbortController();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const owner = runWithAbortSignal(
+        controller.signal,
+        () =>
+          h.probe.ensureSdkCapability("database", undefined, {
+            abortSignal: controller.signal,
+            deadlineMs: h.timer.now() + 100,
+          }),
+        {
+          getDeadlineMs: () => 100,
+          textState: { dispatched: () => () => {} },
+        },
+      );
+      const ownerResult = owner.catch((error: unknown) => error);
+      await drainUntil(() => h.state.attempts === 1, { description: "owner probe" });
+      const joiner = h.probe.ensureSdkCapability("highlight", undefined, {
+        deadlineMs: h.timer.now() + 1000,
+      });
+      try {
+        if (boundary === "abort") controller.abort();
+        else h.timer.advanceTime(100);
+        expect(await ownerResult).toMatchObject({
+          code: boundary === "abort" ? "cancelled" : "timeout",
+        });
+        expect(h.requestManager.getPendingCount()).toBe(1);
+        h.requestManager.resolve(h.requestManager.getPendingIds()[0]!, {
+          ...available,
+          totalTimeMs: 100,
+        });
+        expect(await joiner).toBe(true);
+        expect(h.state.attempts).toBe(1);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("a short-deadline joiner leaves its owner alive", async () => {
+    const h = createHarness(undefined, false);
+    const owner = h.probe.ensureSdkCapability("database");
+    await drainUntil(() => h.state.attempts === 1, { description: "owner probe" });
+    const joiner = h.probe
+      .ensureSdkCapability("highlight", undefined, { deadlineMs: 100 })
+      .catch((error: unknown) => error);
+    h.timer.advanceTime(100);
+    expect(await joiner).toMatchObject({ code: "timeout" });
+    expect(h.requestManager.getPendingCount()).toBe(1);
+    h.requestManager.resolve(h.requestManager.getPendingIds()[0]!, {
+      ...available,
+      totalTimeMs: 100,
+    });
+    expect(await owner).toBe(true);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each([true, false])(
+    "direct probe cancellation during connection (connected=%s) is debug-only",
+    async (connected) => {
+      const h = createHarness(undefined, false);
+      const controller = new AbortController();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      h.context.ensureConnected = async () => {
+        controller.abort();
+        return connected;
+      };
+      try {
+        expect(
+          await h.probe.requestSdkCapabilities(0, { abortSignal: controller.signal }),
+        ).toMatchObject({
+          status: "unknown",
+          error: { code: "cancelled" },
+        });
+        expect(h.state.attempts).toBe(0);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+        expect(warn).not.toHaveBeenCalled();
+        expect(debug).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+        debug.mockRestore();
+      }
+    },
+  );
+
+  test("all callers leaving cancels the shared request and permits a fresh probe", async () => {
+    const h = createHarness(undefined, false);
+    const first = new AbortController();
+    const second = new AbortController();
+    const a = h.probe
+      .ensureSdkCapability("database", undefined, { abortSignal: first.signal })
+      .catch((error: unknown) => error);
+    const b = h.probe
+      .ensureSdkCapability("highlight", undefined, { abortSignal: second.signal })
+      .catch((error: unknown) => error);
+    await drainUntil(() => h.state.attempts === 1, { description: "shared probe" });
+    first.abort();
+    expect(await a).toMatchObject({ code: "cancelled" });
+    expect(h.requestManager.getPendingCount()).toBe(1);
+    second.abort();
+    expect(await b).toMatchObject({ code: "cancelled" });
+    await drainMicrotasks(100);
+    expect(h.requestManager.getPendingCount()).toBe(0);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    const fresh = h.probe.ensureSdkCapability("database");
+    await drainUntil(() => h.state.attempts === 2, { description: "fresh probe" });
+    h.requestManager.resolve(h.requestManager.getPendingIds()[0]!, {
+      ...available,
+      totalTimeMs: 0,
+    });
+    expect(await fresh).toBe(true);
+  });
+
+  test("classifies a deadline expiring during connection acquisition as timeout", async () => {
+    const h = createHarness(undefined, false);
+    h.context.ensureConnected = async () => {
+      h.timer.setCurrentTime(100);
+      return true;
+    };
+    expect(await h.probe.requestSdkCapabilities(0, { deadlineMs: 100 })).toMatchObject({
+      status: "unknown",
+      error: { code: "timeout" },
+    });
+    expect(h.state.attempts).toBe(0);
+  });
+
+  test.each(["failure", "timeout", "deadline"] as const)(
+    "release sends the simulation clear after mock-sync %s",
+    async (boundary) => {
+      const timer = new FakeTimer();
+      const frames: Array<Record<string, unknown>> = [];
+      const client = IOSCtrlProxyClient.createForTesting(
+        { deviceId: "release-clear-test", platform: "ios", name: "fake" },
+        8765,
+        () => new FakeOpenSocket(),
+        timer,
+      );
+      const send = spyOn(client, "sendMessage").mockImplementation((data) => {
+        frames.push(JSON.parse(data));
+        return true;
+      });
+      const ensure = spyOn(
+        client.getSdkCapabilityTestHooks(),
+        "ensureSdkCapability",
+      ).mockImplementation(async () => {
+        if (boundary === "deadline") {
+          timer.setCurrentTime(100);
+          return false;
+        }
+        throw new SdkCapabilityQueryError(
+          boundary === "timeout" ? "timeout" : "not_connected",
+          "probe failed",
+        );
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await client.syncNetworkStateFromHost({ deadlineMs: 100 });
+        expect(frames).toContainEqual(
+          expect.objectContaining({
+            type: "set_network_error_simulation",
+            enabled: false,
+          }),
+        );
+        expect(warn).toHaveBeenCalledTimes(boundary === "deadline" ? 0 : 1);
+      } finally {
+        send.mockRestore();
+        ensure.mockRestore();
+        warn.mockRestore();
+        await client.close();
+      }
+    },
+  );
+
   test("bounds a probe by the caller deadline without starting a retry", async () => {
     const { probe, state, timer, requestManager } = createHarness(undefined, false);
     const pending = probe.ensureSdkCapability("database", undefined, {
@@ -137,7 +316,7 @@ describe("SDK capability transport uncertainty", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("uses the remaining caller budget instead of the default probe timeout", async () => {
+  test("keeps the caller deadline while the shared probe retries on its own budget", async () => {
     const h = createHarness(undefined, false);
     let settled = false;
     const pending = h.probe
@@ -152,11 +331,11 @@ describe("SDK capability transport uncertainty", () => {
     h.timer.advanceTime(IOS_HIERARCHY_REQUEST_TIMEOUT_MS);
     await drainMicrotasks(100);
     expect(settled).toBe(false);
-    expect(h.state.attempts).toBe(1);
+    expect(h.state.attempts).toBe(2);
     h.timer.advanceTime(5000);
     await drainUntil(() => settled, { description: "explicit SDK budget expires" });
     expect(await pending).toMatchObject({ code: "timeout", retryable: true });
-    expect(h.state.attempts).toBe(1);
+    expect(h.state.attempts).toBe(2);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
   });
 
@@ -183,6 +362,7 @@ describe("SDK capability transport uncertainty", () => {
       probe.ensureSdkCapability("database", undefined, { deadlineMs: timer.now() }),
     ).rejects.toMatchObject({ code: "timeout" });
     expect(state.attempts).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("returns capabilities and unavailable as distinct successful probe outcomes", async () => {

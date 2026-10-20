@@ -234,6 +234,7 @@ export class CtrlProxyDatabase {
       ...options,
       cancelScreenshotBackoff: false,
       notConnectedError: () => {
+        options.abortSignal?.throwIfAborted();
         throw new Error("Failed to connect to CtrlProxy");
       },
       unsupportedCommandError: (_type, error) => {

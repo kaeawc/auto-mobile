@@ -885,12 +885,14 @@ export class IOSCtrlProxyClient extends IosCtrlProxyDelegatingFacade implements 
   public async syncNetworkStateFromHost(
     options: SdkCapabilityQueryOptions = sdkCapabilityQueryOptions(this.timer),
   ): Promise<void> {
-    await this.syncNetworkMockRulesIfAvailable(options);
-    options.abortSignal?.throwIfAborted();
-    if (options.deadlineMs !== undefined && this.timer.now() >= options.deadlineMs) {
-      throw new Error("Network state sync deadline expired");
+    try {
+      await this.syncNetworkMockRulesIfAvailable(options);
+    } catch (error) {
+      // Release cleanup is best effort; a failed mock sync must not retain error simulation.
+      logger.warn("[IOSCtrlProxyClient] Failed to sync network mock rules during cleanup", error);
+    } finally {
+      this.networkSync.syncNetworkErrorSimulationToDevice();
     }
-    this.networkSync.syncNetworkErrorSimulationToDevice();
   }
 
   private syncHierarchyCadenceToDevice(): void {

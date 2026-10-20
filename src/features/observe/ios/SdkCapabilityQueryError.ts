@@ -9,7 +9,7 @@ export class SdkCapabilityQueryError extends ActionableError {
   }
 
   constructor(
-    readonly code: "timeout" | "not_connected" | "sdk_capability_query_failed",
+    readonly code: "cancelled" | "timeout" | "not_connected" | "sdk_capability_query_failed",
     message: string,
     options?: ErrorOptions,
   ) {

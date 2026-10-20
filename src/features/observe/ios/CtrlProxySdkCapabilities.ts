@@ -2,6 +2,7 @@ import {
   combineAbortSignals,
   combineWithAmbientAbort,
   getRequestContext,
+  runOutsideRequestContext,
 } from "../../../utils/AbortContext";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -85,7 +86,8 @@ export class CtrlProxySdkCapabilities {
 
   private sdkCapabilityRefreshInFlight: {
     generation: number;
-    options: SdkCapabilityQueryOptions;
+    controller: AbortController;
+    waiters: number;
     promise: Promise<SdkCapabilityProbeResult>;
   } | null = null;
 
@@ -125,21 +127,25 @@ export class CtrlProxySdkCapabilities {
       return { status: "unavailable" };
     }
 
+    // Do not start shared work for a caller that has already left.
+    if (
+      options.abortSignal?.aborted ||
+      (options.deadlineMs !== undefined && options.deadlineMs <= this.host.timer.now())
+    ) {
+      return this.waitForSharedProbe(Promise.resolve({ status: "unavailable" }), options);
+    }
     const generation = this.sdkCapabilityGeneration;
     if (this.sdkCapabilityRefreshInFlight?.generation === generation) {
-      const inFlight = this.sdkCapabilityRefreshInFlight;
-      if (
-        inFlight.options.deadlineMs === options.deadlineMs &&
-        inFlight.options.abortSignal === options.abortSignal
-      ) {
-        return inFlight.promise;
-      }
-      // A waiter owns its bound, never the shared probe started by another caller.
-      return this.waitForSharedProbe(inFlight.promise, options);
+      return this.waitForProbe(this.sdkCapabilityRefreshInFlight, options);
     }
 
-    const promise = this.requestSdkCapabilities(generation, options);
-    const inFlight = { generation, options, promise };
+    // The probe owns its timeout/retry budget; no request's ambient deadline or
+    // signal may terminate work that another caller is still waiting for.
+    const controller = new AbortController();
+    const promise = runOutsideRequestContext(() =>
+      this.requestSdkCapabilities(generation, { abortSignal: controller.signal }),
+    );
+    const inFlight = { generation, controller, waiters: 0, promise };
     this.sdkCapabilityRefreshInFlight = inFlight;
     void promise
       .finally(() => {
@@ -158,7 +164,25 @@ export class CtrlProxySdkCapabilities {
           error,
         );
       });
-    return promise;
+    return this.waitForProbe(inFlight, options);
+  }
+
+  private async waitForProbe(
+    inFlight: NonNullable<CtrlProxySdkCapabilities["sdkCapabilityRefreshInFlight"]>,
+    options: SdkCapabilityQueryOptions,
+  ): Promise<SdkCapabilityProbeResult> {
+    inFlight.waiters++;
+    try {
+      return await this.waitForSharedProbe(inFlight.promise, options);
+    } finally {
+      inFlight.waiters--;
+      if (inFlight.waiters === 0) {
+        if (this.sdkCapabilityRefreshInFlight === inFlight) {
+          this.sdkCapabilityRefreshInFlight = null;
+        }
+        inFlight.controller.abort();
+      }
+    }
   }
 
   private async waitForSharedProbe(
@@ -166,6 +190,12 @@ export class CtrlProxySdkCapabilities {
     options: SdkCapabilityQueryOptions,
   ): Promise<SdkCapabilityProbeResult> {
     try {
+      if (options.deadlineMs !== undefined && options.deadlineMs <= this.host.timer.now()) {
+        throw new SdkCapabilityQueryError(
+          "timeout",
+          "SDK capability query exhausted the caller deadline",
+        );
+      }
       return await raceWithDeadline(promise, {
         timer: this.host.timer,
         timeoutMs:
@@ -185,17 +215,16 @@ export class CtrlProxySdkCapabilities {
         throw error;
       }
       if (error instanceof SdkCapabilityQueryError) {
-        logger.warn("[IOSCtrlProxyClient] SDK capability waiter failed", error);
+        logger.debug("[IOSCtrlProxyClient] SDK capability waiter deadline expired", error);
         return { status: "unknown", error };
       }
-      logger.warn("[IOSCtrlProxyClient] SDK capability waiter cancelled", error);
+      // Caller cancellation is expected and does not invalidate the shared result.
+      logger.debug("[IOSCtrlProxyClient] SDK capability waiter cancelled", error);
       return {
         status: "unknown",
-        error: new SdkCapabilityQueryError(
-          "sdk_capability_query_failed",
-          "SDK capability query cancelled",
-          { cause: error },
-        ),
+        error: new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled", {
+          cause: error,
+        }),
       };
     }
   }
@@ -242,7 +271,9 @@ export class CtrlProxySdkCapabilities {
       return {
         status: "unknown",
         error: new SdkCapabilityQueryError(
-          "sdk_capability_query_failed",
+          result.error === "Request deadline expired before dispatch"
+            ? "timeout"
+            : "sdk_capability_query_failed",
           `SDK capability query failed: ${result.error ?? "invalid capability reply"}`,
         ),
       };
@@ -295,14 +326,17 @@ export class CtrlProxySdkCapabilities {
             abortSignal,
             cancelScreenshotBackoff: false,
             errorLabel: "SDK capability query",
-            notConnectedError: () => ({
-              success: false,
-              totalTimeMs: 0,
-              probeError: new SdkCapabilityQueryError(
-                "not_connected",
-                "SDK capability query not connected to CtrlProxy",
-              ),
-            }),
+            notConnectedError: () => {
+              options.abortSignal?.throwIfAborted();
+              return {
+                success: false,
+                totalTimeMs: 0,
+                probeError: new SdkCapabilityQueryError(
+                  "not_connected",
+                  "SDK capability query not connected to CtrlProxy",
+                ),
+              };
+            },
             timeoutError: (timeoutMs) => ({
               success: false,
               totalTimeMs: timeoutMs,
@@ -335,6 +369,17 @@ export class CtrlProxySdkCapabilities {
         },
       );
     } catch (error) {
+      if (options.abortSignal?.aborted) {
+        // No caller still needs this request, or a direct caller cancelled it.
+        logger.debug("[IOSCtrlProxyClient] SDK capability query cancelled", error);
+        return {
+          success: false,
+          totalTimeMs: 0,
+          probeError: new SdkCapabilityQueryError("cancelled", "SDK capability query cancelled", {
+            cause: error,
+          }),
+        };
+      }
       if (error instanceof SdkCapabilityQueryError) {
         logger.warn("[IOSCtrlProxyClient] SDK capability query failed", error);
         return { success: false, totalTimeMs: timeoutMs, probeError: error };

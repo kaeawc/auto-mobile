@@ -171,8 +171,7 @@ for (const wedged of ["network and clock", "clock"] as const) {
     await flush();
     expect(gateSettled).toBe(true);
     expect(pendingSettled).toBe(false);
-    h.timer.advanceTime(gateCap + 10_000);
-    await flush();
+    await h.timer.advanceTimeAsync(gateCap + 10_000, flush);
     expect(pendingSettled).toBe(false);
     expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
     expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(

@@ -1,4 +1,8 @@
 import type { ReadResourceResult } from "@modelcontextprotocol/server";
+import {
+  resetBootedDevicesResourceCache as invalidateBootedResourceViaDaemon,
+  notifyBootedDeviceResourcesUpdated as notifyBootedResourceViaDaemon,
+} from "../../../src/daemon/deviceResourceInvalidation";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../../src/utils/execResult";
 import { listBootedDevicesForResource } from "../../../src/server/resourceDeviceResolver";
@@ -292,7 +296,7 @@ describe("MCP Booted Device Resources", () => {
     await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(2);
 
-    resetBootedDevicesResourceCache();
+    invalidateBootedResourceViaDaemon();
     await getBootedDevicesForPlatforms(["android"], timer, deps);
     expect(fakeDeviceUtils.getCallCount("getBootedDevices:android")).toBe(3);
   });
@@ -1289,7 +1293,7 @@ describe("MCP Booted Device Resources", () => {
         },
       );
       try {
-        await notifyBootedDeviceResourcesUpdated();
+        await notifyBootedResourceViaDaemon();
         expect(notify).toHaveBeenCalledTimes(1);
         expect(fakeDeviceUtils.getCallCount("getBootedDevices:ios")).toBe(2);
       } finally {

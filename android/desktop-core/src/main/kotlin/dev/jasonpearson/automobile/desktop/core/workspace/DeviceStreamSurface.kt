@@ -161,10 +161,13 @@ private fun androidx.compose.foundation.layout.BoxScope.DeviceQualityOverlay(
       remember(column.deviceId) { mutableStateOf(qualityController.autoAdjustEnabled) }
     var overlayExpanded by remember(column.deviceId) { mutableStateOf(false) }
     StreamQualityControls(
-      currentQuality = currentQuality,
-      actualFps = actualFps,
-      autoAdjustEnabled = autoAdjust,
-      expanded = overlayExpanded,
+      state =
+        StreamQualityState(
+          currentQuality = currentQuality,
+          actualFps = actualFps,
+          autoAdjustEnabled = autoAdjust,
+          expanded = overlayExpanded,
+        ),
       onToggleExpanded = { overlayExpanded = !overlayExpanded },
       onSelectQuality = {
         qualityController.selectQuality(it)

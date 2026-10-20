@@ -133,7 +133,13 @@ export class SimCtlInventory {
   private static recordedDeviceListRequestSequence = 0;
 
   private static inFlightDeviceListRequestSequence: number | null = null;
+  private static readonly simulatorDisplays = new Map<
+    string,
+    { lastUsedAt?: string; displays?: SimulatorDisplay[] }
+  >();
+
   static invalidateDeviceListCache(): void {
+    SimCtlInventory.simulatorDisplays.clear();
     SimCtlInventory.deviceListCache = null;
     SimCtlInventory.lastGoodDeviceList = null;
     SimCtlInventory.inFlightDeviceList = null;
@@ -379,6 +385,7 @@ export class SimCtlInventory {
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
+    this.retireStoppedSimulatorDisplays(simulatorList);
     const devices: DeviceInfo[] = [];
     for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
       for (const device of runtimeDevices) {
@@ -423,21 +430,48 @@ export class SimCtlInventory {
     return devices;
   }
 
+  private retireStoppedSimulatorDisplays(simulatorList: SimulatorList): void {
+    const bootedIds = new Set(
+      Object.values(simulatorList.devices).flatMap((devices) =>
+        devices.filter((device) => device.state === "Booted").map((device) => device.udid),
+      ),
+    );
+    for (const udid of SimCtlInventory.simulatorDisplays.keys()) {
+      if (!bootedIds.has(udid)) {
+        SimCtlInventory.simulatorDisplays.delete(udid);
+      }
+    }
+  }
+
   async displaysForBootedSimulator(
     device: AppleDevice,
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<SimulatorDisplay[]> {
     if (device.state !== "Booted") {
+      SimCtlInventory.simulatorDisplays.delete(device.udid);
       return [];
+    }
+    const cached = SimCtlInventory.simulatorDisplays.get(device.udid);
+    if (cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
+      return cached.displays;
     }
     const remainingMs =
       deadlineMs === undefined ? undefined : deadlineMs - this.context.timer.now();
     if (remainingMs !== undefined && remainingMs <= 0) {
       return [];
     }
+    const entry: { lastUsedAt?: string; displays?: SimulatorDisplay[] } = {
+      lastUsedAt: device.lastUsedAt,
+    };
+    SimCtlInventory.simulatorDisplays.set(device.udid, entry);
     try {
-      return await this.context.enumerateDisplays(device.udid, remainingMs, signal);
+      const displays = await this.context.enumerateDisplays(device.udid, remainingMs, signal);
+      // An invalidation or a newer incarnation must not be overwritten by this read.
+      if (SimCtlInventory.simulatorDisplays.get(device.udid) === entry) {
+        entry.displays = displays;
+      }
+      return displays;
     } catch (error) {
       if (signal?.aborted) {
         throw error;
@@ -528,7 +562,7 @@ export class SimCtlInventory {
 
     try {
       const devices = options.bypassCache
-        ? await this.listDevicesForBootedCheck(timeoutMs, options.signal)
+        ? await this.listDevicesForBootedCheck(timeoutMs, options.signal, true)
         : await this.sharedDeviceList();
       if (
         requestSequence !== undefined &&
@@ -625,7 +659,7 @@ export class SimCtlInventory {
       this.context.timer.now() - cached.timestamp < SimCtlInventory.DEVICE_LIST_CACHE_TTL
         ? cached.devices
         : options.bypassCache
-          ? await this.listDevicesForBootedCheck(timeoutMs, signal)
+          ? await this.listDevicesForBootedCheck(timeoutMs, signal, true)
           : await this.raceOwnDeadline(this.sharedDeviceList(), timeoutMs, signal);
     // A listing served from (or just recorded into) the cache keeps its recorded
     // stamp; only an unrecorded read is a new observation.
@@ -670,7 +704,11 @@ export class SimCtlInventory {
   async listDevicesForBootedCheck(
     timeoutMs: number | undefined,
     signal: AbortSignal | undefined,
+    refreshDisplays = false,
   ): Promise<DeviceInfo[]> {
+    if (refreshDisplays) {
+      SimCtlInventory.simulatorDisplays.clear();
+    }
     const deadlineMs = timeoutMs === undefined ? undefined : this.context.timer.now() + timeoutMs;
     const simulatorList = await this.context.listSimulators(timeoutMs, signal);
     return this.mapSimulatorListToDeviceInfos(simulatorList, deadlineMs, signal);

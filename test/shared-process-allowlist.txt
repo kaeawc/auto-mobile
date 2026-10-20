@@ -49,6 +49,7 @@ test/ctrlProxy/deviceClientRegistry.test.ts
 test/ctrlProxy/deviceInstanceRegistry.test.ts
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts
 test/ctrlProxy/runnerQueryTimeoutEnv.test.ts
+test/daemon/DaemonDisconnect.cadence.test.ts
 test/daemon/DeviceCriteriaMatcher.property.test.ts
 test/daemon/DeviceCriteriaMatcher.test.ts
 test/daemon/McpTimeoutError.test.ts

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import {
   evaluateDeviceDisconnects,
@@ -100,7 +101,10 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => [device],
+      ...({
+        getAllDevices: () => [device],
+        genericAvailability: () => "reserved",
+      } satisfies DisconnectMonitorPool),
       isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},
     },

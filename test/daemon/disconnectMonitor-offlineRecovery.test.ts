@@ -8,6 +8,7 @@ import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
 import { Daemon } from "../../src/daemon/daemon";
+import type { DisconnectMonitorPool } from "../../src/daemon/daemonCore/DaemonDisconnect";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -191,7 +192,10 @@ function monitorHarness(
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAndroidTransportAliases: (): string[] => [],
-      getAllDevices: () => [device],
+      ...({
+        getAllDevices: () => [device],
+        genericAvailability: () => "reserved",
+      } satisfies DisconnectMonitorPool),
       isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},
     },

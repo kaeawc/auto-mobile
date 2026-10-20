@@ -18,6 +18,7 @@ import {
   type TeardownDeviceArgs,
   type StartDeviceArgs,
   type ProvisionDeviceArgs,
+  type InternalProvisionDeviceArgs,
 } from "./contracts";
 import { type TeardownToolResponse } from "./teardownContracts";
 import { provisionDeviceSchema } from "./schemas";
@@ -147,7 +148,9 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-export function parseProvisionDeviceArgs(input: Partial<ProvisionDeviceArgs>): ProvisionDeviceArgs {
+export function parseProvisionDeviceArgs(
+  input: Partial<InternalProvisionDeviceArgs>,
+): InternalProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
   const __oneShotCli = input.__oneShotCli === true;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
@@ -160,9 +163,13 @@ export function parseProvisionDeviceArgs(input: Partial<ProvisionDeviceArgs>): P
   // `__mcpLiveDeadlineKey` made this tool unusable for any caller sending a
   // progress token).
   deleteInternalToolParams(publicInput);
+  delete publicInput.rollbackOnRetryableReadiness;
   const parsed = provisionDeviceSchema.parse(publicInput);
   return {
     ...parsed,
+    ...(input.rollbackOnRetryableReadiness === false
+      ? { rollbackOnRetryableReadiness: false }
+      : {}),
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,

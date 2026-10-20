@@ -221,6 +221,8 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
 
 export interface LedgerEntry {
   deviceId?: string;
+  /** An old device whose slot is held until the replacement binds its own identity. */
+  replacement?: boolean;
   /** Pid of the process spawned for the boot, once handed off with one. */
   processId?: number;
   /** Set once the boot was handed off: the entry ends when the device is visible or this passes. */
@@ -234,6 +236,7 @@ export interface LedgerEntry {
  * repeated, a later call adding the device id or process id the earlier one lacked.
  */
 export interface LedgerAdmission {
+  bind(deviceId?: string): void;
   release(): void;
   handOff(deviceId: string | undefined, untilMs: number, processId?: number): void;
 }
@@ -284,10 +287,16 @@ export class BootAdmissionLedger {
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
-  admit(deviceId?: string): LedgerAdmission {
+  admit(deviceId?: string, replacement = false): LedgerAdmission {
     const token = Symbol("boot-admission");
-    this.entries.set(token, { deviceId });
+    this.entries.set(token, { deviceId, replacement });
     return {
+      bind: (boundDeviceId) => {
+        const entry = this.entries.get(token);
+        if (entry) {
+          this.entries.set(token, { ...entry, deviceId: boundDeviceId, replacement: false });
+        }
+      },
       release: () => this.end(token),
       handOff: (handedOffDeviceId, untilMs, processId) => {
         const entry = this.entries.get(token);
@@ -317,7 +326,12 @@ export class BootAdmissionLedger {
     // A device a listing showed is running whatever its boot deadline says: an older listing
     // still open counts it until that sample decides, so the window keeps it without a deadline.
     const kept = listed
-      ? { deviceId: entry.deviceId, processId: entry.processId, handedOff: entry.handedOff }
+      ? {
+          deviceId: entry.deviceId,
+          processId: entry.processId,
+          handedOff: entry.handedOff,
+          replacement: entry.replacement,
+        }
       : entry;
     for (const window of this.openWindows) {
       window.ended.push(kept);
@@ -385,7 +399,11 @@ export class BootAdmissionLedger {
     // Read before the loop below ends the listed entries into the open windows, this one included.
     const known = [...this.windowEnded(sampleWindow), ...this.entries.values()];
     const listedWithoutProcess = known.filter(
-      (entry) => isVisible(entry) && !hasListedProcess(entry) && entry.deviceId !== excludeDeviceId,
+      (entry) =>
+        isVisible(entry) &&
+        !hasListedProcess(entry) &&
+        entry.deviceId !== excludeDeviceId &&
+        !entry.replacement,
     ).length;
     for (const [token, entry] of [...this.entries]) {
       const visible = isVisible(entry);

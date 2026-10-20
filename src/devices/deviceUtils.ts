@@ -607,6 +607,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
+            skipProfileEnrichment: options.skipAndroidProfileEnrichment,
           },
           signal,
         ),

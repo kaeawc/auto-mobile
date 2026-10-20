@@ -1007,6 +1007,29 @@ device (owner decision 2026-10-09, #11145):
   another session tries again. A failed reset does not quarantine the device.
 - Records are stored in the daemon database, so they survive a daemon restart.
 
+## Transient Android transport failures
+
+For a session-owned Android device whose loss is not confirmed, an ADB transport
+failure returns `code: "device_transport_unavailable"`, `retryable: true`,
+`retryAfterMs` (currently 1000), `deviceId`, and `dispatched` in the tool error.
+The wire dispatch state is `false | "unknown" | true`; `true` is reserved for a
+positively confirmed dispatch and is not currently emitted for this error.
+
+- `false`: ADB refused the command before dispatch (the selected device was
+  missing or offline). AutoMobile retries briefly for up to 3750 ms, bounded by
+  the command timeout, before returning the error. Retrying the command is safe.
+- `"unknown"`: ADB lost its transport after dispatch (`connection terminated`,
+  `error: closed`, `protocol fault`, or exit 255 with empty or transport-only
+  stderr). The command may already have run. Observe before reissuing a
+  non-idempotent action, especially an `openLink` with a single-use sign-in link.
+  `retryable: true` means the transport may recover; it does not authorize blind
+  replay. AutoMobile does not replay non-safe commands on this path. Safe read
+  commands retain their normal retry policy; exhaustion also reports
+  `dispatched: "unknown"` for the final transport failure.
+
+Confirmed device loss remains terminal (`DeviceLostError`). This retryable
+transport error does not establish that a session or its device has been lost.
+
 ## Related
 
 - [Environment variables](environment-variables.md#session-heartbeat-timeout):

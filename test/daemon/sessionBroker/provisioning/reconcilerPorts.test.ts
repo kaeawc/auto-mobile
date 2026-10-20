@@ -1,3 +1,4 @@
+import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
 import { AndroidEmulatorUnavailableError } from "../../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { describe, expect, test } from "bun:test";
@@ -393,4 +394,51 @@ describe("GateBindingBootCapacity", () => {
       "cancelled",
     );
   });
+});
+
+test("late reservation after adapter timeout is released", async () => {
+  const timer = new FakeTimer();
+  let complete:
+    | ((
+        reservation: import("../../../../src/devices/bootAdmission/BootSlotReservation").BootSlotReservation,
+      ) => void)
+    | undefined;
+  let released = 0;
+  const capacity = new GateBindingBootCapacity(
+    timer,
+    async () => {},
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const result = capacity.reserve("ios", { timeoutMs: 60_000 });
+  timer.advanceTime(5_000);
+  expect(await result).toMatchObject({ kind: "unknown" });
+  complete?.({
+    run: (operation) => operation(),
+    markReplacedDeviceGone: () => {},
+    release: () => {
+      released += 1;
+    },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(released).toBe(1);
+});
+
+test("replacement runtime lookup matches an AVD to its emulator serial, excluding physical devices", async () => {
+  const manager = new FakeDeviceUtils();
+  manager.setBootedDevices("android", [
+    { platform: "android", name: "binding-avd", deviceId: "physical-serial" },
+    { platform: "android", name: "other-avd", deviceId: "emulator-5554" },
+    { platform: "android", name: "binding-avd", deviceId: "emulator-5556" },
+  ]);
+  const inventory = new DeviceManagerBindingInventory(manager);
+  expect(
+    await inventory.runtimeDeviceId(
+      { platform: "android", name: "binding-avd", isRunning: true },
+      {},
+    ),
+  ).toBe("emulator-5556");
 });

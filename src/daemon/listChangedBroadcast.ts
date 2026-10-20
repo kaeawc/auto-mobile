@@ -54,6 +54,12 @@ export interface ListChangedListener {
  */
 class ListChangedBroadcasterClass {
   private readonly listeners = new Set<ListChangedListener>();
+  private readonly generations: Record<ListChangedKind, number> = { tools: 0, resources: 0 };
+
+  /** Monotonic invalidation epoch, advanced even when no notification subscriber is live. */
+  generation(kind: ListChangedKind): number {
+    return this.generations[kind];
+  }
 
   /** Register a listener; returns an unsubscribe function. */
   subscribe(listener: ListChangedListener): () => void {
@@ -63,7 +69,13 @@ class ListChangedBroadcasterClass {
     };
   }
 
+  /** Registry mutations invalidate discovery even when no notification is published. */
+  invalidate(kind: ListChangedKind): void {
+    this.generations[kind]++;
+  }
+
   emit(kind: ListChangedKind): void {
+    this.invalidate(kind);
     for (const listener of this.listeners) {
       try {
         listener(kind);

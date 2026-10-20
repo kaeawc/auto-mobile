@@ -139,6 +139,8 @@ export interface BootedDeviceDiscoveryOptions {
    * compares names may set this.
    */
   skipAndroidNameEnrichment?: boolean;
+  /** Monitor discovery retains AVD identity but omits model, architecture and displays. */
+  skipAndroidProfileEnrichment?: boolean;
 }
 
 export interface DeviceImageDiscovery {

@@ -1,3 +1,4 @@
+import { ListChangedBroadcaster } from "../listChangedBroadcast";
 import type { ObserveResult } from "../../models/ObserveResult";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import {
@@ -69,6 +70,9 @@ export class SessionCache {
       ...session.cacheData,
       ...updates,
     };
+    if ("deviceLabels" in updates) {
+      ListChangedBroadcaster.emit("tools");
+    }
     logger.debug(`Updated cache for session ${sessionId}`);
   }
 
@@ -409,6 +413,9 @@ export class SessionCache {
           : { displayPin: session.cacheData.displayPin };
     }
 
+    if (!key || key === "deviceLabels") {
+      ListChangedBroadcaster.emit("tools");
+    }
     logger.debug(`Cleared cache for session ${sessionId}${key ? ` (key: ${key})` : " (all)"}`);
   }
 }

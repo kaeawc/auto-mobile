@@ -1,11 +1,16 @@
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { adbFailureOutput } from "./adbFailureOutput";
+import { isPreDispatchError } from "./adbCommandRetryPolicy";
 import { DeviceLostError, deviceLostErrorFromAbortSignal } from "../../models/DeviceLostError";
 import { sequenceBackoff, type BackoffPolicy } from "../Backoff";
 import { type Timer } from "../SystemTimer";
 import { DefaultRetryExecutor } from "../retry/RetryExecutor";
-import { isAdbDeviceOfflineError, isAdbMissingDeviceError } from "./AdbDeviceHealth";
+import {
+  isAdbDeviceOfflineError,
+  isAdbMissingDeviceError,
+  isAdbPostDispatchTransportError,
+} from "./AdbDeviceHealth";
 import { AdbDeviceTransportUnavailableError } from "./AdbDeviceTransportUnavailableError";
 
 export const ADB_TRANSPORT_RECOVERY_WINDOW_MS = 3750;
@@ -30,6 +35,34 @@ function isOwnTransportRefusal(error: unknown, deviceId?: string, transportId?: 
   return isAdbMissingDeviceError(text, deviceId, transportId) || isAdbDeviceOfflineError(text);
 }
 
+/** A serial-less diagnostic belongs to this client's selected -s transport. */
+function isOwnPostDispatchTransportFailure(
+  error: unknown,
+  deviceId?: string,
+  transportId?: string,
+): boolean {
+  if (!deviceId || (error instanceof Error && isPreDispatchError(error))) {
+    return false;
+  }
+  let current = error;
+  let exitCode: number | undefined;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+    if (
+      current instanceof DeviceLostError ||
+      current instanceof AdbDeviceTransportUnavailableError
+    ) {
+      return false;
+    }
+    const code = (current as Error & { code?: unknown }).code;
+    if (typeof code === "number") {
+      exitCode ??= code;
+    }
+    current = current.cause;
+  }
+  const { stdout, stderr } = adbFailureOutput(error);
+  return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, transportId, stdout);
+}
+
 interface TransportRecoveryOptions {
   deviceId?: string;
   transportId?: string;
@@ -39,6 +72,21 @@ interface TransportRecoveryOptions {
   remainingMs: () => number | undefined;
   signal?: AbortSignal;
   onExhausted: (error: unknown) => void;
+}
+
+function rethrowPostDispatchTransportFailure(
+  error: unknown,
+  { signal, deviceId, transportId }: TransportRecoveryOptions,
+): void {
+  if (
+    !signal?.aborted &&
+    !isOwnTransportRefusal(error, deviceId, transportId) &&
+    isOwnPostDispatchTransportFailure(error, deviceId, transportId)
+  ) {
+    // No replay here. The general retry loop may retry safe reads; even when
+    // those exhaust, dispatch of the last attempt remains unknown.
+    throw new AdbDeviceTransportUnavailableError(deviceId!, error, 1000, "unknown");
+  }
 }
 
 /** Only transport refusals are replayed here, including for non-idempotent commands. */
@@ -93,6 +141,7 @@ export async function executeWithAdbTransportRecovery<T>(
     if (lost) {
       throw lost;
     }
+    rethrowPostDispatchTransportFailure(error, options);
     if (signal?.aborted || !isOwnTransportRefusal(error, deviceId, transportId)) {
       throw error;
     }

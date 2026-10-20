@@ -1642,7 +1642,6 @@ test/utils/float32ToJavaString.test.ts
 test/utils/foldableRecordingSpan.test.ts
 test/utils/foldableTapTarget.test.ts
 test/utils/formatStructuredToolError.test.ts
-test/utils/hierarchyFingerprint.property.test.ts
 test/utils/image-utils.test.ts
 test/utils/image/ImageTransformer.test.ts
 test/utils/image/backend/resolveImageBackend.property.test.ts

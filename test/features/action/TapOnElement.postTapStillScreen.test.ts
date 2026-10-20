@@ -1,9 +1,14 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { NodeCryptoService } from "../../../src/utils/crypto";
 import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeWindow } from "../../fakes/FakeWindow";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
@@ -52,6 +57,8 @@ async function harness(changeAt?: number, neverStable = false) {
   const tap = new TapOnElement(h.device, h.adb, {
     timer: h.timer,
     waitForCondition: new RealWaitForCondition(screen, h.timer),
+    tapStrategy: new FakeTapStrategy(),
+    accessibilityDetector: new FakeAccessibilityDetector(),
   });
   return {
     ...h,
@@ -69,7 +76,80 @@ async function harness(changeAt?: number, neverStable = false) {
   };
 }
 
+/** Real tap/observe/settle flow with only device I/O and optional enrichment faked. */
+async function tapExecutionHarness(changeAt?: number) {
+  const h = await harness(changeAt);
+  const execute = h.screen.execute.bind(h.screen);
+  const captures = spyOn(h.screen, "execute").mockImplementation((options) =>
+    execute({
+      ...options,
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      skipPerformanceAudit: true,
+      skipRecompositionTracking: true,
+    }),
+  );
+  h.tap.observeScreen = h.screen;
+  h.tap.awaitIdle = new FakeAwaitIdle();
+  h.tap.window = new FakeWindow();
+  h.tap.testHooks.setTerminalScreenshotCapture(async () => {});
+  h.tap.testHooks.setDeferredPredictionRecorder(async () => {});
+  const refresh = spyOn(h.tap, "refreshViewHierarchy").mockResolvedValue(h.current.viewHierarchy!);
+  const dispatch = spyOn(h.tap, "executeAndroidTap").mockResolvedValue(undefined);
+  return {
+    ...h,
+    dispatch,
+    restore: () => {
+      dispatch.mockRestore();
+      refresh.mockRestore();
+      captures.mockRestore();
+      h.restore();
+    },
+  };
+}
+
 describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
+  describe.each([
+    { name: "no visible effect", changeAt: undefined, oldHashes: 38 },
+    { name: "in-place change", changeAt: 350, oldHashes: 30 },
+  ])("tap.execute fingerprint budget: $name", (scenario) => {
+    let measurement: {
+      hashes: number;
+      dispatches: number;
+      screenChanged: boolean | undefined;
+    };
+
+    beforeAll(async () => {
+      // Build a measured scenario fixture once for the outcome and budget
+      // assertions. Real CtrlProxy conversion/observe/settle work stays intact.
+      const hash = spyOn(NodeCryptoService, "generateCacheKey");
+      const h = await tapExecutionHarness(scenario.changeAt);
+      try {
+        const result = await h.tap.execute({ action: "tap", text: "B", retryIfNoChange: false });
+        measurement = {
+          hashes: hash.mock.calls.length,
+          dispatches: h.dispatch.mock.calls.length,
+          screenChanged: result.effect?.screenChanged,
+        };
+        console.info(
+          `[tap.execute fingerprint budget] ${scenario.name}: ${measurement.hashes} hashes`,
+        );
+      } finally {
+        h.restore();
+        hash.mockRestore();
+      }
+    });
+
+    test("dispatches once and preserves the expected effect", () => {
+      expect(measurement.dispatches).toBe(1);
+      expect(measurement.screenChanged).toBe(scenario.changeAt !== undefined);
+    });
+
+    test("uses at most half the original hashes", () => {
+      expect(measurement.hashes).toBeLessThanOrEqual(Math.floor(scenario.oldHashes / 2));
+    });
+  });
+
   test.each([
     { name: "already still", elapsed: 1040, reads: 7 },
     { name: "350ms transition", changeAt: 350, elapsed: 1550, reads: 10 },

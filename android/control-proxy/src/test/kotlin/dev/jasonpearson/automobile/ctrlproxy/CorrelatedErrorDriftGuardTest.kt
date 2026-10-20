@@ -29,7 +29,7 @@ import org.junit.Test
  * hand-maintained list of the confirmed correlated-error consumers. Widening the scan to every file
  * in the package was considered and rejected: `WebSocketServer.kt` (the decode path, #2985)
  * constructs `ErrorResponse` for legitimate non-fallback reasons, so a package-wide rule would fire
- * on correct code. This is the same limit [BroadcastGuardAdoptionTest] documents for raw
+ * on correct code. This is the same limit [BroadcastGuardAdoptionTestSourceTest] documents for raw
  * `serviceScope.launch` — it "cannot distinguish such an action from the ~30 legitimate raw
  * launches without false positives" — and it is why [ServiceScopeGuard] closed that gap *by
  * construction* rather than by scanning. A text scanner is a backstop against reintroducing a known

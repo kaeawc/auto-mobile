@@ -8,8 +8,6 @@
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession$fun complete</ID>
     <ID>LongParameterList:AutoMobileNetwork.kt:NetworkCaptureSession.Companion$fun create</ID>
     <ID>LongParameterList:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor</ID>
-    <ID>LongParameterList:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$private fun handleErrorSimulation: Response</ID>
-    <ID>LongParameterList:AutoMobileNetworkInterceptor.kt:AutoMobileNetworkInterceptor$private fun recordResponse: Response</ID>
     <ID>LongParameterList:AutoMobileNotifications.kt:AutoMobileNotifications$fun post: Boolean</ID>
     <ID>LongParameterList:AutoMobileNotifications.kt:AutoMobileNotifications$internal fun postWithContext: NotificationPostResult</ID>
     <ID>LongParameterList:ComposeRecomposition.kt:@Composable fun TrackRecomposition</ID>
@@ -17,9 +15,7 @@
     <ID>LongParameterList:EventBatchReplay.kt:internal fun replayEventBatches</ID>
     <ID>LongParameterList:EventPersistence.kt:FileEventPersistence</ID>
     <ID>LongParameterList:RecompositionTracker.kt:RecompositionTracker$fun recordRecomposition</ID>
-    <ID>LongParameterList:RecompositionTracker.kt:RecompositionTracker.Entry$@Synchronized fun record</ID>
     <ID>LongParameterList:SdkEventBroadcaster.kt:SdkEventBroadcaster$internal fun broadcastBatch</ID>
-    <ID>LongParameterList:SdkEventBroadcaster.kt:SdkEventBroadcaster$private fun sendBatchIntent</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer</ID>
     <ID>LongParameterList:SdkEventBuffer.kt:SdkEventBuffer$constructor</ID>
     <ID>TooGenericExceptionCaught:AutoMobileAnr.kt:AutoMobileAnr.AnrReportingSession$e: Exception</ID>

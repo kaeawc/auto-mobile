@@ -313,6 +313,11 @@ file only if nonempty, then run `./gradlew :<module>:lintDebug --rerun-tasks` on
 to refresh AGP's cached baseline creation result. Never use `--allow-grow` when
 updating baselines. `scripts/android/check-lint-baseline-shrink.sh` checks
 HEAD against the merge-base with origin/main; pre-push includes local edits too.
+Checks that compare against what is published upstream (AndroidGradlePluginVersion,
+GradleDependency, NewerVersionAvailable, OldTargetApi) are disabled in the
+convention plugins: their findings change over time and cannot be baselined.
+Lint must never rewrite files (no autofix); a clean `git status` after a lint run
+is the check.
 
 # Android Notification Group Handling (Hard-Won Knowledge)
 

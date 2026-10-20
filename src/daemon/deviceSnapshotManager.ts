@@ -30,7 +30,7 @@ import {
 import { assertSafeSnapshotName } from "../utils/snapshotNameValidation";
 import { parseDeviceSnapshotConfig } from "../features/snapshot";
 import { serverConfig } from "../utils/ServerConfig";
-import { ResourceRegistry } from "./resourceRegistry";
+import { notifyResourcesUpdated } from "./resourceUpdateNotifier";
 import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "./deviceSnapshotResourceUris";
 import {
   CaptureSnapshot,
@@ -52,9 +52,9 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { logger } from "../utils/logger";
 import {
-  DefaultDeviceIncarnationInvalidator,
+  deviceSnapshotIncarnationInvalidator,
   type DeviceIncarnationInvalidator,
-} from "./DeviceIncarnationInvalidator";
+} from "./deviceSnapshotIncarnationInvalidator";
 import { sortedReaddirEntries } from "../utils/io";
 
 interface DeviceSnapshotCaptureArgs {
@@ -447,7 +447,7 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
         new CaptureSnapshot(device, { timer, store }),
       createRestoreProvider: (device, timer, store) =>
         new RestoreSnapshot(device, { timer, store }),
-      deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator(),
+      deviceIncarnationInvalidator: deviceSnapshotIncarnationInvalidator,
     };
   }
 
@@ -1231,7 +1231,7 @@ async function importLegacySnapshotArchive(
 }
 
 async function notifySnapshotResources(): Promise<void> {
-  await ResourceRegistry.notifyResourcesUpdated([DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE]);
+  await notifyResourcesUpdated([DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE]);
 }
 
 function assertSnapshotNameWritable(snapshotName: string): void {

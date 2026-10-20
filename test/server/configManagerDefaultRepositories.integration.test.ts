@@ -16,7 +16,7 @@ import {
 import {
   getDeviceSnapshotConfig,
   resetDeviceSnapshotManagerDependencies,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import {
   getVideoRecordingConfig,
   resetVideoRecordingManagerDependencies,

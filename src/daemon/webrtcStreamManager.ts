@@ -1,4 +1,4 @@
-import { defaultDaemonContext } from "../daemon/daemonContext";
+import { defaultDaemonContext } from "./daemonContext";
 import {
   decideLifecycleEvent,
   decideOwnershipChange,
@@ -6,8 +6,8 @@ import {
   type StreamSubscriptionIdentity,
   type StreamSubscriptionKind,
   type StreamSubscriptionLifecycleEndReason,
-} from "../daemon/streamSubscriptionPolicy";
-import { WebRtcSubscriptionEndedError } from "../daemon/WebRtcSubscriptionEndedError";
+} from "./streamSubscriptionPolicy";
+import { WebRtcSubscriptionEndedError } from "./WebRtcSubscriptionEndedError";
 import {
   H264AnnexBParser,
   NAL_TYPE_IDR,

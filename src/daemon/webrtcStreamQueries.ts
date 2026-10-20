@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
-import type { StreamSubscriptionEndReason } from "../daemon/streamSubscriptionPolicy";
-import { type StreamSubscriptionKind } from "../daemon/streamSubscriptionPolicy";
+import type { StreamSubscriptionEndReason } from "./streamSubscriptionPolicy";
+import { type StreamSubscriptionKind } from "./streamSubscriptionPolicy";
 import type { WebRtcPublisherLifecycleEvent } from "../features/webrtc";
 import {
   H264AnnexBParser,

@@ -12,7 +12,7 @@ import {
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
   updateDeviceSnapshotConfig,
-} from "../../src/server/deviceSnapshotManager";
+} from "../../src/daemon/deviceSnapshotManager";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";

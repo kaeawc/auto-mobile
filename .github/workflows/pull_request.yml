@@ -1138,9 +1138,34 @@ jobs:
       # finding in a consumer, so scoping would land it on main and redden the
       # next unrelated PR. The Gradle build cache, not a shorter task list, is
       # what makes this fast.
+      # Android Lint, unlike Detekt, only looks at one module's own inputs
+      # (checkDependencies = false), so a PR lints just the modules it changes.
+      # Build-logic/Gradle/lint-gate/workflow changes select every module. The
+      # selection is shared with scripts/prepush-android.sh; merge.yml still
+      # lints every module on each push to main.
+      - name: "Select Android lint modules"
+        id: lint-select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if selection="$(git diff --name-only "${BASE_SHA}...HEAD" | bash scripts/android/select-lint-modules.sh)"; then
+            :
+          else
+            echo "Could not select lint modules; linting all."
+            selection=all
+          fi
+          if [[ "$selection" == all ]]; then
+            tasks=lintDebug
+          else
+            tasks="$(printf '%s' "$selection" | tr '\n' ' ' | sed 's/ *$//')"
+          fi
+          echo "Android lint tasks: ${tasks:-none}"
+          echo "tasks=${tasks}" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest :build-logic:test lintDebug"
+          gradle-tasks: "detektMain detektTest :build-logic:test ${{ steps.lint-select.outputs.tasks }}"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332). A restored

@@ -12,6 +12,7 @@ setup() {
 copy_prepush_fixture() {
   mkdir -p "${fixture_repo}/scripts/lib" "${fixture_repo}/scripts/ktfmt" "${fixture_repo}/scripts/android"
   cp "${REPO_ROOT}/scripts/android/check-lint-baseline-shrink.sh" "${fixture_repo}/scripts/android/"
+  cp "${REPO_ROOT}/scripts/android/select-lint-modules.sh" "${fixture_repo}/scripts/android/"
   cp "${REPO_ROOT}/${SCRIPT}" "${fixture_repo}/${SCRIPT}"
   cp "${REPO_ROOT}/scripts/lib/vcs-diff.sh" "${fixture_repo}/scripts/lib/vcs-diff.sh"
 }

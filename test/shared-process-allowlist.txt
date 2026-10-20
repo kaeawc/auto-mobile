@@ -53,6 +53,7 @@ test/ctrlProxy/IosCtrlProxyPrefetcher.test.ts
 test/ctrlProxy/deviceClientRegistry.test.ts
 test/ctrlProxy/deviceInstanceRegistry.test.ts
 test/ctrlProxy/ios/IosAppBundleGuard.test.ts
+test/ctrlProxy/ios/IosCtrlProxyHealthClient.test.ts
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts
 test/ctrlProxy/runnerQueryTimeoutEnv.test.ts
 test/daemon/DeviceCriteriaMatcher.property.test.ts
@@ -114,10 +115,12 @@ test/daemon/daemonMcpProxyOneShotCli.test.ts
 test/daemon/daemonMcpProxySessionBinding.test.ts
 test/daemon/daemonMcpProxyTaskRelay.test.ts
 test/daemon/daemonNamespaceMarker.test.ts
+test/daemon/daemonObservationStreamCallbacks.test.ts
 test/daemon/daemonOptionsPropagation.test.ts
 test/daemon/daemonRequestEnvelope.test.ts
 test/daemon/daemonRequestHandlers.inventoryOwnership.test.ts
 test/daemon/daemonRestartEndToEnd.test.ts
+test/daemon/daemonSessionLifecycleWiring.test.ts
 test/daemon/daemonSocketReachability.test.ts
 test/daemon/daemonStartupFailureTracker.test.ts
 test/daemon/daemonStartupGuard.test.ts
@@ -367,10 +370,15 @@ test/daemon/runDaemonSessionCommandArgs.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionBroker/admission.test.ts
 test/daemon/sessionBroker/broker.test.ts
+test/daemon/sessionBroker/brokerAbortAfterActivate.test.ts
+test/daemon/sessionBroker/brokerPostActivationRead.test.ts
+test/daemon/sessionBroker/brokerRecoverySnapshot.test.ts
+test/daemon/sessionBroker/brokerResultReceipts.test.ts
 test/daemon/sessionBroker/brokerShutdownPreparations.test.ts
 test/daemon/sessionBroker/connectionScope.test.ts
 test/daemon/sessionBroker/deviceNaming.test.ts
 test/daemon/sessionBroker/exports.test.ts
+test/daemon/sessionBroker/handlers.test.ts
 test/daemon/sessionBroker/hostConfig.test.ts
 test/daemon/sessionBroker/iosBaselineReset.test.ts
 test/daemon/sessionBroker/persistedIdentity.test.ts
@@ -407,6 +415,7 @@ test/daemon/sessionBroker/provisioning/resolvedExistingSpec.test.ts
 test/daemon/sessionBroker/provisioning/retryBusyRegistryWrite.test.ts
 test/daemon/sessionBroker/provisioning/settlingBindingStaleOwnerStuck.test.ts
 test/daemon/sessionBroker/provisioning/widenedSpecReportsCreationDefaultModel.test.ts
+test/daemon/sessionBroker/receiptRetention.test.ts
 test/daemon/sessionBroker/receiptRetentionLegacy.test.ts
 test/daemon/sessionBroker/registry/abandonedScopeRevival.test.ts
 test/daemon/sessionBroker/registry/backgroundBindingRegistryUpgrade.test.ts
@@ -433,6 +442,7 @@ test/daemon/sessionCacheTypedSlots.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts
+test/daemon/sessionLivenessLease.test.ts
 test/daemon/sessionManager.appCleanupRecovery.test.ts
 test/daemon/sessionManager.cache.test.ts
 test/daemon/sessionManager.cancelledClientChosenId.test.ts
@@ -449,6 +459,7 @@ test/daemon/sessionManager.releaseDeviceHold.test.ts
 test/daemon/sessionManager.releaseRowRetry.test.ts
 test/daemon/sessionManager.releaseSnapshots.test.ts
 test/daemon/sessionManager.restartRecovery.test.ts
+test/daemon/sessionManager.rowWriter.test.ts
 test/daemon/sessionManager.slotPredicates.test.ts
 test/daemon/sessionManager.supersededRowReassertRetry.test.ts
 test/daemon/sessionManager.terminalRelease.test.ts
@@ -499,6 +510,7 @@ test/daemon/socketServerInputRoutePreamble.test.ts
 test/daemon/socketServerMcpCancelDispatchHold.test.ts
 test/daemon/socketServerProgressDeadlineExtension.test.ts
 test/daemon/socketServerRefusedOwnedRestore.test.ts
+test/daemon/socketServerRequestDeadlineTiming.test.ts
 test/daemon/socketServerSessionIdGenerator.test.ts
 test/daemon/socketServerStartupAndParse.test.ts
 test/daemon/socketServerToolCallTransportAlias.test.ts
@@ -536,6 +548,7 @@ test/daemon/videoStreamSocketServer.reconfigurePrime.test.ts
 test/daemon/webrtcStreamClient.test.ts
 test/db/DatabaseHealthProbeTimeout.test.ts
 test/db/appConnectionBusyRetry.test.ts
+test/db/bunSqliteBeginImmediate.test.ts
 test/db/bunSqliteBeginRetry.test.ts
 test/db/bunfigPreload.test.ts
 test/db/classifySqliteError.test.ts
@@ -629,6 +642,7 @@ test/features/action/DragPath.test.ts
 test/features/action/ExecuteGesture.iosSwipe.test.ts
 test/features/action/FieldTypeDetector.test.ts
 test/features/action/GrantAndroidPermissions.test.ts
+test/features/action/HandleIntentChooser.test.ts
 test/features/action/InstallApp.signingGuard.test.ts
 test/features/action/IosClearEntryPoints.test.ts
 test/features/action/IosDoubleTap.test.ts
@@ -741,12 +755,14 @@ test/features/action/sendkeys/TypingSession.test.ts
 test/features/action/sendkeys/readBackWithSettle.test.ts
 test/features/action/stylusPointer.test.ts
 test/features/action/swipeon/AutoTargetSelectorUnit.test.ts
+test/features/action/swipeon/BoomerangPartialApplication.test.ts
 test/features/action/swipeon/OverlayDetector.characterization.test.ts
 test/features/action/swipeon/OverlayDetector.property.test.ts
 test/features/action/swipeon/OverlayDetector.windowOrder.test.ts
 test/features/action/swipeon/ScrollUntilVisible.lookForStep.test.ts
 test/features/action/swipeon/ScrollUntilVisible.navigationOcclusion.test.ts
 test/features/action/swipeon/ScrollUntilVisible.overshoot.test.ts
+test/features/action/swipeon/ScrollUntilVisible.talkback.test.ts
 test/features/action/swipeon/SwipeOn.duration.test.ts
 test/features/action/swipeon/SwipeOn.edge.test.ts
 test/features/action/swipeon/SwipeOn.iosIndeterminate.test.ts
@@ -755,12 +771,14 @@ test/features/action/swipeon/SwipeOnDisplayLookFor.test.ts
 test/features/action/swipeon/SwipeOnDisplayLookForFallback.test.ts
 test/features/action/swipeon/SwipeOnDisplayOverlap.test.ts
 test/features/action/swipeon/SwipeOnDisplayTalkBack.test.ts
+test/features/action/swipeon/TalkBackSwipeExecutor.test.ts
 test/features/action/swipeon/VoiceOverSwipeExecutor.test.ts
 test/features/action/swipeon/edgeSwipe.test.ts
 test/features/action/swipeon/iosChromeInsets.test.ts
 test/features/action/swipeon/lookForScroll.test.ts
 test/features/action/swipeon/resolveContainerSwipeCoordinates.test.ts
 test/features/action/swipeon/searchCancellation.test.ts
+test/features/action/swipeon/swipeDurationReport.test.ts
 test/features/action/swipeon/swipeNavigation.test.ts
 test/features/action/swipeon/swipeOnUtils.property.test.ts
 test/features/action/swipeon/swipeOnUtils.test.ts
@@ -889,6 +907,7 @@ test/features/observe/PredictionAnalyzer.test.ts
 test/features/observe/ResolverMigration.test.ts
 test/features/observe/ScreenshotBackoffScheduler.test.ts
 test/features/observe/ScreenshotMetadata.test.ts
+test/features/observe/ScreenshotPathProtection.test.ts
 test/features/observe/SelectedDisplayRead.test.ts
 test/features/observe/SelectedDisplayReadRetry.test.ts
 test/features/observe/SettleObserve.test.ts
@@ -896,6 +915,7 @@ test/features/observe/SingleDisplayStages.test.ts
 test/features/observe/TakeScreenshot.AndroidAdbFilePull.test.ts
 test/features/observe/TakeScreenshot.AndroidPhysicalDisplayId.test.ts
 test/features/observe/TakeScreenshot.PathGeneration.test.ts
+test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts
 test/features/observe/TrackedScreenGeometry.property.test.ts
 test/features/observe/TrackedScreenGeometry.test.ts
 test/features/observe/ViewHierarchy.filter.test.ts
@@ -936,6 +956,8 @@ test/features/observe/android/ctrlProxyHierarchyAccessibilityTool.test.ts
 test/features/observe/android/ctrlProxyHierarchyCloseBeforeWait.test.ts
 test/features/observe/android/ctrlProxyHierarchyConnectAbort.test.ts
 test/features/observe/android/ctrlProxyHierarchyDiagnostics.test.ts
+test/features/observe/android/ctrlProxyHierarchyPrototypeHidden.test.ts
+test/features/observe/android/ctrlProxyHierarchyPrototypeSuspended.test.ts
 test/features/observe/android/ctrlProxyHierarchySemanticLinks.test.ts
 test/features/observe/android/ctrlProxyHierarchySingleFlight.test.ts
 test/features/observe/android/ctrlProxyHierarchyWindows.test.ts
@@ -1046,6 +1068,7 @@ test/features/performance/DisplayedTimeMetricsCollector.test.ts
 test/features/performance/PerfWindowBuffer.test.ts
 test/features/performance/PerformanceAudit.refreshRate.test.ts
 test/features/performance/PerformanceAudit.ttff.test.ts
+test/features/performance/PerformanceAudit.window.test.ts
 test/features/performance/PerformanceMonitor.cost.test.ts
 test/features/performance/SdkFrameMetricsStore.test.ts
 test/features/preferences/AndroidPreferencesXmlFile.test.ts
@@ -1154,6 +1177,8 @@ test/features/systemTray/notificationHints.test.ts
 test/features/talkback/FocusElementMatcher.test.ts
 test/features/talkback/FocusNavigationExecutor.cancellation.test.ts
 test/features/talkback/FocusNavigationExecutor.test.ts
+test/features/talkback/TalkBackTapStrategy.focusNavigation.test.ts
+test/features/talkback/TalkBackTargetSafety.test.ts
 test/features/talkback/TapOnElement.focusNavigation.test.ts
 test/features/talkback/resourceIdActionError.test.ts
 test/features/telemetry/TelemetryEventBuffer.test.ts
@@ -1576,6 +1601,7 @@ test/server/interactionTools.clipboard.test.ts
 test/server/interactionTools.image.test.ts
 test/server/interactionTools.pinchOn.test.ts
 test/server/interactionTools.swipeOn.test.ts
+test/server/interactionTools.tapOnMessage.test.ts
 test/server/internalToolCall.property.test.ts
 test/server/internalToolCall.test.ts
 test/server/internalToolPayloads.property.test.ts
@@ -1823,6 +1849,7 @@ test/utils/android-cmdline-tools/EmulatorReadinessPoller.test.ts
 test/utils/android-cmdline-tools/RunningAvdAdvertisementReader.test.ts
 test/utils/android-cmdline-tools/SdkManagerClient.test.ts
 test/utils/android-cmdline-tools/adbFailureOutput.test.ts
+test/utils/android-cmdline-tools/androidProcessState.test.ts
 test/utils/android-cmdline-tools/androidSdkRoot.test.ts
 test/utils/android-cmdline-tools/apkSigningBlock.test.ts
 test/utils/android-cmdline-tools/appendBounded.test.ts
@@ -1930,6 +1957,7 @@ test/utils/ios-cmdline-tools/DevicectlDisplayScreenshot.test.ts
 test/utils/ios-cmdline-tools/DevicectlPanelScreenshot.test.ts
 test/utils/ios-cmdline-tools/IosClearDataBackend.test.ts
 test/utils/ios-cmdline-tools/IosCrashBackend.test.ts
+test/utils/ios-cmdline-tools/IosDeviceBackend.test.ts
 test/utils/ios-cmdline-tools/IosDeviceKind.test.ts
 test/utils/ios-cmdline-tools/IosDowngradeRecoveryBackend.test.ts
 test/utils/ios-cmdline-tools/IosHomeBackend.test.ts
@@ -1970,6 +1998,7 @@ test/utils/ios-cmdline-tools/simctl-client.runtimeResolution.test.ts
 test/utils/ios-cmdline-tools/simctl-client.uninstallBound.test.ts
 test/utils/ios-cmdline-tools/simctl.bootedCacheObservedAt.test.ts
 test/utils/ios-cmdline-tools/simctl.transitionalListing.test.ts
+test/utils/ios-cmdline-tools/simctlCommandBounds.test.ts
 test/utils/ios-cmdline-tools/simctlRuntimes.test.ts
 test/utils/ios-cmdline-tools/simctlVersion.test.ts
 test/utils/ios-cmdline-tools/simulatorLaunchHandle.test.ts

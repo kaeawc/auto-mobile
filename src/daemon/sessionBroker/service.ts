@@ -30,6 +30,7 @@ import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig
 import { IosBaselineReset } from "./iosBaselineReset";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import type { BrokerResourceRecord } from "./store";
+import { SESSION_BROKER_RECOVERY_INTERVAL_MS } from "./timing";
 
 export interface SessionBrokerHostLock {
   acquire(): void;
@@ -326,7 +327,7 @@ export class SessionBrokerService {
         this.wake = undefined;
         resolve();
       };
-      const timeout = this.timer.setTimeout(done, 5_000);
+      const timeout = this.timer.setTimeout(done, SESSION_BROKER_RECOVERY_INTERVAL_MS);
       this.wake = () => {
         this.timer.clearTimeout(timeout);
         done();

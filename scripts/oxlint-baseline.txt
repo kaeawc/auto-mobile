@@ -8,7 +8,6 @@
 1	src/daemon/daemon.ts	auto-mobile(max-class-lines)
 1	src/daemon/daemon.ts	eslint(complexity)
 1	src/daemon/devicePool.ts	auto-mobile(max-class-lines)
-1	src/daemon/manager.ts	auto-mobile(max-class-lines)
 1	src/daemon/sessionManager.ts	auto-mobile(max-class-lines)
 1	src/daemon/sessionManager.ts	eslint(max-classes-per-file)
 1	src/features/action/TapOnElement.ts	eslint(complexity)

@@ -91,8 +91,11 @@ export function matchTestTag(
 export function guardNamespaceNodes(
   nodes: readonly SearchableEntry[],
   intent: ResolutionIntent,
+  searchedNodes: readonly SearchableEntry[] = nodes,
 ): readonly SearchableEntry[] {
-  return intent.excludeImeKeys ? nodes.filter((node) => !isImeKeyEntry(node)) : nodes;
+  return intent.excludeImeKeys
+    ? searchedNodes.filter((node) => !isImeKeyEntry(node))
+    : searchedNodes;
 }
 
 export function matchId(

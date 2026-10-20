@@ -31,6 +31,8 @@ interface QueueWait {
  * - A laned request starts as soon as no earlier barrier is pending or running and
  *   no earlier request in the same lane is pending or running. Requests in
  *   different lanes run concurrently; requests in one lane keep arrival order.
+ * - Host-inventory reads may overlap within their lane to join shared discovery;
+ *   they still wait for barriers and hold back later barriers.
  */
 export class SocketRequestAdmissionQueue {
   private readonly pending: PendingRequest[] = [];
@@ -122,7 +124,7 @@ export class SocketRequestAdmissionQueue {
     this.runningCount++;
     if (entry.lane === undefined) {
       this.barrierRunning = true;
-    } else {
+    } else if (entry.lane !== "host:inventory") {
       this.runningLanes.add(entry.lane);
     }
     void entry.run().finally(() => {

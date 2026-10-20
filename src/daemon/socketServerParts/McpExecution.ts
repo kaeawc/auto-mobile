@@ -1,3 +1,5 @@
+import { HostInventoryForward } from "../socketServer/hostInventoryForward";
+import { isHostInventoryCall } from "../socketRequestAdmission";
 import { ControlDiscoveryCache, runPassthroughForward } from "../socketServer/controlRoutes";
 
 import { logger } from "../../utils/logger";
@@ -114,10 +116,12 @@ type Callbacks = Pick<
 /** Mcp Execution over shared connection state and explicit callbacks. */
 export class McpExecution {
   private readonly discoveryCache: ControlDiscoveryCache;
+  private readonly inventoryForward: HostInventoryForward;
   constructor(
     private readonly state: State,
     private readonly resolveCallbacks: () => Callbacks,
   ) {
+    this.inventoryForward = new HostInventoryForward(state.timer, state.idGenerator);
     this.discoveryCache = new ControlDiscoveryCache(
       () => this.state.mcpDispatcher.refreshResources?.() ?? Promise.resolve(),
     );
@@ -202,6 +206,13 @@ export class McpExecution {
     fn: (route: McpForwardRoute) => Promise<T>,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
+    // Inventory reads share discovery rather than holding a global serial queue.
+    if (
+      request.method === "tools/call" &&
+      isHostInventoryCall(request.params?.name, request.params?.arguments)
+    ) {
+      return await fn(initialRoute);
+    }
     const visitedKeys = [initialRoute.executionKey];
     let route = initialRoute;
     for (;;) {
@@ -282,6 +293,12 @@ export class McpExecution {
    */
   async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
+    const inventory = this.inventoryForward.read(context, (shared) =>
+      this.forwardUncachedMcpRequest(shared),
+    );
+    if (inventory) {
+      return await inventory;
+    }
     const method = context.request.method;
     if (
       (method !== "tools/list" && method !== "resources/list") ||

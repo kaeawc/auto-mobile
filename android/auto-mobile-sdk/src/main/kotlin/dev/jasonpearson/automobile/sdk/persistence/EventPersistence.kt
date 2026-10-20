@@ -89,7 +89,6 @@ internal class FileEventPersistence(
   )
 
   private val logger = DefaultSdkLogger()
-  private var nextSequence: Long? = null
 
   init {
     require(maxPendingBatches > 0)
@@ -97,70 +96,7 @@ internal class FileEventPersistence(
     require(maxPendingBytes > 0)
   }
 
-  private data class BatchFile(
-    val file: File,
-    val sequence: Long?,
-    val timestamp: Long,
-    val count: Int?,
-    val attempts: Int,
-    val identity: String,
-  ) {
-    val batchId: String
-      get() = file.name.removePrefix("events_").removeSuffix(".json")
-  }
-
-  private val sequencedName = Regex("s(\\d{20})_c(\\d+)_a(\\d+)_t(-?\\d+)_(.+)")
-  private val retriedLegacyName = Regex("l(\\d+)_c(\\d+)_a(\\d+)_(.+)")
-
-  private fun parseFile(file: File): BatchFile? {
-    if (!file.name.startsWith("events_") || !file.name.endsWith(".json")) return null
-    val id = file.name.removePrefix("events_").removeSuffix(".json")
-    sequencedName.matchEntire(id)?.destructured?.let { (seq, count, attempts, time, uuid) ->
-      return BatchFile(
-        file,
-        seq.toLongOrNull() ?: return null,
-        time.toLongOrNull() ?: return null,
-        count.toIntOrNull() ?: return null,
-        attempts.toIntOrNull() ?: return null,
-        uuid,
-      )
-    }
-    retriedLegacyName.matchEntire(id)?.destructured?.let { (time, count, attempts, original) ->
-      return BatchFile(
-        file,
-        null,
-        time.toLongOrNull() ?: return null,
-        count.toIntOrNull() ?: return null,
-        attempts.toIntOrNull() ?: return null,
-        original,
-      )
-    }
-    val time = id.substringBefore('_').toLongOrNull() ?: return null
-    return BatchFile(file, null, time, null, 0, id)
-  }
-
-  private fun pendingFiles(): List<BatchFile> =
-    directory
-      .listFiles()
-      ?.mapNotNull(::parseFile)
-      ?.sortedWith(
-        compareBy<BatchFile> { it.sequence != null }
-          .thenBy { it.sequence ?: it.timestamp }
-          .thenBy { it.identity },
-      ) ?: emptyList()
-
-  private fun initializeSequence() {
-    if (nextSequence == null) {
-      nextSequence = (pendingFiles().mapNotNull { it.sequence }.maxOrNull() ?: 0) + 1
-    }
-  }
-
-  private fun allocateSequence(): Long {
-    initializeSequence()
-    val sequence = checkNotNull(nextSequence)
-    nextSequence = sequence + 1
-    return sequence
-  }
+  private val batchFiles = PendingEventFiles(directory)
 
   private fun eventCount(batch: BatchFile): Int =
     batch.count
@@ -199,7 +135,7 @@ internal class FileEventPersistence(
     var file: File? = null
     val batchId =
       try {
-        val sequence = allocateSequence().toString().padStart(20, '0')
+        val sequence = batchFiles.allocateSequence().toString().padStart(20, '0')
         val id = "s${sequence}_c${events.size}_a0_t${clock()}_${uuidProvider()}"
         // The host can clear its cache at any time, including after earlier successful writes.
         directory.mkdirs()
@@ -220,7 +156,7 @@ internal class FileEventPersistence(
         return null
       }
     try {
-      val files = pendingFiles()
+      val files = batchFiles.pendingFiles()
       var excess = files.size - maxPendingBatches
       var bytes = files.sumOf { it.file.length() }
       for (victim in files) {
@@ -241,10 +177,10 @@ internal class FileEventPersistence(
   @Synchronized
   override fun loadPending(): List<PendingEventBatch> =
     try {
-      initializeSequence()
-      pendingFiles().mapNotNull { batch ->
+      batchFiles.initializeSequence()
+      batchFiles.pendingFiles().mapNotNull { batch ->
         try {
-          deserializePendingBatch(batch.batchId, batch.file.readText())
+          PersistedEventCodec.deserializePendingBatch(batch.batchId, batch.file.readText())
         } catch (_: IOException) {
           // Corrupt files cannot replay; count only a file actually removed.
           deleteDropped(batch, DropReason.DELIVERY_FAILED)
@@ -275,7 +211,7 @@ internal class FileEventPersistence(
   @Synchronized
   override fun removeBatch(batchId: String) {
     try {
-      initializeSequence()
+      batchFiles.initializeSequence()
       val file = File(directory, "events_$batchId.json")
       if (!fileOps(file) && file.exists()) {
         logger.w("EventPersistence") { "Could not remove delivered batch $batchId" }
@@ -288,9 +224,10 @@ internal class FileEventPersistence(
   @Synchronized
   override fun cleanup(maxAgeDays: Int) {
     try {
-      initializeSequence()
+      batchFiles.initializeSequence()
       val cutoff = clock() - maxAgeDays * 24 * 60 * 60 * 1000L
-      pendingFiles()
+      batchFiles
+        .pendingFiles()
         .filter { it.timestamp < cutoff }
         .forEach {
           deleteDropped(it, DropReason.DELIVERY_FAILED)
@@ -303,8 +240,8 @@ internal class FileEventPersistence(
   @Synchronized
   override fun recordReplayFailure(batchId: String): Boolean {
     try {
-      initializeSequence()
-      val batch = parseFile(File(directory, "events_$batchId.json")) ?: return true
+      batchFiles.initializeSequence()
+      val batch = batchFiles.parseFile(File(directory, "events_$batchId.json")) ?: return true
       if (!batch.file.exists()) return false
       val attempts = batch.attempts + 1
       if (attempts >= maxReplayAttempts) return !deleteDropped(batch, DropReason.DELIVERY_FAILED)
@@ -327,144 +264,14 @@ internal class FileEventPersistence(
     return true
   }
 
-  // Old array-only files have no delivery identity. Keep them replayable without rewriting disk.
-  private fun deserializePendingBatch(storageId: String, json: String): PendingEventBatch =
-    when (val value = JSONTokener(json).nextValue()) {
-      is JSONArray -> PendingEventBatch(storageId, deserializeEvents(value.toString()))
-      is JSONObject ->
-        PendingEventBatch(
-          storageId,
-          deserializeEvents(value.getJSONArray("events").toString()),
-          if (value.isNull("batchId")) null else value.getString("batchId"),
-        )
-      else -> error("Invalid persisted event batch")
-    }
-
   internal fun serializePendingBatch(events: List<SdkEvent>, deliveryId: String?): String =
-    JSONObject()
-      .put("batchId", deliveryId ?: JSONObject.NULL)
-      .put("events", JSONArray(serializeEvents(events)))
-      .toString()
+    PersistedEventCodec.serializePendingBatch(events, deliveryId)
 
-  internal fun serializeEvents(events: List<SdkEvent>): String {
-    val array = JSONArray()
-    for (event in events) {
-      val obj = JSONObject()
-      obj.put("type", eventTypeKey(event))
-      obj.put("timestamp", event.timestamp)
-      obj.put("applicationId", event.applicationId ?: "")
-      writeEventFields(obj, event)
-      array.put(obj)
-    }
-    return array.toString()
-  }
+  internal fun serializeEvents(events: List<SdkEvent>): String =
+    PersistedEventCodec.serializeEvents(events)
 
-  private fun writeEventFields(obj: JSONObject, event: SdkEvent) {
-    when (event) {
-      is SdkNavigationEvent -> PersistedEventWriter.writeNavigation(obj, event)
-      is SdkHandledExceptionEvent -> PersistedEventWriter.writeHandledException(obj, event)
-      is SdkNotificationActionEvent -> {
-        obj.put("notificationId", event.notificationId)
-        obj.put("actionId", event.actionId)
-        obj.put("actionLabel", event.actionLabel)
-      }
-      is SdkRecompositionSnapshotEvent -> {
-        obj.put("snapshotJson", event.snapshotJson)
-      }
-      is SdkCrashEvent -> PersistedEventWriter.writeCrash(obj, event)
-      is SdkAnrEvent -> PersistedEventWriter.writeAnr(obj, event)
-      is SdkNetworkRequestEvent -> PersistedEventWriter.writeNetworkRequest(obj, event)
-      is SdkWebSocketFrameEvent -> {
-        obj.put("connectionId", event.connectionId)
-        obj.put("url", event.url)
-        obj.put("direction", event.direction.name)
-        obj.put("frameType", event.frameType.name)
-        obj.put("payloadSize", event.payloadSize)
-        obj.put("success", event.success)
-      }
-      is SdkLogEvent -> {
-        obj.put("level", event.level)
-        obj.put("tag", event.tag)
-        obj.put("message", event.message)
-        obj.put("pid", event.pid)
-        obj.put("tid", event.tid)
-      }
-      is SdkBroadcastEvent -> PersistedEventWriter.writeBroadcast(obj, event)
-      is SdkLifecycleEvent -> PersistedEventWriter.writeLifecycle(obj, event)
-      else -> obj.put("data", event.toString())
-    }
-  }
-
-  private fun eventTypeKey(event: SdkEvent): String =
-    when (event) {
-      is SdkNavigationEvent -> "navigation"
-      is SdkHandledExceptionEvent -> "handled_exception"
-      is SdkNotificationActionEvent -> "notification_action"
-      is SdkRecompositionSnapshotEvent -> "recomposition_snapshot"
-      is SdkCrashEvent -> "crash"
-      is SdkAnrEvent -> "anr"
-      is SdkNetworkRequestEvent -> "network_request"
-      is SdkWebSocketFrameEvent -> "websocket_frame"
-      is SdkLogEvent -> "log"
-      is SdkBroadcastEvent -> "broadcast"
-      is SdkLifecycleEvent -> "lifecycle"
-      else -> "unknown"
-    }
-
-  internal fun deserializeEvents(json: String): List<SdkEvent> {
-    val array = JSONArray(json)
-    return (0 until array.length()).mapNotNull { i ->
-      val obj = array.getJSONObject(i)
-      deserializeEvent(
-        type = obj.optString("type"),
-        obj = obj,
-        timestamp = obj.optLong("timestamp"),
-        appId = obj.optString("applicationId").ifEmpty { null },
-      )
-    }
-  }
-
-  private fun deserializeEvent(
-    type: String,
-    obj: JSONObject,
-    timestamp: Long,
-    appId: String?,
-  ): SdkEvent? =
-    when (type) {
-      "navigation" -> PersistedEventReader.readNavigation(obj, timestamp, appId)
-      "handled_exception" -> PersistedEventReader.readHandledException(obj, timestamp, appId)
-      "notification_action" ->
-        SdkNotificationActionEvent(
-          timestamp = timestamp,
-          applicationId = appId,
-          notificationId = obj.optString("notificationId"),
-          actionId = obj.optString("actionId"),
-          actionLabel = obj.optString("actionLabel"),
-        )
-      "recomposition_snapshot" ->
-        SdkRecompositionSnapshotEvent(
-          timestamp = timestamp,
-          applicationId = appId,
-          snapshotJson = obj.optString("snapshotJson"),
-        )
-      "crash" -> PersistedEventReader.readCrash(obj, timestamp, appId)
-      "anr" -> PersistedEventReader.readAnr(obj, timestamp, appId)
-      "network_request" -> PersistedEventReader.readNetworkRequest(obj, timestamp, appId)
-      "websocket_frame" -> PersistedEventReader.readWebSocketFrame(obj, timestamp, appId)
-      "log" ->
-        SdkLogEvent(
-          timestamp = timestamp,
-          applicationId = appId,
-          level = obj.optInt("level"),
-          tag = obj.optString("tag"),
-          message = obj.optString("message"),
-          pid = obj.optInt("pid"),
-          tid = obj.optInt("tid"),
-        )
-      "broadcast" -> PersistedEventReader.readBroadcast(obj, timestamp, appId)
-      "lifecycle" -> PersistedEventReader.readLifecycle(obj, timestamp, appId)
-      else -> null // Unknown type, skip gracefully
-    }
+  internal fun deserializeEvents(json: String): List<SdkEvent> =
+    PersistedEventCodec.deserializeEvents(json)
 }
 
 // Payload codecs are private so extraction does not expand the SDK API or persistence class.
@@ -692,4 +499,214 @@ private object PersistedEventReader {
     if (obj == null) return emptyMap()
     return obj.keys().asSequence().associateWith { key -> obj.optString(key) }
   }
+}
+
+private data class BatchFile(
+  val file: File,
+  val sequence: Long?,
+  val timestamp: Long,
+  val count: Int?,
+  val attempts: Int,
+  val identity: String,
+) {
+  val batchId: String
+    get() = file.name.removePrefix("events_").removeSuffix(".json")
+}
+
+private class PendingEventFiles(private val directory: File) {
+  private var nextSequence: Long? = null
+
+  private val sequencedName = Regex("s(\\d{20})_c(\\d+)_a(\\d+)_t(-?\\d+)_(.+)")
+  private val retriedLegacyName = Regex("l(\\d+)_c(\\d+)_a(\\d+)_(.+)")
+
+  fun parseFile(file: File): BatchFile? {
+    if (!file.name.startsWith("events_") || !file.name.endsWith(".json")) return null
+    val id = file.name.removePrefix("events_").removeSuffix(".json")
+    sequencedName.matchEntire(id)?.destructured?.let { (seq, count, attempts, time, uuid) ->
+      return BatchFile(
+        file,
+        seq.toLongOrNull() ?: return null,
+        time.toLongOrNull() ?: return null,
+        count.toIntOrNull() ?: return null,
+        attempts.toIntOrNull() ?: return null,
+        uuid,
+      )
+    }
+    retriedLegacyName.matchEntire(id)?.destructured?.let { (time, count, attempts, original) ->
+      return BatchFile(
+        file,
+        null,
+        time.toLongOrNull() ?: return null,
+        count.toIntOrNull() ?: return null,
+        attempts.toIntOrNull() ?: return null,
+        original,
+      )
+    }
+    val time = id.substringBefore('_').toLongOrNull() ?: return null
+    return BatchFile(file, null, time, null, 0, id)
+  }
+
+  fun pendingFiles(): List<BatchFile> =
+    directory
+      .listFiles()
+      ?.mapNotNull(::parseFile)
+      ?.sortedWith(
+        compareBy<BatchFile> { it.sequence != null }
+          .thenBy { it.sequence ?: it.timestamp }
+          .thenBy { it.identity },
+      ) ?: emptyList()
+
+  fun initializeSequence() {
+    if (nextSequence == null) {
+      nextSequence = (pendingFiles().mapNotNull { it.sequence }.maxOrNull() ?: 0) + 1
+    }
+  }
+
+  fun allocateSequence(): Long {
+    initializeSequence()
+    val sequence = checkNotNull(nextSequence)
+    nextSequence = sequence + 1
+    return sequence
+  }
+}
+
+private object PersistedEventCodec {
+  // Old array-only files have no delivery identity. Keep them replayable without rewriting disk.
+  fun deserializePendingBatch(storageId: String, json: String): PendingEventBatch =
+    when (val value = JSONTokener(json).nextValue()) {
+      is JSONArray -> PendingEventBatch(storageId, deserializeEvents(value.toString()))
+      is JSONObject ->
+        PendingEventBatch(
+          storageId,
+          deserializeEvents(value.getJSONArray("events").toString()),
+          if (value.isNull("batchId")) null else value.getString("batchId"),
+        )
+      else -> error("Invalid persisted event batch")
+    }
+
+  fun serializePendingBatch(events: List<SdkEvent>, deliveryId: String?): String =
+    JSONObject()
+      .put("batchId", deliveryId ?: JSONObject.NULL)
+      .put("events", JSONArray(serializeEvents(events)))
+      .toString()
+
+  fun serializeEvents(events: List<SdkEvent>): String {
+    val array = JSONArray()
+    for (event in events) {
+      val obj = JSONObject()
+      obj.put("type", eventTypeKey(event))
+      obj.put("timestamp", event.timestamp)
+      obj.put("applicationId", event.applicationId ?: "")
+      writeEventFields(obj, event)
+      array.put(obj)
+    }
+    return array.toString()
+  }
+
+  private fun writeEventFields(obj: JSONObject, event: SdkEvent) {
+    when (event) {
+      is SdkNavigationEvent -> PersistedEventWriter.writeNavigation(obj, event)
+      is SdkHandledExceptionEvent -> PersistedEventWriter.writeHandledException(obj, event)
+      is SdkNotificationActionEvent -> {
+        obj.put("notificationId", event.notificationId)
+        obj.put("actionId", event.actionId)
+        obj.put("actionLabel", event.actionLabel)
+      }
+      is SdkRecompositionSnapshotEvent -> {
+        obj.put("snapshotJson", event.snapshotJson)
+      }
+      is SdkCrashEvent -> PersistedEventWriter.writeCrash(obj, event)
+      is SdkAnrEvent -> PersistedEventWriter.writeAnr(obj, event)
+      is SdkNetworkRequestEvent -> PersistedEventWriter.writeNetworkRequest(obj, event)
+      is SdkWebSocketFrameEvent -> {
+        obj.put("connectionId", event.connectionId)
+        obj.put("url", event.url)
+        obj.put("direction", event.direction.name)
+        obj.put("frameType", event.frameType.name)
+        obj.put("payloadSize", event.payloadSize)
+        obj.put("success", event.success)
+      }
+      is SdkLogEvent -> {
+        obj.put("level", event.level)
+        obj.put("tag", event.tag)
+        obj.put("message", event.message)
+        obj.put("pid", event.pid)
+        obj.put("tid", event.tid)
+      }
+      is SdkBroadcastEvent -> PersistedEventWriter.writeBroadcast(obj, event)
+      is SdkLifecycleEvent -> PersistedEventWriter.writeLifecycle(obj, event)
+      else -> obj.put("data", event.toString())
+    }
+  }
+
+  private fun eventTypeKey(event: SdkEvent): String =
+    when (event) {
+      is SdkNavigationEvent -> "navigation"
+      is SdkHandledExceptionEvent -> "handled_exception"
+      is SdkNotificationActionEvent -> "notification_action"
+      is SdkRecompositionSnapshotEvent -> "recomposition_snapshot"
+      is SdkCrashEvent -> "crash"
+      is SdkAnrEvent -> "anr"
+      is SdkNetworkRequestEvent -> "network_request"
+      is SdkWebSocketFrameEvent -> "websocket_frame"
+      is SdkLogEvent -> "log"
+      is SdkBroadcastEvent -> "broadcast"
+      is SdkLifecycleEvent -> "lifecycle"
+      else -> "unknown"
+    }
+
+  fun deserializeEvents(json: String): List<SdkEvent> {
+    val array = JSONArray(json)
+    return (0 until array.length()).mapNotNull { i ->
+      val obj = array.getJSONObject(i)
+      deserializeEvent(
+        type = obj.optString("type"),
+        obj = obj,
+        timestamp = obj.optLong("timestamp"),
+        appId = obj.optString("applicationId").ifEmpty { null },
+      )
+    }
+  }
+
+  private fun deserializeEvent(
+    type: String,
+    obj: JSONObject,
+    timestamp: Long,
+    appId: String?,
+  ): SdkEvent? =
+    when (type) {
+      "navigation" -> PersistedEventReader.readNavigation(obj, timestamp, appId)
+      "handled_exception" -> PersistedEventReader.readHandledException(obj, timestamp, appId)
+      "notification_action" ->
+        SdkNotificationActionEvent(
+          timestamp = timestamp,
+          applicationId = appId,
+          notificationId = obj.optString("notificationId"),
+          actionId = obj.optString("actionId"),
+          actionLabel = obj.optString("actionLabel"),
+        )
+      "recomposition_snapshot" ->
+        SdkRecompositionSnapshotEvent(
+          timestamp = timestamp,
+          applicationId = appId,
+          snapshotJson = obj.optString("snapshotJson"),
+        )
+      "crash" -> PersistedEventReader.readCrash(obj, timestamp, appId)
+      "anr" -> PersistedEventReader.readAnr(obj, timestamp, appId)
+      "network_request" -> PersistedEventReader.readNetworkRequest(obj, timestamp, appId)
+      "websocket_frame" -> PersistedEventReader.readWebSocketFrame(obj, timestamp, appId)
+      "log" ->
+        SdkLogEvent(
+          timestamp = timestamp,
+          applicationId = appId,
+          level = obj.optInt("level"),
+          tag = obj.optString("tag"),
+          message = obj.optString("message"),
+          pid = obj.optInt("pid"),
+          tid = obj.optInt("tid"),
+        )
+      "broadcast" -> PersistedEventReader.readBroadcast(obj, timestamp, appId)
+      "lifecycle" -> PersistedEventReader.readLifecycle(obj, timestamp, appId)
+      else -> null // Unknown type, skip gracefully
+    }
 }

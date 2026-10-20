@@ -1,7 +1,9 @@
 import type { Timer } from "../../../utils/SystemTimer";
 import type { BaseResult } from "../shared/types";
 import type { DelegateContext } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "./CtrlProxyHierarchy";
+import { SdkCapabilityQueryError } from "./SdkCapabilityQueryError";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE, sendCommand } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import {
@@ -23,10 +25,27 @@ interface IosSdkCapabilities {
 }
 
 interface IosSdkCapabilitiesResult extends BaseResult {
-  available: boolean;
+  available?: boolean;
+  probeError?: SdkCapabilityQueryError;
+  unsupported?: boolean;
   bundleId?: string;
   capabilities?: string[];
 }
+type SdkCapabilityProbeResult =
+  | { status: "capabilities"; capabilities: IosSdkCapabilities }
+  | { status: "unavailable" }
+  | { status: "unknown"; error: SdkCapabilityQueryError };
+
+const commandByCapability: Record<IosSdkCapability, string> = {
+  hierarchy: "request_hierarchy",
+  network_mocking: "set_network_mock_rules",
+  network_fault_rules: "set_network_fault_rules",
+  network_error_simulation: "set_network_error_simulation",
+  database: "execute_sql",
+  highlight: "add_highlight",
+  magic_tap: "request_magic_tap",
+};
+
 /** Generation-bound SDK negotiation and capability gates. */
 export class CtrlProxySdkCapabilities {
   constructor(private readonly host: SdkCapabilitiesHost) {}
@@ -41,7 +60,7 @@ export class CtrlProxySdkCapabilities {
 
   private sdkCapabilityRefreshInFlight: {
     generation: number;
-    promise: Promise<IosSdkCapabilities | null>;
+    promise: Promise<SdkCapabilityProbeResult>;
   } | null = null;
 
   private static readonly SDK_CAPABILITY_NEGATIVE_CACHE_TTL_MS = 5000;
@@ -71,11 +90,11 @@ export class CtrlProxySdkCapabilities {
     );
   }
 
-  private async refreshSdkCapabilities(): Promise<IosSdkCapabilities | null> {
+  private async refreshSdkCapabilities(): Promise<SdkCapabilityProbeResult> {
     if (!this.host.isCommandSupported("get_sdk_capabilities")) {
       this.sdkCapabilities = null;
       this.sdkCapabilitiesKnown = true;
-      return null;
+      return { status: "unavailable" };
     }
 
     const generation = this.sdkCapabilityGeneration;
@@ -99,68 +118,130 @@ export class CtrlProxySdkCapabilities {
     return promise;
   }
 
-  async requestSdkCapabilities(generation: number): Promise<IosSdkCapabilities | null> {
-    const result = await sendCommand<IosSdkCapabilitiesResult>(this.host.createDelegateContext(), {
-      idPrefix: "sdkCapabilities",
-      responseType: "sdk_capabilities",
-      messageType: "get_sdk_capabilities",
-      timeoutMs: 1000,
-      cancelScreenshotBackoff: false,
-      errorLabel: "SDK capability query",
-      notConnectedError: () => ({
-        success: false,
-        available: false,
-        capabilities: [],
-        totalTimeMs: 0,
-      }),
-      timeoutError: (timeoutMs) => ({
-        success: false,
-        available: false,
-        capabilities: [],
-        totalTimeMs: timeoutMs,
-      }),
-      unsupportedCommandError: () => ({
-        success: false,
-        available: false,
-        capabilities: [],
-        totalTimeMs: 0,
-      }),
-    });
-
-    let capabilities: IosSdkCapabilities | null = null;
-    if (!result.success) {
-      return null;
+  async requestSdkCapabilities(generation: number): Promise<SdkCapabilityProbeResult> {
+    let result = await this.sendSdkCapabilityQuery();
+    // This read is safe to retry, but never re-probe an invalidated foreground generation.
+    if (result.probeError?.code === "timeout" && generation === this.sdkCapabilityGeneration) {
+      result = await this.sendSdkCapabilityQuery();
     }
+    if (result.probeError) {
+      return { status: "unknown", error: result.probeError };
+    }
+    if (result.unsupported) {
+      return { status: "unavailable" };
+    }
+    return this.cacheSdkCapabilityReply(generation, result);
+  }
 
-    if (result.success && result.available && result.bundleId) {
-      capabilities = {
-        bundleId: result.bundleId,
-        capabilities: new Set(
-          (result.capabilities ?? []).filter(
-            (capability): capability is IosSdkCapability =>
-              capability === "hierarchy" ||
-              capability === "network_mocking" ||
-              capability === "network_fault_rules" ||
-              capability === "network_error_simulation" ||
-              capability === "database" ||
-              capability === "highlight" ||
-              capability === "magic_tap",
-          ),
+  private cacheSdkCapabilityReply(
+    generation: number,
+    result: IosSdkCapabilitiesResult,
+  ): SdkCapabilityProbeResult {
+    if (
+      !result.success ||
+      result.available === undefined ||
+      (result.available && !result.bundleId)
+    ) {
+      return {
+        status: "unknown",
+        error: new SdkCapabilityQueryError(
+          "sdk_capability_query_failed",
+          `SDK capability query failed: ${result.error ?? "invalid capability reply"}`,
         ),
       };
     }
+
+    const capabilities: IosSdkCapabilities | null =
+      result.available && result.bundleId
+        ? {
+            bundleId: result.bundleId,
+            capabilities: new Set(
+              (result.capabilities ?? []).filter((capability): capability is IosSdkCapability =>
+                Object.hasOwn(commandByCapability, capability),
+              ),
+            ),
+          }
+        : null;
 
     if (generation === this.sdkCapabilityGeneration) {
       this.sdkCapabilities = capabilities;
       this.sdkCapabilitiesKnown = true;
       this.sdkCapabilitiesKnownAt = this.host.timer.now();
+    } else {
+      return {
+        status: "unknown",
+        error: new SdkCapabilityQueryError(
+          "sdk_capability_query_failed",
+          "SDK capability query superseded by a newer foreground state; re-observe and retry.",
+        ),
+      };
     }
-    return generation === this.sdkCapabilityGeneration ? capabilities : null;
+    return capabilities ? { status: "capabilities", capabilities } : { status: "unavailable" };
+  }
+
+  private async sendSdkCapabilityQuery(): Promise<IosSdkCapabilitiesResult> {
+    try {
+      return await sendCommand<IosSdkCapabilitiesResult>(this.host.createDelegateContext(), {
+        idPrefix: "sdkCapabilities",
+        responseType: "sdk_capabilities",
+        messageType: "get_sdk_capabilities",
+        timeoutMs: IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
+        cancelScreenshotBackoff: false,
+        errorLabel: "SDK capability query",
+        notConnectedError: () => ({
+          success: false,
+          totalTimeMs: 0,
+          probeError: new SdkCapabilityQueryError(
+            "not_connected",
+            "SDK capability query not connected to CtrlProxy",
+          ),
+        }),
+        timeoutError: (timeoutMs) => ({
+          success: false,
+          totalTimeMs: timeoutMs,
+          probeError: new SdkCapabilityQueryError(
+            "timeout",
+            `SDK capability query timed out after ${timeoutMs} ms`,
+          ),
+        }),
+        responseError: (error, totalTimeMs) => ({
+          success: false,
+          totalTimeMs,
+          error,
+          // The inbound handler records older runners' explicit unknown-command refusals.
+          unsupported: !this.host.isCommandSupported("get_sdk_capabilities"),
+        }),
+        unsupportedCommandError: () => ({
+          success: false,
+          available: false,
+          unsupported: true,
+          totalTimeMs: 0,
+        }),
+      });
+    } catch (error) {
+      // Socket loss/send failures reject the request rather than using a fallback builder.
+      const message = errorMessage(error);
+      logger.warn(`[IOSCtrlProxyClient] SDK capability query failed: ${message}`, error);
+      return {
+        success: false,
+        totalTimeMs: 0,
+        probeError: new SdkCapabilityQueryError(
+          message === WEBSOCKET_NOT_CONNECTED_MESSAGE || message === "WebSocket connection closed"
+            ? "not_connected"
+            : "sdk_capability_query_failed",
+          `SDK capability query failed: ${message}`,
+          { cause: error },
+        ),
+      };
+    }
   }
 
   async refreshSdkCapabilitiesAndSync(): Promise<void> {
     const capabilities = await this.refreshSdkCapabilities();
-    if (capabilities === null) {
+    if (capabilities.status === "unknown") {
+      throw capabilities.error;
+    }
+    if (capabilities.status === "unavailable") {
       if (this.host.getSupportedCommands()?.has("get_sdk_capabilities") === false) {
         this.host.syncNetworkMockRulesToDevice();
         this.host.syncNetworkErrorSimulationToDevice();
@@ -208,7 +289,14 @@ export class CtrlProxySdkCapabilities {
         this.sdkCapabilityGeneration,
       );
     }
-    return CtrlProxySdkCapabilities.capabilitiesInclude(probed, capability, bundleId);
+    if (probed.status === "unknown") {
+      throw probed.error;
+    }
+    return CtrlProxySdkCapabilities.capabilitiesInclude(
+      probed.status === "capabilities" ? probed.capabilities : null,
+      capability,
+      bundleId,
+    );
   }
 
   /**
@@ -231,15 +319,6 @@ export class CtrlProxySdkCapabilities {
   }
 
   isLegacySdkCommandSupported(capability: IosSdkCapability): boolean {
-    const commandByCapability: Record<IosSdkCapability, string> = {
-      hierarchy: "request_hierarchy",
-      network_mocking: "set_network_mock_rules",
-      network_fault_rules: "set_network_fault_rules",
-      network_error_simulation: "set_network_error_simulation",
-      database: "execute_sql",
-      highlight: "add_highlight",
-      magic_tap: "request_magic_tap",
-    };
     return this.host.isCommandSupported(commandByCapability[capability]);
   }
 

@@ -220,7 +220,11 @@ export class ReadinessPhaseRunner {
     phase: RunnerReadinessPhase,
     attempts: number,
     detail: unknown,
-    options?: { deadlineExhausted?: boolean; failureKind?: "ctrlproxy_forward_unavailable" },
+    options: {
+      deadlineExhausted?: boolean;
+      failureKind?: "ctrlproxy_forward_unavailable";
+      previousAttemptDetails?: readonly string[];
+    } = {},
   ): never {
     const { device } = context;
     const mapping =
@@ -233,20 +237,24 @@ export class ReadinessPhaseRunner {
     const readinessContext =
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
       `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}${phaseElapsed ? ` ${phaseElapsed}` : ""}`;
+    const detailMessage = [
+      normalizeDiagnostic(detail),
+      ...(options.previousAttemptDetails ?? []),
+    ].join("; ");
     const failure = new RunnerReadinessError(
-      options?.failureKind
-        ? `${normalizeDiagnostic(detail)}; ${readinessContext}`
-        : `${readinessContext}: ${normalizeDiagnostic(detail)}`,
+      options.failureKind
+        ? `${detailMessage}; ${readinessContext}`
+        : `${readinessContext}: ${detailMessage}`,
       device.platform === "android" &&
         ReadinessPhaseRunner.isSetupPhase(phase) &&
         isAndroidFrameworkUnavailable(detail),
-      options?.deadlineExhausted ?? false,
+      options.deadlineExhausted ?? false,
       phase,
       attempts,
       detail,
-      options?.failureKind,
+      options.failureKind,
     );
-    if (options?.deadlineExhausted) {
+    if (options.deadlineExhausted) {
       context.deadlineFailure = failure;
     }
     throw failure;

@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, spyOn, test, afterEach, mock } from "bun:test";
 import path from "node:path";
 import {
   BoundedScreenshotPathProtection,
@@ -6,6 +6,10 @@ import {
 } from "../../../src/features/observe/ScreenshotPathProtection";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+afterEach(() => {
+  mock.restore();
+});
 
 test("win32 protection shares separator and case variants without covering other files", async () => {
   const registry = new BoundedScreenshotPathProtection(new FakeTimer(), path.win32);

@@ -3081,22 +3081,30 @@ describe("LaunchApp", () => {
     expect(hasStartedAppLaunch()).toBe(false);
   });
 
-  test("preserves the transport code from a failed installed-app listing", async () => {
-    fakeTimer.enableAutoAdvance();
-    const error = new AdbDeviceTransportUnavailableError(device.deviceId, new Error("offline"));
-    const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
-      targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
-      installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
-        successful: false,
-        error,
-      }),
-    });
+  test.each([false, "unknown"] as const)(
+    "preserves the transport dispatch state %s from a failed installed-app listing",
+    async (dispatched) => {
+      fakeTimer.enableAutoAdvance();
+      const error = new AdbDeviceTransportUnavailableError(
+        device.deviceId,
+        new Error("offline"),
+        1000,
+        dispatched,
+      );
+      const action = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+        targetUserDetector: new FakeTargetUserDetector(fakeTimer, { resolvedUserId: 0 }),
+        installedAppsProvider: new FakeInstalledAppsProvider(fakeTimer, {
+          successful: false,
+          error,
+        }),
+      });
 
-    await expect(
-      action.execute(packageName, { clearAppData: false, coldBoot: false }),
-    ).rejects.toMatchObject({ code: "device_transport_unavailable" });
-    expect(hasStartedAppLaunch()).toBe(false);
-  });
+      await expect(
+        action.execute(packageName, { clearAppData: false, coldBoot: false }),
+      ).rejects.toBe(error);
+      expect(hasStartedAppLaunch()).toBe(false);
+    },
+  );
 
   test("rejects an incomplete Android listing even when it contains the app", async () => {
     fakeTimer.enableAutoAdvance();

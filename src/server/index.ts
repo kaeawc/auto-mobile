@@ -508,3 +508,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   return server;
 };
+
+/** Refresh externally changed resource rosters before a cached control-socket discovery reply. */
+export function refreshMcpResourceList(): Promise<void> {
+  return ResourceRegistry.refreshBeforeList();
+}

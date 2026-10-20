@@ -1,4 +1,4 @@
-import { runPassthroughForward } from "../socketServer/controlRoutes";
+import { ControlDiscoveryCache, runPassthroughForward } from "../socketServer/controlRoutes";
 
 import { logger } from "../../utils/logger";
 
@@ -113,12 +113,21 @@ type Callbacks = Pick<
 >;
 /** Mcp Execution over shared connection state and explicit callbacks. */
 export class McpExecution {
+  private readonly discoveryCache: ControlDiscoveryCache;
   constructor(
     private readonly state: State,
     private readonly resolveCallbacks: () => Callbacks,
-  ) {}
+  ) {
+    this.discoveryCache = new ControlDiscoveryCache(
+      () => this.state.mcpDispatcher.refreshResources?.() ?? Promise.resolve(),
+    );
+  }
   private get callbacks(): Callbacks {
     return this.resolveCallbacks();
+  }
+
+  forgetSocketDiscovery(socketSessionId: string): void {
+    this.discoveryCache.forgetSocket(socketSessionId);
   }
   /**
    * Reject an inbound request whose declared version/build identity does not match
@@ -273,6 +282,33 @@ export class McpExecution {
    */
   async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
+    const method = context.request.method;
+    if (
+      (method !== "tools/list" && method !== "resources/list") ||
+      (method === "resources/list" && !this.state.mcpDispatcher.refreshResources)
+    ) {
+      return await this.forwardUncachedMcpRequest(context);
+    }
+    this.callbacks.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.deadline,
+      "preparing discovery",
+    );
+    const result = await this.callbacks.withAdmittedBoundSession(context.request.params, () =>
+      this.discoveryCache.read(context, () => this.forwardUncachedMcpRequest(context)),
+    );
+    context.signal?.throwIfAborted();
+    this.callbacks.requireRemainingMcpForwardBudget(
+      context.request,
+      context.totalTimeoutMs,
+      context.deadline,
+      "refreshing discovery",
+    );
+    return result;
+  }
+
+  private async forwardUncachedMcpRequest(context: McpForwardContext): Promise<unknown> {
     const mcpClient = await runWithForwardSessionKey(
       context.socketSessionId,
       () =>

@@ -3,21 +3,28 @@ import { ActionableError } from "../../models/ActionableError";
 import { DeviceLostError } from "../../models/DeviceLostError";
 import { errorMessage } from "../describeUnknownError";
 
-/** ADB refused the command before dispatch; the session is not confirmed lost. */
+/** Wire dispatch state; `true` is reserved for a positively confirmed dispatch. */
+export type AdbTransportDispatchState = false | "unknown" | true;
+
+/** ADB transport failed; the session is not confirmed lost. */
 export class AdbDeviceTransportUnavailableError extends ActionableError {
   readonly code = "device_transport_unavailable";
   readonly retryable = true;
-  readonly dispatched = false;
 
   constructor(
     readonly deviceId: string,
     cause: unknown,
     readonly retryAfterMs = 1000,
+    readonly dispatched: AdbTransportDispatchState = false,
   ) {
     const stderr = adbFailureOutput(cause).stderr.trim().slice(-300);
     const message = errorMessage(cause);
     const diagnostic = stderr && !message.includes(stderr) ? `${message}\n${stderr}` : message;
-    super(`ADB transport unavailable for ${deviceId}. Retry the operation: ${diagnostic}`, {
+    const action =
+      dispatched === false
+        ? "Retry the operation"
+        : "The command may already have run. Observe before reissuing a non-idempotent command";
+    super(`ADB transport unavailable for ${deviceId}. ${action}: ${diagnostic}`, {
       cause,
     });
     this.name = "AdbDeviceTransportUnavailableError";
@@ -53,7 +60,7 @@ export function findDeviceTransportUnavailable(
   return transport;
 }
 
-/** Preserve this refusal across boundaries that otherwise flatten contextual errors. */
+/** Preserve transport failure and dispatch state across contextual error boundaries. */
 export function rethrowDeviceTransportUnavailable(error: unknown): void {
   const transport = findDeviceTransportUnavailable(error);
   if (transport) {

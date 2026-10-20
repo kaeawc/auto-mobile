@@ -1,3 +1,4 @@
+import { ListChangedBroadcaster } from "./listChangedBroadcast";
 import { type ToolSelectionProfileRegistry } from "./toolSelectionProfileRegistry";
 
 export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfileRegistry {
@@ -19,7 +20,10 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
 
   setToolResultsNoStructuredContent(profileUuid: string, enabled: boolean): void {
     if (profileUuid.trim().length > 0) {
-      this.toolResultsNoStructuredContent.set(profileUuid, enabled);
+      if (this.toolResultsNoStructuredContent.get(profileUuid) !== enabled) {
+        this.toolResultsNoStructuredContent.set(profileUuid, enabled);
+        ListChangedBroadcaster.emit("tools");
+      }
     }
   }
 

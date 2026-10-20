@@ -302,6 +302,7 @@ class ResourceRegistryClass {
     mimeType: string,
     handler: ResourceHandler,
   ): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources.set(uri, { uri, name, description, mimeType, handler });
   }
 
@@ -315,6 +316,7 @@ class ResourceRegistryClass {
     paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    ListChangedBroadcaster.invalidate("resources");
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -337,6 +339,7 @@ class ResourceRegistryClass {
     paginationParams: string[] = [],
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
+    ListChangedBroadcaster.invalidate("resources");
     this.templates.set(uriTemplate, {
       uriTemplate,
       name,
@@ -385,6 +388,7 @@ class ResourceRegistryClass {
 
   // Unregister a resource by URI
   unregister(uri: string): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources.delete(uri);
   }
 
@@ -756,12 +760,14 @@ class ResourceRegistryClass {
 
   /** Test-only: put back what {@link snapshotForTesting} captured, replacing current entries. */
   restoreForTesting(snapshot: ReturnType<ResourceRegistryClass["snapshotForTesting"]>): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.resources = new Map(snapshot.resources);
     this.templates = new Map(snapshot.templates);
   }
 
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
+    ListChangedBroadcaster.invalidate("resources");
     this.clearEpoch++;
     this.listRefreshers.clear();
     this.resources.clear();

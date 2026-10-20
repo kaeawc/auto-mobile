@@ -1,3 +1,4 @@
+import { serializeControlFrame } from "../socketServer/controlRoutes";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
@@ -88,6 +89,7 @@ type Callbacks = Pick<
   | "frameDeviceId"
   | "handleRequest"
   | "abortMcpRequests"
+  | "forgetSocketDiscovery"
   | "clearBoundMcpClientKey"
   | "releaseDevicePoolMcpSessionBindings"
   | "forgetLateSessionToolBindings"
@@ -372,6 +374,7 @@ export class SocketTransport {
       return;
     }
     this.callbacks.abortMcpRequests(sessionId);
+    this.callbacks.forgetSocketDiscovery(sessionId);
     this.callbacks.trackRequestHandler(
       executionTracker
         .cancelSessionExecutions(sessionId, "socket_disconnect")
@@ -609,7 +612,7 @@ export class SocketTransport {
       return;
     }
     try {
-      const payload = JSON.stringify(frame) + "\n";
+      const payload = serializeControlFrame(frame);
       const byteLength = Buffer.byteLength(payload);
       const guard = this.callbacks.connectionFor(socket, sessionId).outboundWriteGuard();
       const queuedBytes = guard.admit(byteLength);

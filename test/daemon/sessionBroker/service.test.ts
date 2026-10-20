@@ -86,6 +86,11 @@ class ControlledBroker extends SessionBroker {
   override async close(): Promise<void> {
     this.events.push("broker:close");
   }
+
+  override async markRestartHandoff(): Promise<void> {
+    this.events.push("broker:handoff");
+    await super.markRestartHandoff();
+  }
 }
 
 describe("session broker service lifecycle", () => {
@@ -134,7 +139,7 @@ describe("session broker service lifecycle", () => {
     expect(second).toBe(first);
     await first;
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(broker.events).toEqual(["broker:close"]);
+    expect(broker.events).toEqual(["broker:handoff", "broker:close"]);
     expect(lock.events).toEqual(["lock:release"]);
   });
 
@@ -155,10 +160,16 @@ describe("session broker service lifecycle", () => {
     await Promise.resolve();
     expect(closed).toBe(false);
     expect(lock.events).toEqual([]);
+    expect(broker.events).toEqual(["recover:start", "broker:handoff"]);
 
     broker.finishRecovery.resolve();
     await closing;
-    expect(broker.events).toEqual(["recover:start", "recover:end", "broker:close"]);
+    expect(broker.events).toEqual([
+      "recover:start",
+      "broker:handoff",
+      "recover:end",
+      "broker:close",
+    ]);
     expect(lock.events).toEqual(["lock:release"]);
   });
 

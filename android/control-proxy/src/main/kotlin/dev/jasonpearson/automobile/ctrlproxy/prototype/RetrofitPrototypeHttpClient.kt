@@ -370,21 +370,28 @@ class RetrofitPrototypeHttpClient(
     // so same-origin calls can reuse a connection; another host still requires DNS validation.
     private val dnsByPort = ConcurrentHashMap<Int, PrototypePolicyDns>()
 
-    override fun newCall(request: Request): Call =
-      delegate
+    override fun newCall(request: Request): Call {
+      val timeoutMs = request.tag(PrototypeCallTimeout::class.java)?.millis
+      return delegate
         .newBuilder()
         .dns(
           dnsByPort.computeIfAbsent(request.url.port) {
             PrototypePolicyDns(delegate.dns, policy, it)
           },
         )
-        .build()
-        .newCall(request)
-        .also { call ->
-          request.tag(PrototypeCallTimeout::class.java)?.let {
-            call.timeout().timeout(it.millis, TimeUnit.MILLISECONDS)
+        .apply {
+          if (timeoutMs != null) {
+            // The request's timeoutMs is the whole call. The delegate's own connect, read and write
+            // timeouts (OkHttp's default is 10 s each) must not end a slower call earlier (#13455).
+            callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
           }
         }
+        .build()
+        .newCall(request)
+    }
   }
 
   internal companion object {

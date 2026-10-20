@@ -376,6 +376,18 @@ describe("PerformanceTracker", function () {
           return this;
         }
 
+        trackSync<T>(name: string, fn: () => T): T {
+          this.calls.push({ method: "trackSync", name });
+          return fn();
+        }
+
+        addExternalTiming(): void {}
+        startOperation(): void {}
+        endOperation(): void {}
+        fork(): PerformanceTracker {
+          return new FakePerformanceTracker();
+        }
+
         getTimings(): TimingData | null {
           return [];
         }

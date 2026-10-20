@@ -108,7 +108,7 @@ describe("DeviceTeardownService", () => {
       stop: async () => "stopped" as const,
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
 
     await expect(service.teardown({ identity, deadlineMs: 100 }, workflow)).resolves.toEqual({
@@ -133,7 +133,7 @@ describe("DeviceTeardownService", () => {
       stop: async () => "accepted" as const,
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
 
     await expect(
@@ -173,7 +173,7 @@ describe("DeviceTeardownService", () => {
       stop: async () => "accepted" as const,
       destroy: async () => {},
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
 
     await expect(
@@ -208,7 +208,7 @@ describe("DeviceTeardownService", () => {
         await destroyGate;
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
     const request = {
       identity,
@@ -265,7 +265,7 @@ describe("DeviceTeardownService", () => {
         });
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
     const request = {
       identity,
@@ -316,7 +316,7 @@ describe("DeviceTeardownService", () => {
         await platformMutation;
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase: DeviceTeardownPhase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
     const request = {
       identity,
@@ -369,7 +369,7 @@ describe("DeviceTeardownService", () => {
         stop: async () => "not_required" as const,
         destroy: async () => {},
         verify: async () => ({ status: "destroyed" }) as TestResponse,
-        failure: (phase) => ({ status: "failed", phase }) as TestResponse,
+        failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
       },
     );
 
@@ -405,7 +405,7 @@ describe("DeviceTeardownService", () => {
         throw new Error("delete deadline elapsed");
       },
       verify: async () => ({ status: "destroyed" }) as TestResponse,
-      failure: (phase) => ({ status: "failed", phase }) as TestResponse,
+      failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
     };
     const teardown = service.teardown(request, workflow);
     await expect(teardown).resolves.toEqual({ status: "failed", phase: "destroy" });
@@ -448,7 +448,7 @@ describe("DeviceTeardownService", () => {
         },
         destroy: async () => {},
         verify: async () => ({ status: "destroyed" }) as TestResponse,
-        failure: (phase) => ({ status: "failed", phase }) as TestResponse,
+        failure: (phase: DeviceTeardownPhase): TestResponse => ({ status: "failed", phase }),
       },
     );
     await expect(teardown).resolves.toEqual({ status: "failed", phase: "stop" });

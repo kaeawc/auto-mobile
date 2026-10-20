@@ -60,28 +60,15 @@ internal class NodeActionController(
     selector: NodeSelector?,
   ) {
     val startTime = timeProvider.currentTimeMillis()
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+    val validationError = accessibilityLinkError(text, occurrence)
+    if (validationError != null) {
       host.launchRequestScope(requestId) {
         host.sendActionResult(
           NodeActionResult(
             requestId = requestId,
             action = "activate_accessibility_link",
             success = false,
-            error = "Semantic accessibility links require Android API 26 or later",
-            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-          ),
-        )
-      }
-      return
-    }
-    if (text.isBlank() || occurrence < 0) {
-      host.launchRequestScope(requestId) {
-        host.sendActionResult(
-          NodeActionResult(
-            requestId = requestId,
-            action = "activate_accessibility_link",
-            success = false,
-            error = "Link text must be non-blank and occurrence must be non-negative",
+            error = validationError,
             totalTimeMs = timeProvider.currentTimeMillis() - startTime,
           ),
         )
@@ -119,45 +106,27 @@ internal class NodeActionController(
         )
       }
     } catch (error: IllegalArgumentException) {
-      Log.w(TAG, "Semantic accessibility link activation failed", error)
-      host.launchRequestScope(requestId) {
-        host.sendActionResult(
-          NodeActionResult(
-            requestId = requestId,
-            action = "activate_accessibility_link",
-            success = false,
-            error = error.message ?: error.javaClass.simpleName,
-            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-          ),
-        )
-      }
+      reportLinkFailure(requestId, startTime, error)
     } catch (error: IllegalStateException) {
       if (error is kotlinx.coroutines.CancellationException) throw error
-      Log.w(TAG, "Semantic accessibility link activation failed", error)
-      host.launchRequestScope(requestId) {
-        host.sendActionResult(
-          NodeActionResult(
-            requestId = requestId,
-            action = "activate_accessibility_link",
-            success = false,
-            error = error.message ?: error.javaClass.simpleName,
-            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-          ),
-        )
-      }
+      reportLinkFailure(requestId, startTime, error)
     } catch (error: SecurityException) {
-      Log.w(TAG, "Semantic accessibility link activation failed", error)
-      host.launchRequestScope(requestId) {
-        host.sendActionResult(
-          NodeActionResult(
-            requestId = requestId,
-            action = "activate_accessibility_link",
-            success = false,
-            error = error.message ?: error.javaClass.simpleName,
-            totalTimeMs = timeProvider.currentTimeMillis() - startTime,
-          ),
-        )
-      }
+      reportLinkFailure(requestId, startTime, error)
+    }
+  }
+
+  private fun reportLinkFailure(requestId: String?, startTime: Long, error: Exception) {
+    Log.w(TAG, "Semantic accessibility link activation failed", error)
+    host.launchRequestScope(requestId) {
+      host.sendActionResult(
+        NodeActionResult(
+          requestId = requestId,
+          action = "activate_accessibility_link",
+          success = false,
+          error = error.message ?: error.javaClass.simpleName,
+          totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+        ),
+      )
     }
   }
 
@@ -215,6 +184,21 @@ internal class NodeActionController(
     }
   }
 
+  private fun findActionNode(
+    effectiveSelector: NodeSelector?,
+    resourceId: String?,
+  ): AccessibilityNodeInfo? {
+    return host.findNodeInDisplayWindows { root ->
+      if (effectiveSelector != null) {
+        findNodeBySelector(root, effectiveSelector)
+      } else if (resourceId != null) {
+        findNodeByResourceIdOnRootDisplay(root, resourceId, host::screenDimensions)
+      } else {
+        null
+      }
+    }
+  }
+
   /**
    * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
    * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
@@ -254,15 +238,7 @@ internal class NodeActionController(
       }
 
       perfProvider.startOperation("findNode")
-      val targetNode = host.findNodeInDisplayWindows { root ->
-        if (effectiveSelector != null) {
-          findNodeBySelector(root, effectiveSelector)
-        } else if (resourceId != null) {
-          findNodeByResourceIdOnRootDisplay(root, resourceId, host::screenDimensions)
-        } else {
-          null
-        }
-      }
+      val targetNode = findActionNode(effectiveSelector, resourceId)
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -285,17 +261,7 @@ internal class NodeActionController(
       }
 
       perfProvider.startOperation("executeAction")
-      val decision =
-        decideNodeAction(
-          action,
-          targetNode.isAccessibilityFocused,
-          targetNode.actionList?.map { it.id },
-        )
-      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
-      val actionError = (decision as? NodeActionDecision.Refused)?.message
-      val success =
-        alreadySatisfied ||
-          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
+      val (alreadySatisfied, actionError, success) = executeNodeAction(action, targetNode)
       perfProvider.endOperation("executeAction")
 
       targetNode.recycle()
@@ -365,3 +331,36 @@ internal class NodeActionController(
     }
   }
 }
+
+private data class NodeActionOutcome(
+  val alreadySatisfied: Boolean,
+  val error: String?,
+  val success: Boolean,
+)
+
+private fun executeNodeAction(
+  action: String,
+  targetNode: AccessibilityNodeInfo,
+): NodeActionOutcome {
+  val decision =
+    decideNodeAction(
+      action,
+      targetNode.isAccessibilityFocused,
+      targetNode.actionList?.map { it.id },
+    )
+  val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
+  val actionError = (decision as? NodeActionDecision.Refused)?.message
+  val success =
+    alreadySatisfied ||
+      (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
+  return NodeActionOutcome(alreadySatisfied, actionError, success)
+}
+
+private fun accessibilityLinkError(text: String, occurrence: Int): String? =
+  when {
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.O ->
+      "Semantic accessibility links require Android API 26 or later"
+    text.isBlank() || occurrence < 0 ->
+      "Link text must be non-blank and occurrence must be non-negative"
+    else -> null
+  }

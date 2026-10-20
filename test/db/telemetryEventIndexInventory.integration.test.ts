@@ -91,7 +91,7 @@ const CANONICAL_INDEXES: Record<string, Record<string, string[]>> = {
 const TABLES: string[] = [...EVENT_TABLES];
 
 test("EVENT_TABLES is the canonical table list used by the telemetry index guard", () => {
-  expect([...TABLES].sort()).toEqual(Object.keys(CANONICAL_INDEXES).sort());
+  expect(Object.keys(CANONICAL_INDEXES).sort()).toEqual([...TABLES].sort());
 });
 
 /**

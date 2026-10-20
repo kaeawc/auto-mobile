@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -150,15 +151,14 @@ test("dragAndDrop preserves its fallback diagnostic through wrapping and result 
       cacheTtlMinutes: 60,
     },
   });
-  action.observedInteraction = async (callback) =>
-    callback({
-      updatedAt: 1,
-      observationId: "container",
-      display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
-      screenSize: { width: 500, height: 500 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: capture,
-    });
+  action.observedInteraction = runBlockWith(() => ({
+    updatedAt: 1,
+    observationId: "container",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    screenSize: { width: 500, height: 500 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    viewHierarchy: capture,
+  }));
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const gesture = spyOn(client, "requestDrag").mockResolvedValue({ success: true, totalTimeMs: 0 });
   try {

@@ -526,7 +526,7 @@ function isFunctionInitializer(initializer: ts.Expression | undefined): boolean 
 
 function classMemberUnits(node: ts.ClassLikeDeclaration): FunctionUnit[] {
   const className = node.name?.text ?? "<anonymous class>";
-  return node.members.flatMap((member) => {
+  return node.members.flatMap<FunctionUnit>((member) => {
     if (ts.isConstructorDeclaration(member)) {
       return [{ key: `${className}.constructor`, className, node: member }];
     }

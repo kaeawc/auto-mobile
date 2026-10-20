@@ -1,3 +1,4 @@
+import { logStreamFactory, type LogStream } from "../../src/utils/loggingConfig";
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs from "node:fs";
@@ -13,7 +14,7 @@ useRealLogSinks();
 const STALL_MS = 5_000;
 const ABANDON_MS = 30_000;
 
-class HeldStream extends EventEmitter {
+class HeldStream extends EventEmitter implements LogStream {
   writable = true;
   destroyed = false;
   closed = false;
@@ -22,7 +23,7 @@ class HeldStream extends EventEmitter {
   writes: string[] = [];
   callbacks: Array<(error: Error | null) => void> = [];
 
-  write(chunk: unknown, callback: (error: Error | null) => void): boolean {
+  write(chunk: string, callback: (error?: Error | null) => void): boolean {
     this.writes.push(String(chunk));
     if (this.prompt) {
       callback(null);
@@ -69,10 +70,10 @@ describe("logger sink stall watchdog", () => {
     const stderr: string[] = [];
     const stdout: string[] = [];
     const timer = new FakeTimer();
-    const create = spyOn(fs, "createWriteStream").mockImplementation(() => {
+    const create = spyOn(logStreamFactory, "create").mockImplementation(() => {
       const stream = new HeldStream();
       streams.push(stream);
-      return stream as fs.WriteStream;
+      return stream;
     });
     const sync = spyOn(fs, "writeSync").mockImplementation(((fd: number, chunk: unknown) => {
       if (fd === process.stderr.fd) {
@@ -129,13 +130,52 @@ describe("logger sink stall watchdog", () => {
     let releaseStat: (() => void) | undefined;
     let rejectStat: ((error: Error) => void) | undefined;
     let rotationSize = 0;
-    const stat = spyOn(io, "statAsync").mockImplementation(
-      () =>
-        new Promise((resolve, reject) => {
-          releaseStat = () => resolve(Object.assign(fs.statSync(dir), { size: rotationSize }));
-          rejectStat = reject;
-        }),
-    );
+    // Match the filesystem overloads while retaining the deferred rotation seam.
+    function heldStat(path: fs.PathLike): Promise<fs.Stats>;
+    function heldStat(
+      path: fs.PathLike,
+      opts?: fs.StatOptions & { bigint?: false; throwIfNoEntry?: true },
+    ): Promise<fs.Stats>;
+    function heldStat(
+      path: fs.PathLike,
+      opts: fs.StatOptions & { bigint: true; throwIfNoEntry?: true },
+    ): Promise<fs.BigIntStats>;
+    function heldStat(
+      path: fs.PathLike,
+      opts: fs.StatOptions & { bigint?: false; throwIfNoEntry: false },
+    ): Promise<fs.Stats | undefined>;
+    function heldStat(
+      path: fs.PathLike,
+      opts: fs.StatOptions & { bigint: true; throwIfNoEntry: false },
+    ): Promise<fs.BigIntStats | undefined>;
+    function heldStat(
+      path: fs.PathLike,
+      opts: fs.StatOptions & { throwIfNoEntry?: true },
+    ): Promise<fs.Stats | fs.BigIntStats>;
+    function heldStat(
+      path: fs.PathLike,
+      opts?: fs.StatOptions,
+    ): Promise<fs.Stats | fs.BigIntStats | undefined>;
+    function heldStat(
+      _path: fs.PathLike,
+      opts?: fs.StatOptions,
+    ): Promise<fs.Stats | fs.BigIntStats | undefined> {
+      return new Promise((resolve, reject) => {
+        releaseStat = () => {
+          if (opts?.bigint) {
+            const stats = fs.statSync(dir, { bigint: true });
+            stats.size = BigInt(rotationSize);
+            resolve(stats);
+          } else {
+            const stats = fs.statSync(dir);
+            stats.size = rotationSize;
+            resolve(stats);
+          }
+        };
+        rejectStat = reject;
+      });
+    }
+    const stat = spyOn(io, "statAsync").mockImplementation(heldStat);
 
     return {
       mod,

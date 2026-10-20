@@ -534,7 +534,10 @@ describe("typed restore outcomes", () => {
     name: string;
     state: KeepScreenAwakeState;
     reject: string[];
-    failures: Array<{ setting: string; error: string }>;
+    failures: Array<{
+      setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
+      error: string;
+    }>;
   }>)("$name", async ({ state, reject, failures }) => {
     const adb = new FakeAdb({ reject });
     const mgr = new KeepScreenAwakeManager(
@@ -582,7 +585,10 @@ describe("typed restore outcomes", () => {
     name: string;
     state: KeepScreenAwakeState;
     calls: string[];
-    settings: Array<{ setting: string; value: string }>;
+    settings: Array<{
+      setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
+      value: string;
+    }>;
   }>)("$name", async ({ state, calls, settings }) => {
     const adb = new FakeAdb();
     const mgr = new KeepScreenAwakeManager(
@@ -623,7 +629,10 @@ describe("typed restore outcomes", () => {
     name: string;
     state: KeepScreenAwakeState;
     reject: string[];
-    baselineSettings: Array<{ setting: string; value: string }>;
+    baselineSettings: Array<{
+      setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
+      value: string;
+    }>;
   }>)("$name", async ({ state, reject, baselineSettings }) => {
     const adb = new FakeAdb({ reject });
     const mgr = new KeepScreenAwakeManager(
@@ -631,15 +640,22 @@ describe("typed restore outcomes", () => {
       makeFactory(adb),
       () => failingSettingsClient,
     );
-    const failures = reject.map((command) => ({
-      setting:
-        command === disable
-          ? "svc_stayon"
-          : command === timeout
-            ? "screen_off_timeout"
-            : "stay_on_while_plugged_in",
-      error: `fake adb: command failed: ${command}`,
-    }));
+    const failures = reject.map(
+      (
+        command,
+      ): {
+        setting: "screen_off_timeout" | "stay_on_while_plugged_in" | "svc_stayon";
+        error: string;
+      } => ({
+        setting:
+          command === disable
+            ? "svc_stayon"
+            : command === timeout
+              ? "screen_off_timeout"
+              : "stay_on_while_plugged_in",
+        error: `fake adb: command failed: ${command}`,
+      }),
+    );
     expect(await mgr.restore(state)).toEqual({
       status: "failed",
       failures,

@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import { describe, expect, test } from "bun:test";
 import path from "path";
 import { writeFile } from "node:fs/promises";
@@ -188,10 +189,12 @@ export async function down(db) {
       // No corruption: the write ran exactly once (single `probe` row, single
       // `0001` history row) — a stolen concurrent run would have collided.
       const database = db.getDatabase();
-      const probeRows = await database.selectFrom("probe").selectAll().execute();
-      expect(probeRows).toHaveLength(1);
-      const historyRows = await database.selectFrom("kysely_migration").select("name").execute();
-      expect(historyRows.map((row: { name: string }) => row.name)).toEqual([
+      const probeRows = await sql`select * from probe`.execute(database);
+      expect(probeRows.rows).toHaveLength(1);
+      const historyRows = await sql<{ name: string }>`select name from kysely_migration`.execute(
+        database,
+      );
+      expect(historyRows.rows.map((row: { name: string }) => row.name)).toEqual([
         "0001_slow_writing_migration",
       ]);
 

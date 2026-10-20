@@ -5,7 +5,7 @@ import {
   AndroidEmulatorClient,
   parseExtraEmulatorArguments,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { DeviceInfo, ExecResult } from "../../../src/models";
+import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
 import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
@@ -240,12 +240,13 @@ describe("AndroidEmulatorClient launch contract", () => {
       extraArgs: ["-ports", "5562,5555"],
     });
     const secondLaunch = await secondClient.startEmulator("Pixel 9a");
+    expect(secondLaunch).toBe(secondChild);
 
     expect(firstLaunch.targetDeviceId).toBe("emulator-5562");
     expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-ports", "5562,5555"]));
     expect(secondSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5556"]));
     firstChild.emit("exit", 0, null);
-    secondLaunch!.emit("exit", 0, null);
+    secondChild.emit("exit", 0, null);
   });
 
   test("skips an automatic port pair whose ADB endpoint is occupied outside ADB", async () => {
@@ -368,12 +369,13 @@ describe("AndroidEmulatorClient launch contract", () => {
       deviceId: "emulator-5554",
     });
     const secondLaunch = await secondClient.startEmulator("Pixel 9a");
+    expect(secondLaunch).toBe(secondChild);
 
     expect(firstLaunch.targetDeviceId).toBe("emulator-5554");
     expect(firstSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5554"]));
     expect(secondSpawnedArgs).toEqual(expect.arrayContaining(["-port", "5556"]));
     firstChild.emit("exit", 0, null);
-    secondLaunch!.emit("exit", 0, null);
+    secondChild.emit("exit", 0, null);
     AndroidEmulatorClient.resetLaunchReservationsForTesting();
   });
 
@@ -793,8 +795,8 @@ describe("AndroidEmulatorClient launch contract", () => {
   test("cancels the reservation snapshot before starting the raw-state scan", async () => {
     const controller = new AbortController();
     const adb = new FakeAdbExecutor();
-    let releaseBootedDevices: (devices: DeviceInfo[]) => void = () => {};
-    const bootedDevices = new Promise<DeviceInfo[]>((resolve) => {
+    let releaseBootedDevices: (devices: BootedDevice[]) => void = () => {};
+    const bootedDevices = new Promise<BootedDevice[]>((resolve) => {
       releaseBootedDevices = resolve;
     });
     let bootedDeviceSignal: AbortSignal | undefined;

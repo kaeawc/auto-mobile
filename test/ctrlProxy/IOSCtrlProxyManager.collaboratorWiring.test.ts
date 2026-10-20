@@ -1,3 +1,4 @@
+import { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { describe, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { BootedDevice } from "../../src/models";
@@ -28,7 +29,7 @@ class NoSigningManager extends XcodeSigningManager {
   override async resolveSigningForDevice(): ReturnType<
     XcodeSigningManager["resolveSigningForDevice"]
   > {
-    return { buildSettings: [], allowProvisioningUpdates: false, warnings: [] };
+    return { style: "automatic", buildSettings: [], allowProvisioningUpdates: false, warnings: [] };
   }
 }
 
@@ -39,13 +40,17 @@ interface AppLookup {
 }
 
 function recordingAppManager(lookups: AppLookup[], hash: string | null) {
-  return {
-    getInstalledAppBundleHash: async (deviceId: string, bundleId: string, simulator?: boolean) => {
-      lookups.push({ deviceId, bundleId, simulator });
-      return hash;
-    },
-    uninstallApp: async () => {},
+  const manager = new DeviceAppManager();
+  manager.getInstalledAppBundleHash = async (
+    deviceId: string,
+    bundleId: string,
+    simulator?: boolean,
+  ) => {
+    lookups.push({ deviceId, bundleId, simulator });
+    return hash;
   };
+  manager.uninstallApp = async () => {};
+  return manager;
 }
 
 /** Runs `fn` with the skip variable set (or unset when `value` is undefined), then restores it. */

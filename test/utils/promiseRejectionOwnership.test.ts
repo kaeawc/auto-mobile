@@ -92,7 +92,14 @@ describe("detached promise rejection ownership", () => {
     const error = new Error("navigation push rejected");
     await nav.manager.setCurrentApp("com.promise.navigation");
     nav.telemetrySpy.mockRejectedValue(error);
-    await nav.manager.recordNavigationEvent({ destination: "Home", timestamp: 1 });
+    await nav.manager.recordNavigationEvent({
+      destination: "Home",
+      timestamp: 1,
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 1,
+    });
     expect(nav.manager.getCurrentScreen()).toBe("Home");
     expect(warnings).toHaveBeenCalledWith(
       "[NAVIGATION_GRAPH] Navigation telemetry failed: navigation push rejected",
@@ -111,8 +118,8 @@ describe("detached promise rejection ownership", () => {
       timer,
     });
     try {
-      // Omit package/hierarchy to avoid performance monitoring and navigation work.
-      client.handleHierarchyUpdate({ updatedAt: timer.now() });
+      // Empty package/hierarchy avoid performance monitoring and navigation work.
+      client.handleHierarchyUpdate({ updatedAt: timer.now(), packageName: "", hierarchy: {} });
       await timer.advanceTimersByTimeAsync(0);
       expect(warnings).toHaveBeenCalledWith(
         "[CTRL_PROXY] Layout telemetry failed: hierarchy push rejected",
@@ -158,7 +165,14 @@ describe("detached promise rejection ownership", () => {
     const observation = structuredClone(loadAndroidHomeObserve().observe);
     const appId = observation.activeWindow!.appId!;
     await nav.manager.setCurrentApp(appId);
-    await nav.manager.recordNavigationEvent({ destination: "Home", timestamp: 1 });
+    await nav.manager.recordNavigationEvent({
+      destination: "Home",
+      timestamp: 1,
+      source: "",
+      arguments: {},
+      metadata: {},
+      sequenceNumber: 1,
+    });
     observation.backStack = { depth: 2, capturedAt: 1 } as ObserveResult["backStack"];
     const record = spyOn(nav.manager, "recordBackStack").mockRejectedValue(error);
     const fake = new FakeObserveScreen();

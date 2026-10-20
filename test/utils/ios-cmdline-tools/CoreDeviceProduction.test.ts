@@ -221,7 +221,7 @@ describe("production CoreDevice wiring", () => {
       simctl: {
         getDeviceInfo: async () => null,
         listSimulatorImages: async () => [
-          { name: "sim", platform: "ios", deviceId: "sim-1", state: "Booted" },
+          { name: "sim", platform: "ios", deviceId: "sim-1", state: "Booted", isRunning: true },
         ],
       },
     });
@@ -312,7 +312,16 @@ describe("production CoreDevice wiring", () => {
           events.push("boot");
           expect(timeoutMs).toBe(5000);
           expect(options?.bypassCache).toBe(true);
-          return [{ name: "sim", platform: "ios", deviceId: "sim-1", state, deviceType: "nonDuo" }];
+          return [
+            {
+              name: "sim",
+              platform: "ios",
+              deviceId: "sim-1",
+              state,
+              isRunning: state === "Booted",
+              deviceType: "nonDuo",
+            },
+          ];
         },
       },
     });

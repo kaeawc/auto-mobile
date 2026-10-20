@@ -6,7 +6,6 @@ import { judgedLeaseHeartbeat } from "../../src/daemon/livenessOwnerLease";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
-import type { DevicePool } from "../../src/daemon/devicePool";
 import { handleHeartbeat } from "../../src/daemon/daemonRequestHandlersParts/heartbeat";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -46,7 +45,6 @@ async function setUp(activeControl = false) {
   manager.onSessionRelease((_id, _device, reason) =>
     releases.push({ at: manager.sessionNow(), reason }),
   );
-  let pool: DevicePool;
   const release = async (session: Session, reason: SessionReleaseReason) => {
     await releaseSessionAndDevice(manager, pool, session.assignedDevice, ID, reason, {
       release: () => manager.releaseSessionIfOwned(ID, session, session.assignedDevice, reason),
@@ -54,13 +52,15 @@ async function setUp(activeControl = false) {
   };
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
-  pool = makePool(manager, "repro-daemon", {
+  const pool = makePool(manager, "repro-daemon", {
     timer,
     deviceManager,
     ownerDisconnect: {
       release: async (session, reason) => {
         const deferral = veto.keeps(session);
-        if (deferral) return deferral;
+        if (deferral) {
+          return deferral;
+        }
         await release(session, reason);
       },
     },
@@ -101,7 +101,9 @@ async function setUp(activeControl = false) {
     executions,
     async (id, reason) => {
       const current = manager.peekSession(id);
-      if (current) await release(current, reason);
+      if (current) {
+        await release(current, reason);
+      }
     },
     timer,
   );

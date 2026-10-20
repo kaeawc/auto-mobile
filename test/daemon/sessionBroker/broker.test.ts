@@ -195,7 +195,7 @@ describe("session-only broker lifecycle", () => {
   test("caller cancellation after device preparation persists a retryable receipt and cleans up", async () => {
     const controller = new AbortController();
     const prepare = devices.prepare.bind(devices);
-    spyOn(devices, "prepare").mockImplementationOnce(async (...args) => {
+    const prepareSpy = spyOn(devices, "prepare").mockImplementationOnce(async (...args) => {
       const prepared = await prepare(...args);
       controller.abort(new ClientRequestCancellation("client cancelled prepare"));
       return prepared;
@@ -220,6 +220,7 @@ describe("session-only broker lifecycle", () => {
     expect(devices.destroyed).toEqual(devices.prepared);
     expect(devices.released).toEqual(["session-1"]);
     expect(devices.sessions.size).toBe(0);
+    prepareSpy.mockRestore();
   });
 
   test("caller cancellation mid-acquire types an untyped native rejection using the abort reason", async () => {

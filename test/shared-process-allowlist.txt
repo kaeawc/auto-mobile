@@ -24,6 +24,7 @@ test/config/alwaysLoadTools.test.ts
 test/config/env.test.ts
 test/contracts/adbExecutor.test.ts
 test/contracts/androidCtrlProxy.test.ts
+test/contracts/daemonHttpTokenStore.test.ts
 test/contracts/dbWriteBarrier.test.ts
 test/contracts/deviceClientRegistry.test.ts
 test/contracts/deviceHealthMarkers.test.ts
@@ -102,6 +103,7 @@ test/daemon/daemonFatalHandler.test.ts
 test/daemon/daemonFlagEqualsForm.test.ts
 test/daemon/daemonHandshake.test.ts
 test/daemon/daemonHealthCheck.test.ts
+test/daemon/daemonHttpTokenLifecycle.test.ts
 test/daemon/daemonIsolationPaths.test.ts
 test/daemon/daemonMcpProxyCancellation.test.ts
 test/daemon/daemonMcpProxyLazyToolList.test.ts

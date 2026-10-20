@@ -62,7 +62,7 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // Finalization callback record moved from SessionManager; no additional reads.
   "src/daemon/sessionSlots.ts": 1,
   // MCP failure options and live-acceptance Session candidates.
-  "src/daemon/socketServer.ts": 1,
+  "src/daemon/socketServerParts/SocketAdmission.ts": 1,
   // Live-acceptance Session candidates, moved from socketServer.ts.
   "src/daemon/socketServer/restartAdmission.ts": 2,
   // CoreDevice diagnostic capability entries.

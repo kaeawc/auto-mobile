@@ -4,7 +4,6 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1333	src/daemon/client.ts
 4033	src/daemon/daemon.ts
-4532	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
 1262	src/daemon/deviceDataStreamSocketServer.ts
 1013	src/daemon/devicePool.ts
@@ -15,7 +14,6 @@
 1970	src/daemon/sessionBroker/provisioning/reconciler.ts
 1048	src/daemon/sessionDeviceStateRestore.ts
 9809	src/daemon/sessionManager.ts
-5794	src/daemon/socketServer.ts
 1180	src/daemon/videoStreamSocketServer.ts
 1401	src/db/navigationRetention.ts
 1390	src/devices/deviceBootService.ts

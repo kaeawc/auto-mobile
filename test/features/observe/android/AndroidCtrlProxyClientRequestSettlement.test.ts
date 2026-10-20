@@ -31,7 +31,7 @@ async function harness() {
   const socket = new RecordingSocket("ws://fake", "none", 0, timer);
   const adb = new FakeAdbExecutor();
   const client = AndroidCtrlProxyClient.createForTesting(
-    { deviceId: "client-settlement", platform: "android", name: "Android", isEmulator: true },
+    { deviceId: "client-settlement", platform: "android", name: "Android" },
     adb,
     {
       webSocketFactory: () => socket,
@@ -500,7 +500,7 @@ const methods: RequestMethod[] = [
   {
     name: "setPreference",
     abortable: false,
-    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "string", LONG_TIMEOUT_MS),
+    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "STRING", LONG_TIMEOUT_MS),
   },
   {
     name: "removePreference",

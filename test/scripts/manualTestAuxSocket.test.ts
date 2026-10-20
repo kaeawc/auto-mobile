@@ -151,7 +151,7 @@ test("parses recording fields, common flags, video and each WebRTC action", () =
     parsed(["video", '{"action":"subscribe","quality":"low"}', "--observer", "--hold-ms", "10"])
       .holdMs,
   ).toBe(10);
-  for (const action of ["stop", "status", "list", "await"]) {
+  for (const action of ["stop", "status", "list", "await"] as const) {
     expect(parsed(["webrtc", action, "{}", "--timeout-ms", "10"]).request).toEqual({ action });
   }
   expect(

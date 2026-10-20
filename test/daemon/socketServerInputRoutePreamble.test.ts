@@ -31,11 +31,11 @@ function fixture() {
     { isInitialized: () => false } as DaemonStateAccess,
     timer,
   );
-  // Bracket access reaches the private preamble helpers without a type-erasing cast.
+  // Typed callbacks exercise the real preamble helpers.
   const preamble: Preamble = {
-    inputRouteClock: (request, input) => server["inputRouteClock"](request, input),
+    inputRouteClock: (request, input) => server.testHooks.input.inputRouteClock(request, input),
     remainingInputBudgetMs: (toolName, origin, queueEnterMs, totalTimeoutMs) =>
-      server["remainingInputBudgetMs"](toolName, origin, queueEnterMs, totalTimeoutMs),
+      server.testHooks.input.remainingInputBudgetMs(toolName, origin, queueEnterMs, totalTimeoutMs),
   };
   return { timer, preamble };
 }
@@ -85,7 +85,7 @@ describe("input/* request preamble (#11814)", () => {
   });
 
   test("the budget check exists once in the socket server", () => {
-    const source = readFileSync("src/daemon/socketServer.ts", "utf8");
+    const source = readFileSync("src/daemon/socketServerParts/SocketInput.ts", "utf8");
     expect(source.match(/spent \$\{queueWaitMs\}ms waiting in queue/g)).toHaveLength(1);
   });
 });

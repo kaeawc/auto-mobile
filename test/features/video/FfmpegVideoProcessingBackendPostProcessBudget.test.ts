@@ -18,7 +18,6 @@ import {
   ProcessTeardownUnconfirmedError,
   trackProcess,
 } from "../../../src/utils/ChildProcessTracker";
-import { EventEmitter } from "node:events";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
@@ -126,8 +125,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
   }
 
   function captureTracker(recorderSignal: NodeJS.Signals | null = null): ProcessTracker {
-    const process = new EventEmitter() as ProcessTracker["process"];
-    process.stderr = new EventEmitter() as ProcessTracker["process"]["stderr"];
+    const process = new FakeChildProcess(timer);
     process.exitCode = recorderSignal ? null : 0;
     process.signalCode = recorderSignal;
     process.killed = false;

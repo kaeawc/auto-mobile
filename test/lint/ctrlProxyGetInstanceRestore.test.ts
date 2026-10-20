@@ -133,7 +133,7 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
         current = current.parent;
         continue;
       }
-      if (teardownCallbacks.has(current)) {
+      if ([...teardownCallbacks].some((callback) => callback === current)) {
         return true;
       }
       const call = current.parent;
@@ -349,13 +349,20 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
           if (ts.isShorthandPropertyAssignment(property)) {
             recordReassignedTarget(property.name, position);
           } else if (ts.isPropertyAssignment(property) || ts.isSpreadAssignment(property)) {
-            recordReassignedTarget(property.initializer ?? property.expression, position);
+            recordReassignedTarget(
+              ts.isPropertyAssignment(property) ? property.initializer : property.expression,
+              position,
+            );
           }
         }
       }
     };
     const reassignmentWalk = (node: ts.Node): void => {
-      if (ts.isBinaryExpression(node) && ts.isAssignmentOperator(node.operatorToken.kind)) {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ) {
         recordReassignedTarget(node.left, node.pos);
       }
       if (

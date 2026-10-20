@@ -336,7 +336,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     discoveryCallCounts();
     const routed = [
       "src/daemon/deviceLossDiscovery.ts",
-      "src/daemon/socketServer.ts",
+      "src/daemon/socketServerParts/SocketIdeRoutes.ts",
       "src/daemon/socketServer/ideDeviceRoutes.ts",
       "src/daemon/socketServer/inputDeviceGating.ts",
       "src/server/bootedDeviceResources.ts",

@@ -67,7 +67,7 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     }
   });
 
-  test.each(DEVICE_SESSION_ACQUISITION_TOOLS)(
+  test.each([...DEVICE_SESSION_ACQUISITION_TOOLS])(
     "does not inject sessionUuid into %s params",
     async (toolName) => {
       installFakeProxy();

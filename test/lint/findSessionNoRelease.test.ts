@@ -249,10 +249,10 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionBroker/sessionDisposition.ts#sessionDisposition": 1,
   "sessionClockPersistence.ts#getSession": 1,
   "sessionForIngress.ts#sessionForIngress": 1,
-  "socketServer.ts#getAssignedDeviceForSession": 1,
-  "socketServer.ts#getSessionIncarnation": 1,
+  "socketServerParts/McpBindings.ts#getAssignedDeviceForSession": 1,
+  "socketServerParts/McpBindings.ts#getSessionIncarnation": 1,
   "socketServer/inputDeviceGating.ts#grantedDeviceOf": 1,
-  "socketServer.ts#hasActiveDaemonSession": 1,
+  "socketServerParts/McpBindings.ts#hasActiveDaemonSession": 1,
   "socketServer/inputDeviceGating.ts#selectInputTargetDevice": 1,
 };
 

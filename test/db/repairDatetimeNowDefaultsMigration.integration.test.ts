@@ -229,7 +229,7 @@ describe("2026_07_03_000_repair_datetime_now_defaults migration (#2895)", () => 
         .selectFrom("kysely_migration")
         .select("name")
         .execute();
-      const names = executed.map((r: { name: string }) => r.name);
+      const names = executed.map((r) => r.name);
       expect(names).toContain("2026_07_03_000_repair_datetime_now_defaults");
     });
 

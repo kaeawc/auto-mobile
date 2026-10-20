@@ -1,5 +1,5 @@
 import { StubMcpClient } from "./helpers/fakeMcpClient";
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import { createHarnessServer as createTestUnixSocketServer } from "./helpers/UnixSocketServerHarness";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -451,7 +451,7 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
     const events: string[] = [];
     const deliveries: Array<boolean | undefined> = [];
     const socket = new FakeSocket();
-    server["clientSockets"].set(CONNECTION, socket);
+    server.state.clientSockets.set(CONNECTION, socket);
     h.pool.beginMcpToolCall = (connection) => {
       expect(connection).toBe(CONNECTION);
       events.push("begin");
@@ -460,17 +460,17 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
         deliveries.push(delivered);
       };
     };
-    server["handleRequest"] = async () => {
+    server.requestHandler = async () => {
       events.push("forward");
       expect(events).toEqual(["begin", "forward"]);
       if (outcome === "throw") {
         throw new Error("test forward failed");
       }
       if (outcome === "replaced") {
-        server["clientSockets"].set(CONNECTION, new FakeSocket());
+        server.state.clientSockets.set(CONNECTION, new FakeSocket());
       }
       if (outcome === "terminal") {
-        for (const pending of server["pendingSocketRequests"]) {
+        for (const pending of server.pendingRequests) {
           pending.terminal = true;
         }
       }
@@ -478,11 +478,11 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
         ? undefined
         : { id: "mint", type: "mcp_response", success: true };
     };
-    server["writeTerminalSocketResponse"] = () => {
+    server.testHooks.transport.writeTerminalSocketResponse = () => {
       events.push("write");
       expect(events).toEqual(["begin", "forward", "write"]);
     };
-    await server["processSocketRequestLine"](
+    await server.testHooks.transport.processSocketRequestLine(
       CONNECTION,
       socket,
       JSON.stringify({
@@ -522,15 +522,15 @@ test("#11999 a failed optional socket claim still forwards and writes the answer
     events.push("begin");
     throw claimError;
   };
-  server["handleRequest"] = async () => {
+  server.requestHandler = async () => {
     events.push("forward");
     return { id: "mint", type: "mcp_response", success: true };
   };
-  server["writeTerminalSocketResponse"] = () => {
+  server.testHooks.transport.writeTerminalSocketResponse = () => {
     events.push("write");
   };
   try {
-    await server["processSocketRequestLine"](
+    await server.testHooks.transport.processSocketRequestLine(
       CONNECTION,
       new FakeSocket(),
       JSON.stringify({
@@ -564,10 +564,10 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
       },
       h.timer,
     );
-    server["acceptingRequests"] = true;
+    server.allowRequests();
     const socket = new FakeSocket();
-    server["handleConnection"](socket);
-    const connection = [...server["sessions"].keys()][0]!;
+    server.connect(socket);
+    const connection = server.sessionIds[0]!;
     const minted = Promise.withResolvers<string>();
     const answer = Promise.withResolvers<void>();
     server.mcpClientFactory = async () =>
@@ -585,7 +585,7 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
           return { content: [] };
         },
       });
-    const request = server["processSocketRequestLine"](
+    const request = server.testHooks.transport.processSocketRequestLine(
       connection,
       socket,
       JSON.stringify({

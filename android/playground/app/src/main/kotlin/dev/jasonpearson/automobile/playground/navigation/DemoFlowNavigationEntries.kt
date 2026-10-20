@@ -7,6 +7,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
+import dev.jasonpearson.automobile.demos.DemoIndexNavigation
 import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
 import dev.jasonpearson.automobile.demos.PerformanceListScreen
@@ -44,24 +45,23 @@ private fun DemoIndexEntry(destination: DemoIndexDestination, state: NavigationS
   }
   Box(modifier = Modifier.destinationSemanticModifier<DemoIndexDestination>()) {
     DemoIndexScreen(
-      onNavigateToUxFlow = { backStack.add(DemoUxStartDestination) },
-      onNavigateToStartup = { backStack.add(DemoStartupDestination) },
-      onNavigateToPerformanceList = { backStack.add(DemoPerformanceListDestination) },
-      onNavigateToContrast = { backStack.add(DemoContrastDestination) },
-      onNavigateToTapTargets = { backStack.add(DemoTapTargetsDestination) },
-      onNavigateToXmlSemanticLinks = { backStack.add(DemoXmlSemanticLinksDestination) },
-      onNavigateToComposeSemanticLinks = {
-        backStack.add(DemoComposeSemanticLinksDestination)
-      },
-      onNavigateToNestedSelection = { backStack.add(DemoNestedSelectionDestination) },
-      onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
-      onNavigateToHandledException = {
-        backStack.add(DemoHandledExceptionDestination)
-      },
-      onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
-      onNavigateToPointerProbe = { backStack.add(DemoPointerProbeDestination) },
-      onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
-      onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
+      navigation =
+        DemoIndexNavigation(
+          onNavigateToUxFlow = { backStack.add(DemoUxStartDestination) },
+          onNavigateToStartup = { backStack.add(DemoStartupDestination) },
+          onNavigateToPerformanceList = { backStack.add(DemoPerformanceListDestination) },
+          onNavigateToContrast = { backStack.add(DemoContrastDestination) },
+          onNavigateToTapTargets = { backStack.add(DemoTapTargetsDestination) },
+          onNavigateToXmlSemanticLinks = { backStack.add(DemoXmlSemanticLinksDestination) },
+          onNavigateToComposeSemanticLinks = { backStack.add(DemoComposeSemanticLinksDestination) },
+          onNavigateToNestedSelection = { backStack.add(DemoNestedSelectionDestination) },
+          onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
+          onNavigateToHandledException = { backStack.add(DemoHandledExceptionDestination) },
+          onNavigateToNetworkTest = { backStack.add(DemoNetworkTestDestination) },
+          onNavigateToPointerProbe = { backStack.add(DemoPointerProbeDestination) },
+          onNavigateToDesignSystem = { backStack.add(DesignSystemDemoDestination) },
+          onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
+        ),
     )
   }
 }

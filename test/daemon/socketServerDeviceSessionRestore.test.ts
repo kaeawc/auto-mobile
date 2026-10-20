@@ -63,16 +63,13 @@ async function boundRecoveryHarness() {
       emulatorLossIncidentStore: incidents,
     }),
   );
-  const server = createTestUnixSocketServer(
-    "/fake/recovery.sock",
-    {
-      isInitialized: () => true,
-      getSessionManager: () => manager,
-      getDevicePool: () => pool,
-      getDeviceSessionRegistry: () => ({ list: () => [] }),
-    },
-    timer,
-  );
+  const state = {
+    isInitialized: () => true,
+    getSessionManager: () => manager,
+    getDevicePool: () => pool,
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
+  };
+  const server = createTestUnixSocketServer("/fake/recovery.sock", state, timer);
   server["acceptingRequests"] = true;
   const socket = new FakeSocket();
   server["handleConnection"](socket);
@@ -136,6 +133,7 @@ async function boundRecoveryHarness() {
   await call(false);
   return {
     timer,
+    state,
     persistence,
     manager,
     pool,
@@ -247,7 +245,7 @@ test.each([undefined, "device-restart:Pixel", "daemon-shutdown"])(
       // The daemon that held the session is gone; the one answering never had it in memory.
       const restarted = new SessionManager(h.timer, h.persistence);
       restarted.stopCleanupTimer();
-      h.server["daemonState"].getSessionManager = () => restarted;
+      h.state.getSessionManager = () => restarted;
       h.timer.setCurrentTime(row!.expires_at_ms + 1);
 
       const reason = handoff === "device-restart:Pixel" ? "restart-recovery-timeout" : "expired";
@@ -374,7 +372,7 @@ test("never-issued bound identity retains ReleasedBoundSessionError and loss fen
   try {
     const args = { sessionUuid: "never-issued", [DAEMON_BOUND_SESSION_PARAM]: "never-issued" };
     const error = await Promise.resolve()
-      .then(() => h.server["getToolsCallForwardRoute"](args, h.socketId, "observe"))
+      .then(() => h.server.testHooks.routing.getToolsCallForwardRoute(args, h.socketId, "observe"))
       .catch((error: unknown) => error);
     expect(error).toMatchObject({
       name: "ReleasedBoundSessionError",

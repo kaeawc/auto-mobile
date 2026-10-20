@@ -17,7 +17,6 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
   const device: BootedDevice = {
     deviceId: "request-registration-cleanup",
     platform: "android",
-    isEmulator: true,
     name: "Test Device",
   };
   let client: AndroidCtrlProxyClient | null = null;

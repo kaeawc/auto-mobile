@@ -364,7 +364,11 @@ class DesktopWireFixtureCompositionTest {
     repeat(3) { mainClock.advanceTimeByFrame() }
   }
 
-  private inner class Replay(scenario: String, panes: List<DesktopDaemonSessionBinding>) {
+  private inner class Replay(
+    scenario: String,
+    panes: List<DesktopDaemonSessionBinding>,
+    private val testDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Unconfined,
+  ) {
     val fixture = DesktopWireFixture.load(scenario)
     val transport = FixtureReplayDaemonTransport(fixture)
     val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
@@ -393,8 +397,8 @@ class DesktopWireFixtureCompositionTest {
           val uuid = fixture.sessions.getValue("desktop-${++minted}")
           DesktopDaemonSession(McpDaemonClient(transport, sessionUuid = uuid))
         },
-        ioDispatcher = Dispatchers.Unconfined,
-        cleanupDispatcher = Dispatchers.Unconfined,
+        ioDispatcher = testDispatcher,
+        cleanupDispatcher = testDispatcher,
       )
   }
 

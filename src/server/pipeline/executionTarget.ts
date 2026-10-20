@@ -58,7 +58,7 @@ import { resolveDirectSessionDevice } from "../../utils/directSessionDeviceRegis
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
-import { AmbiguousDeviceTargetError } from "../ambiguousDeviceTargetRefusal";
+import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
 
 export interface ExecutionTargetInput {
   name: string;

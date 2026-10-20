@@ -888,12 +888,12 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue(
       deviceManagerWith([device]),
     );
-    const iosManager = IOSCtrlProxyManager.createForTestingWithDeps(
+    const iosManager = IOSCtrlProxyManager.createForTestingWithDeps({
       device,
-      new FakeTimer(),
-      undefined,
-      new FakeProcessExecutor(),
-    );
+      timer: new FakeTimer(),
+      builder: undefined,
+      processExecutor: new FakeProcessExecutor(),
+    });
     spyOn(iosManager, "forceRestart").mockResolvedValue();
     const restart = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue(iosManager);
     const resume = spyOn(IOSCtrlProxyClient, "resumeAfterDeviceStart");

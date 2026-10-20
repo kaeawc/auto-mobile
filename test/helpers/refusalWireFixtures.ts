@@ -5,7 +5,7 @@ import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownErro
 import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
-import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
+import { OrphanRecorderActiveError } from "../../src/daemon/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -114,8 +114,8 @@ import {
   DeviceOutsideBoundSessionError,
   SessionOutsideBoundSessionError,
 } from "../../src/daemon/deviceOutsideBoundSessionRefusal";
-import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
-import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { PlanExecutionInProgressError } from "../../src/daemon/planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/daemon/ambiguousDeviceTargetRefusal";
 import { AdbDeviceTransportUnavailableError } from "../../src/utils/android-cmdline-tools/AdbDeviceTransportUnavailableError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
@@ -139,7 +139,7 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
 import { logger } from "../../src/utils/logger";
 

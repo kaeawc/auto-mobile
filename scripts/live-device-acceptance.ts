@@ -41,7 +41,7 @@ import {
   startDeviceSchema,
 } from "../src/server/deviceTools";
 import { readToolEnvelopePayload } from "../src/daemon/toolEnvelopePayload";
-import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/server/ambiguousDeviceTargetRefusal";
+import { AMBIGUOUS_DEVICE_TARGET_CODE } from "../src/daemon/ambiguousDeviceTargetRefusal";
 import { MIN_AVD_RAM_MB } from "../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { parseAndroidApiLevelBound } from "../src/utils/androidVersionBounds";

@@ -8,7 +8,7 @@ import type { ElementResolution } from "../../../src/features/utility/ElementRes
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { ScrollUntilVisible } from "../../../src/features/action/swipeon/ScrollUntilVisible";
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
-import { shapeToolCallError } from "../../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../../src/daemon/shapeToolCallError";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";

@@ -28,14 +28,12 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import {
   DEFAULT_VISION_CONFIG,
   type VisionAnalyzer,
   type VisionFallbackConfig,
 } from "../../vision/index";
-import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 import { AccessibilityDetector } from "../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
@@ -47,19 +45,16 @@ import {
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
 import { TapPostTapEffectPhase } from "./tapPostTapEffectPhase";
-import {
-  DefaultTalkBackNavigationDriverFactory,
-  type TalkBackNavigationDriverFactory,
-} from "../talkback/TalkBackNavigationDriver";
-import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import type { TalkBackNavigationDriverFactory } from "../talkback/TalkBackNavigationDriver";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
-import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
-import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import { LongPressMetadataDetector } from "./LongPressMetadataDetector";
-import { createTapStrategy } from "./strategies/createTapStrategy";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
+import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependencies";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { type RenderedObservationReader } from "./TargetDisplayAction";
 import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
@@ -449,32 +444,32 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         screenshotCapturer: this.screenshotCapturer,
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
-    this.elementSelector =
+    this.elementSelector = this.createElementSelector(options);
+    const accessibility = resolveTapAccessibilityDependencies(
+      options,
+      device,
+      this.adbFactory,
+      this.adb,
+      this.timer,
+      this.accessibilityDetector,
+    );
+    this.talkBackDriverFactory = accessibility.talkBackDriverFactory;
+    this.talkBackStrategy = accessibility.talkBackStrategy;
+    this.iosVoiceOverDetector = accessibility.iosVoiceOverDetector;
+    this.featureFlags = accessibility.featureFlags;
+    this.strategy = accessibility.strategy;
+    this.longPressMetadataDetector = new LongPressMetadataDetector(this.elementParser);
+  }
+
+  private createElementSelector(options: TapOnElementDependencies): ElementSelector {
+    return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: device.platform,
-        iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
-      });
-    this.talkBackDriverFactory =
-      options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
-    this.talkBackStrategy =
-      options.talkBackStrategy ??
-      new TalkBackTapStrategy({
-        timer: this.timer,
-        driverFactory: this.talkBackDriverFactory,
-      });
-    this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
-    this.featureFlags = options.featureFlags ?? FeatureFlagService.getInstance();
-    this.strategy =
-      options.tapStrategy ??
-      createTapStrategy(
-        device,
-        this.adb,
-        this.accessibilityDetector,
-        this.iosVoiceOverDetector,
-        this.featureFlags,
-      );
-    this.longPressMetadataDetector = new LongPressMetadataDetector(this.elementParser);
+        platform: this.device.platform,
+        iosMultiPanel:
+          this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+      })
+    );
   }
 
   /** @internal Typed view of private seams for unit tests; not part of the public API. */

@@ -4,7 +4,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

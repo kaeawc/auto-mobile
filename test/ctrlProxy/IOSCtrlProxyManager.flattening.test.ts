@@ -21,7 +21,9 @@ function getTunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
   return client;
 }
 
-type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+type RemoteRunner = NonNullable<
+  Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[0]["remoteRunner"]
+>;
 const simulator = {
   platform: "ios" as const,
   deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
@@ -376,12 +378,12 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     "listener cleanup preserves loop exits: %s",
     async (branch) => {
       const events: string[] = [];
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        simulator,
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps({
+        device: simulator,
         timer,
-        undefined,
-        new FakeProcessExecutor(),
-      );
+        builder: undefined,
+        processExecutor: new FakeProcessExecutor(),
+      });
       const owned = { pid: 5555, port: 8765, command: "xcodebuild" };
       const foreign = { pid: 5556, port: 8765, command: "foreign" };
       let probes = 0;

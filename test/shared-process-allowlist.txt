@@ -400,12 +400,14 @@ test/daemon/sessionBroker/registry/bindingJournalRemovalNeverAdopted.test.ts
 test/daemon/sessionBroker/registry/bindingOwnerLiveness.test.ts
 test/daemon/sessionBroker/registry/bindingRegistryBusyCallers.test.ts
 test/daemon/sessionBroker/registry/bindingRegistryMigrations.test.ts
+test/daemon/sessionBroker/registry/brokerResourceIndexes.test.ts
 test/daemon/sessionBroker/registry/platformLegacySlotDeviceStopper.test.ts
 test/daemon/sessionBroker/registry/registrySchemaCompatibility.test.ts
 test/daemon/sessionBroker/registry/registryUpgradeFromCapturedSchema.test.ts
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.test.ts
 test/daemon/sessionBroker/service.test.ts
 test/daemon/sessionBroker/sqliteStore.test.ts
+test/daemon/sessionBroker/sqliteStoreBoundedReads.test.ts
 test/daemon/sessionBrokerProxyAcquisition.test.ts
 test/daemon/sessionBrokerProxyLifecycle.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
@@ -1915,6 +1917,8 @@ test/utils/ios-cmdline-tools/SimCtlClient.unboundDevice.test.ts
 test/utils/ios-cmdline-tools/SimulatorAppPresenter.test.ts
 test/utils/ios-cmdline-tools/SimulatorDeviceTypeProfiles.test.ts
 test/utils/ios-cmdline-tools/SimulatorDisplays.test.ts
+test/utils/ios-cmdline-tools/SimulatorProfileDiscovery.test.ts
+test/utils/ios-cmdline-tools/SimulatorProfileStore.test.ts
 test/utils/ios-cmdline-tools/SimulatorTccSqliteClient.test.ts
 test/utils/ios-cmdline-tools/XcodebuildClient.test.ts
 test/utils/ios-cmdline-tools/XctestrunPlist.test.ts

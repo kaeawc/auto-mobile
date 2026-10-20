@@ -131,21 +131,26 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.discovery.findDaemonManagedRunnerTreeRoot(...args),
       formatListeningProcesses: (...args) => this.discovery.formatListeningProcesses(...args),
     });
-    this.launch = new IosCtrlProxyLaunch(this.state, {
-      useRemoteRunner: () => this.useRemoteRunner(),
-      adoptServicePort: (...args) => this.ports.adoptServicePort(...args),
-      ensureRemoteServicePortAvailable: (...args) => this.ensureRemoteServicePortAvailable(...args),
-      resolveTargetBundleId: () => this.resolveTargetBundleId(),
-      assertDeviceNotRetired: () => this.assertDeviceNotRetired(),
-      ensureLocalServicePortAllocatedAndAvailable: () =>
-        this.ports.ensureLocalServicePortAllocatedAndAvailable(),
-      trackStartedXcodebuild: (...args) => this.trackStartedXcodebuild(...args),
-      startIproxyTunnel: (...args) => this.startIproxyTunnel(...args),
-      stopIproxyTunnel: (...args) => this.stopIproxyTunnel(...args),
-      retireTrackedDeviceRunnerBeforeSpawn: () => this.retireTrackedDeviceRunnerBeforeSpawn(),
-      checkHealthEndpoint: () => this.health.checkHealthEndpoint(),
-      isProcessRunning: (...args) => this.isProcessRunning(...args),
-    });
+    this.launch = new IosCtrlProxyLaunch(
+      this.state,
+      {
+        useRemoteRunner: () => this.useRemoteRunner(),
+        adoptServicePort: (...args) => this.ports.adoptServicePort(...args),
+        ensureRemoteServicePortAvailable: (...args) =>
+          this.ensureRemoteServicePortAvailable(...args),
+        resolveTargetBundleId: () => this.resolveTargetBundleId(),
+        assertDeviceNotRetired: () => this.assertDeviceNotRetired(),
+        ensureLocalServicePortAllocatedAndAvailable: () =>
+          this.ports.ensureLocalServicePortAllocatedAndAvailable(),
+        trackStartedXcodebuild: (...args) => this.trackStartedXcodebuild(...args),
+        startIproxyTunnel: (...args) => this.startIproxyTunnel(...args),
+        stopIproxyTunnel: (...args) => this.stopIproxyTunnel(...args),
+        retireTrackedDeviceRunnerBeforeSpawn: () => this.retireTrackedDeviceRunnerBeforeSpawn(),
+        checkHealthEndpoint: () => this.health.checkHealthEndpoint(),
+        isProcessRunning: (...args) => this.isProcessRunning(...args),
+      },
+      options.healthMissThreshold,
+    );
     this.restart = new IosCtrlProxyRestart(this.state, {
       stop: (...args) => this.stop(...args),
       assertDeviceNotRetired: () => this.assertDeviceNotRetired(),

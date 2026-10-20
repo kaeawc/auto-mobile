@@ -1727,6 +1727,7 @@ test/server/prototypeWindowOptions.test.ts
 test/server/provisionCancellationOutcomes.test.ts
 test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
+test/server/provisioning/verifiedBootCapacity.test.ts
 test/server/proxyServer.resources.characterization.test.ts
 test/server/proxyServerProgress.test.ts
 test/server/proxyTasksRelay.test.ts

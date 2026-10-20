@@ -432,6 +432,40 @@ describe("GateBindingBootCapacity", () => {
     });
   });
 
+  test.each([3_000, 60_000])(
+    "bounds and aborts the probe at min(%i, 17 s)",
+    async (remainingMs) => {
+      const timer = new FakeTimer();
+      let probeSignal: AbortSignal | undefined;
+      const capacity = new GateBindingBootCapacity(timer, async (_platform, signal) => {
+        probeSignal = signal;
+        await new Promise<void>(() => {});
+      });
+      const timeoutMs = Math.min(remainingMs, BOOT_CAPACITY_CHECK_TIMEOUT_MS);
+      const check = capacity.check("ios", {
+        timeoutMs: remainingMs,
+        signal: new AbortController().signal,
+      });
+      await timer.advanceTimersByTimeAsync(timeoutMs - 1);
+      expect(probeSignal?.aborted).toBe(false);
+      await timer.advanceTimersByTimeAsync(1);
+      expect(probeSignal?.aborted).toBe(true);
+      expect(await check).toEqual({
+        kind: "unknown",
+        message: `Timed out after ${timeoutMs}ms checking ios boot capacity.`,
+      });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("a short-budget probe finishes at 3 s rather than the 17 s backstop", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const capacity = new GateBindingBootCapacity(timer, () => new Promise<void>(() => {}));
+    expect(await capacity.check("ios", { timeoutMs: 3_000 })).toMatchObject({ kind: "unknown" });
+    expect(timer.now()).toBe(3_000);
+  });
+
   test("a defect in the gate propagates instead of becoming a retryable refusal", async () => {
     const capacity = new GateBindingBootCapacity(new FakeTimer(), async () => {
       throw new TypeError("gate.decide is not a function");

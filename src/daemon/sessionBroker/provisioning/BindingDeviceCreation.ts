@@ -1,4 +1,5 @@
 import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
+import { withVerifiedBootCapacity } from "../../../devices/bootAdmission/VerifiedBootCapacity";
 import {
   BindingJournalRemovalRegistryTimeout,
   type BindingJournal,
@@ -121,12 +122,14 @@ export class BindingDeviceCreation {
     options: { bootReservation?: BootSlotReservation } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
+    let capacityVerifiedAtMs: number | undefined;
     if (replacing === undefined) {
       try {
         this.host.checkBudget(request);
         await this.assertCreatable(context);
         if (!options.bootReservation) {
-          await this.assertBootCapacity(request);
+          // Fail before journal/resource admission; only this create may reuse the fresh verdict.
+          capacityVerifiedAtMs = await this.assertBootCapacity(request);
         }
       } catch (error) {
         // No provisioning or journal entry exists yet; preserve the original refusal unchanged.
@@ -138,7 +141,7 @@ export class BindingDeviceCreation {
       // A replacement holds its boot admission across deletion. The provision-path gate consumes
       // that same reservation, so neither this probe nor the boot can refuse its held slot.
       if (!options.bootReservation) {
-        await this.assertBootCapacity(request);
+        capacityVerifiedAtMs = await this.assertBootCapacity(request);
       }
     }
     const name = bindingDeviceName(
@@ -157,7 +160,7 @@ export class BindingDeviceCreation {
       }
       let provisioned: BindingProvisionedDevice;
       try {
-        const provision = () =>
+        const provisionDevice = () =>
           this.deps.provisioner.provision({
             platform: request.platform,
             name,
@@ -170,6 +173,20 @@ export class BindingDeviceCreation {
             deadlineMs: request.deadlineMs,
             signal: request.signal,
           });
+        const provision = () =>
+          withVerifiedBootCapacity(
+            {
+              platform: request.platform,
+              name,
+              spec: {
+                runtime: request.requestedSpec.runtime,
+                deviceType: context.resolvedSpec.deviceType,
+              },
+            },
+            capacityVerifiedAtMs,
+            this.deps.timer,
+            provisionDevice,
+          );
         provisioned = options.bootReservation
           ? await options.bootReservation.run(provision)
           : await provision();
@@ -760,12 +777,17 @@ export class BindingDeviceCreation {
    * Booting a device that already exists is not checked
    * here: the provision path owns that decision and its own-target exemption.
    */
-  private async assertBootCapacity(request: BindingReconcileRequest): Promise<void> {
+  private async assertBootCapacity(request: BindingReconcileRequest): Promise<number | undefined> {
     if (!this.deps.capacity) {
       return;
     }
-    const check = await this.deps.capacity.check(request.platform, { signal: request.signal });
+    this.host.checkBudget(request);
+    const check = await this.deps.capacity.check(request.platform, {
+      signal: request.signal,
+      timeoutMs: Math.max(1, request.deadlineMs - this.deps.timer.now()),
+    });
     this.assertCapacityCheck(request, check);
+    return check.kind === "available" ? this.deps.timer.now() : undefined;
   }
 
   private assertCapacityCheck(request: BindingReconcileRequest, check: BindingCapacityCheck): void {

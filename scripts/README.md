@@ -562,3 +562,36 @@ Each cycle cold boots (snapshot load/save disabled) with a fresh private daemon
 namespace for W. Host GPU boot refusal is UNEXERCISED. A crash is data and emits
 a warning; harness errors fail the cell. Inputs accept up to nine decimal digits. No runtime stability claim is made from
 one passing cycle. The artifacts can be large because cores and full logs are kept.
+
+## Host test workers and cancellation
+
+`scripts/test-ts.sh unit` and `changed` share a nonblocking host slot pool at
+`${AUTOMOBILE_COORDINATION_DIR:-$HOME/.auto-mobile}/test-slots` (the legacy
+`AUTO_MOBILE_COORDINATION_DIR` override is also supported). Worktrees must use
+one coordination directory to share the limit. `AUTOMOBILE_HOST_TEST_SLOTS`
+sets a positive pool capacity; the default is half the logical cores, rounded
+up, with a minimum of two. Set it to `off` to disable the semaphore.
+
+`AUTOMOBILE_UNIT_TEST_WORKERS` still bounds demand. Lanes acquire free slots in
+index order. Only a lane holding the entire base pool may acquire extra slots
+up to its demand, preserving the existing full worker count on an idle host,
+including hosted runners. Concurrent lanes divide the base pool; a lane with
+zero slots runs one **unslotted** worker so it can make progress. This is a
+cooperative cap, not an absolute process ceiling. Targeted runs also limit
+`--parallel` to the number of selected files. Coverage keeps `--parallel=1`.
+The `test-ts: host slots` stderr line reports demand, acquired slots and workers.
+
+INT, TERM and HUP stop the shard command and watchdog process groups, then
+escalate to KILL after `AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS` (default two
+seconds), release slots and exit with 128 plus the signal number. EXIT cleanup
+also runs on failures. Portable watchdogs check their caller every second;
+chunk runners check the original lane owner before starting another group.
+Dead slot owners are reclaimed on the next acquisition. Slots with an owner
+not yet published are conservatively left alone to avoid stealing an active
+acquisition.
+
+A timed-out unit shard is not retried when one-minute host load exceeds the
+logical core count. `AUTOMOBILE_TEST_LOADAVG_FILE` can inject a load-average
+file (first field is the one-minute value) for deterministic tests. Changed
+mode still delegates selection to Bun with `--changed` and `--shard`; only its
+shard count is capped. Sharing a changed-file list is deferred.

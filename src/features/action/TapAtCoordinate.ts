@@ -653,7 +653,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     ) {
       return undefined;
     }
-    if (!hasSameTapTargetingLayout(initial, refreshed)) {
+    if (!options.snapshotId && !hasSameTapTargetingLayout(initial, refreshed)) {
       throw new ActionableError(
         "Stale frame context: screen layout changed since the last observation. Observe again and recompute coordinates, or pass a fresh snapshotId.",
       );

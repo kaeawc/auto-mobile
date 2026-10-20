@@ -9,7 +9,10 @@ import { setDeviceIncarnationResolver } from "../../../src/utils/deviceIncarnati
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { observation } from "../../helpers/tapAtCoordinate";
-import { loadIosFractionalObserve } from "../../fixtures/observe/observeFixture";
+import { loadDiffFixture, loadIosFractionalObserve } from "../../fixtures/observe/observeFixture";
+import iosCapturedHierarchy from "../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import { flattenForDiff } from "../../../src/features/observe/output/resultOutput/hierarchy";
 
 const captured: ObserveResult = {
   observationId: "captured",
@@ -39,6 +42,15 @@ function captureReference(
     throw new Error(`Missing: ${result.missing.join(", ")}`);
   }
   return result.reference;
+}
+
+function capturedAndroid(): ObserveResult {
+  const fixture = loadDiffFixture("scroll-before");
+  return {
+    ...fixture,
+    display: captured.display,
+    viewHierarchy: { ...fixture.viewHierarchy!, nativeScale: 1, frameContext: "epoch:1" },
+  };
 }
 
 const androidEpoch = "123e4567-e89b-42d3-a456-426614174000";
@@ -344,24 +356,130 @@ describe("SnapshotReferenceStore", () => {
     );
   });
 
-  test("rejects a real screen change with the same geometry and runner epoch", () => {
+  test("accepts captured Android clock and battery updates across a minute boundary", () => {
+    const original = capturedAndroid();
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    const original = observation(100, 200, `${androidEpoch}:1:abc`, 0, { text: "Home" });
-    const ref = captureReference(store, "device-1", original);
-    const changed = observation(100, 200, `${androidEpoch}:2:def`, 0, { text: "Settings" });
-    expect(store.staleReason(ref.snapshotId, "device-1", changed)).toBe(
-      "Snapshot reference is stale (tap-targeting layout changed); re-observe.",
+    const ref = captureReference(store, "android", original);
+    const refreshed = structuredClone(original);
+    const nodes = flattenForDiff(refreshed).map(({ source }) => source);
+    const clock = nodes.find((node) => node["resource-id"] === "com.android.systemui:id/clock")!;
+    const battery = nodes.find(
+      (node) => node["resource-id"] === "com.android.systemui:id/battery",
+    )!;
+    expect(clock.text).toBe("9:02");
+    expect(battery["content-desc"]).toBe("Battery 100 percent.");
+    clock.text = "9:03";
+    clock["content-desc"] = "9:03 PM";
+    battery["content-desc"] = "Battery 99 percent.";
+    expect(store.staleReason(ref.snapshotId, "android", refreshed)).toBeUndefined();
+    // Chrome can reflow or add/remove icons without retargeting app coordinates.
+    clock.bounds!.right += 10;
+    battery.node = [];
+    const { top, bottom, left, right } = refreshed.systemInsets;
+    refreshed.systemInsets = { bottom, right, top, left };
+    expect(store.staleReason(ref.snapshotId, "android", refreshed)).toBeUndefined();
+  });
+
+  test("ignores captured app labels, values, state and screen identity keys", () => {
+    const original = capturedAndroid();
+    original.screenIdentity = {
+      platform: "android",
+      source: "sdk",
+      confidence: "high",
+      key: "first",
+      components: {},
+    };
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const ref = captureReference(store, "android", original);
+    const refreshed = structuredClone(original);
+    for (const { source } of flattenForDiff(refreshed)) {
+      Object.assign(source, {
+        text: "00:42",
+        "content-desc": "Progress 42%",
+        value: "42",
+        selected: true,
+        checked: true,
+        "state-description": "playing",
+      });
+    }
+    refreshed.screenIdentity!.key = "second";
+    expect(store.staleReason(ref.snapshotId, "android", refreshed)).toBeUndefined();
+  });
+
+  test.each(["bounds", "structure", "className", "role", "clickable", "enabled"] as const)(
+    "rejects captured Android %s changes with the same frame geometry",
+    (field) => {
+      const original = capturedAndroid();
+      const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const ref = captureReference(store, "android", original);
+      const refreshed = structuredClone(original);
+      const target = flattenForDiff(refreshed).find(
+        ({ source }) => source["resource-id"] === "navigation.HomeDestination",
+      )!.source;
+      if (field === "bounds") {
+        target.bounds!.right -= 100;
+      } else if (field === "structure") {
+        target.node = [];
+      } else {
+        Object.assign(target, {
+          [field]: field === "clickable" || field === "enabled" ? false : "changed",
+        });
+      }
+      expect(store.staleReason(ref.snapshotId, "android", refreshed)).toContain(
+        "tap-targeting layout changed",
+      );
+    },
+  );
+
+  test("rejects pinch-style bounds changes in a captured iOS hierarchy", () => {
+    const original: ObserveResult = {
+      ...captured,
+      screenSize: {
+        width: iosCapturedHierarchy.screenWidth,
+        height: iosCapturedHierarchy.screenHeight,
+      },
+      viewHierarchy: structuredClone(iosCapturedHierarchy) as ViewHierarchyResult,
+    };
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const ref = captureReference(store, "ios", original);
+    const refreshed = structuredClone(original);
+    const target = flattenForDiff(refreshed).find(({ source }) => source.role === "text")!.source;
+    target.bounds!.right += 12.5;
+    expect(store.staleReason(ref.snapshotId, "ios", refreshed)).toContain(
+      "tap-targeting layout changed",
     );
   });
 
-  test.each(["captured", "current"])("fails closed when the %s layout is truncated", (which) => {
+  test.each(["observation", "hierarchy", "window"])(
+    "does not issue a reference for %s truncation",
+    (location) => {
+      const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+      const truncated = observation(100, 200);
+      if (location === "observation") {
+        truncated.truncationReasons = ["max_nodes"];
+      } else if (location === "hierarchy") {
+        truncated.viewHierarchy!.truncationReasons = ["max_depth"];
+      } else {
+        truncated.viewHierarchy!.windows = [{ truncationReasons: ["max_nodes"] }];
+      }
+      expect(store.capture("device-1", truncated)).toEqual({
+        status: "unavailable",
+        missing: ["Hierarchy was truncated; observe with a narrower scope."],
+      });
+      expect(store.size).toBe(0);
+    },
+  );
+
+  test("rejects a previously complete reference when the current hierarchy is truncated", () => {
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
     const complete = observation(100, 200);
-    const truncated = { ...complete, truncationReasons: ["maxNodes"] };
-    const ref = captureReference(store, "device-1", which === "captured" ? truncated : complete);
+    const ref = captureReference(store, "device-1", complete);
     expect(
-      store.staleReason(ref.snapshotId, "device-1", which === "current" ? truncated : complete),
-    ).toBe("Snapshot tap-targeting layout is unavailable; re-observe.");
+      store.staleReason(ref.snapshotId, "device-1", {
+        ...complete,
+        truncationReasons: ["max_nodes"],
+      }),
+    ).toContain("Hierarchy was truncated; observe with a narrower scope.");
   });
 
   test("expires at the deadline and bounds capacity", () => {

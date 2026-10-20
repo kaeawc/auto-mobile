@@ -341,7 +341,11 @@ describe("DragPath", () => {
       const { client, frames } = fakeClient(timer);
       const iosClient = new FakeIOSCtrlProxy();
       const observe = new FakeObserveScreen();
-      observe.setObserveResult(observation(100, 200, "frame-124", 0, { text: "New screen" }));
+      observe.setObserveResult(
+        observation(100, 200, "frame-124", 0, {
+          bounds: { left: 0, top: 0, right: 90, bottom: 90 },
+        }),
+      );
       const dragPath = new DragPath(device, new FakeAdbExecutor(), {
         timer,
         androidClient: client,

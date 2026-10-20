@@ -1,3 +1,5 @@
+import { attachSnapshotReference } from "../../src/server/observeResponse";
+import { observation as coordinateObservation } from "../helpers/tapAtCoordinate";
 import { readToolEnvelopePayload } from "../../src/utils/toolEnvelopePayload";
 import { z } from "zod/v4";
 import { observeResultSchema } from "../../src/server/toolOutputSchemas";
@@ -1071,4 +1073,20 @@ describe("session-free observe device read", () => {
       },
     });
   });
+});
+
+test("truncated captures replace a prior handle with actionable snapshot unavailability", () => {
+  const result = coordinateObservation(100, 200);
+  attachSnapshotReference(device.deviceId, result);
+  expect(result.snapshotReference?.snapshotId).toBeTruthy();
+  result.viewHierarchy!.truncationReasons = ["max_nodes"];
+  attachSnapshotReference(device.deviceId, result);
+  expect(result.snapshotReference).toBeUndefined();
+  expect(result.snapshotReferenceUnavailable).toEqual([
+    "Hierarchy was truncated; observe with a narrower scope.",
+  ]);
+  result.viewHierarchy!.truncationReasons = [];
+  attachSnapshotReference(device.deviceId, result);
+  expect(result.snapshotReference?.snapshotId).toBeTruthy();
+  expect(result.snapshotReferenceUnavailable).toBeUndefined();
 });

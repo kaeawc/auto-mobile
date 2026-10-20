@@ -1,4 +1,12 @@
+import { createHash, type Hash } from "node:crypto";
+import { stableStringify } from "../../utils/stableStringify";
 import { isDeepStrictEqual } from "node:util";
+import {
+  nodeAttributes,
+  nodeBounds,
+  type ViewHierarchyNode,
+} from "../../models/ViewHierarchyResult";
+import { isSystemUiStatusBarId } from "./output/resultOutput/hierarchy";
 import type { ObserveResult } from "../../models/ObserveResult";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -42,6 +50,13 @@ function withoutVolatileTapLayoutFields(value: unknown): unknown {
 function hasTruncatedTapLayout(observation: ObserveResult): boolean {
   return Boolean(
     observation.truncationReasons?.length || observation.viewHierarchy?.truncationReasons?.length,
+  );
+}
+
+function hasTruncatedSnapshotLayout(observation: ObserveResult): boolean {
+  return (
+    hasTruncatedTapLayout(observation) ||
+    Boolean(observation.viewHierarchy?.windows?.some((window) => window.truncationReasons?.length))
   );
 }
 
@@ -152,7 +167,7 @@ export function snapshotReferenceUnavailable(observation: ObserveResult): string
     missing.push("screenSize");
   }
   const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
-  if (typeof rotation !== "number" || !Number.isInteger(rotation)) {
+  if (!Number.isInteger(rotation)) {
     missing.push("rotation");
   }
   if (!hasPositiveScale(observation.viewHierarchy?.nativeScale)) {
@@ -160,6 +175,9 @@ export function snapshotReferenceUnavailable(observation: ObserveResult): string
   }
   if (!observation.viewHierarchy?.frameContext) {
     missing.push("frameContext");
+  }
+  if (hasTruncatedSnapshotLayout(observation)) {
+    missing.push("Hierarchy was truncated; observe with a narrower scope.");
   }
   return missing;
 }
@@ -233,27 +251,109 @@ function hasConflictingField(
   return entry[key] !== current[key];
 }
 
-/** Keep the existing unknown-window tolerance while comparing the shared targeting projection. */
+/** Fixed-order geometry avoids dependence on wire object property order. */
+function snapshotBounds(bounds: unknown): unknown {
+  if (bounds && typeof bounds === "object" && !Array.isArray(bounds)) {
+    const rect = bounds as Record<string, unknown>;
+    return [rect.left, rect.top, rect.right, rect.bottom];
+  }
+  return bounds;
+}
+
+/**
+ * Hash only structure, geometry and tap affordances, including wrapped iOS attributes.
+ * Text, descriptions, values, selection/state and capture IDs cannot retarget a coordinate.
+ * Delimit each subtree so changing parentage/order cannot alias an identical flat node list.
+ */
+function hashSnapshotTree(hash: Hash, value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const node of value) {
+      hashSnapshotTree(hash, node);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+  const node = value as ViewHierarchyNode;
+  // Some Android captures carry an empty `$` alongside flat attributes.
+  const attrs: Record<string, unknown> = { ...node, ...nodeAttributes(node) };
+  if (isSystemUiStatusBarId(attrs["resource-id"])) {
+    return;
+  }
+  hash.update("[");
+  hash.update(
+    JSON.stringify([
+      attrs.className ?? attrs.class ?? attrs.type,
+      attrs.role,
+      snapshotBounds(nodeBounds(node)),
+      attrs.clickable,
+      attrs.enabled,
+    ]),
+  );
+  hashSnapshotTree(hash, node.node);
+  hash.update("]");
+}
+
+/** Constant-sized owned digests; no observation trees or mutable bounds are retained. */
+function snapshotLayout(observation: ObserveResult) {
+  const hierarchy = observation.viewHierarchy!;
+  const hash = createHash("sha256");
+  hash.update(
+    stableStringify([
+      observation.systemInsets,
+      observation.insets,
+      hierarchy.screenWidth,
+      hierarchy.screenHeight,
+      hierarchy.pixelWidth,
+      hierarchy.pixelHeight,
+      hierarchy.nativeScale,
+      hierarchy.rotation,
+      hierarchy.systemInsets,
+      hierarchy.insets,
+    ]),
+  );
+  hashSnapshotTree(hash, hierarchy.hierarchy);
+  let windows: string | undefined;
+  if (hierarchy.windows !== undefined) {
+    const windowHash = createHash("sha256");
+    for (const window of hierarchy.windows) {
+      windowHash.update(
+        JSON.stringify([
+          window.id,
+          window.type,
+          window.isActive,
+          window.isFocused,
+          snapshotBounds(window.bounds),
+          window.windowLayer,
+          window.packageName,
+        ]),
+      );
+      hashSnapshotTree(windowHash, window.hierarchy);
+    }
+    windows = windowHash.digest("hex");
+  }
+  return { tree: hash.digest("hex"), windows };
+}
+
 function hasSameSnapshotLayout(
-  captured: NonNullable<ReturnType<typeof tapTargetingLayout>>,
-  current: NonNullable<ReturnType<typeof tapTargetingLayout>>,
+  captured: ReturnType<typeof snapshotLayout>,
+  current: ReturnType<typeof snapshotLayout>,
 ): boolean {
-  // Older/bootstrap captures can omit optional activity/window metadata. Geometry already
-  // rejects conflicting known facts; absence alone must not invalidate an otherwise equal tree.
-  if (!captured.activeWindow.activityName || !current.activeWindow.activityName) {
-    current.activeWindow.activityName = captured.activeWindow.activityName;
-  }
-  if (captured.hierarchy.windows === undefined || current.hierarchy.windows === undefined) {
-    current.hierarchy.windows = captured.hierarchy.windows;
-  }
-  return isDeepStrictEqual(captured, current);
+  // Geometry rejects conflicting known window facts; missing optional metadata is tolerated.
+  return (
+    captured.tree === current.tree &&
+    (captured.windows === undefined ||
+      current.windows === undefined ||
+      captured.windows === current.windows)
+  );
 }
 
 /** Process-local, bounded references to observed geometry and tap-targeting layout. */
 export class SnapshotReferenceStore {
   private readonly entries = new Map<
     string,
-    SnapshotGeometry & SnapshotReference & { layout: ReturnType<typeof tapTargetingLayout> }
+    SnapshotGeometry & SnapshotReference & { layout: ReturnType<typeof snapshotLayout> }
   >();
 
   constructor(
@@ -274,7 +374,7 @@ export class SnapshotReferenceStore {
     this.entries.set(reference.snapshotId, {
       ...captured,
       ...reference,
-      layout: structuredClone(tapTargetingLayout(observation)),
+      layout: snapshotLayout(observation),
     });
     return { status: "captured", reference };
   }
@@ -292,6 +392,9 @@ export class SnapshotReferenceStore {
       this.entries.delete(snapshotId);
       return "Snapshot reference expired; re-observe.";
     }
+    if (hasTruncatedSnapshotLayout(observation)) {
+      return "Snapshot layout is unavailable. Hierarchy was truncated; observe with a narrower scope.";
+    }
     const current = geometry(deviceId, observation);
     if (!current) {
       return "Snapshot geometry or frame context is unavailable; re-observe.";
@@ -304,10 +407,7 @@ export class SnapshotReferenceStore {
         return `Snapshot reference is stale (${key} changed); re-observe.`;
       }
     }
-    const currentLayout = tapTargetingLayout(observation);
-    if (entry.layout === null || currentLayout === null) {
-      return "Snapshot tap-targeting layout is unavailable; re-observe.";
-    }
+    const currentLayout = snapshotLayout(observation);
     if (!hasSameSnapshotLayout(entry.layout, currentLayout)) {
       return "Snapshot reference is stale (tap-targeting layout changed); re-observe.";
     }

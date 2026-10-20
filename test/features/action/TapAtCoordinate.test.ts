@@ -654,7 +654,7 @@ describe("TapAtCoordinate", () => {
       },
     );
 
-    test("explicit snapshot retry still requires equal layout when optional activity becomes known", async () => {
+    test("explicit snapshot retry accepts optional activity becoming known", async () => {
       const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
       const captured = {
         ...observation(100, 200, "epoch:1"),
@@ -678,11 +678,8 @@ describe("TapAtCoordinate", () => {
         y: 20,
         snapshotId: capture.reference.snapshotId,
       });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(
-        "screen layout changed since the last observation. Observe again",
-      );
-      expect(sent).toEqual(["epoch:1"]);
+      expect(result.success).toBe(true);
+      expect(sent).toEqual(["epoch:1", "epoch:2"]);
     });
 
     test("retries only once when the fresh layout is unchanged", async () => {

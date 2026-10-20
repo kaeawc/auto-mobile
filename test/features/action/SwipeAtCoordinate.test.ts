@@ -318,7 +318,10 @@ describe("swipeAt snapshotId", () => {
       const { swipeAt, observeScreen, swipes } = createSwipeAt(device, 100, 200, references);
       observeScreen.setObserveResult({
         ...captured,
-        viewHierarchy: { ...captured.viewHierarchy!, hierarchy: { node: { text: "New screen" } } },
+        viewHierarchy: {
+          ...captured.viewHierarchy!,
+          hierarchy: { node: { bounds: { left: 0, top: 0, right: 90, bottom: 90 } } },
+        },
       });
       const result = await swipeAt.execute({
         from: { x: 10, y: 20 },

@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { capturedFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { expect, spyOn, test } from "bun:test";
@@ -128,15 +129,14 @@ for (const row of rows) {
           });
           // Reuse the real capture for fresh lookup. After dispatch the fake
           // probe is unreadable, so retry cannot obscure the first dispatch.
-          tap.observedInteraction = (action) =>
-            action(
-              buildObserveResult({
-                updatedAt: 0,
-                systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-                viewHierarchy: capture,
-                screenSize: { width: 1080, height: 2400 },
-              }),
-            );
+          tap.observedInteraction = runBlockWith(() =>
+            buildObserveResult({
+              updatedAt: 0,
+              systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+              viewHierarchy: capture,
+              screenSize: { width: 1080, height: 2400 },
+            }),
+          );
           let dispatched = false;
           tap.testHooks.setBeforeAndroidTap(() => {
             dispatched = true;

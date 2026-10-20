@@ -96,23 +96,28 @@ internal object ImeGraphemes {
       else -> false
     }
 
-  private fun Int.isConjoiningLetter(): Boolean =
-    this in 0x1100..0x11ff || // Hangul Jamo
-      this in 0xa960..0xa97c ||
-      this in 0xac00..0xd7a3 || // Hangul syllables can join following Jamo
-      this in 0xd7b0..0xd7fb ||
-      this == 0x16d63 ||
-      this in 0x16d67..0x16d6a ||
-      this == 0x0d4e || // Prepend and SpacingMark letters
-      this in 0x111c2..0x111c3 ||
-      this == 0x113d1 ||
-      this == 0x1193f ||
-      this == 0x11941 ||
-      this in 0x11a84..0x11a89 ||
-      this == 0x11d46 ||
-      this == 0x11f02 ||
-      this == 0x0e33 ||
-      this == 0x0eb3
+  private fun Int.isConjoiningLetter(): Boolean = conjoiningLetterRanges.any { this in it }
+
+  // Hangul and the Prepend/SpacingMark letters that must stay on ICU's path.
+  private val conjoiningLetterRanges =
+    listOf(
+      0x0d4e..0x0d4e,
+      0x0e33..0x0e33,
+      0x0eb3..0x0eb3,
+      0x1100..0x11ff,
+      0xa960..0xa97c,
+      0xac00..0xd7a3,
+      0xd7b0..0xd7fb,
+      0x111c2..0x111c3,
+      0x113d1..0x113d1,
+      0x1193f..0x1193f,
+      0x11941..0x11941,
+      0x11a84..0x11a89,
+      0x11d46..0x11d46,
+      0x11f02..0x11f02,
+      0x16d63..0x16d63,
+      0x16d67..0x16d6a,
+    )
 
   private fun String.hasOddRegionalIndicatorRunBefore(end: Int): Boolean {
     if (end >= length || !Character.codePointAt(this, end).isRegionalIndicator()) return false

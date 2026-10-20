@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { createExecResult } from "../../../src/utils/execResult";
 import { buildObserveResult } from "../../helpers/observeFixture";
@@ -231,17 +232,16 @@ function realTap(capture: ViewHierarchyResult) {
     },
   );
   tap.prepareSelectionCapture = async () => null;
-  tap.observedInteraction = (callback) =>
-    callback(
-      recordObservationRead(
-        buildObserveResult({
-          updatedAt: 0,
-          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-          viewHierarchy: capture,
-          screenSize: { width: 500, height: 500 },
-        }),
-      ),
-    );
+  tap.observedInteraction = runBlockWith(() =>
+    recordObservationRead(
+      buildObserveResult({
+        updatedAt: 0,
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: capture,
+        screenSize: { width: 500, height: 500 },
+      }),
+    ),
+  );
   return tap;
 }
 for (const [kind, message] of [

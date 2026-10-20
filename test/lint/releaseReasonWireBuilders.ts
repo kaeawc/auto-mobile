@@ -3,7 +3,7 @@ import {
   Visitor,
   type Expression,
   type ObjectExpression,
-  type Property,
+  type ObjectProperty,
 } from "oxc-parser";
 
 export interface ReleaseReasonSerialisation {
@@ -63,7 +63,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Returns an in-memory heartbeat not-found decision used to update proxy binding state.",
   ],
   [
-    "src/daemon/daemonMcpProxy.ts#DaemonMcpProxy.classifyRecoveryAttemptError",
+    "src/daemon/mcpProxy/ProxyLiveness.ts#ProxyLiveness.classifyRecoveryAttemptError",
     "Classifies a typed upstream refusal for the in-memory liveness recovery state machine.",
   ],
   [
@@ -108,7 +108,7 @@ function unwrap(expression: Expression): Expression {
   }
 }
 
-function keyName(property: Property): string | undefined {
+function keyName(property: Pick<ObjectProperty, "key" | "computed">): string | undefined {
   if (!property.computed && property.key.type === "Identifier") {
     return property.key.name;
   }
@@ -306,7 +306,7 @@ export function scanReleaseReasonSerialisations(
           ? [element]
           : branchObjects.flatMap((branch) =>
               branch.properties.filter(
-                (property): property is Property => property.type === "Property",
+                (property): property is ObjectProperty => property.type === "Property",
               ),
             );
       for (const property of properties) {

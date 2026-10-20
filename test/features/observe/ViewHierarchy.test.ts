@@ -412,7 +412,7 @@ describe("ViewHierarchy", function () {
           hierarchy: null,
           fresh: false,
           reconnectStatus: {
-            state: "cooldown",
+            state: "cooldown" as const,
             retryAfterMs: 1800,
             retryAfterSeconds: 2,
             connectionAttempts: 3,
@@ -434,7 +434,7 @@ describe("ViewHierarchy", function () {
 
         expect(result.hierarchy.error).toBe("CtrlProxy reconnecting, retry in 2s");
         expect(result.ctrlProxyReconnect).toEqual({
-          state: "cooldown",
+          state: "cooldown" as const,
           retryAfterMs: 1800,
           retryAfterSeconds: 2,
           connectionAttempts: 3,
@@ -581,7 +581,7 @@ describe("ViewHierarchy", function () {
             ? {
                 hierarchy: null,
                 reconnectStatus: {
-                  state: "cooldown",
+                  state: "cooldown" as const,
                   retryAfterMs: 1000,
                   retryAfterSeconds: 1,
                   connectionAttempts: 3,
@@ -628,7 +628,7 @@ describe("ViewHierarchy", function () {
             unavailableReason: "connection_lost",
             unavailableDetail: "runner socket closed",
             reconnectStatus: {
-              state: "cooldown",
+              state: "cooldown" as const,
               retryAfterMs: 1000,
               retryAfterSeconds: 1,
               connectionAttempts: 3,
@@ -668,7 +668,7 @@ describe("ViewHierarchy", function () {
         hierarchy: { text: "Cached screen" },
       };
       const reconnectStatus = {
-        state: "cooldown",
+        state: "cooldown" as const,
         retryAfterMs: 1800,
         retryAfterSeconds: 2,
         connectionAttempts: 3,

@@ -1,3 +1,4 @@
+import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
@@ -166,8 +167,8 @@ function createCommand(observation: ObserveResult) {
       selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
     },
   );
-  spyOn(command, "observedInteraction").mockImplementation(async (block) =>
-    block(recordObservationRead(observation)),
+  spyOn(command, "observedInteraction").mockImplementation(
+    runBlockWith(() => recordObservationRead(observation)),
   );
   return { command, service };
 }

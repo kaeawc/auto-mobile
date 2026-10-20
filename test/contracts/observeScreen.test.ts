@@ -16,6 +16,8 @@ runObserveScreenContract("FakeObserveScreen", () => {
     screen,
     present: (marker) => {
       screen.setObserveResult((): ObserveResult => ({
+        display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+        observationId: "contract",
         updatedAt: marker,
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },

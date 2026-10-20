@@ -25,7 +25,11 @@ import com.intellij.openapi.options.SearchableConfigurable
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FeatureFlagState
 import dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import java.io.IOException
 import javax.swing.JComponent
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -88,8 +93,11 @@ private data class FeatureFlagsUiState(
   val isLoading: Boolean = true,
 )
 
-private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+private class FeatureFlagsViewModel(
+  private val client: AutoMobileClient,
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) {
+  private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
   private val _state = MutableStateFlow(FeatureFlagsUiState())
   val state: StateFlow<FeatureFlagsUiState> = _state.asStateFlow()
 
@@ -112,15 +120,12 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
             isLoading = false,
           )
         }
-      } catch (error: Exception) {
-        _state.update {
-          it.copy(
-            flags = emptyList(),
-            statusText = "Unable to load feature flags",
-            errorText = error.message ?: "Unknown error",
-            isLoading = false,
-          )
-        }
+      } catch (error: McpConnectionException) {
+        loadFailed(error)
+      } catch (error: IOException) {
+        loadFailed(error)
+      } catch (error: SerializationException) {
+        loadFailed(error)
       }
     }
   }
@@ -148,15 +153,12 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
             updatingKeys = it.updatingKeys - flag.key,
           )
         }
-      } catch (error: Exception) {
-        _state.update {
-          it.copy(
-            flags = previousFlags,
-            statusText = "Update failed",
-            errorText = error.message ?: "Unknown error",
-            updatingKeys = it.updatingKeys - flag.key,
-          )
-        }
+      } catch (error: McpConnectionException) {
+        updateFailed(error, previousFlags, flag)
+      } catch (error: IOException) {
+        updateFailed(error, previousFlags, flag)
+      } catch (error: SerializationException) {
+        updateFailed(error, previousFlags, flag)
       }
     }
   }
@@ -184,15 +186,12 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
             updatingKeys = it.updatingKeys - flag.key,
           )
         }
-      } catch (error: Exception) {
-        _state.update {
-          it.copy(
-            flags = previousFlags,
-            statusText = "Update failed",
-            errorText = error.message ?: "Unknown error",
-            updatingKeys = it.updatingKeys - flag.key,
-          )
-        }
+      } catch (error: McpConnectionException) {
+        updateFailed(error, previousFlags, flag)
+      } catch (error: IOException) {
+        updateFailed(error, previousFlags, flag)
+      } catch (error: SerializationException) {
+        updateFailed(error, previousFlags, flag)
       }
     }
   }
@@ -200,6 +199,36 @@ private class FeatureFlagsViewModel(private val client: AutoMobileClient) {
   fun dispose() {
     scope.cancel()
     client.close()
+  }
+
+  private fun loadFailed(error: Throwable) {
+    LoggerFactory.getLogger("FeatureFlags").warn("Unable to load feature flags", error)
+
+    _state.update {
+      it.copy(
+        flags = emptyList(),
+        statusText = "Unable to load feature flags",
+        errorText = error.message ?: "Unknown error",
+        isLoading = false,
+      )
+    }
+  }
+
+  private fun updateFailed(
+    error: Throwable,
+    previousFlags: List<FeatureFlagState>,
+    flag: FeatureFlagState,
+  ) {
+    LoggerFactory.getLogger("FeatureFlags").warn("Unable to update feature flag ${flag.key}", error)
+
+    _state.update {
+      it.copy(
+        flags = previousFlags,
+        statusText = "Update failed",
+        errorText = error.message ?: "Unknown error",
+        updatingKeys = it.updatingKeys - flag.key,
+      )
+    }
   }
 }
 
@@ -304,102 +333,60 @@ private fun AccessibilityConfigPanel(
 ) {
   val colors = JewelTheme.globalColors
 
-  var level by remember { mutableStateOf(readConfigValue(flag.config, "level", "AA")) }
-  var failureMode by remember {
-    mutableStateOf(readConfigValue(flag.config, "failureMode", "report"))
-  }
-  var minSeverity by remember {
-    mutableStateOf(readConfigValue(flag.config, "minSeverity", "warning"))
-  }
-  var useBaseline by remember {
-    mutableStateOf(readConfigBoolean(flag.config, "useBaseline", false))
-  }
-
-  LaunchedEffect(flag.config) {
-    level = readConfigValue(flag.config, "level", "AA")
-    failureMode = readConfigValue(flag.config, "failureMode", "report")
-    minSeverity = readConfigValue(flag.config, "minSeverity", "warning")
-    useBaseline = readConfigBoolean(flag.config, "useBaseline", false)
-  }
-
-  fun submit() {
-    val config = buildJsonObject {
-      put("level", JsonPrimitive(level))
-      put("failureMode", JsonPrimitive(failureMode))
-      put("minSeverity", JsonPrimitive(minSeverity))
-      put("useBaseline", JsonPrimitive(useBaseline))
+  val state = remember { AccessibilityConfigState(flag.config) }
+  with(state) {
+    LaunchedEffect(flag.config) {
+      level = readConfigValue(flag.config, "level", "AA")
+      failureMode = readConfigValue(flag.config, "failureMode", "report")
+      minSeverity = readConfigValue(flag.config, "minSeverity", "warning")
+      useBaseline = readConfigBoolean(flag.config, "useBaseline", false)
     }
-    onConfigChange(config)
-  }
 
-  Column(
-    modifier = Modifier.fillMaxWidth().padding(start = 28.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    Text(
-      "Accessibility audit settings",
-      color = colors.text.normal.copy(alpha = 0.7f),
-      fontSize = 12.sp,
-    )
-
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(start = 28.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      Text("Level", fontSize = 12.sp)
-      ListComboBox(
-        ACCESSIBILITY_LEVELS,
-        ACCESSIBILITY_LEVELS.indexOf(level).coerceAtLeast(0),
-        { index ->
+      Text(
+        "Accessibility audit settings",
+        color = colors.text.normal.copy(alpha = 0.7f),
+        fontSize = 12.sp,
+      )
+
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        AccessibilityChoice(
+          AccessibilityChoiceSpec("Level", ACCESSIBILITY_LEVELS, level, 90.dp),
+          enabled = !isUpdating,
+        ) { index ->
           if (!isUpdating) {
             level = ACCESSIBILITY_LEVELS.getOrNull(index) ?: level
-            submit()
+            onConfigChange(state.config())
           }
-        },
-        enabled = !isUpdating,
-        modifier = Modifier.width(90.dp),
-      )
-
-      Text("Failure", fontSize = 12.sp)
-      ListComboBox(
-        ACCESSIBILITY_FAILURE_MODES,
-        ACCESSIBILITY_FAILURE_MODES.indexOf(failureMode).coerceAtLeast(0),
-        { index ->
+        }
+        AccessibilityChoice(
+          AccessibilityChoiceSpec("Failure", ACCESSIBILITY_FAILURE_MODES, failureMode, 120.dp),
+          enabled = !isUpdating,
+        ) { index ->
           if (!isUpdating) {
             failureMode = ACCESSIBILITY_FAILURE_MODES.getOrNull(index) ?: failureMode
-            submit()
+            onConfigChange(state.config())
           }
-        },
-        enabled = !isUpdating,
-        modifier = Modifier.width(120.dp),
-      )
-
-      Text("Min severity", fontSize = 12.sp)
-      ListComboBox(
-        ACCESSIBILITY_SEVERITIES,
-        ACCESSIBILITY_SEVERITIES.indexOf(minSeverity).coerceAtLeast(0),
-        { index ->
+        }
+        AccessibilityChoice(
+          AccessibilityChoiceSpec("Min severity", ACCESSIBILITY_SEVERITIES, minSeverity, 110.dp),
+          enabled = !isUpdating,
+        ) { index ->
           if (!isUpdating) {
             minSeverity = ACCESSIBILITY_SEVERITIES.getOrNull(index) ?: minSeverity
-            submit()
+            onConfigChange(state.config())
           }
-        },
-        enabled = !isUpdating,
-        modifier = Modifier.width(110.dp),
-      )
-    }
-
-    CheckboxRow(
-      text = "Use baseline",
-      checked = useBaseline,
-      onCheckedChange = { enabled ->
-        if (!isUpdating) {
-          useBaseline = enabled
-          submit()
         }
-      },
-      enabled = !isUpdating,
-    )
+      }
+
+      AccessibilityBaselineToggle(state, isUpdating, onConfigChange)
+    }
   }
 }
 
@@ -412,4 +399,62 @@ private fun readConfigBoolean(config: JsonObject?, key: String, fallback: Boolea
   val value = config?.get(key)
   val content = (value as? JsonPrimitive)?.content
   return content?.toBooleanStrictOrNull() ?: fallback
+}
+
+private data class AccessibilityChoiceSpec(
+  val label: String,
+  val options: List<String>,
+  val value: String,
+  val width: androidx.compose.ui.unit.Dp,
+)
+
+@Composable
+private fun AccessibilityChoice(
+  spec: AccessibilityChoiceSpec,
+  enabled: Boolean,
+  onSelect: (Int) -> Unit,
+) {
+  Text(spec.label, fontSize = 12.sp)
+  ListComboBox(
+    spec.options,
+    spec.options.indexOf(spec.value).coerceAtLeast(0),
+    onSelect,
+    enabled = enabled,
+    modifier = Modifier.width(spec.width),
+  )
+}
+
+private class AccessibilityConfigState(config: JsonObject?) {
+  var level by mutableStateOf(readConfigValue(config, "level", "AA"))
+  var failureMode by mutableStateOf(readConfigValue(config, "failureMode", "report"))
+  var minSeverity by mutableStateOf(readConfigValue(config, "minSeverity", "warning"))
+  var useBaseline by mutableStateOf(readConfigBoolean(config, "useBaseline", false))
+
+  fun config(): JsonObject = buildJsonObject {
+    put("level", JsonPrimitive(level))
+    put("failureMode", JsonPrimitive(failureMode))
+    put("minSeverity", JsonPrimitive(minSeverity))
+    put("useBaseline", JsonPrimitive(useBaseline))
+  }
+}
+
+@Composable
+private fun AccessibilityBaselineToggle(
+  state: AccessibilityConfigState,
+  isUpdating: Boolean,
+  onConfigChange: (JsonObject) -> Unit,
+) {
+  with(state) {
+    CheckboxRow(
+      text = "Use baseline",
+      checked = useBaseline,
+      onCheckedChange = { enabled ->
+        if (!isUpdating) {
+          useBaseline = enabled
+          onConfigChange(state.config())
+        }
+      },
+      enabled = !isUpdating,
+    )
+  }
 }

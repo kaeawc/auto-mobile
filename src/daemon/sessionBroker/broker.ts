@@ -691,7 +691,7 @@ export class SessionBroker {
     if (this.stopping) {
       return;
     }
-    for (const resource of await this.options.store.listResources()) {
+    for (const resource of await this.options.store.listLiveResources()) {
       if (this.stopping) {
         return;
       }
@@ -888,9 +888,7 @@ export class SessionBroker {
   private async requestResource(
     request: BrokerRequestRecord,
   ): Promise<BrokerResourceRecord | undefined> {
-    return (await this.options.store.listResources()).find(
-      (entry) => entry.resourceId === request.resourceId,
-    );
+    return request.resourceId ? this.options.store.getResource(request.resourceId) : undefined;
   }
 
   private async result(request: BrokerRequestRecord): Promise<SessionBrokerResult> {
@@ -963,10 +961,8 @@ export class SessionBroker {
   }
 
   private async tryCleanup(ticket: DestructionTicket): Promise<void> {
-    const resource = (await this.options.store.listResources()).find(
-      (entry) => entry.resourceId === ticket.resourceId && entry.revision === ticket.revision,
-    );
-    if (resource?.state === "destroying") {
+    const resource = await this.options.store.getResource(ticket.resourceId);
+    if (resource?.state === "destroying" && resource.revision === ticket.revision) {
       try {
         await this.destroy(resource);
       } catch (error) {

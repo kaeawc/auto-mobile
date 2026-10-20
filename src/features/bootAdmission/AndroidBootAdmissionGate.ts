@@ -1,3 +1,9 @@
+import {
+  BootReservationScope,
+  type BootCapacityReserver,
+  type BootReservationOptions,
+  type BootSlotReservation,
+} from "../../devices/bootAdmission/BootSlotReservation";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError } from "../../models/ActionableError";
 import type { BootAdmission } from "../../models/BootAdmission";
@@ -66,10 +72,13 @@ export interface AndroidBootAdmissionGateOptions {
  * counts, including ones started outside AutoMobile. It never
  * boots, kills or reconfigures an emulator.
  */
-export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapacityChecker {
+export class AndroidBootAdmissionGate
+  implements BootCapacityReporter, BootCapacityChecker, BootCapacityReserver
+{
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly ledger: BootAdmissionLedger;
+  private readonly reservations = new BootReservationScope<BootAdmission>();
   private readonly hostRegistry: HostBootAdmissionRegistry | undefined;
   private readonly publications = new Map<
     PublishedBootAdmission,
@@ -101,6 +110,29 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
    * its limit (no queueing), and with the abort reason when the signal fires.
    */
   async admit(request: AndroidBootAdmissionRequest): Promise<BootAdmission> {
+    request.signal?.throwIfAborted();
+    return this.reservations.take() ?? (await this.admitNew(request)).admission;
+  }
+
+  async reserveBoot(options: BootReservationOptions): Promise<BootSlotReservation> {
+    const reserved = await this.admitNew(
+      { ...options, avdName: "binding replacement" },
+      options.replacingDeviceId,
+    );
+    return this.reservations.hold(
+      () => {
+        reserved.bind();
+        return reserved.admission;
+      },
+      reserved.admission.release,
+      reserved.markReplacedDeviceGone,
+    );
+  }
+
+  private async admitNew(
+    request: AndroidBootAdmissionRequest,
+    replacingDeviceId?: string,
+  ): Promise<{ admission: BootAdmission; bind: () => void; markReplacedDeviceGone: () => void }> {
     const deadlineMs = this.timer.now() + request.timeoutMs;
     let admitted: LedgerAdmission | undefined;
     let published: PublishedBootAdmission | undefined;
@@ -126,11 +158,16 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
           return sample;
         },
         ledger: this.ledger,
-        decide: (sample, window) => this.decide(sample, window, peers),
+        decide: (sample, window) => this.decide(sample, window, peers, replacingDeviceId),
         admit: () => {
-          admitted = this.ledger.admit();
+          admitted = this.ledger.admit(replacingDeviceId, replacingDeviceId !== undefined);
           try {
-            published = this.hostRegistry?.publish({ admittedUntilMs: deadlineMs });
+            published = this.hostRegistry?.publish({
+              admittedUntilMs: deadlineMs,
+              ...(replacingDeviceId !== undefined
+                ? { deviceId: replacingDeviceId, replacement: true }
+                : {}),
+            });
             if (published) {
               this.publications.set(published, {});
             }
@@ -159,7 +196,7 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     }
     const handedOffSerials = new Set<string>();
     let released = false;
-    return {
+    const admission: BootAdmission = {
       release: () => {
         released = true;
         ledgerAdmission.release();
@@ -188,14 +225,40 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
           fields.handedOffUntilMs = deadlineMs;
         }
         this.updatePublication(published, () =>
-          published?.update({ deviceId, processId, handedOffUntilMs: deadlineMs }),
+          published?.update({
+            deviceId,
+            processId,
+            handedOffUntilMs: deadlineMs,
+            ...(replacingDeviceId !== undefined ? { replacement: false } : {}),
+          }),
         );
       },
+    };
+    return {
+      admission,
+      markReplacedDeviceGone: () => {
+        ledgerAdmission.bind();
+        // The local slot is already rebound. A failed peer update must not abort replacement
+        // after verified deletion; keep the reservation held through the boot.
+        try {
+          published?.clearDeviceId();
+        } catch (error) {
+          logger.warn(
+            `[BootAdmission] Failed to clear replaced device '${replacingDeviceId}' from the host registry; continuing replacement with the reservation held. The stale record keeps the replaced device id until boot hand-off; peers may undercount only if that serial is reused: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      },
+      bind: () => ledgerAdmission.bind(),
     };
   }
 
   /** Refuses with `capacity_exhausted` when a cold boot would be refused now; admits nothing. */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
+    options.signal?.throwIfAborted();
+    if (this.reservations.hasPending()) {
+      return;
+    }
     const { sample, window, peers } = await this.sampleInWindow(options);
     assertBootCapacityGranted(
       { decision: this.decide(sample, window, peers) },
@@ -321,9 +384,15 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
     sample: AndroidCapacitySample,
     window?: LedgerSampleWindow,
     peers: readonly HostBootAdmissionRecord[] = [],
+    replacingDeviceId?: string,
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
     const { limits, effective: bootedCount } = this.count(sample, window, peers);
+    const credit =
+      replacingDeviceId !== undefined && sample.emulatorSerials.includes(replacingDeviceId) ? 1 : 0;
+    if (bootedCount - credit < limits.maxBooted) {
+      return { outcome: "allow", limits, bootedCount };
+    }
     return (
       atCapacityDecision(bootedCount, limits, this.retryAfterMs, {
         noun: "emulator",
@@ -519,7 +588,9 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
         handedOff: record.handedOffUntilMs !== undefined,
       })),
       withListedProcess: unlisted.filter(matched).length,
-      listedWithoutProcess: active.filter((record) => visible(record) && !matched(record)).length,
+      listedWithoutProcess: active.filter(
+        (record) => visible(record) && !matched(record) && !record.replacement,
+      ).length,
     };
   }
 

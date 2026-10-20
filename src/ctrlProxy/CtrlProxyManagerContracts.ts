@@ -21,6 +21,8 @@ export type ApkOverrideChecksumEntry = {
  */
 export interface CtrlProxyManager extends ProxyManager {
   assertNotDrivenByOtherDaemon?(signal?: AbortSignal): Promise<void>;
+  /** Reopen automated setup without invalidating availability or version caches. */
+  reopenSetupGate(): void;
   setup(force?: boolean, perf?: PerformanceTracker): Promise<CtrlProxySetupResult>;
   isEnabled(): Promise<boolean>;
   /**

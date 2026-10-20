@@ -88,7 +88,8 @@ class VideoStreamClientTest {
 
   private suspend fun assertAckKind(wire: String?, expected: VideoStreamSubscriptionKind?) {
     val server = relay(RelaySpec(payload = sampleH264(), keepOpen = true, subscriptionKind = wire))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
     try {
       client.connect("emulator-5554")
       server.awaitFirstFrameFrom(client)
@@ -126,7 +127,8 @@ class VideoStreamClientTest {
           extraBytesOnReconnect = byteArrayOf(),
         ),
       )
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
     try {
       client.connect("emulator-5554")
       waitUntil { client.readOnly.value }
@@ -146,7 +148,8 @@ class VideoStreamClientTest {
   fun `unknown notice is ignored while stream remains usable`() = runBlocking {
     val server =
       relay(RelaySpec(payload = sampleH264(), keepOpen = true, extraBytes = notice(99) + notice(1)))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
     try {
       client.connect("emulator-5554")
       // The following downgrade proves the reader made it past the unknown notice.
@@ -163,7 +166,8 @@ class VideoStreamClientTest {
     line: ByteArray = terminal(expected.wire),
   ) {
     val server = relay(RelaySpec(payload = sampleH264(), extraBytes = notice(code) + line))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
     try {
       client.connect("emulator-5554")
       waitUntil { client.state.value is VideoStreamState.Ended }
@@ -241,7 +245,8 @@ class VideoStreamClientTest {
   @Test
   fun `old daemon EOF still reports live mirroring stopped`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
     try {
       client.connect("emulator-5554")
       waitUntil { client.state.value is VideoStreamState.Unavailable }
@@ -254,7 +259,8 @@ class VideoStreamClientTest {
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
 
@@ -276,10 +282,12 @@ class VideoStreamClientTest {
     val server = relay(RelaySpec(payload = sampleH264()))
     val client =
       VideoStreamClient(
-        socketPathValue = server.socketPath.toString(),
-        quality = VideoStreamQuality.Low,
-        fps = 15,
-        bitrateKbps = 1_500,
+        VideoStreamClient.Options(
+          socketPathValue = server.socketPath.toString(),
+          quality = VideoStreamQuality.Low,
+          fps = 15,
+          bitrateKbps = 1_500,
+        ),
       )
 
     client.connect("emulator-5554")
@@ -296,7 +304,8 @@ class VideoStreamClientTest {
   @Test
   fun `omits the quality hints by default`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
     server.awaitFirstFrameFrom(client)
@@ -313,7 +322,8 @@ class VideoStreamClientTest {
   fun `reports the decoded size, not the advertised header size`() = runBlocking {
     // The daemon advertises 0x0 unless a hint was sent; the truth is in the SPS.
     val server = relay(RelaySpec(payload = sampleH264(), keepOpen = true))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect(null)
     server.awaitFirstFrameFrom(client)
@@ -331,7 +341,8 @@ class VideoStreamClientTest {
   @Test
   fun `parses the relay's advertised heartbeat cadence from the ack`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264(), heartbeatMs = 1_000))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
     server.awaitFirstFrameFrom(client)
@@ -344,7 +355,8 @@ class VideoStreamClientTest {
   @Test
   fun `heartbeatMs stays null for a daemon that predates the field`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
     server.awaitFirstFrameFrom(client)
@@ -364,7 +376,8 @@ class VideoStreamClientTest {
       relay(
         RelaySpec(payload = sampleH264(), heartbeatMs = 1_000, sendHeartbeatAfterPayload = true),
       )
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
     val frame = server.awaitFirstFrameFrom(client)
@@ -382,7 +395,8 @@ class VideoStreamClientTest {
     // Issue #4786: the config packet attests rotation 3, so the decoded frame carries it
     // end-to-end.
     val server = relay(RelaySpec(payload = sampleH264(), rotation = 3))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
 
@@ -397,7 +411,8 @@ class VideoStreamClientTest {
     // An unattested stream (screenrecord/iOS relay) leaves rotation unknown so control fails
     // closed.
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
 
@@ -409,7 +424,8 @@ class VideoStreamClientTest {
   @Test
   fun `omits the device id when none is given`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect(null)
     server.awaitFirstFrameFrom(client)
@@ -424,8 +440,10 @@ class VideoStreamClientTest {
     val server = relay(RelaySpec(payload = sampleH264()))
     val client =
       VideoStreamClient(
-        socketPathValue = server.socketPath.toString(),
-        sessionUuidProvider = { "session-abc" },
+        VideoStreamClient.Options(
+          socketPathValue = server.socketPath.toString(),
+          sessionUuidProvider = { "session-abc" },
+        ),
       )
 
     client.connect("emulator-5554")
@@ -440,7 +458,8 @@ class VideoStreamClientTest {
     // Default: the desktop holds no daemon session identity yet (issue #4924); the field must be
     // omitted so a pre-#4751 daemon still accepts the subscribe.
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
     server.awaitFirstFrameFrom(client)
@@ -452,7 +471,8 @@ class VideoStreamClientTest {
   @Test
   fun `a refused subscribe surfaces the daemon's reason`() = runBlocking {
     val server = relay(RelaySpec(success = false, error = "No connected device with id ghost."))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("ghost")
 
@@ -478,7 +498,8 @@ class VideoStreamClientTest {
             """{"kind":"screen_recording","status":"needs_approval","approvalTarget":"AutoMobile"}""",
         ),
       )
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("ios-simulator")
 
@@ -497,7 +518,10 @@ class VideoStreamClientTest {
   @Test
   fun `a missing socket reports unavailable with no relay cause instead of throwing`() =
     runBlocking {
-      val client = VideoStreamClient(socketPathValue = "/tmp/no-video-stream-am.sock")
+      val client =
+        VideoStreamClient(
+          VideoStreamClient.Options(socketPathValue = "/tmp/no-video-stream-am.sock"),
+        )
 
       assertTrue(!client.isAvailable())
       client.connect("emulator-5554")
@@ -512,7 +536,8 @@ class VideoStreamClientTest {
   @Test
   fun `disconnect returns to idle and stops the reader`() = runBlocking {
     val server = relay(RelaySpec(payload = sampleH264()))
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
     server.awaitFirstFrameFrom(client)
@@ -527,8 +552,10 @@ class VideoStreamClientTest {
     val server = relay(RelaySpec(payload = sampleH264()))
     val client =
       VideoStreamClient(
-        socketPathValue = server.socketPath.toString(),
-        decoderFactory = { throw H264DecodeException("no decoder in this build") },
+        VideoStreamClient.Options(
+          socketPathValue = server.socketPath.toString(),
+          decoderFactory = { throw H264DecodeException("no decoder in this build") },
+        ),
       )
 
     client.connect("emulator-5554")
@@ -546,16 +573,18 @@ class VideoStreamClientTest {
     val decoderFinished = CountDownLatch(1)
     val client =
       VideoStreamClient(
-        socketPathValue = server.socketPath.toString(),
-        decoderFactory = {
-          decoderStarted.countDown()
-          try {
-            check(releaseDecoder.await(5, TimeUnit.SECONDS))
-            throw H264DecodeException("startup cancelled")
-          } finally {
-            decoderFinished.countDown()
-          }
-        },
+        VideoStreamClient.Options(
+          socketPathValue = server.socketPath.toString(),
+          decoderFactory = {
+            decoderStarted.countDown()
+            try {
+              check(releaseDecoder.await(5, TimeUnit.SECONDS))
+              throw H264DecodeException("startup cancelled")
+            } finally {
+              decoderFinished.countDown()
+            }
+          },
+        ),
       )
 
     client.connect("emulator-5554")
@@ -572,7 +601,8 @@ class VideoStreamClientTest {
   @Test
   fun `an orderly relay close reports the stream as unavailable`() = runBlocking {
     val server = relay(RelaySpec())
-    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    val client =
+      VideoStreamClient(VideoStreamClient.Options(socketPathValue = server.socketPath.toString()))
 
     client.connect("emulator-5554")
 
@@ -592,8 +622,10 @@ class VideoStreamClientTest {
     val reader = FakeSessionRunner()
     val client =
       VideoStreamClient(
-        sessionRunner = reader,
-        readerCoroutineDispatcher = StandardTestDispatcher(testScheduler),
+        VideoStreamClient.Options(
+          sessionRunner = reader,
+          readerCoroutineDispatcher = StandardTestDispatcher(testScheduler),
+        ),
       )
 
     try {

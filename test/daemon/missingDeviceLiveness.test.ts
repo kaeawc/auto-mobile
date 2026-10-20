@@ -19,6 +19,7 @@ import type { ExecResult } from "../../src/models";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { registerDeviceResourceInvalidation } from "../../src/daemon/deviceResourceInvalidation";
 
 const deviceId = "emulator-5554";
 
@@ -168,6 +169,29 @@ function emptyRefresh(h: ReturnType<typeof harness>) {
 }
 
 describe("MissingDeviceLiveness", () => {
+  test("fresh presence invalidates both resource caches through the daemon port", async () => {
+    const resets: string[] = [];
+    const restore = registerDeviceResourceInvalidation({
+      resetBootedDevicesResourceCache: () => {
+        resets.push("booted");
+      },
+      resetAndroidDeviceImageResourceCache: () => {
+        resets.push("images");
+      },
+    });
+    try {
+      const h = harness();
+      h.port.getDeviceManager = () =>
+        new ScriptedDiscoveryManager(() => {
+          expect(resets).toEqual(["booted", "images"]);
+          return { devices: [], succeededPlatforms: new Set(["android"]) };
+        });
+      await h.liveness.takeFreshPresenceDiscovery("android");
+      expect(resets).toEqual(["booted", "images"]);
+    } finally {
+      restore();
+    }
+  });
   test("fresh presence bypasses only its own adb read while a concurrent caller keeps the cached list", async () => {
     resetAdbClientCaches();
     const h = harness();

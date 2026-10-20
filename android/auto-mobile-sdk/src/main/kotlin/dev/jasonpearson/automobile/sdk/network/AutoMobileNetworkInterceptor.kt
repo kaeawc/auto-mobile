@@ -99,12 +99,8 @@ internal class AutoMobileNetworkInterceptor(
     if (errorSim != null) {
       val durationMs = System.currentTimeMillis() - startMs
       return handleErrorSimulation(
-        request,
+        SimulatedRequest(request, startMs, durationMs, capture.reqHeaders, capture.reqBody),
         errorSim,
-        startMs,
-        durationMs,
-        capture.reqHeaders,
-        capture.reqBody,
       )
     }
 
@@ -124,13 +120,8 @@ internal class AutoMobileNetworkInterceptor(
 
     return observeOrNull {
       recordResponse(
-        request = request,
+        capture = capture,
         response = response,
-        startMs = startMs,
-        headersEnabled = capture.headersEnabled,
-        bodiesEnabled = capture.bodiesEnabled,
-        reqHeaders = capture.reqHeaders,
-        reqBody = capture.reqBody,
       )
     } ?: response
   }
@@ -192,18 +183,17 @@ internal class AutoMobileNetworkInterceptor(
    * when the app finishes (or abandons) the body. See [NetworkBodyCapture.CapturingResponseBody].
    */
   private fun recordResponse(
-    request: okhttp3.Request,
+    capture: CapturedRequest,
     response: Response,
-    startMs: Long,
-    headersEnabled: Boolean,
-    bodiesEnabled: Boolean,
-    reqHeaders: Map<String, String>?,
-    reqBody: String?,
   ): Response {
+    val request = capture.request
+    val startMs = capture.startMs
+    val headersEnabled = capture.headersEnabled
     val durationMs = System.currentTimeMillis() - startMs
     val responseContentType = response.header("Content-Type")
     val finalReqHeaders =
-      if (headersEnabled) RequestHeaders.toHeaderMap(response.request.headers) else reqHeaders
+      if (headersEnabled) RequestHeaders.toHeaderMap(response.request.headers)
+      else capture.reqHeaders
     val respHeaders = if (headersEnabled) RequestHeaders.toHeaderMap(response.headers) else null
     val responseBodySize = response.body.contentLength()
     fun event(respBody: String?) =
@@ -221,17 +211,17 @@ internal class AutoMobileNetworkInterceptor(
         path = request.url.encodedPath,
         requestHeaders = finalReqHeaders,
         responseHeaders = respHeaders,
-        requestBody = reqBody,
+        requestBody = capture.reqBody,
         responseBody = respBody,
         contentType = responseContentType,
       )
 
     val body = response.body
-    val capture =
-      bodiesEnabled &&
+    val captureBody =
+      capture.bodiesEnabled &&
         isTextContentType(responseContentType) &&
         !NetworkBodyCapture.isStreamingContentType(responseContentType)
-    if (!capture || body == null) {
+    if (!captureBody || body == null) {
       buffer.add(event(null))
       return response
     }
@@ -275,24 +265,19 @@ internal class AutoMobileNetworkInterceptor(
   }
 
   private fun handleErrorSimulation(
-    request: okhttp3.Request,
+    capture: SimulatedRequest,
     sim: NetworkMockRuleStore.ErrorSimulationConfig,
-    startMs: Long,
-    durationMs: Long,
-    reqHeaders: Map<String, String>?,
-    reqBody: String?,
   ): Response {
     val errorMsg = "simulated:${sim.errorType}"
     when (sim.errorType) {
       "http500" -> {
         observe {
           buffer.add(
-            SimulatedRequest(request, startMs, durationMs, reqHeaders, reqBody)
-              .event(500, 0, errorMsg, applicationId),
+            capture.event(500, 0, errorMsg, applicationId),
           )
         }
         return Response.Builder()
-          .request(request)
+          .request(capture.request)
           .protocol(Protocol.HTTP_1_1)
           .code(500)
           .message("Simulated Error (AutoMobile)")
@@ -302,8 +287,7 @@ internal class AutoMobileNetworkInterceptor(
       else -> {
         observe {
           buffer.add(
-            SimulatedRequest(request, startMs, durationMs, reqHeaders, reqBody)
-              .event(0, -1, errorMsg, applicationId),
+            capture.event(0, -1, errorMsg, applicationId),
           )
         }
         throw when (sim.errorType) {

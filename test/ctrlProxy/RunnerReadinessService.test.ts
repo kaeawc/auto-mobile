@@ -300,6 +300,7 @@ class FakeIosManager implements ReadinessIosManager {
 function createService(
   options: {
     timer?: FakeTimer;
+    iosSetupMaxAttempts?: number;
     androidManager?: FakeAndroidManager;
     androidClient?: FakeReadinessClient;
     iosManager?: FakeIosManager;
@@ -341,6 +342,7 @@ function createService(
     iosClient,
     service: new RunnerReadinessService({
       timer,
+      iosSetupMaxAttempts: options.iosSetupMaxAttempts,
       iosPostSetupRestartMinFailedProbes: options.iosPostSetupRestartMinFailedProbes,
       getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
       getAndroidManager: () => androidManager,
@@ -1465,6 +1467,187 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 30_000,
       }),
     ).rejects.toThrow(/phase=runner-setup.*xcodebuild exited 65/);
+    expect(iosManager.setupCalls).toBe(1);
+  });
+
+  test("retries typed iOS runner-exited startup failure and succeeds on attempt two", async () => {
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosManager.onSetup = async () => {
+      iosManager.setupResult =
+        iosManager.setupCalls === 1
+          ? {
+              success: false,
+              message: "runner exited during startup",
+              retryableStartupFailure: true,
+            }
+          : { success: true, message: "ready" };
+    };
+    const { service } = createService({ iosManager, iosClient });
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 30_000,
+    });
+    expect(iosManager.setupCalls).toBe(2);
+    expect(iosManager.resetSetupStateCalls).toBe(2);
+  });
+
+  test("marks an exhausted iOS transient startup budget as a deadline failure", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosManager.setupResult = {
+      success: false,
+      message: "runner exited",
+      retryableStartupFailure: true,
+    };
+    const { service } = createService({ timer, iosManager, iosClient });
+    const error = await service
+      .ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios",
+        totalDeadlineMs: 30,
+        readinessTimeoutMs: 30,
+        onRunnerSetup: () => timer.advanceTime(30),
+      })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect(error).toMatchObject({ deadlineExhausted: true, phase: "runner-setup", attempts: 1 });
+    expect(iosManager.setupCalls).toBe(1);
+  });
+
+  test.each([
+    [undefined, 3],
+    [2, 2],
+    [0, 1],
+    [-2, 1],
+    [Number.NaN, 1],
+    [2.9, 2],
+    [50, 3],
+    [Number.POSITIVE_INFINITY, 3],
+    [Number.NEGATIVE_INFINITY, 1],
+  ] as const)(
+    "bounds iOS transient setup attempts with limit %s to %s",
+    async (limit, expectedAttempts) => {
+      const iosManager = new FakeIosManager();
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      iosManager.setupResult = {
+        success: false,
+        message: "runner exited",
+        retryableStartupFailure: true,
+      };
+      const { service } = createService({ iosManager, iosClient, iosSetupMaxAttempts: limit });
+      await expect(
+        service.ensureReady({
+          device: iosDevice,
+          requestedIdentity: "platform=ios",
+          totalDeadlineMs: 30_000,
+          readinessTimeoutMs: 30_000,
+        }),
+      ).rejects.toMatchObject({ deadlineExhausted: false, attempts: expectedAttempts });
+      expect(iosManager.setupCalls).toBe(expectedAttempts);
+    },
+  );
+
+  test.each(["failure", "throw", "timeout"] as const)(
+    "retains bounded prior iOS setup errors on final %s",
+    async (outcome) => {
+      const iosManager = new FakeIosManager();
+      const iosClient = new FakeReadinessClient();
+      iosClient.connected = false;
+      const finalFailure = new Error("final setup fault");
+      iosManager.onSetup = async () => {
+        if (iosManager.setupCalls === 3) {
+          if (outcome === "throw") {
+            throw finalFailure;
+          }
+          if (outcome === "timeout") {
+            await new Promise<never>((_resolve, reject) => {
+              iosManager.setupSignal?.addEventListener(
+                "abort",
+                () => reject(iosManager.setupSignal?.reason),
+                { once: true },
+              );
+            });
+          }
+        }
+        iosManager.setupResult = {
+          success: false,
+          message: "startup failed",
+          error:
+            iosManager.setupCalls === 1
+              ? "first runner exited token=top-secret"
+              : iosManager.setupCalls === 2
+                ? `second runner exited ${"x".repeat(1_000)}`
+                : "final setup fault",
+          retryableStartupFailure: true,
+        };
+      };
+      const { service, timer } = createService({ iosManager, iosClient });
+      const error = await service
+        .ensureReady({
+          device: iosDevice,
+          requestedIdentity: "platform=ios",
+          totalDeadlineMs: 30,
+          readinessTimeoutMs: 30,
+        })
+        .then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      if (!(error instanceof RunnerReadinessError)) {
+        throw new Error("Expected final setup failure");
+      }
+      expect(error).toMatchObject({
+        phase: "runner-setup",
+        attempts: 3,
+        deadlineExhausted: outcome === "timeout",
+      });
+      expect(error.message).toContain("startDevice automation runner readiness failed:");
+      expect(error.message).toContain("phase=runner-setup attempts=3");
+      expect(error.message).toContain("attempt 1/3: first runner exited token=[REDACTED]");
+      expect(error.message).toContain("attempt 2/3: second runner exited");
+      expect(error.message).not.toContain("top-secret");
+      expect(error.message).not.toContain("x".repeat(501));
+      expect(error.diagnosticCause).toBe(
+        outcome === "throw"
+          ? finalFailure
+          : outcome === "timeout"
+            ? iosManager.setupSignal?.reason
+            : "final setup fault",
+      );
+      expect(iosManager.setupCalls).toBe(3);
+      expect(timer.now()).toBe(outcome === "timeout" ? 30 : 0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("does not retry a non-retryable iOS setup failure even at the deadline", async () => {
+    const timer = new FakeTimer();
+    const iosManager = new FakeIosManager();
+    const iosClient = new FakeReadinessClient();
+    iosClient.connected = false;
+    iosManager.setupResult = { success: false, message: "missing runner artifact" };
+    const { service } = createService({ timer, iosManager, iosClient });
+    await expect(
+      service.ensureReady({
+        device: iosDevice,
+        requestedIdentity: "platform=ios",
+        totalDeadlineMs: 30,
+        readinessTimeoutMs: 30,
+        onRunnerSetup: () => timer.advanceTime(30),
+      }),
+    ).rejects.toMatchObject({ deadlineExhausted: false, attempts: 1 });
+    expect(iosManager.setupCalls).toBe(1);
   });
 
   test("passes the remaining readiness budget to iOS CtrlProxy setup", async () => {

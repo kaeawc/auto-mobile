@@ -38,13 +38,15 @@ class DeviceControlSessionKeyboardTest {
     platform: String = "android",
   ) =
     DeviceControlSession(
-      scope = scope,
-      clientProvider = { client },
-      platform = { platform },
-      nowMs = { 1_000L },
-      publishError = publishError,
-      uiContext = UnconfinedTestDispatcher(testScheduler),
-      ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      DeviceControlSessionOptions(
+        scope = scope,
+        clientProvider = { client },
+        platform = { platform },
+        nowMs = { 1_000L },
+        publishError = publishError,
+        uiContext = UnconfinedTestDispatcher(testScheduler),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+      ),
     )
 
   @Test

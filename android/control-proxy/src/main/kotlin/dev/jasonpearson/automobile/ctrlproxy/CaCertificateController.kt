@@ -1,12 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.os.Build
-import android.util.Base64
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import java.io.File
-import java.security.MessageDigest
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 
@@ -27,7 +25,7 @@ internal class CaCertificateController(
 ) {
   private val devicePolicy = dependencies.devicePolicy
   private val packageName = dependencies.packageName
-  private val filesDir = dependencies.filesDir
+  private val certificateStorage = CaCertificateStorage(dependencies.filesDir)
 
   /** The DevicePolicyManager operations bound to the service's device-admin component. */
   interface DevicePolicy {
@@ -84,17 +82,17 @@ internal class CaCertificateController(
         }
 
         perfProvider.startOperation("decodeCert")
-        val certBytes = decodeCertificateBytes(certificate)
+        val certBytes = certificateStorage.decodeCertificateBytes(certificate)
         perfProvider.endOperation("decodeCert")
         if (certBytes == null) {
           error = "Certificate payload is empty or invalid"
           return
         }
 
-        alias = computeCertificateAlias(certBytes)
+        alias = certificateStorage.computeCertificateAlias(certBytes)
 
         perfProvider.startOperation("persistCert")
-        val stored = writeCaCertToStorage(alias, certBytes)
+        val stored = certificateStorage.writeCaCertToStorage(alias, certBytes)
         perfProvider.endOperation("persistCert")
         if (!stored) {
           error = "Failed to persist certificate for alias: $alias"
@@ -113,7 +111,7 @@ internal class CaCertificateController(
       }
     } finally {
       if (!success && alias != null) {
-        deleteCaCertFromStorage(alias)
+        certificateStorage.deleteCaCertFromStorage(alias)
       }
       perfProvider.end()
       val totalTime = timeProvider.currentTimeMillis() - startTime
@@ -126,7 +124,7 @@ internal class CaCertificateController(
   /** Install a CA certificate from a device file path (device owner only). */
   suspend fun performInstallCaCertificateFromPath(requestId: String?, devicePath: String) {
     val startTime = timeProvider.currentTimeMillis()
-    val payload = readCertificatePayloadFromPath(devicePath)
+    val payload = certificateStorage.readCertificatePayloadFromPath(devicePath)
     if (payload == null) {
       val totalTime = timeProvider.currentTimeMillis() - startTime
       broadcastCaCertResult(
@@ -181,10 +179,10 @@ internal class CaCertificateController(
         val certBytes =
           when {
             !alias.isNullOrBlank() -> {
-              val stored = readCaCertFromStorage(alias)
-              stored ?: certificate?.let { decodeCertificateBytes(it) }
+              val stored = certificateStorage.readCaCertFromStorage(alias)
+              stored ?: certificate?.let { certificateStorage.decodeCertificateBytes(it) }
             }
-            !certificate.isNullOrBlank() -> decodeCertificateBytes(certificate)
+            !certificate.isNullOrBlank() -> certificateStorage.decodeCertificateBytes(certificate)
             else -> null
           }
         perfProvider.endOperation("resolveCert")
@@ -200,7 +198,7 @@ internal class CaCertificateController(
         }
 
         if (resolvedAlias.isNullOrBlank()) {
-          resolvedAlias = computeCertificateAlias(certBytes)
+          resolvedAlias = certificateStorage.computeCertificateAlias(certBytes)
         }
 
         val wasInstalled = isCaCertInstalled(certBytes)
@@ -218,7 +216,7 @@ internal class CaCertificateController(
         val isInstalled = isCaCertInstalled(certBytes)
         success = isInstalled == false
         if (success) {
-          deleteCaCertFromStorage(resolvedAlias)
+          certificateStorage.deleteCaCertFromStorage(resolvedAlias)
         } else {
           error =
             if (isInstalled == null) {
@@ -297,117 +295,6 @@ internal class CaCertificateController(
       return "Device admin receiver is not active for $packageName"
     }
     return null
-  }
-
-  private fun decodeCertificateBytes(certificate: String): ByteArray? {
-    val trimmed = certificate.trim()
-    if (trimmed.isEmpty()) {
-      return null
-    }
-
-    val pemHeader = "-----BEGIN CERTIFICATE-----"
-    val pemFooter = "-----END CERTIFICATE-----"
-    val normalized =
-      if (trimmed.contains(pemHeader)) {
-        trimmed.replace(pemHeader, "").replace(pemFooter, "").replace("\\s".toRegex(), "")
-      } else {
-        trimmed.replace("\\s".toRegex(), "")
-      }
-
-    return try {
-      Base64.decode(normalized, Base64.DEFAULT)
-    } catch (e: IllegalArgumentException) {
-      Log.w(TAG, "Failed to decode certificate payload", e)
-      null
-    }
-  }
-
-  private fun readCertificatePayloadFromPath(devicePath: String): String? {
-    val certFile = File(devicePath)
-    if (!certFile.exists() || !certFile.isFile) {
-      Log.w(TAG, "Certificate file not found at $devicePath")
-      return null
-    }
-
-    val bytes =
-      try {
-        certFile.readBytes()
-      } catch (e: java.io.IOException) {
-        Log.w(TAG, "Failed to read certificate file at $devicePath", e)
-        return null
-      } catch (e: SecurityException) {
-        Log.w(TAG, "Failed to read certificate file at $devicePath", e)
-        return null
-      }
-
-    if (bytes.isEmpty()) {
-      Log.w(TAG, "Certificate file is empty at $devicePath")
-      return null
-    }
-
-    val text = bytes.toString(Charsets.UTF_8)
-    val normalized = text.trim()
-    if (normalized.contains("-----BEGIN CERTIFICATE-----")) {
-      return normalized
-    }
-
-    val compact = normalized.replace("\\s".toRegex(), "")
-    if (compact.isNotEmpty() && compact.matches(Regex("^[A-Za-z0-9+/=]+$"))) {
-      return compact
-    }
-
-    return Base64.encodeToString(bytes, Base64.NO_WRAP)
-  }
-
-  private fun computeCertificateAlias(certBytes: ByteArray): String {
-    val digest = MessageDigest.getInstance("SHA-256").digest(certBytes)
-    return digest.joinToString("") { formatHexByte(it) }
-  }
-
-  private fun writeCaCertToStorage(alias: String, certBytes: ByteArray): Boolean {
-    val dir = File(filesDir(), "ca_certs")
-    if (!dir.exists() && !dir.mkdirs()) {
-      Log.w(TAG, "Failed to create CA cert storage directory: ${dir.absolutePath}")
-      return false
-    }
-
-    val certFile = File(dir, "$alias.der")
-    return try {
-      certFile.writeBytes(certBytes)
-      true
-    } catch (e: java.io.IOException) {
-      Log.w(TAG, "Failed to write CA cert file: ${certFile.absolutePath}", e)
-      false
-    } catch (e: SecurityException) {
-      Log.w(TAG, "Failed to write CA cert file: ${certFile.absolutePath}", e)
-      false
-    }
-  }
-
-  private fun readCaCertFromStorage(alias: String): ByteArray? {
-    val certFile = File(File(filesDir(), "ca_certs"), "$alias.der")
-    if (!certFile.exists()) {
-      return null
-    }
-    return try {
-      certFile.readBytes()
-    } catch (e: java.io.IOException) {
-      Log.w(TAG, "Failed to read CA cert file: ${certFile.absolutePath}", e)
-      null
-    } catch (e: SecurityException) {
-      Log.w(TAG, "Failed to read CA cert file: ${certFile.absolutePath}", e)
-      null
-    }
-  }
-
-  private fun deleteCaCertFromStorage(alias: String) {
-    val certFile = File(File(filesDir(), "ca_certs"), "$alias.der")
-    if (!certFile.exists()) {
-      return
-    }
-    if (!certFile.delete()) {
-      Log.w(TAG, "Failed to delete CA cert file: ${certFile.absolutePath}")
-    }
   }
 
   /** Broadcast CA certificate result to WebSocket clients */

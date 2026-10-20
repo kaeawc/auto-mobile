@@ -19,6 +19,13 @@ import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import kotlin.math.roundToInt
 
+data class StreamQualityState(
+  val currentQuality: VideoStreamQuality,
+  val actualFps: Float,
+  val autoAdjustEnabled: Boolean,
+  val expanded: Boolean,
+)
+
 /**
  * Compact quality overlay for a live-mirror pane. Collapsed by default it shows only a small,
  * non-interactive readout — the current preset and the measured-vs-target frame rate — so it never
@@ -28,15 +35,11 @@ import kotlin.math.roundToInt
  * callbacks are hoisted, so the pane owns the [QualityController] and persistence and this view
  * stays testable.
  *
- * @param actualFps the live rate from the controller, rendered rounded.
- * @param expanded whether the selector/toggle row is shown beneath the readout.
+ * @param state the current quality, measured rate, auto-adjust flag, and expansion state.
  */
 @Composable
 fun StreamQualityControls(
-  currentQuality: VideoStreamQuality,
-  actualFps: Float,
-  autoAdjustEnabled: Boolean,
-  expanded: Boolean,
+  state: StreamQualityState,
   onToggleExpanded: () -> Unit,
   onSelectQuality: (VideoStreamQuality) -> Unit,
   onToggleAutoAdjust: (Boolean) -> Unit,
@@ -53,15 +56,15 @@ fun StreamQualityControls(
       // Measured rate only — no "/ target" suffix. The measured rate can legitimately exceed the
       // requested rate (decoder catch-up bursts after a stall), so rendering it against the target
       // read as a broken limit rather than live throughput.
-      "${currentQuality.name} · ${actualFps.roundToInt()} fps",
+      "${state.currentQuality.name} · ${state.actualFps.roundToInt()} fps",
       fontSize = 10.sp,
       color = Color.White.copy(alpha = 0.9f),
       modifier = Modifier.clickable(onClick = onToggleExpanded).pointerHoverIcon(PointerIcon.Hand),
     )
-    if (expanded) {
+    if (state.expanded) {
       Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         VideoStreamQuality.entries.forEach { quality ->
-          val selected = quality == currentQuality
+          val selected = quality == state.currentQuality
           Chip(
             label = quality.name,
             accent = if (selected) SELECTED_ACCENT else UNSELECTED_ACCENT,
@@ -70,8 +73,8 @@ fun StreamQualityControls(
         }
         Chip(
           label = "Auto",
-          accent = if (autoAdjustEnabled) SELECTED_ACCENT else UNSELECTED_ACCENT,
-          onClick = { onToggleAutoAdjust(!autoAdjustEnabled) },
+          accent = if (state.autoAdjustEnabled) SELECTED_ACCENT else UNSELECTED_ACCENT,
+          onClick = { onToggleAutoAdjust(!state.autoAdjustEnabled) },
         )
       }
     }
